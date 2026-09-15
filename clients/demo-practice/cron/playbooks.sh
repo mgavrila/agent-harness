@@ -13,8 +13,28 @@ set -euo pipefail
 
 : "${SLACK_HOME_CHANNEL:?SLACK_HOME_CHANNEL must be set}"
 
+# True when a job with exactly this --name is already installed.
+#
+# `hermes cron list` prints a block per job with one `Name:  <name>` line, so
+# the name column is what gets compared, and it is compared whole. An
+# unanchored `grep -F` over the whole listing matched any line that merely
+# contained the name — including `Script: harness-outbox-watchdog.sh`, which
+# contains `harness-outbox-watchdog`. A partial install then looked complete
+# and this script reported "already exists" for a job it never created.
+#
+# Read into a variable first and loop in bash rather than piping into
+# `grep -q`: under `set -o pipefail`, grep exiting early on a match can leave
+# the upstream command killed by SIGPIPE and the whole pipeline reporting 141,
+# which would read as "not found".
 have_job() {
-  hermes cron list 2>/dev/null | grep -Fq "$1"
+  local wanted="$1" listing line
+  listing=$(hermes cron list 2>/dev/null || true)
+  while IFS= read -r line; do
+    if [[ $line =~ ^[[:space:]]*Name:[[:space:]]*(.*[^[:space:]])[[:space:]]*$ ]]; then
+      [[ ${BASH_REMATCH[1]} == "$wanted" ]] && return 0
+    fi
+  done <<<"$listing"
+  return 1
 }
 
 install_job() {
