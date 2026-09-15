@@ -49,8 +49,13 @@ services:
         cp /srv/client/scripts/*.sh /data/scripts/
         chmod +x /data/cron/playbooks.sh /data/scripts/*.sh
         # Hermes reads secrets from $$HERMES_HOME/.env; the process environment
-        # carries them too, and whichever it prefers, both agree.
-        cp /srv/env/.env /data/.env
+        # carries them too, and whichever it prefers, both agree. The
+        # approver's Slack app tokens are filtered out here for the same
+        # reason the hermes service blanks them: they belong to a different
+        # Slack app, and only the approvals container should hold them.
+        # sed, not `grep -v`: grep exits 1 when it prints nothing, which
+        # would abort this script under `set -e`.
+        sed '/^APPROVALS_SLACK_/d' /srv/env/.env > /data/.env
         chmod 600 /data/.env
         # jobs.json is deliberately NOT seeded: its record shape is not
         # documented, and Hermes creates it on the first `hermes cron create`.
@@ -77,6 +82,11 @@ services:
     env_file:
       - ../../.env
     environment:
+      # Hermes has its own Slack app (SLACK_BOT_TOKEN / SLACK_APP_TOKEN). The
+      # approver's app is a different one and its tokens have no business
+      # here, so they are blanked out of what env_file brought in.
+      APPROVALS_SLACK_BOT_TOKEN: ""
+      APPROVALS_SLACK_APP_TOKEN: ""
       # These override the .env values, which point at the host from a shell.
       HERMES_UID: "${HERMES_UID:-1000}"
       HERMES_GID: "${HERMES_GID:-1000}"
@@ -108,14 +118,29 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    env_file:
-      - ../../.env
+    # No env_file here, deliberately. This service gets an explicit allowlist
+    # interpolated from ../../.env, so Hermes's Slack tokens never enter the
+    # approver's container and the approver's tokens never enter Hermes's.
+    # Anything main.ts or its core-tools child reads must be listed here.
     environment:
       DATABASE_URL: "postgres://harness:harness@postgres:5432/harness"
+      HARNESS_ENCRYPTION_KEY: "${HARNESS_ENCRYPTION_KEY:-}"
+      HARNESS_CLIENT: "${HARNESS_CLIENT:-demo-practice}"
       HARNESS_STORAGE_DIR: "/srv/harness-storage"
       HARNESS_FORMS_DIR: "/srv/agent-harness/packs/healthcare/forms"
       HARNESS_POLICY_FILE: "/srv/agent-harness/clients/demo-practice/policy.yaml"
+      # The approver's own Slack app — a second app, not Hermes's. One app
+      # token cannot serve two Socket Mode connections: Slack delivers each
+      # event to exactly one of them, so the buttons would work half the time.
+      APPROVALS_SLACK_BOT_TOKEN: "${APPROVALS_SLACK_BOT_TOKEN:-}"
+      APPROVALS_SLACK_APP_TOKEN: "${APPROVALS_SLACK_APP_TOKEN:-}"
+      SLACK_APPROVALS_CHANNEL: "${SLACK_APPROVALS_CHANNEL:-}"
+      SLACK_ALLOWED_USERS: "${SLACK_ALLOWED_USERS:-}"
+      APPROVALS_POLL_SECONDS: "${APPROVALS_POLL_SECONDS:-5}"
+      EFFECTS_DISPATCH_SECONDS: "${EFFECTS_DISPATCH_SECONDS:-5}"
+      RECONCILE_SECONDS: "${RECONCILE_SECONDS:-300}"
       APPROVALS_HEALTH_PORT: "8787"
+      APPROVALS_HEALTH_BIND: "${APPROVALS_HEALTH_BIND:-0.0.0.0}"
     ports:
       # Localhost only: the health endpoint is for the watchdogs, not the LAN.
       # The host side is configurable because 8787 is not always free on the

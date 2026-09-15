@@ -24,7 +24,10 @@ loadEnv({ path: path.join(repoRoot, '.env'), quiet: true });
 
 function required(name: string): string {
   const value = process.env[name];
-  if (!value || value.trim() === '') throw new Error(`${name} is not set`);
+  if (!value || value.trim() === '') {
+    const hint = name.startsWith('APPROVALS_SLACK_') ? ' (the approvals app needs its own Slack app; see docs/runbook.md)' : '';
+    throw new Error(`${name} is not set${hint}`);
+  }
   return value;
 }
 
@@ -41,9 +44,22 @@ const channel = required('SLACK_APPROVALS_CHANNEL');
 const allowedUsers = parseAllowedUsers(process.env.SLACK_ALLOWED_USERS);
 const storageRoot = required('HARNESS_STORAGE_DIR');
 
+/**
+ * The approvals app needs its own Slack app, not Hermes's.
+ *
+ * Slack routes each Socket Mode event to exactly one of an app's open
+ * connections. With Hermes's gateway and this process both connected on one
+ * `SLACK_APP_TOKEN`, roughly half of every button click and modal submission
+ * went to Hermes, which has no handler for them, and the approval silently
+ * stayed pending. Two app tokens means two independent event streams.
+ *
+ * These are deliberately not falling back to `SLACK_BOT_TOKEN` /
+ * `SLACK_APP_TOKEN`: a fallback would make the broken configuration the
+ * default again and fail intermittently rather than at startup.
+ */
 const bolt = new App({
-  token: required('SLACK_BOT_TOKEN'),
-  appToken: required('SLACK_APP_TOKEN'),
+  token: required('APPROVALS_SLACK_BOT_TOKEN'),
+  appToken: required('APPROVALS_SLACK_APP_TOKEN'),
   socketMode: true,
   logLevel: LogLevel.INFO,
 });

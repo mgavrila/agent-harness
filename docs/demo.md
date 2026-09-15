@@ -17,8 +17,19 @@ pnpm demo:up
 pnpm demo:playbooks                               # installs the three cron jobs
 ```
 
-Then in Slack, invite the bot to the channel named by `SLACK_APPROVALS_CHANNEL`
-and `SLACK_HOME_CHANNEL`. Generate the synthetic provider files with the
+Create **two** Slack apps before filling in `.env`, both with Socket Mode on:
+
+| App | Variables | Bot scopes | Other |
+|---|---|---|---|
+| Hermes gateway | `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN` | `chat:write`, `app_mentions:read`, `channels:history`, `groups:history`, `im:history`, `im:read`, `im:write`, `mpim:history`, `users:read`, `files:read`, `files:write` | — |
+| Approvals app | `APPROVALS_SLACK_BOT_TOKEN`, `APPROVALS_SLACK_APP_TOKEN` | `chat:write`, `users:read`, `files:write` | Interactivity on |
+
+One app cannot serve both. Slack routes each Socket Mode event to exactly one
+open connection, so a shared app sends about half the button clicks to Hermes,
+which has no handler for them, and step 4 below fails silently.
+
+Then in Slack, invite the Hermes bot to `SLACK_HOME_CHANNEL` and the approvals
+bot to `SLACK_APPROVALS_CHANNEL`. Generate the synthetic provider files with the
 generator from the document-pipeline plan (`packs/healthcare/synthetic/`) and
 keep three of them — a state licence, a malpractice certificate and a W-9 for
 one doctor — open in a folder.
@@ -121,6 +132,7 @@ Run this before the demo. Each line either passes or tells you what is wrong.
 - [ ] `curl -s localhost:${APPROVALS_HEALTH_HOST_PORT:-8787}/healthz | python3 -m json.tool` returns `"ok": true`.
 - [ ] `docker compose -f harness/compose/docker-compose.yml exec hermes hermes config get skills.write_approval` prints `true`.
 - [ ] `docker compose -f harness/compose/docker-compose.yml exec hermes hermes cron list` shows all three jobs.
+- [ ] The two Slack apps are separate: `docker compose -f harness/compose/docker-compose.yml --profile demo exec approvals printenv APPROVALS_SLACK_APP_TOKEN` and `... exec hermes printenv SLACK_APP_TOKEN` print **different** tokens, and `... exec hermes printenv APPROVALS_SLACK_APP_TOKEN` prints nothing.
 - [ ] In Slack, `/credentialing-intake` autocompletes: the pack skills were discovered through `skills.external_dirs`.
 - [ ] Asking the bot "what tools do you have?" lists `mcp_core_tools_*` names and **no** terminal or file tools.
 - [ ] A test release round-trips: ask for a roster of one provider, approve the card, and confirm the file arrives.

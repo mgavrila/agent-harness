@@ -247,11 +247,32 @@ app refuses every decision. There is no default allowlist and no bypass —
 missing or empty means no Slack user can approve, reject, or edit anything,
 not that everyone can.
 
-**Slack credentials.** The demo uses one Slack app for both Hermes and the
-approvals app, so both containers read the same `SLACK_BOT_TOKEN` and
-`SLACK_APP_TOKEN`. In production, split them into two Slack apps so Hermes
-never holds the approver app's token. Approval decisions are gated by
-`SLACK_ALLOWED_USERS` regardless of which token is present.
+**Slack credentials: two apps are required.** Not a hardening recommendation —
+one app does not work. Slack delivers each Socket Mode event to exactly one of
+an app's open connections, which is what makes rolling restarts possible. With
+the Hermes gateway and the approvals app both connected on one
+`SLACK_APP_TOKEN`, roughly half of every `block_actions` and `view_submission`
+payload goes to Hermes, which has no handler for the approval buttons or the
+note modal. Those clicks do nothing at all: the approval stays `pending` and
+the approver has no signal other than pressing again.
+
+| App | Variables | Bot scopes | Other settings |
+|---|---|---|---|
+| Hermes gateway | `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN` | `chat:write`, `app_mentions:read`, `channels:history`, `groups:history`, `im:history`, `im:read`, `im:write`, `mpim:history`, `users:read`, `files:read`, `files:write` | Socket Mode on |
+| Approvals app | `APPROVALS_SLACK_BOT_TOKEN`, `APPROVALS_SLACK_APP_TOKEN` | `chat:write`, `users:read`, `files:write` | Socket Mode on, Interactivity on |
+
+The approvals app has no fallback to the Hermes variables. A fallback would
+make the broken configuration the default again and fail intermittently
+instead of at startup, so both `APPROVALS_SLACK_*` variables are required and
+the process refuses to start without them.
+
+Compose keeps the two sets apart. The `approvals` service has no `env_file`:
+it gets an explicit `environment:` allowlist interpolated from `.env`, so
+Hermes's tokens never enter that container. In the other direction the
+`hermes` service blanks `APPROVALS_SLACK_*` over what `env_file` brought in,
+and `hermes-init` strips those lines out of the `.env` it copies to
+`$HERMES_HOME/.env`. Approval decisions are gated by `SLACK_ALLOWED_USERS`
+regardless of which token is present.
 
 Health is on `http://<host>:${APPROVALS_HEALTH_PORT}/healthz`. It returns counts
 and loop timestamps only, never a summary or a payload, because anything
