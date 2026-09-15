@@ -33,6 +33,8 @@ export interface ToolDeps {
   /** External-effect senders keyed by sink name (e.g. 'slack'). Empty in Plan 1.1; Plan 3 registers real ones. */
   sinks: SinkRegistry;
   context: SessionContext;
+  /** Every registered tool, keyed by name, so a parked action can be replayed by name. Filled by `registerTools`. */
+  tools: Map<string, AnyToolDef>;
 }
 
 export interface ToolDef<I extends z.ZodObject, O extends z.ZodObject> {
@@ -138,6 +140,7 @@ async function handleUnexpectedError(db: Db, tool: AnyToolDef, base: AuditBase, 
 }
 
 export function registerTools(server: McpServer, tools: AnyToolDef[], deps: ToolDeps): void {
+  for (const tool of tools) deps.tools.set(tool.name, tool);
   for (const tool of tools) {
     server.registerTool(
       tool.name,

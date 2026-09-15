@@ -5,8 +5,9 @@ import { loadPolicy } from './policy.js';
 import { providerTools } from './tools/providers.js';
 import { deadlineTools } from './tools/deadlines.js';
 import { auditTools } from './tools/audit.js';
+import { approvalTools } from './tools/approvals.js';
 
-export const ALL_TOOLS = [...providerTools, ...deadlineTools, ...auditTools];
+export const ALL_TOOLS = [...providerTools, ...deadlineTools, ...auditTools, ...approvalTools];
 
 export function createCoreToolsServer(deps: ToolDeps): McpServer {
   const server = new McpServer({ name: 'core-tools', version: '0.1.0' });
@@ -42,6 +43,7 @@ export async function buildDepsFromEnv(): Promise<{ deps: ToolDeps; close: () =>
     confidenceThreshold: numberFromEnv('CONFIDENCE_THRESHOLD', 0.85, { min: 0, max: 1 }),
     sinks: {},
     context: {},
+    tools: new Map(),
   };
   return { deps, close };
 }

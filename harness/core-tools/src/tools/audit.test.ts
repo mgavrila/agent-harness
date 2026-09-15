@@ -88,6 +88,7 @@ describe('audit_query', () => {
     const { tools } = await client.listTools();
     const names = tools.map((t) => t.name).sort();
     expect(names).toEqual([
+      'approvals_execute',
       'audit_query',
       'deadlines_compute',
       'deadlines_upcoming',

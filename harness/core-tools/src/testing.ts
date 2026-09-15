@@ -18,6 +18,7 @@ export function makeTestDeps(db: Db, overrides: Partial<ToolDeps> = {}): ToolDep
     confidenceThreshold: 0.85,
     sinks: {},
     context: {},
+    tools: new Map(),
     ...overrides,
   };
 }
