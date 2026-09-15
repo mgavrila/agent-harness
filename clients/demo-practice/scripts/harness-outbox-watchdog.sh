@@ -15,17 +15,21 @@ set -uo pipefail
 
 HEALTH_URL="${APPROVALS_HEALTH_URL:-http://approvals:8787/healthz}"
 
-body="$(curl -sS --max-time 10 "$HEALTH_URL" 2>/dev/null)" || {
+# Said the same way whether the request failed outright or the body carried no
+# counts: both mean nobody is watching the outbox, and the reader needs one
+# message, not two spellings of it.
+not_answering() {
   echo "Approvals app is not answering on ${HEALTH_URL}. Slack approvals and file delivery are stopped until it is back."
   exit 0
 }
+
+body="$(curl -sS --max-time 10 "$HEALTH_URL" 2>/dev/null)" || not_answering
 
 failed="$(printf '%s' "$body" | sed -n 's/.*"failed":\([0-9]*\).*/\1/p')"
 review="$(printf '%s' "$body" | sed -n 's/.*"needs_review":\([0-9]*\).*/\1/p')"
 
 if [ -z "$failed" ] || [ -z "$review" ]; then
-  echo "Approvals app is not answering on ${HEALTH_URL}. Slack approvals and file delivery are stopped until it is back."
-  exit 0
+  not_answering
 fi
 
 if [ "$failed" -eq 0 ] && [ "$review" -eq 0 ]; then

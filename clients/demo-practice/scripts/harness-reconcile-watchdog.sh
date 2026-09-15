@@ -16,14 +16,17 @@ set -uo pipefail
 HEALTH_URL="${APPROVALS_HEALTH_URL:-http://approvals:8787/healthz}"
 STALE_MINUTES="${RECONCILE_STALE_MINUTES:-90}"
 
-body="$(curl -sS --max-time 10 "$HEALTH_URL" 2>/dev/null)" || {
+# Said the same way whether the request failed outright or the body carried no
+# lastReconcileAt at all: both mean the same thing to the reader.
+not_answering() {
   echo "Approvals app is not answering on ${HEALTH_URL}; reconciliation is not running."
   exit 0
 }
 
+body="$(curl -sS --max-time 10 "$HEALTH_URL" 2>/dev/null)" || not_answering
+
 if ! printf '%s' "$body" | grep -q '"lastReconcileAt"'; then
-  echo "Approvals app is not answering on ${HEALTH_URL}; reconciliation is not running."
-  exit 0
+  not_answering
 fi
 
 last="$(printf '%s' "$body" | sed -n 's/.*"lastReconcileAt":"\([^"]*\)".*/\1/p')"
