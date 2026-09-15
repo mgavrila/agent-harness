@@ -48,14 +48,19 @@ function digitsOnly(s: string): string {
 const NL = String.raw`\n[ \t]*`;
 
 /**
- * A group separator: a dash or space (as printed on a form), optionally
- * followed by a single line break where a text layer or OCR pass wrapped the
- * field onto two lines — or a bare line break where the groups landed on
- * separate lines with no punctuation at all. Each of the two separator slots
- * in a pattern is independent, so a form is not required to use the same
- * character twice.
+ * A separator as it is actually printed on a form: a dash or a space,
+ * optionally followed by a single line break where a text layer or OCR pass
+ * wrapped the field onto two lines.
  */
-const SEP = String.raw`(?:[- ][ \t]*(?:${NL})?|${NL})`;
+const SEP_PRINTED = String.raw`[- ][ \t]*(?:${NL})?`;
+
+/**
+ * Either a printed separator or a bare line break, for the case where two
+ * groups landed on separate lines with no punctuation at all. The two
+ * separator slots in a pattern are independent, so a form is not required to
+ * use the same character twice.
+ */
+const SEP = String.raw`(?:${SEP_PRINTED}|${NL})`;
 
 /**
  * SSN as it is actually printed on a form: three, two, four digits, with a
@@ -64,8 +69,19 @@ const SEP = String.raw`(?:[- ][ \t]*(?:${NL})?|${NL})`;
  * to cut false positives on form templates and examples, after OCR
  * normalization and separator stripping — the shape here is intentionally
  * loose (see `D`).
+ *
+ * At most ONE of the two separator slots may be a bare line break: at least
+ * one printed `-` or space has to be there to say "these groups belong to one
+ * field". Allowing a bare break at both slots would make any three consecutive
+ * unpunctuated lines of 3, 2 and 4 digits — a column of figures on a claims
+ * page — an SSN, and `documents_extract` would then write that fabricated
+ * nine-digit number onto the provider record as an encrypted `ssn`. A real
+ * form that wraps does so at one slot, so nothing legitimate is lost.
  */
-const SSN_FORMATTED = new RegExp(String.raw`\b${D}{3}${SEP}${D}{2}${SEP}${D}{4}\b`, 'g');
+const SSN_FORMATTED = new RegExp(
+  String.raw`\b${D}{3}(?:${SEP_PRINTED}${D}{2}${SEP}|${SEP}${D}{2}${SEP_PRINTED})${D}{4}\b`,
+  'g',
+);
 
 /**
  * The same nine digits with no separator at all — how an SSN is typed into a

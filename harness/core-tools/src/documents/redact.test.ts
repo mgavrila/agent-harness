@@ -140,6 +140,24 @@ describe('redactPages', () => {
     expect(out.pages[0].text).toBe('EIN {{ein:1}} filed');
     expect(out.hits[0].value).toBe('123456789');
   });
+
+  it('joins an SSN whose second separator alone is a bare line break', () => {
+    const out = redactPages([{ num: 1, text: 'SSN 123-45\n6789 on file' }]);
+    expect(out.pages[0].text).toBe('SSN {{ssn:1}} on file');
+    expect(out.hits[0].value).toBe('123456789');
+  });
+
+  it('does not treat a column of unpunctuated numbers as an SSN', () => {
+    // Three lines of 3, 2 and 4 digits with no printed separator at either
+    // slot is a column of figures, not a wrapped SSN field. Redacting it
+    // would destroy three real values AND write the fabricated number
+    // 123456789 onto the provider record as an encrypted `ssn`.
+    const text = 'Claims history\n123\n45\n6789\n';
+    const out = redactPages([{ num: 1, text }]);
+    expect(out.pages[0].text).toBe(text);
+    expect(out.hits).toHaveLength(0);
+    expect(() => assertRedacted(text)).not.toThrow();
+  });
 });
 
 describe('fieldNameFor', () => {
