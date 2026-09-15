@@ -40,6 +40,19 @@ function seconds(name: string, fallback: number): number {
   return value;
 }
 
+/**
+ * A TCP port, range-checked like every other numeric variable here. An
+ * unvalidated typo becomes `NaN`, `listen(NaN)` picks an arbitrary free port,
+ * and the process looks healthy while nothing can reach it.
+ */
+function port(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (!raw || raw.trim() === '') return fallback;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 1 || value > 65_535) throw new Error(`${name} must be an integer between 1 and 65535`);
+  return value;
+}
+
 const client = process.env.HARNESS_CLIENT ?? 'default';
 const channel = required('SLACK_APPROVALS_CHANNEL');
 const allowedUsers = parseAllowedUsers(process.env.SLACK_ALLOWED_USERS);
@@ -157,7 +170,7 @@ const runner = startRunner(deps, {
 });
 
 const health = startHealthServer({
-  port: Number(process.env.APPROVALS_HEALTH_PORT ?? 8787),
+  port: port('APPROVALS_HEALTH_PORT', 8787),
   // Every interface by default. In Compose nothing can reach a listener on the
   // container's own loopback — not the published host port, not
   // `http://approvals:8787` from Hermes — and the exposure boundary is the port
