@@ -1,0 +1,56 @@
+# GENERATED FILE - do not edit by hand.
+# Rendered from clients/<name>/routing.yaml by harness/gateway/render-config.ts.
+# Regenerate with: pnpm gateway:config
+model_list:
+  - model_name: chat
+    litellm_params:
+      model: gemini/gemini-3-flash-preview
+      api_key: os.environ/GEMINI_API_KEY
+      max_budget: 2
+      budget_duration: 1d
+  - model_name: chat-fallback-1
+    litellm_params:
+      model: groq/openai/gpt-oss-120b
+      api_key: os.environ/GROQ_API_KEY
+      max_budget: 2
+      budget_duration: 1d
+  - model_name: extract
+    litellm_params:
+      model: gemini/gemini-3-flash-preview
+      api_key: os.environ/GEMINI_API_KEY
+      max_budget: 5
+      budget_duration: 1d
+  - model_name: reason
+    litellm_params:
+      model: gemini/gemini-3-flash-preview
+      api_key: os.environ/GEMINI_API_KEY
+      max_budget: 2
+      budget_duration: 1d
+  - model_name: reason-fallback-1
+    litellm_params:
+      model: groq/openai/gpt-oss-120b
+      api_key: os.environ/GROQ_API_KEY
+      max_budget: 2
+      budget_duration: 1d
+  - model_name: judge
+    litellm_params:
+      model: groq/openai/gpt-oss-120b
+      api_key: os.environ/GROQ_API_KEY
+      max_budget: 1
+      budget_duration: 1d
+router_settings:
+  fallbacks:
+    - chat:
+        - chat-fallback-1
+    - reason:
+        - reason-fallback-1
+  num_retries: 2
+  request_timeout: 120
+  allowed_fails: 3
+  cooldown_time: 30
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+litellm_settings:
+  drop_params: true
+  set_verbose: false
+  turn_off_message_logging: true

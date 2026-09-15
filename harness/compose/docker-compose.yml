@@ -16,5 +16,32 @@ services:
       timeout: 3s
       retries: 10
 
+  litellm:
+    image: ghcr.io/berriai/litellm:main-stable
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["--config", "/app/config.yaml", "--port", "4000"]
+    environment:
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?set LITELLM_MASTER_KEY in .env}
+      DATABASE_URL: postgres://harness:harness@postgres:5432/litellm
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      VLLM_API_KEY: ${VLLM_API_KEY:-none}
+    volumes:
+      - ../gateway/litellm.config.yaml:/app/config.yaml:ro
+    ports:
+      # Loopback only. The gateway holds every provider key; nothing outside
+      # this host may reach it.
+      - "127.0.0.1:4000:4000"
+    healthcheck:
+      # /health/liveliness is the unauthenticated probe. /health needs a key.
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:4000/health/liveliness').status==200 else 1)\""]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
 volumes:
   pgdata: {}

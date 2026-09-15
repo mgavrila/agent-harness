@@ -7,8 +7,11 @@
   "scripts": {
     "test": "pnpm -r --if-present test",
     "typecheck": "pnpm -r --if-present typecheck",
-    "db:up": "docker compose -f harness/compose/docker-compose.yml up -d postgres",
-    "db:down": "docker compose -f harness/compose/docker-compose.yml down",
-    "db:migrate": "pnpm --filter @harness/db migrate"
+    "db:up": "docker compose --env-file .env -f harness/compose/docker-compose.yml up -d postgres",
+    "db:down": "docker compose --env-file .env -f harness/compose/docker-compose.yml down",
+    "db:migrate": "pnpm --filter @harness/db migrate",
+    "gateway:config": "pnpm --filter @harness/gateway render",
+    "gateway:up": "docker compose --env-file .env -f harness/compose/docker-compose.yml up -d litellm",
+    "gateway:logs": "docker compose --env-file .env -f harness/compose/docker-compose.yml logs -f litellm"
   }
 }

@@ -1,0 +1,120 @@
+import { readFile, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { stringify as stringifyYaml } from 'yaml';
+import { ROUTES, parseRouting, type Route, type RoutingFile } from './routing.schema.js';
+
+/**
+ * Which environment variable holds the credential for a provider prefix. The
+ * rendered config never contains a key, only an `os.environ/NAME` reference, so
+ * the config file is safe to commit and the secret stays in `.env`.
+ */
+const PROVIDER_KEY_ENV: Record<string, string> = {
+  gemini: 'GEMINI_API_KEY',
+  groq: 'GROQ_API_KEY',
+  openrouter: 'OPENROUTER_API_KEY',
+  openai: 'OPENAI_API_KEY',
+  anthropic: 'ANTHROPIC_API_KEY',
+  hosted_vllm: 'VLLM_API_KEY',
+  ollama: 'OLLAMA_API_KEY',
+};
+
+export function apiKeyEnvFor(model: string): string {
+  const slash = model.indexOf('/');
+  if (slash <= 0) {
+    throw new Error(`model "${model}" has no provider prefix; use e.g. gemini/gemini-3-flash-preview`);
+  }
+  const provider = model.slice(0, slash);
+  const env = PROVIDER_KEY_ENV[provider];
+  if (!env) {
+    throw new Error(`unknown provider prefix "${provider}"; add it to PROVIDER_KEY_ENV in harness/gateway/render-config.ts`);
+  }
+  return env;
+}
+
+interface Deployment {
+  model_name: string;
+  litellm_params: Record<string, unknown>;
+}
+
+function deployment(name: string, model: string, budget: number, apiBase?: string): Deployment {
+  const params: Record<string, unknown> = {
+    model,
+    api_key: `os.environ/${apiKeyEnvFor(model)}`,
+    max_budget: budget,
+    budget_duration: '1d',
+  };
+  if (apiBase) params.api_base = apiBase;
+  return { model_name: name, litellm_params: params };
+}
+
+const HEADER = `# GENERATED FILE - do not edit by hand.
+# Rendered from clients/<name>/routing.yaml by harness/gateway/render-config.ts.
+# Regenerate with: pnpm gateway:config
+`;
+
+export function renderLiteLlmConfig(routing: RoutingFile): string {
+  const defaultBudget = routing.defaults.daily_budget_usd;
+  const modelList: Deployment[] = [];
+  const fallbacks: Record<string, string[]>[] = [];
+
+  for (const route of ROUTES) {
+    const spec = routing.routes[route];
+    const budget = spec.daily_budget_usd ?? defaultBudget;
+    modelList.push(deployment(route, spec.model, budget, spec.api_base));
+    if (spec.fallbacks.length === 0) continue;
+    const names = spec.fallbacks.map((model, i) => {
+      const name = `${route}-fallback-${i + 1}`;
+      modelList.push(deployment(name, model, budget));
+      return name;
+    });
+    fallbacks.push({ [route]: names });
+  }
+
+  const config = {
+    model_list: modelList,
+    router_settings: {
+      fallbacks,
+      num_retries: routing.defaults.num_retries,
+      request_timeout: routing.defaults.request_timeout_s,
+      allowed_fails: 3,
+      cooldown_time: 30,
+    },
+    general_settings: {
+      master_key: 'os.environ/LITELLM_MASTER_KEY',
+    },
+    litellm_settings: {
+      // Providers differ in which OpenAI parameters they accept; dropping the
+      // unsupported ones keeps one calling convention in src/models.ts.
+      drop_params: true,
+      set_verbose: false,
+      // Prompts may contain patient-adjacent text. Never echo them into logs.
+      turn_off_message_logging: true,
+    },
+  };
+
+  return HEADER + stringifyYaml(config, { lineWidth: 0 });
+}
+
+/** Route name -> the LiteLLM `model_name` a client asks for. Identical today; a function so callers do not hardcode it. */
+export function deploymentNameFor(route: Route): string {
+  return route;
+}
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+const repoRoot = path.resolve(here, '../..');
+
+export async function renderClientConfig(client: string): Promise<string> {
+  const source = path.join(repoRoot, 'clients', client, 'routing.yaml');
+  const target = path.join(here, 'litellm.config.yaml');
+  const routing = parseRouting(await readFile(source, 'utf8'));
+  await writeFile(target, renderLiteLlmConfig(routing), 'utf8');
+  return target;
+}
+
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  const client = process.env.HARNESS_CLIENT ?? 'demo-practice';
+  renderClientConfig(client).then((target) => {
+    console.log(`rendered ${client} routing to ${target}`);
+  });
+}
