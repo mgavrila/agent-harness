@@ -22,6 +22,11 @@ export interface ExtractedText {
 /** Below this many characters a page is treated as having no usable text layer. */
 export const MIN_CHARS_PER_PAGE = 40;
 
+/** Bounds for the child processes this module shells out to. All overridable per call so a hung process cannot block the pipeline indefinitely, and so tests can force a timeout without waiting for the real default. */
+const DEFAULT_ASSERT_TIMEOUT_MS = 10_000;
+const DEFAULT_RASTERISE_TIMEOUT_MS = 120_000;
+const DEFAULT_OCR_TIMEOUT_MS = 60_000;
+
 const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.tif', '.tiff', '.bmp']);
 
 /** True when the bytes begin with the PDF magic number. */
@@ -64,29 +69,50 @@ const INSTALL_HINT: Record<string, string> = {
 };
 
 /**
+ * True when `err` is the error `execFile` rejects with because the process
+ * was killed for running past its `timeout` option, rather than failing on
+ * its own. Node sets `killed` only when something (here, the timeout) sent
+ * the process a signal; we always ask for `killSignal: 'SIGKILL'`, so this
+ * is unambiguous.
+ */
+function isTimeoutError(err: unknown): boolean {
+  return typeof err === 'object' && err !== null && (err as { killed?: boolean }).killed === true;
+}
+
+/**
  * Fail early and legibly when an OCR binary is missing, instead of surfacing a
  * bare ENOENT from deep inside a page loop. `pdftoppm -v` writes its banner to
  * stderr and exits 0; `tesseract --version` writes to stdout. Neither stream is
- * inspected, only the exit.
+ * inspected, only the exit. Bounded by `timeoutMs` so a wedged binary cannot
+ * hang the check itself.
  */
-export async function assertBinary(name: 'tesseract' | 'pdftoppm'): Promise<void> {
+export async function assertBinary(name: 'tesseract' | 'pdftoppm', timeoutMs = DEFAULT_ASSERT_TIMEOUT_MS): Promise<void> {
   const args = name === 'tesseract' ? ['--version'] : ['-v'];
   try {
-    await run(name, args);
-  } catch {
+    await run(name, args, { timeout: timeoutMs, killSignal: 'SIGKILL' });
+  } catch (err) {
+    if (isTimeoutError(err)) throw new ToolError(`${name} did not respond within ${timeoutMs}ms while checking it is installed`);
     throw new ToolError(`${name} is not installed; OCR is unavailable. Install it: ${INSTALL_HINT[name]}`);
   }
 }
 
-async function tesseractOnImage(imagePath: string, lang: string): Promise<string> {
+/**
+ * OCR one already-rendered image. `page` is only used to name the page in a
+ * timeout or failure message; `imagePath` is a filesystem path (a caller
+ * document or a scratch PNG derived from one), so only its basename — never
+ * the full path, and never stdout/stderr, which could contain restricted
+ * values read off the page — is ever quoted back.
+ */
+async function tesseractOnImage(imagePath: string, lang: string, timeoutMs: number, page: number): Promise<string> {
   try {
     const { stdout } = await run('tesseract', [imagePath, 'stdout', '-l', lang, '--psm', '6'], {
       maxBuffer: 32 * 1024 * 1024,
+      timeout: timeoutMs,
+      killSignal: 'SIGKILL',
     });
     return stdout;
-  } catch {
-    // A tesseract failure message can quote the file path but never its
-    // contents, so naming the page is safe and the raw stderr is dropped.
+  } catch (err) {
+    if (isTimeoutError(err)) throw new ToolError(`ocr timed out on page ${page} of ${path.basename(imagePath)}`);
     throw new ToolError(`OCR failed on ${path.basename(imagePath)}`);
   }
 }
@@ -99,27 +125,33 @@ async function tesseractOnImage(imagePath: string, lang: string): Promise<string
 export async function ocrPdf(
   absPath: string,
   pageCount: number,
-  opts: { dpi?: number; lang?: string } = {},
+  opts: { dpi?: number; lang?: string; rasteriseTimeoutMs?: number; timeoutMs?: number } = {},
 ): Promise<PageText[]> {
   await assertBinary('pdftoppm');
   await assertBinary('tesseract');
   const dpi = opts.dpi ?? 300;
   const lang = opts.lang ?? 'eng';
+  const rasteriseTimeoutMs = opts.rasteriseTimeoutMs ?? DEFAULT_RASTERISE_TIMEOUT_MS;
+  const ocrTimeoutMs = opts.timeoutMs ?? DEFAULT_OCR_TIMEOUT_MS;
   const scratch = await mkdtemp(path.join(tmpdir(), 'harness-ocr-'));
   try {
     const pages: PageText[] = [];
     for (let num = 1; num <= pageCount; num += 1) {
       const prefix = path.join(scratch, `p${num}`);
       try {
-        await run('pdftoppm', ['-r', String(dpi), '-png', '-f', String(num), '-l', String(num), absPath, prefix]);
-      } catch {
+        await run('pdftoppm', ['-r', String(dpi), '-png', '-f', String(num), '-l', String(num), absPath, prefix], {
+          timeout: rasteriseTimeoutMs,
+          killSignal: 'SIGKILL',
+        });
+      } catch (err) {
+        if (isTimeoutError(err)) throw new ToolError(`rasterise timed out for ${path.basename(absPath)}`);
         throw new ToolError(`could not rasterise page ${num} of the document`);
       }
       // pdftoppm appends a zero-padded page suffix whose width depends on the
       // page count, so the file is found by listing rather than guessed.
       const produced = (await readdir(scratch)).filter((f) => f.startsWith(`p${num}-`) && f.endsWith('.png')).sort();
       if (produced.length === 0) throw new ToolError(`page ${num} produced no image`);
-      pages.push({ num, text: await tesseractOnImage(path.join(scratch, produced[0]), lang) });
+      pages.push({ num, text: await tesseractOnImage(path.join(scratch, produced[0]), lang, ocrTimeoutMs, num) });
     }
     return pages;
   } finally {
@@ -127,9 +159,10 @@ export async function ocrPdf(
   }
 }
 
-export async function ocrImage(absPath: string, opts: { lang?: string } = {}): Promise<PageText[]> {
+export async function ocrImage(absPath: string, opts: { lang?: string; timeoutMs?: number } = {}): Promise<PageText[]> {
   await assertBinary('tesseract');
-  return [{ num: 1, text: await tesseractOnImage(absPath, opts.lang ?? 'eng') }];
+  const timeoutMs = opts.timeoutMs ?? DEFAULT_OCR_TIMEOUT_MS;
+  return [{ num: 1, text: await tesseractOnImage(absPath, opts.lang ?? 'eng', timeoutMs, 1) }];
 }
 
 /**
@@ -139,7 +172,7 @@ export async function ocrImage(absPath: string, opts: { lang?: string } = {}): P
  */
 export async function extractDocumentText(
   absPath: string,
-  opts: { minCharsPerPage?: number; dpi?: number; lang?: string } = {},
+  opts: { minCharsPerPage?: number; dpi?: number; lang?: string; rasteriseTimeoutMs?: number; timeoutMs?: number } = {},
 ): Promise<ExtractedText> {
   const bytes = new Uint8Array(await readFile(absPath));
 
