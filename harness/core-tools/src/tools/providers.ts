@@ -2,6 +2,7 @@ import * as z from 'zod/v4';
 import { and, eq, ilike, or, sql } from 'drizzle-orm';
 import { providers, fields, credentials, encrypt } from '@harness/db';
 import { defineTool, ToolError, type AnyToolDef, type ToolDeps } from '../registry.js';
+import { CREDENTIAL_KINDS } from '../deadlines/compute.js';
 
 export const FieldInput = z.object({
   name: z.string().min(1),
@@ -14,7 +15,7 @@ export const FieldInput = z.object({
 export type FieldInput = z.infer<typeof FieldInput>;
 
 export const CredentialInput = z.object({
-  kind: z.enum(['license', 'dea', 'malpractice', 'board_cert']),
+  kind: z.enum(CREDENTIAL_KINDS),
   issuer: z.string().optional(),
   number: z.string().optional(),
   state: z.string().length(2).optional(),

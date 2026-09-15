@@ -1,11 +1,13 @@
 import { createRequire } from 'node:module';
 import * as z from 'zod/v4';
 import { isRestrictedName } from '../tools/providers.js';
+import { CREDENTIAL_KINDS } from '../deadlines/compute.js';
 import { DOCUMENT_KINDS, type DocumentKind } from './storage.js';
 import type { ModelMessage } from '../models.js';
 import type { PageText } from './text.js';
 
-const CREDENTIAL_KINDS = ['license', 'dea', 'malpractice', 'board_cert'] as const;
+// Deliberately ordered for the prompt rather than shared with the template
+// manifest's list: this order is what the model reads in the schema.
 const CREDENTIAL_PROPERTIES = ['state', 'issuer', 'issued_at', 'expires_at'] as const;
 
 const ManifestField = z.object({

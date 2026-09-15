@@ -1,5 +1,16 @@
 import { createHash } from 'node:crypto';
 
+/**
+ * The credential vocabulary, defined once for the whole package: the storage
+ * contract (`CredentialInput.kind`), the form-template manifest, the
+ * model-facing extraction schema and the lead-day table below all read it from
+ * here. This module is the home because it is the only leaf with no harness
+ * imports of its own, so every one of those can depend on it without a cycle.
+ *
+ * Four copies of this list used to sit in four files. A kind added to the
+ * extraction schema but not to the manifest is a credential a model reports and
+ * a template can never quote, and nothing fails loudly when the lists drift.
+ */
 export const CREDENTIAL_KINDS = ['license', 'dea', 'malpractice', 'board_cert'] as const;
 export type CredentialKind = (typeof CREDENTIAL_KINDS)[number];
 

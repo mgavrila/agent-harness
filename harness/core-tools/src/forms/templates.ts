@@ -3,9 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as z from 'zod/v4';
 import { ToolError } from '../registry.js';
-
-/** Credential kinds a template may read, matching `CredentialInput.kind`. */
-const CREDENTIAL_KINDS = ['license', 'dea', 'malpractice', 'board_cert'] as const;
+import { CREDENTIAL_KINDS } from '../deadlines/compute.js';
 
 /**
  * Credential columns a template may print. `number` is deliberately absent:

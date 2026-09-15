@@ -35,8 +35,13 @@ export interface ResolvedMapping {
 /** Only a field a model extracted confidently or a human confirmed may reach a form. */
 const USABLE_FIELD_STATUSES = new Set(['extracted', 'verified']);
 
-/** The credential of a kind that a form should quote: the one that expires last. */
-function latestCredential(data: ProviderData, kind: string): ProviderData['credentials'][number] | undefined {
+/**
+ * The credential of a kind that a form should quote: the one that expires last.
+ * Shared with the roster in tools/forms.ts, which must pick the same one: two
+ * copies of this rule is how a filled form and the roster built from the same
+ * record come to name different licences.
+ */
+export function latestCredential(data: ProviderData, kind: string): ProviderData['credentials'][number] | undefined {
   const matching = data.credentials.filter((c) => c.kind === kind);
   if (matching.length === 0) return undefined;
   return matching.reduce((best, c) => ((c.expiresAt ?? '') > (best.expiresAt ?? '') ? c : best));

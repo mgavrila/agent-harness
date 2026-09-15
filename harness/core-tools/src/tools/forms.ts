@@ -7,7 +7,7 @@ import { defineTool, ToolError, type AnyToolDef, type ToolDeps } from '../regist
 import { writeOutFile, resolveOutFile } from '../storage.js';
 import { stageEffect } from '../effects.js';
 import { getTemplate, loadManifest, mappingLabel } from '../forms/templates.js';
-import { fillTemplatePdf, resolveMappings, type ProviderData } from '../forms/fill.js';
+import { fillTemplatePdf, latestCredential, resolveMappings, type ProviderData } from '../forms/fill.js';
 import { buildRosterCsv, ROSTER_COLUMNS, type RosterRow } from '../forms/roster.js';
 import { requireProvider } from './providers.js';
 
@@ -123,13 +123,6 @@ const formsFill = defineTool({
 /** Slack rejects very large uploads and a 25 MB roster is a bug, not a roster. */
 const MAX_RELEASE_BYTES = 25 * 1024 * 1024;
 
-/** The latest-expiring credential of a kind, or undefined. Mirrors forms/fill.ts. */
-function latest(data: ProviderData, kind: string) {
-  const matching = data.credentials.filter((c) => c.kind === kind);
-  if (matching.length === 0) return undefined;
-  return matching.reduce((best, c) => ((c.expiresAt ?? '') > (best.expiresAt ?? '') ? c : best));
-}
-
 const fieldValue = (data: ProviderData, name: string): string | null => {
   const row = data.fields.find((f) => f.name === name);
   if (!row || row.restricted) return null;
@@ -162,9 +155,9 @@ const formsRoster = defineTool({
       // requireProvider inside loadProviderData scopes this to deps.client, so
       // one unknown id aborts the whole roster rather than silently skipping.
       const data = await loadProviderData(deps, providerId);
-      const license = latest(data, 'license');
-      const malpractice = latest(data, 'malpractice');
-      const boardCert = latest(data, 'board_cert');
+      const license = latestCredential(data, 'license');
+      const malpractice = latestCredential(data, 'malpractice');
+      const boardCert = latestCredential(data, 'board_cert');
       rows.push({
         payer_id,
         provider_name: data.provider.name,
@@ -178,7 +171,7 @@ const formsRoster = defineTool({
         // exists: `number_encrypted` is nullable, so a licence recorded from a
         // document with no legible number must report no.
         license_number_on_file: license?.hasNumber ?? false,
-        dea_on_file: latest(data, 'dea')?.hasNumber ?? false,
+        dea_on_file: latestCredential(data, 'dea')?.hasNumber ?? false,
         malpractice_carrier: malpractice?.issuer ?? null,
         malpractice_expires_at: malpractice?.expiresAt ?? null,
         board_cert_expires_at: boardCert?.expiresAt ?? null,
