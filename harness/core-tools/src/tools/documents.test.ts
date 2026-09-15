@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
-import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { PDFDocument, StandardFonts } from 'pdf-lib';
@@ -120,6 +120,33 @@ describe('documents_ingest', () => {
     const out = resultOf<IngestOut>(await client.callTool({ name: 'documents_ingest', arguments: { path: 'incoming/notes.txt' } }));
     expect(out.pages).toBe(1);
   });
+
+  it('refuses a symlink under the storage dir that points outside it', async () => {
+    const client = await connect();
+    const outsideDir = await mkdtemp(path.join(tmpdir(), 'harness-outside-'));
+    try {
+      const secret = path.join(outsideDir, 'secret.pdf');
+      await writeFile(secret, 'top secret');
+      const link = path.join(storageDir, 'incoming', 'escape-link.pdf');
+      await symlink(secret, link);
+      const res = await client.callTool({ name: 'documents_ingest', arguments: { path: 'incoming/escape-link.pdf' } });
+      expect(res.isError).toBe(true);
+      const message = JSON.stringify(res.content);
+      expect(message).toMatch(/outside HARNESS_STORAGE_DIR/);
+      expect(message).not.toContain(secret);
+      expect(await db.select().from(documents)).toHaveLength(0);
+    } finally {
+      await rm(outsideDir, { recursive: true, force: true });
+    }
+  });
+
+  it('ingests a document reached through a symlink that stays inside the storage dir', async () => {
+    const client = await connect();
+    const link = path.join(storageDir, 'incoming', 'license-link.pdf');
+    await symlink(path.join(storageDir, 'incoming', 'license.pdf'), link);
+    const out = resultOf<IngestOut>(await client.callTool({ name: 'documents_ingest', arguments: { path: 'incoming/license-link.pdf' } }));
+    expect(out.pages).toBe(2);
+  });
 });
 
 describe('documents_get and documents_list', () => {
@@ -152,5 +179,41 @@ describe('documents_get and documents_list', () => {
     const other = await connectTools('other-client', [...providerTools, ...documentTools], makeTestDeps(db, { storageDir, client: 'other' }));
     const res = await other.callTool({ name: 'documents_list', arguments: { provider_id: providerId } });
     expect(res.isError).toBe(true);
+  });
+
+  it('an unattached document ingested by one client is invisible to another', async () => {
+    const owner = await connect();
+    const otherClient = await connectTools(
+      'other-clinic',
+      [...providerTools, ...documentTools],
+      makeTestDeps(db, { storageDir, client: 'other-clinic' }),
+    );
+    const ingested = resultOf<IngestOut>(
+      await otherClient.callTool({ name: 'documents_ingest', arguments: { path: 'incoming/notes.txt' } }),
+    );
+
+    const getRes = await owner.callTool({ name: 'documents_get', arguments: { document_id: ingested.document_id } });
+    expect(getRes.isError).toBe(true);
+
+    const listed = resultOf<{ documents: DocOut['document'][] }>(
+      await owner.callTool({ name: 'documents_list', arguments: {} }),
+    );
+    expect(listed.documents.find((d) => d.id === ingested.document_id)).toBeUndefined();
+  });
+
+  it('documents_list without a provider filter returns only this client’s documents', async () => {
+    const client = await connect();
+    const otherClient = await connectTools(
+      'other-clinic-2',
+      [...providerTools, ...documentTools],
+      makeTestDeps(db, { storageDir, client: 'other-clinic-2' }),
+    );
+    const mine = resultOf<IngestOut>(await client.callTool({ name: 'documents_ingest', arguments: { path: 'incoming/notes.txt' } }));
+    await otherClient.callTool({ name: 'documents_ingest', arguments: { path: 'incoming/license.pdf' } });
+
+    const listed = resultOf<{ documents: DocOut['document'][] }>(
+      await client.callTool({ name: 'documents_list', arguments: {} }),
+    );
+    expect(listed.documents.map((d) => d.id)).toEqual([mine.document_id]);
   });
 });

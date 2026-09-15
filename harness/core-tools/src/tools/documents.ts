@@ -1,5 +1,5 @@
 import * as z from 'zod/v4';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { documents } from '@harness/db';
 import { defineTool, ToolError, type AnyToolDef, type ToolDeps } from '../registry.js';
 import { requireProvider } from './providers.js';
@@ -43,12 +43,14 @@ function viewOf(row: typeof documents.$inferSelect) {
 }
 
 /**
- * Load a document, refusing one attached to another client's provider. A
- * document with no provider yet is visible: the deployment is single-tenant per
- * process, and an unattached document has not been associated with anyone.
+ * Load a document, scoped directly to `deps.client` — including one not yet
+ * attached to a provider, which has no other owner to check against — and, if
+ * it is attached, also refusing one whose provider belongs to another client.
  */
 export async function requireDocument(deps: ToolDeps, documentId: string) {
-  const row = await deps.db.query.documents.findFirst({ where: eq(documents.id, documentId) });
+  const row = await deps.db.query.documents.findFirst({
+    where: and(eq(documents.id, documentId), eq(documents.client, deps.client)),
+  });
   if (!row) throw new ToolError(`document ${documentId} not found`);
   if (row.providerId) await requireProvider(deps, row.providerId);
   return row;
@@ -75,11 +77,15 @@ const documentsIngest = defineTool({
   }),
   handler: async ({ path: requested, provider_id, kind }, deps) => {
     if (provider_id) await requireProvider(deps, provider_id);
-    const abs = resolveStoragePath(deps.storageDir, requested);
+    const abs = await resolveStoragePath(deps.storageDir, requested);
     const relative = toStorageRelative(deps.storageDir, abs);
     const sha256 = await sha256File(abs);
 
-    const existing = await deps.db.query.documents.findFirst({ where: eq(documents.sha256, sha256) });
+    // Scoped to this client: the same file ingested by two different clients
+    // must produce two separate documents rows, not a shared one.
+    const existing = await deps.db.query.documents.findFirst({
+      where: and(eq(documents.sha256, sha256), eq(documents.client, deps.client)),
+    });
     if (existing) {
       // A second ingest may supply the provider or kind the first one lacked.
       const patch: Partial<typeof documents.$inferInsert> = {};
@@ -100,7 +106,7 @@ const documentsIngest = defineTool({
     const pages = await pdfPageCount(await readDocumentBytes(abs));
     const [row] = await deps.db
       .insert(documents)
-      .values({ providerId: provider_id ?? null, kind: kind ?? null, storagePath: relative, sha256, pages })
+      .values({ client: deps.client, providerId: provider_id ?? null, kind: kind ?? null, storagePath: relative, sha256, pages })
       .returning();
     return { document_id: row.id, sha256, pages, storage_path: relative, already_ingested: false };
   },
@@ -119,17 +125,23 @@ const documentsGet = defineTool({
 
 const documentsList = defineTool({
   name: 'documents_list',
-  description: 'List the documents on file for a provider, newest first.',
+  description:
+    'List the documents on file for this client, newest first. Pass provider_id to scope to one provider; ' +
+    'omit it to list every document ingested by this client, including ones not yet attached to a provider.',
   actionClass: 'read',
-  input: z.object({ provider_id: z.string().uuid() }),
+  input: z.object({ provider_id: z.string().uuid().optional() }),
   output: z.object({ documents: z.array(DocumentView) }),
   handler: async ({ provider_id }, deps) => {
-    await requireProvider(deps, provider_id);
-    const rows = await deps.db.select().from(documents).where(eq(documents.providerId, provider_id));
+    const conditions = [eq(documents.client, deps.client)];
+    if (provider_id) {
+      await requireProvider(deps, provider_id);
+      conditions.push(eq(documents.providerId, provider_id));
+    }
+    const rows = await deps.db.select().from(documents).where(and(...conditions));
     rows.sort((a, b) => b.ingestedAt.getTime() - a.ingestedAt.getTime());
     return { documents: rows.map(viewOf) };
   },
-  recordIds: ({ provider_id }) => [provider_id],
+  recordIds: ({ provider_id }) => (provider_id ? [provider_id] : []),
 });
 
 /** Task 7 appends documents_classify and documents_extract to this array. */

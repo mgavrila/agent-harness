@@ -25,6 +25,12 @@ export const providers = pgTable('providers', {
 
 export const documents = pgTable('documents', {
   id: uuid('id').primaryKey().defaultRandom(),
+  /**
+   * The document is scoped to this client independently of `providerId`: a
+   * document that has not yet been attached to a provider must still be
+   * invisible to any other client of this process.
+   */
+  client: text('client').notNull(),
   providerId: uuid('provider_id').references(() => providers.id),
   kind: text('kind'),
   storagePath: text('storage_path').notNull(),
@@ -38,7 +44,9 @@ export const documents = pgTable('documents', {
    */
   textPath: text('text_path'),
   ingestedAt: timestamp('ingested_at', { withTimezone: true }).notNull().defaultNow(),
-});
+}, (t) => [
+  index('documents_client_ingested_idx').on(t.client, t.ingestedAt),
+]);
 
 export const fields = pgTable('fields', {
   id: uuid('id').primaryKey().defaultRandom(),
