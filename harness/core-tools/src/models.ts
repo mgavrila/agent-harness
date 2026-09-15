@@ -1,3 +1,4 @@
+import * as z from 'zod/v4';
 import { eq } from 'drizzle-orm';
 import { modelCalls } from '@harness/db';
 import { ROUTES, type Route } from '@harness/gateway/routing';
@@ -168,15 +169,39 @@ function stripFence(text: string): string {
   return fenced ? fenced[1] : text;
 }
 
-export async function callModelJson(
-  deps: ToolDeps,
-  opts: ModelCallOptions & { jsonSchema: JsonSchemaSpec },
-): Promise<ModelCallResult & { json: unknown }> {
-  const result = await callModel(deps, opts);
-  try {
-    return { ...result, json: JSON.parse(stripFence(result.text)) as unknown };
-  } catch {
-    // The raw reply can contain document text, so it is never quoted here.
-    throw new ToolError(`model route "${opts.route}" did not return valid JSON for schema "${opts.jsonSchema.name}"`);
+/**
+ * The model's output failed to parse as JSON, or parsed but did not match the
+ * caller's zod schema. Gateway-side `strict: true` on the response schema is a
+ * request, not a guarantee every provider honors, so this is checked again on
+ * this side. The message carries only the zod issue paths and zod's own
+ * type-name wording, never a value from the reply, which may contain document
+ * text.
+ */
+export class ModelOutputError extends Error {
+  constructor(route: string, detail: string) {
+    super(`model output invalid on route ${route}: ${detail}`);
+    this.name = 'ModelOutputError';
   }
+}
+
+export async function callModelJson<T>(
+  deps: ToolDeps,
+  opts: ModelCallOptions & { jsonSchema: JsonSchemaSpec; validate: z.ZodType<T> },
+): Promise<ModelCallResult & { json: T }> {
+  const result = await callModel(deps, opts);
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(stripFence(result.text));
+  } catch {
+    throw new ModelOutputError(opts.route, 'not valid JSON');
+  }
+
+  const validated = opts.validate.safeParse(parsed);
+  if (!validated.success) {
+    const detail = validated.error.issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`).join('; ');
+    throw new ModelOutputError(opts.route, detail);
+  }
+
+  return { ...result, json: validated.data };
 }

@@ -1,8 +1,9 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import * as z from 'zod/v4';
 import { eq } from 'drizzle-orm';
 import { modelCalls, runs } from '@harness/db';
 import { ToolError, type ToolDeps } from './registry.js';
-import { callModel, callModelJson, gatewayFromEnv } from './models.js';
+import { callModel, callModelJson, gatewayFromEnv, ModelOutputError } from './models.js';
 import { makeTestDeps, useTestDb, startFakeGateway, type FakeGateway } from './testing.js';
 
 const db = useTestDb();
@@ -140,6 +141,7 @@ describe('callModelJson', () => {
     required: ['answer'],
     properties: { answer: { type: 'string' } },
   };
+  const validate = z.object({ answer: z.string() });
 
   it('sends response_format and parses the reply', async () => {
     gateway.setResponder(() => ({ content: '{"answer":"42"}' }));
@@ -147,6 +149,7 @@ describe('callModelJson', () => {
       route: 'extract',
       messages: [{ role: 'user', content: 'go' }],
       jsonSchema: { name: 'answer_only', schema },
+      validate,
     });
     expect(out.json).toEqual({ answer: '42' });
     expect(gateway.calls.at(-1)!.responseFormat).toEqual({
@@ -161,20 +164,51 @@ describe('callModelJson', () => {
       route: 'extract',
       messages: [{ role: 'user', content: 'go' }],
       jsonSchema: { name: 'answer_only', schema },
+      validate,
     });
     expect(out.json).toEqual({ answer: '42' });
   });
 
-  it('throws a ToolError on unparseable JSON without echoing the body', async () => {
+  it('throws a ModelOutputError on unparseable JSON without echoing the body', async () => {
     gateway.setResponder(() => ({ content: 'I am sorry, SECRET, I cannot' }));
     const err = (await callModelJson(deps(), {
       route: 'extract',
       messages: [{ role: 'user', content: 'go' }],
       jsonSchema: { name: 'answer_only', schema },
+      validate,
     }).catch((e: Error) => e)) as Error;
-    expect(err).toBeInstanceOf(ToolError);
-    expect(err.message).toMatch(/did not return valid JSON/);
+    expect(err).toBeInstanceOf(ModelOutputError);
+    expect(err.message).toMatch(/not valid JSON/);
     expect(err.message).not.toContain('SECRET');
+  });
+
+  it('throws a ModelOutputError naming the field path when a required field is missing, without echoing the reply', async () => {
+    gateway.setResponder(() => ({ content: '{"unexpected":"SECRET_REPLY_VALUE"}' }));
+    const err = (await callModelJson(deps(), {
+      route: 'extract',
+      messages: [{ role: 'user', content: 'go' }],
+      jsonSchema: { name: 'answer_only', schema },
+      validate,
+    }).catch((e: Error) => e)) as Error;
+    expect(err).toBeInstanceOf(ModelOutputError);
+    expect(err.message).toContain('answer');
+    expect(err.message).not.toContain('SECRET_REPLY_VALUE');
+  });
+
+  it('still records a model_calls row when the reply parses as JSON but fails schema validation', async () => {
+    const before = (await db.select().from(modelCalls)).length;
+    gateway.setResponder(() => ({ content: '{"unexpected":"x"}' }));
+    await callModelJson(deps(), {
+      route: 'extract',
+      messages: [{ role: 'user', content: 'go' }],
+      jsonSchema: { name: 'answer_only', schema },
+      validate,
+    }).catch(() => undefined);
+    // callModel already wrote its row before callModelJson parses or
+    // validates the text, since a valid HTTP response was received; a later
+    // validation failure does not roll it back. Pinning that here, not just
+    // asserting it does not throw, is the point of this test.
+    expect((await db.select().from(modelCalls))).toHaveLength(before + 1);
   });
 });
 

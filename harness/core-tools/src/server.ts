@@ -60,4 +60,13 @@ export async function buildDepsFromEnv(): Promise<{ deps: ToolDeps; close: () =>
 }
 
 export { registerTools, defineTool, ToolError, type ToolDeps, type AnyToolDef } from './registry.js';
-export { callModel, callModelJson, gatewayFromEnv, ROUTES, type Route, type GatewayConfig, type ModelCallResult } from './models.js';
+export {
+  callModel,
+  callModelJson,
+  gatewayFromEnv,
+  ModelOutputError,
+  ROUTES,
+  type Route,
+  type GatewayConfig,
+  type ModelCallResult,
+} from './models.js';
