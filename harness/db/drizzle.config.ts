@@ -5,6 +5,6 @@ export default defineConfig({
   schema: './src/schema.ts',
   out: './drizzle',
   dbCredentials: {
-    url: process.env.DATABASE_URL ?? 'postgres://harness:harness@localhost:5433/harness',
+    url: process.env.DATABASE_URL ?? 'postgres://harness:harness@localhost:15432/harness',
   },
 });
