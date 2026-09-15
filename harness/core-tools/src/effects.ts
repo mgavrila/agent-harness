@@ -23,13 +23,16 @@ export interface StageEffectInput {
  * anything is sent. The payload is stored encrypted only.
  */
 export async function stageEffect(deps: ToolDeps, e: StageEffectInput): Promise<{ effect_id: string; staged: boolean }> {
+  // Idempotency keys are caller-supplied and only meaningful within a client;
+  // two clients computing the same key (e.g. `roster:aetna`) must not collide.
+  const scopedKey = `${deps.client}:${e.idempotencyKey}`;
   const inserted = await deps.db
     .insert(toolEffects)
     .values({
       client: deps.client,
       tool: deps.context.tool ?? 'unknown',
       sink: e.sink,
-      idempotencyKey: e.idempotencyKey,
+      idempotencyKey: scopedKey,
       payloadEncrypted: encrypt(JSON.stringify(e.payload ?? null), deps.encryptionKey),
       summary: e.summary,
       runId: deps.context.runId ?? null,
@@ -37,7 +40,7 @@ export async function stageEffect(deps: ToolDeps, e: StageEffectInput): Promise<
     .onConflictDoNothing({ target: toolEffects.idempotencyKey })
     .returning({ id: toolEffects.id });
   if (inserted.length > 0) return { effect_id: inserted[0].id, staged: true };
-  const existing = await deps.db.query.toolEffects.findFirst({ where: eq(toolEffects.idempotencyKey, e.idempotencyKey) });
+  const existing = await deps.db.query.toolEffects.findFirst({ where: eq(toolEffects.idempotencyKey, scopedKey) });
   if (!existing) throw new Error('effect row missing after insert');
   return { effect_id: existing.id, staged: false };
 }

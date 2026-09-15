@@ -54,7 +54,7 @@ describe('effects outbox', () => {
     const out = (res.structuredContent as { result: { effect_id: string; staged: boolean } }).result;
     expect(out.staged).toBe(true);
     const [row] = await db.select().from(toolEffects).where(eq(toolEffects.id, out.effect_id));
-    expect(row).toMatchObject({ status: 'staged', sink: 'slack', idempotencyKey: 'roster:aetna', client: 'test', tool: 'send_roster' });
+    expect(row).toMatchObject({ status: 'staged', sink: 'slack', idempotencyKey: 'test:roster:aetna', client: 'test', tool: 'send_roster' });
     expect(row.payloadEncrypted.toString()).not.toContain('123-45-6789');
     await c();
   });
@@ -74,6 +74,29 @@ describe('effects outbox', () => {
     expect((second.structuredContent as { result: { staged: boolean } }).result.staged).toBe(false);
     expect(await db.select().from(toolEffects)).toHaveLength(1);
     await c();
+  });
+
+  it('scopes idempotency keys by client so two clients staging the same key do not collide', async () => {
+    const otherDeps = makeTestDeps(db, { client: 'other-clinic' });
+    const otherFactory = () => {
+      const server = new McpServer({ name: 'effects-test-other', version: '0.0.0' });
+      registerTools(server, [sendRoster], otherDeps);
+      return server;
+    };
+    const { client, close: c } = await makeTestClient(factory);
+    const { client: otherClient, close: otherClose } = await makeTestClient(otherFactory);
+
+    const first = await client.callTool({ name: 'send_roster', arguments: { payer: 'aetna' } });
+    const second = await otherClient.callTool({ name: 'send_roster', arguments: { payer: 'aetna' } });
+    expect((first.structuredContent as { result: { staged: boolean } }).result.staged).toBe(true);
+    expect((second.structuredContent as { result: { staged: boolean } }).result.staged).toBe(true);
+
+    const rows = await db.select().from(toolEffects);
+    expect(rows).toHaveLength(2);
+    expect(rows.map((r) => r.idempotencyKey).sort()).toEqual(['other-clinic:roster:aetna', 'test:roster:aetna']);
+
+    await c();
+    await otherClose();
   });
 
   it('dispatches once with the decrypted payload, never twice', async () => {
