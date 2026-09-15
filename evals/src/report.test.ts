@@ -90,13 +90,14 @@ describe('buildReport with no judge', () => {
   it('cannot clear the gate by losing the judge a baseline had measured', () => {
     const c = compareToBaseline(unjudged(), report());
     expect(c.notComparable).toContain('judge.agreement_rate');
+    expect(c.stoppedMeasuring).toEqual(['judge.agreement_rate']);
     expect(c.regressions).toEqual([]);
     expect(c.improvements).toEqual([]);
     expect(c.passesPromotionGate).toBe(false);
-    expect(c.reason).toMatch(/not comparable/i);
+    expect(c.reason).toMatch(/missing from this run/i);
   });
 
-  it('still refuses promotion when a real win comes with a judge that stopped reporting', () => {
+  it('refuses promotion when a real win comes with a judge that stopped reporting', () => {
     const better = buildReport({
       evalSetVersion: '1.0.0',
       servingModel: { extract: 'x' },
@@ -106,11 +107,11 @@ describe('buildReport with no judge', () => {
       metricOverrides: { 'scan.field_accuracy': 0.91 },
     });
     const c = compareToBaseline(better, report());
-    // The genuine improvement still counts; the missing judge is simply not
-    // evidence either way, and it is named in the verdict.
+    // The improvement is real and still listed, but a win on one metric does
+    // not buy the right to stop reporting another. The gate stays shut.
     expect(c.improvements.map((d) => d.metric)).toEqual(['scan.field_accuracy']);
-    expect(c.notComparable).toEqual(['judge.agreement_rate']);
-    expect(c.passesPromotionGate).toBe(true);
+    expect(c.stoppedMeasuring).toEqual(['judge.agreement_rate']);
+    expect(c.passesPromotionGate).toBe(false);
     expect(c.reason).toContain('judge.agreement_rate');
   });
 
@@ -119,7 +120,7 @@ describe('buildReport with no judge', () => {
     expect(md).toContain('The judge did not run');
     expect(md).toContain('not a score of 100%');
     expect(md).toContain('Not comparable');
-    expect(md).toContain('`judge.agreement_rate` (not measured in this run)');
+    expect(md).toContain('`judge.agreement_rate`: the baseline measured it and this run did not — blocks promotion');
   });
 });
 
@@ -175,6 +176,33 @@ describe('compareToBaseline', () => {
     const c = compareToBaseline(report(), old);
     expect(c.regressions).toEqual([]);
     expect(c.notComparable).toEqual(['judge.agreement_rate']);
+    expect(c.stoppedMeasuring).toEqual([]);
+  });
+
+  it('blocks promotion when a metric the baseline measured stops being measured', () => {
+    // A win on one metric alongside a measurement that quietly stopped. The
+    // stopped one is not arithmetic, so it cannot be a regression Delta, but it
+    // is the same thing in substance: evidence that used to exist is gone.
+    const stopped = report({ 'scan.field_accuracy': 0.91 });
+    delete stopped.metrics['text_layer.restricted_recall'];
+    const c = compareToBaseline(stopped, base);
+    expect(c.stoppedMeasuring).toEqual(['text_layer.restricted_recall']);
+    expect(c.improvements.map((d) => d.metric)).toEqual(['scan.field_accuracy']);
+    expect(c.regressions).toEqual([]);
+    expect(c.passesPromotionGate).toBe(false);
+    expect(c.reason).toContain('text_layer.restricted_recall');
+  });
+
+  it('lets a metric the baseline never had through as neutral', () => {
+    // The mirror image. Measuring something new costs the comparison nothing,
+    // so it neither opens the gate nor closes it.
+    const older = report();
+    delete older.metrics['judge.agreement_rate'];
+    const c = compareToBaseline(report({ 'scan.field_accuracy': 0.91 }), older);
+    expect(c.notComparable).toEqual(['judge.agreement_rate']);
+    expect(c.stoppedMeasuring).toEqual([]);
+    expect(c.passesPromotionGate).toBe(true);
+    expect(c.reason).toMatch(/new, not comparable/i);
   });
 
   it('compares normally when both sides measured the judge', () => {

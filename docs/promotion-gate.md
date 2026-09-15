@@ -43,11 +43,23 @@ since the gate needs exactly one improvement to open, a broken judge could have
 supplied it.
 
 A metric that one side has and the other does not goes into
-`BaselineComparison.notComparable`. It is not a regression and not an
-improvement, the gate cannot be satisfied by it, and the report names it under
-the metrics table and in the verdict line so a run that quietly stopped
-measuring something does not read like a clean one. The same applies in the
-other direction, to a metric the baseline predates.
+`BaselineComparison.notComparable`. It has no delta, so it is never a regression
+and never an improvement, and the gate cannot be *satisfied* by one. The report
+names each of them under the metrics table and in the verdict line, so a run
+that quietly stopped measuring something does not read like a clean one.
+
+The two directions are not treated alike:
+
+| Direction | Effect |
+|---|---|
+| The baseline measured it, this run did not (`stoppedMeasuring`) | **Blocks promotion.** |
+| This run measures it, the baseline predates it | Neutral. |
+
+A measurement that stops is a regression in everything but arithmetic. The
+evidence that used to exist no longer does, and "we stopped looking" must not be
+promotable on the strength of a win somewhere else — that is the cheapest way
+there is to make a candidate look good. Measuring something new, on the other
+hand, costs the comparison nothing.
 
 ## Targets
 

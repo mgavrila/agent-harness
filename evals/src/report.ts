@@ -118,12 +118,22 @@ export interface BaselineComparison {
   improvements: Delta[];
   unchanged: Delta[];
   /**
-   * Metrics one side has and the other does not, sorted. A metric the baseline
-   * predates is new; a metric this run omitted was not measured. Either way
-   * there is no delta, so these are never regressions and never improvements,
-   * and the gate cannot be satisfied by one.
+   * Metrics one side has and the other does not, sorted. There is no delta
+   * either way, so none of these is ever a regression or an improvement and the
+   * gate cannot be *satisfied* by one. The two directions are not symmetric
+   * about blocking, though — see `stoppedMeasuring`.
    */
   notComparable: string[];
+  /**
+   * The subset of `notComparable` the baseline measured and this run did not.
+   * A measurement that stops is a regression in everything but arithmetic: the
+   * evidence that used to exist no longer does, and "we stopped looking" must
+   * not read the same as "it held". These block promotion.
+   *
+   * The other direction — a metric this run added that the baseline predates —
+   * is neutral. Nothing was lost by measuring something new.
+   */
+  stoppedMeasuring: string[];
   passesPromotionGate: boolean;
   reason: string;
 }
@@ -146,15 +156,17 @@ export function compareToBaseline(report: Report, baseline: Report, tolerance = 
   const improvements: Delta[] = [];
   const unchanged: Delta[] = [];
   const notComparable: string[] = [];
+  const stoppedMeasuring: string[] = [];
 
   for (const metric of [...new Set([...Object.keys(report.metrics), ...Object.keys(baseline.metrics)])]) {
     const base = baseline.metrics[metric];
     const current = report.metrics[metric];
     // One side has it and the other does not: a metric the baseline predates,
     // or one this run did not measure. Neither is a delta, and neither may
-    // stand in for one.
+    // stand in for one — but a measurement that stopped also blocks.
     if (base === undefined || current === undefined) {
       notComparable.push(metric);
+      if (current === undefined) stoppedMeasuring.push(metric);
       continue;
     }
     const signed = LOWER_IS_BETTER.has(metric) ? base - current : current - base;
@@ -170,16 +182,29 @@ export function compareToBaseline(report: Report, baseline: Report, tolerance = 
   improvements.sort(sortByMetric);
   unchanged.sort(sortByMetric);
   notComparable.sort();
+  stoppedMeasuring.sort();
 
-  const base =
-    regressions.length > 0
-      ? `${regressions.length} metric(s) regressed: ${regressions.map((r) => r.metric).join(', ')}`
+  const blockers: string[] = [];
+  if (regressions.length > 0) {
+    blockers.push(`${regressions.length} metric(s) regressed: ${regressions.map((r) => r.metric).join(', ')}`);
+  }
+  if (stoppedMeasuring.length > 0) {
+    blockers.push(
+      `${stoppedMeasuring.length} metric(s) the baseline measured are missing from this run: ${stoppedMeasuring.join(', ')}`,
+    );
+  }
+
+  const verdict =
+    blockers.length > 0
+      ? blockers.join('; ')
       : improvements.length === 0
         ? 'no metric improved, so there is nothing to promote'
         : `improved ${improvements.map((i) => i.metric).join(', ')} with no regression`;
-  // Said out loud in the verdict line: a run that quietly stopped measuring
-  // something should not read like a clean one.
-  const reason = notComparable.length === 0 ? base : `${base} (not comparable: ${notComparable.join(', ')})`;
+
+  // A metric this run added is neutral, but still said out loud, so a comparison
+  // that silently covered less ground than it looks like never reads as clean.
+  const added = notComparable.filter((m) => !stoppedMeasuring.includes(m));
+  const reason = added.length === 0 ? verdict : `${verdict} (new, not comparable: ${added.join(', ')})`;
 
   return {
     tolerance,
@@ -187,7 +212,8 @@ export function compareToBaseline(report: Report, baseline: Report, tolerance = 
     improvements,
     unchanged,
     notComparable,
-    passesPromotionGate: regressions.length === 0 && improvements.length > 0,
+    stoppedMeasuring,
+    passesPromotionGate: blockers.length === 0 && improvements.length > 0,
     reason,
   };
 }
@@ -289,11 +315,13 @@ export function renderMarkdown(report: Report, comparison: BaselineComparison | 
     }
     if (comparison.notComparable.length > 0) {
       lines.push('');
-      lines.push('Not comparable — one side has the metric and the other does not, so it counts neither way:');
+      lines.push('Not comparable — one side has the metric and the other does not, so neither counts as a delta:');
       lines.push('');
       for (const metric of comparison.notComparable) {
-        const side = report.metrics[metric] === undefined ? 'not measured in this run' : 'absent from the baseline';
-        lines.push(`- \`${metric}\` (${side})`);
+        const side = comparison.stoppedMeasuring.includes(metric)
+          ? 'the baseline measured it and this run did not — blocks promotion'
+          : 'new in this run, absent from the baseline — neutral';
+        lines.push(`- \`${metric}\`: ${side}`);
       }
     }
   }
