@@ -43,6 +43,24 @@ export function numberFromEnv(name: string, fallback: number, { min, max }: { mi
   return value;
 }
 
+/**
+ * Read a boolean environment variable. `true` and `1` are on; everything else
+ * — unset, empty, `false`, `0`, `no`, a typo — is off. Case and surrounding
+ * whitespace are ignored.
+ *
+ * Every boolean in `buildDepsFromEnv` goes through this one helper so no flag
+ * can be read differently from another. Before it, `VERIFY_NPPES_ENABLED`
+ * alone disabled on the literal `'false'` while its neighbours enabled on the
+ * literal `'true'`, so `VERIFY_NPPES_ENABLED=0` left outbound registry lookups
+ * switched on while the same spelling switched everything else off. Every one
+ * of these defaults to off: a deployment that sets nothing makes no outbound
+ * calls and sends nothing restricted to a model.
+ */
+export function booleanFromEnv(name: string): boolean {
+  const raw = process.env[name]?.trim().toLowerCase();
+  return raw === 'true' || raw === '1';
+}
+
 export async function buildDepsFromEnv(): Promise<{ deps: ToolDeps; close: () => Promise<void> }> {
   const { db, close } = createDb();
   const deps: ToolDeps = {
@@ -56,11 +74,11 @@ export async function buildDepsFromEnv(): Promise<{ deps: ToolDeps; close: () =>
     confidenceThreshold: numberFromEnv('CONFIDENCE_THRESHOLD', DEFAULT_CONFIDENCE_THRESHOLD, { min: 0, max: 1 }),
     gateway: gatewayFromEnv(),
     storageDir: path.resolve(process.env.HARNESS_STORAGE_DIR ?? './storage'),
-    restrictedToModel: process.env.HARNESS_RESTRICTED_TO_MODEL === 'true',
+    restrictedToModel: booleanFromEnv('HARNESS_RESTRICTED_TO_MODEL'),
     verify: {
-      nppesEnabled: process.env.VERIFY_NPPES_ENABLED !== 'false',
+      nppesEnabled: booleanFromEnv('VERIFY_NPPES_ENABLED'),
       nppesBaseUrl: process.env.NPPES_BASE_URL ?? NPPES_DEFAULT_BASE_URL,
-      stateLicenseEnabled: process.env.VERIFY_STATE_LICENSE_ENABLED === 'true',
+      stateLicenseEnabled: booleanFromEnv('VERIFY_STATE_LICENSE_ENABLED'),
       timeoutMs: numberFromEnv('VERIFY_TIMEOUT_MS', 15_000, { min: 1_000, max: 60_000 }),
     },
     sinks: {},
