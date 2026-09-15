@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { McpServer } from '@modelcontextprotocol/server';
 import { createDb, loadKey } from '@harness/db';
-import { registerTools, type ToolDeps } from './registry.js';
+import { DEFAULT_CONFIDENCE_THRESHOLD, registerTools, type ToolDeps } from './registry.js';
 import { loadPolicy } from './policy.js';
 import { gatewayFromEnv } from './models.js';
 import { providerTools } from './tools/providers.js';
@@ -53,7 +53,7 @@ export async function buildDepsFromEnv(): Promise<{ deps: ToolDeps; close: () =>
     encryptionKey: loadKey(),
     now: () => new Date(),
     approvalTtlHours: numberFromEnv('APPROVAL_TTL_HOURS', 24, { min: 1, max: 720 }),
-    confidenceThreshold: numberFromEnv('CONFIDENCE_THRESHOLD', 0.85, { min: 0, max: 1 }),
+    confidenceThreshold: numberFromEnv('CONFIDENCE_THRESHOLD', DEFAULT_CONFIDENCE_THRESHOLD, { min: 0, max: 1 }),
     gateway: gatewayFromEnv(),
     storageDir: path.resolve(process.env.HARNESS_STORAGE_DIR ?? './storage'),
     restrictedToModel: process.env.HARNESS_RESTRICTED_TO_MODEL === 'true',
@@ -75,7 +75,7 @@ export async function buildDepsFromEnv(): Promise<{ deps: ToolDeps; close: () =>
   return { deps, close };
 }
 
-export { registerTools, defineTool, ToolError, type ToolDeps, type AnyToolDef } from './registry.js';
+export { registerTools, defineTool, ToolError, DEFAULT_CONFIDENCE_THRESHOLD, type ToolDeps, type AnyToolDef } from './registry.js';
 export {
   callModel,
   callModelJson,

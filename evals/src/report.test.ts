@@ -57,6 +57,72 @@ describe('buildReport', () => {
   });
 });
 
+describe('buildReport with no judge', () => {
+  function unjudged(): Report {
+    return buildReport({
+      evalSetVersion: '1.0.0',
+      servingModel: { extract: 'x' },
+      splits: report().splits,
+      injection: { cases: 2, passed: 2, passRate: 1, failures: [] },
+      judge: null,
+      metricOverrides: {},
+    });
+  }
+
+  it('omits the agreement rate rather than recording a number nobody measured', () => {
+    const r = unjudged();
+    expect(r.judge).toBeNull();
+    expect(r.metrics).not.toHaveProperty('judge.agreement_rate');
+  });
+
+  it('omits it too when the judge ran but graded nothing', () => {
+    const r = buildReport({
+      evalSetVersion: '1.0.0',
+      servingModel: { extract: 'x' },
+      splits: report().splits,
+      injection: { cases: 2, passed: 2, passRate: 1, failures: [] },
+      judge: { scored: 0, agreementRate: 1 },
+      metricOverrides: {},
+    });
+    expect(r.metrics).not.toHaveProperty('judge.agreement_rate');
+  });
+
+  it('cannot clear the gate by losing the judge a baseline had measured', () => {
+    const c = compareToBaseline(unjudged(), report());
+    expect(c.notComparable).toContain('judge.agreement_rate');
+    expect(c.regressions).toEqual([]);
+    expect(c.improvements).toEqual([]);
+    expect(c.passesPromotionGate).toBe(false);
+    expect(c.reason).toMatch(/not comparable/i);
+  });
+
+  it('still refuses promotion when a real win comes with a judge that stopped reporting', () => {
+    const better = buildReport({
+      evalSetVersion: '1.0.0',
+      servingModel: { extract: 'x' },
+      splits: report().splits,
+      injection: { cases: 2, passed: 2, passRate: 1, failures: [] },
+      judge: null,
+      metricOverrides: { 'scan.field_accuracy': 0.91 },
+    });
+    const c = compareToBaseline(better, report());
+    // The genuine improvement still counts; the missing judge is simply not
+    // evidence either way, and it is named in the verdict.
+    expect(c.improvements.map((d) => d.metric)).toEqual(['scan.field_accuracy']);
+    expect(c.notComparable).toEqual(['judge.agreement_rate']);
+    expect(c.passesPromotionGate).toBe(true);
+    expect(c.reason).toContain('judge.agreement_rate');
+  });
+
+  it('says in the report that an absent judge is absent, not perfect', () => {
+    const md = renderMarkdown(unjudged(), compareToBaseline(unjudged(), report()));
+    expect(md).toContain('The judge did not run');
+    expect(md).toContain('not a score of 100%');
+    expect(md).toContain('Not comparable');
+    expect(md).toContain('`judge.agreement_rate` (not measured in this run)');
+  });
+});
+
 describe('compareToBaseline', () => {
   const base = report();
 
@@ -108,6 +174,14 @@ describe('compareToBaseline', () => {
     delete old.metrics['judge.agreement_rate'];
     const c = compareToBaseline(report(), old);
     expect(c.regressions).toEqual([]);
+    expect(c.notComparable).toEqual(['judge.agreement_rate']);
+  });
+
+  it('compares normally when both sides measured the judge', () => {
+    const c = compareToBaseline(report({ 'judge.agreement_rate': 0.9 }), base);
+    expect(c.notComparable).toEqual([]);
+    expect(c.improvements.map((d) => d.metric)).toEqual(['judge.agreement_rate']);
+    expect(c.passesPromotionGate).toBe(true);
   });
 });
 

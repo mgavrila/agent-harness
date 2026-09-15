@@ -199,6 +199,58 @@ describe('runEvals', () => {
     expect(report.splits.scan.fieldAccuracy).toBe(0.5);
   }, 180_000);
 
+  it('reports no agreement rate at all when the judge route is down', async () => {
+    gateway.setResponder((call) => (call.model === 'judge' ? { status: 500 } : { content: EXTRACTION }));
+    const { report } = await runEvals(options());
+    gateway.setResponder((call) => ({ content: call.model === 'judge' ? VERDICTS : EXTRACTION }));
+
+    expect(report.judge).toBeNull();
+    expect(report.metrics).not.toHaveProperty('judge.agreement_rate');
+    // The free-text miss the judge would have forgiven stays a miss: three of
+    // text_layer's four expected fields matched exactly.
+    expect(report.splits.text_layer.fieldAccuracy).toBe(0.75);
+  }, 180_000);
+
+  it('gives a broken judge no way to clear the gate against a baseline that had one', async () => {
+    const judged = await runEvals(options());
+    expect(judged.report.metrics['judge.agreement_rate']).toBe(1);
+    const baselineFile = path.join(dir, 'baseline-judged.json');
+    await writeFile(baselineFile, JSON.stringify(judged.report, null, 2), 'utf8');
+
+    gateway.setResponder((call) => (call.model === 'judge' ? { status: 500 } : { content: EXTRACTION }));
+    const { markdown } = await runEvals(options({ baselineFile }));
+    gateway.setResponder((call) => ({ content: call.model === 'judge' ? VERDICTS : EXTRACTION }));
+
+    expect(markdown).toContain('HOLD');
+    expect(markdown).toContain('judge.agreement_rate');
+    expect(markdown).not.toMatch(/\| judge\.agreement_rate \|/);
+  }, 240_000);
+
+  it('scores the pending-field check with the threshold the pipeline actually used', async () => {
+    // The pipeline marks a field `extracted` at or above its own threshold. Run
+    // it at 0.5 and a 0.6-confidence field is legitimately extracted; a scorer
+    // still holding a literal 0.85 would call that a field that should have
+    // been pending and fail an injection case that never leaked anything.
+    gateway.setResponder((call) =>
+      call.model === 'judge'
+        ? { content: VERDICTS }
+        : {
+            content: JSON.stringify({
+              document_kind: 'state_license',
+              fields: { last_name: { value: 'Lovelace', confidence: 0.6, source_page: 1 } },
+              credentials: [],
+            }),
+          },
+    );
+    const { report, exitCode } = await runEvals(options({ confidenceThreshold: 0.5 }));
+    gateway.setResponder((call) => ({ content: call.model === 'judge' ? VERDICTS : EXTRACTION }));
+
+    expect(report.injection.cases).toBe(1);
+    expect(report.injection.failures).toEqual([]);
+    expect(report.injection.passed).toBe(1);
+    expect(exitCode).toBe(0);
+  }, 180_000);
+
   it('exits non-zero against a baseline that regressed', async () => {
     const first = await runEvals(options());
     // The scan case has no low-confidence field, so that split measures no

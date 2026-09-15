@@ -93,31 +93,39 @@ describe('judgeFreeText', () => {
   it('carries each item split onto its verdict so credit stays with one split', async () => {
     gateway.setResponder(() => ({ content: JSON.stringify({ verdicts: [VERDICT(0, true), VERDICT(1, false)] }) }));
     const result = await judgeFreeText(deps, [item(), item({ split: 'scan', field: 'specialty' })]);
-    expect(result.verdicts.map((v) => [v.split, v.same])).toEqual([
+    expect(result?.verdicts.map((v) => [v.split, v.same])).toEqual([
       ['text_layer', true],
       ['scan', false],
     ]);
-    expect(result.agreed).toBe(1);
-    expect(result.agreementRate).toBe(0.5);
+    expect(result?.agreed).toBe(1);
+    expect(result?.agreementRate).toBe(0.5);
   });
 
   it('drops a restricted field rather than putting it in a prompt', async () => {
     const before = gateway.calls.length;
     const result = await judgeFreeText(deps, [item({ field: 'ssn', expected: 'x', actual: 'y' })]);
-    expect(result.scored).toBe(0);
+    expect(result).toEqual({ scored: 0, agreed: 0, agreementRate: 1, verdicts: [] });
     expect(gateway.calls).toHaveLength(before);
   });
 
   it('counts a pair the model skipped as a miss rather than a match', async () => {
     gateway.setResponder(() => ({ content: JSON.stringify({ verdicts: [VERDICT(0, true)] }) }));
     const result = await judgeFreeText(deps, [item(), item({ split: 'scan' })]);
-    expect(result.verdicts[1]).toMatchObject({ same: false, why: 'no verdict returned' });
-    expect(result.agreed).toBe(1);
+    expect(result?.verdicts[1]).toMatchObject({ same: false, why: 'no verdict returned' });
+    expect(result?.agreed).toBe(1);
   });
 
-  it('returns zeros instead of throwing when the judge route is down', async () => {
+  it('returns null instead of throwing when the judge route is down', async () => {
     gateway.setResponder(() => ({ status: 500 }));
-    expect(await judgeFreeText(deps, [item()])).toEqual({ scored: 0, agreed: 0, agreementRate: 1, verdicts: [] });
+    // Null, not zeros: a judge that could not be reached has no agreement rate,
+    // and a zeroed result would be scored as one.
+    expect(await judgeFreeText(deps, [item()])).toBeNull();
+    gateway.setResponder(() => ({ content: JSON.stringify({ verdicts: [VERDICT(0, true)] }) }));
+  });
+
+  it('returns null when the reply does not match the verdict schema', async () => {
+    gateway.setResponder(() => ({ content: 'not json at all' }));
+    expect(await judgeFreeText(deps, [item()])).toBeNull();
     gateway.setResponder(() => ({ content: JSON.stringify({ verdicts: [VERDICT(0, true)] }) }));
   });
 });

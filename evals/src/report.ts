@@ -29,6 +29,11 @@ export interface Report {
   metrics: Record<string, number>;
 }
 
+/**
+ * Every key `buildReport` can write. Not every key is written on every run:
+ * `judge.agreement_rate` is absent when the judge did not run, because a metric
+ * nobody measured has no value that is honest to record. See `buildReport`.
+ */
 export const METRIC_KEYS = [
   'text_layer.field_accuracy',
   'text_layer.credential_accuracy',
@@ -81,7 +86,12 @@ export function buildReport(input: BuildReportInput): Report {
     metrics[`${name}.failure_rate`] = s.cases === 0 ? 0 : s.failures / s.cases;
   }
   metrics['injection.pass_rate'] = input.injection.passRate;
-  metrics['judge.agreement_rate'] = input.judge?.agreementRate ?? 1;
+  // Written only when the judge actually graded something. A judge that did not
+  // run, or ran and threw, used to land here as 1.0 — indistinguishable from a
+  // judge that agreed with every verdict, and enough on its own to supply the
+  // one improvement the promotion gate asks for. An absent key is compared
+  // against nothing; see `compareToBaseline`'s `notComparable`.
+  if (input.judge !== null && input.judge.scored > 0) metrics['judge.agreement_rate'] = input.judge.agreementRate;
   Object.assign(metrics, input.metricOverrides ?? {});
 
   return {
@@ -107,6 +117,13 @@ export interface BaselineComparison {
   regressions: Delta[];
   improvements: Delta[];
   unchanged: Delta[];
+  /**
+   * Metrics one side has and the other does not, sorted. A metric the baseline
+   * predates is new; a metric this run omitted was not measured. Either way
+   * there is no delta, so these are never regressions and never improvements,
+   * and the gate cannot be satisfied by one.
+   */
+  notComparable: string[];
   passesPromotionGate: boolean;
   reason: string;
 }
@@ -128,12 +145,18 @@ export function compareToBaseline(report: Report, baseline: Report, tolerance = 
   const regressions: Delta[] = [];
   const improvements: Delta[] = [];
   const unchanged: Delta[] = [];
+  const notComparable: string[] = [];
 
-  for (const metric of Object.keys(report.metrics)) {
+  for (const metric of [...new Set([...Object.keys(report.metrics), ...Object.keys(baseline.metrics)])]) {
     const base = baseline.metrics[metric];
-    // A metric the baseline predates is new: nothing to compare it against.
-    if (base === undefined) continue;
     const current = report.metrics[metric];
+    // One side has it and the other does not: a metric the baseline predates,
+    // or one this run did not measure. Neither is a delta, and neither may
+    // stand in for one.
+    if (base === undefined || current === undefined) {
+      notComparable.push(metric);
+      continue;
+    }
     const signed = LOWER_IS_BETTER.has(metric) ? base - current : current - base;
     const band = ZERO_TOLERANCE.has(metric) ? 0 : tolerance;
     const delta = Number((current - base).toFixed(6));
@@ -146,15 +169,27 @@ export function compareToBaseline(report: Report, baseline: Report, tolerance = 
   regressions.sort(sortByMetric);
   improvements.sort(sortByMetric);
   unchanged.sort(sortByMetric);
+  notComparable.sort();
 
-  const reason =
+  const base =
     regressions.length > 0
       ? `${regressions.length} metric(s) regressed: ${regressions.map((r) => r.metric).join(', ')}`
       : improvements.length === 0
         ? 'no metric improved, so there is nothing to promote'
         : `improved ${improvements.map((i) => i.metric).join(', ')} with no regression`;
+  // Said out loud in the verdict line: a run that quietly stopped measuring
+  // something should not read like a clean one.
+  const reason = notComparable.length === 0 ? base : `${base} (not comparable: ${notComparable.join(', ')})`;
 
-  return { tolerance, regressions, improvements, unchanged, passesPromotionGate: regressions.length === 0 && improvements.length > 0, reason };
+  return {
+    tolerance,
+    regressions,
+    improvements,
+    unchanged,
+    notComparable,
+    passesPromotionGate: regressions.length === 0 && improvements.length > 0,
+    reason,
+  };
 }
 
 function pct(n: number): string {
@@ -218,12 +253,19 @@ export function renderMarkdown(report: Report, comparison: BaselineComparison | 
   }
   lines.push('');
 
-  if (report.judge) {
-    lines.push('## Judge');
-    lines.push('');
+  lines.push('## Judge');
+  lines.push('');
+  if (report.judge === null) {
+    lines.push(
+      'The judge did not run, so free-text fields were scored by exact comparison only and ' +
+        'there is no agreement rate for this run. This is not a score of 100%: the metric is absent, not perfect.',
+    );
+  } else if (report.judge.scored === 0) {
+    lines.push('No free-text field missed an exact comparison, so the judge had nothing to grade.');
+  } else {
     lines.push(`${report.judge.scored} free-text values judged; ${pct(report.judge.agreementRate)} matched the expected value.`);
-    lines.push('');
   }
+  lines.push('');
 
   lines.push('## Metrics');
   lines.push('');
@@ -244,6 +286,15 @@ export function renderMarkdown(report: Report, comparison: BaselineComparison | 
           : '';
     for (const d of [...comparison.regressions, ...comparison.improvements, ...comparison.unchanged].sort((a, b) => a.metric.localeCompare(b.metric))) {
       lines.push(`| ${d.metric} | ${d.baseline.toFixed(4)} | ${d.current.toFixed(4)} | ${d.delta >= 0 ? '+' : ''}${d.delta.toFixed(4)} | ${label(d.metric)} |`);
+    }
+    if (comparison.notComparable.length > 0) {
+      lines.push('');
+      lines.push('Not comparable — one side has the metric and the other does not, so it counts neither way:');
+      lines.push('');
+      for (const metric of comparison.notComparable) {
+        const side = report.metrics[metric] === undefined ? 'not measured in this run' : 'absent from the baseline';
+        lines.push(`- \`${metric}\` (${side})`);
+      }
     }
   }
   lines.push('');

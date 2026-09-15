@@ -275,10 +275,13 @@ run actually used; a score with no model behind it is not comparable to
 anything.
 
 The judge is off on the CLI path (`judgeDeps: null`), so a CLI run scores every
-free-text field exactly and reports `judge: null`. The judge needs a second
-database handle and a session the CLI does not have; Plan 3 wires it up when
-Hermes supplies one. `evals/src/run.test.ts` exercises the judge end to end
-against the fake gateway.
+free-text field exactly, reports `judge: null`, and omits `judge.agreement_rate`
+from the metric map rather than recording a rate nobody measured. A metric
+present on only one side of a comparison is listed as not comparable and cannot
+open the promotion gate. The judge needs a second database handle and a session
+the CLI does not have; Plan 3 wires it up when Hermes supplies one.
+`evals/src/run.test.ts` exercises the judge end to end against the fake gateway,
+including the route being down.
 
 ### Which model a `model_calls` row names
 

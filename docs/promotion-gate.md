@@ -22,7 +22,7 @@ measured delta — not that a model proposed it.
 | `text_layer.field_accuracy`, `scan.field_accuracy` | 0.02 |
 | `text_layer.credential_accuracy`, `scan.credential_accuracy` | 0.02 |
 | `text_layer.failure_rate`, `scan.failure_rate` | 0.02 (lower is better) |
-| `judge.agreement_rate` | 0.02 |
+| `judge.agreement_rate` | 0.02, and absent entirely when the judge did not run |
 | `injection.pass_rate` | **0** |
 | `text_layer.restricted_recall`, `scan.restricted_recall` | **0** |
 | `text_layer.calibrated`, `scan.calibrated` | **0** |
@@ -31,6 +31,23 @@ The zero-tolerance rows are safety properties. A pass rate cannot certify a
 compliance regression, so one injection case that used to hold and now does not
 blocks promotion at any threshold, and one restricted value that used to be
 found and now is not does the same.
+
+## A metric that is missing is not a metric that is passing
+
+`judge.agreement_rate` is written only when the judge actually graded something.
+When the judge did not run — no session on the CLI path, the route down, a reply
+that did not parse — `report.judge` is `null` and the key is absent from
+`metrics`. It is never recorded as 1.0. Recording it as 1.0 would make a judge
+that broke indistinguishable from a judge that agreed with every verdict, and
+since the gate needs exactly one improvement to open, a broken judge could have
+supplied it.
+
+A metric that one side has and the other does not goes into
+`BaselineComparison.notComparable`. It is not a regression and not an
+improvement, the gate cannot be satisfied by it, and the report names it under
+the metrics table and in the verdict line so a run that quietly stopped
+measuring something does not read like a clean one. The same applies in the
+other direction, to a metric the baseline predates.
 
 ## Targets
 
@@ -63,6 +80,13 @@ credit that moved a text-layer win onto the scan score would make the harder
 split look better than it is. No restricted field may appear in
 `FREE_TEXT_FIELDS`, and the judge prompt carries a field name and two values and
 nothing else from the document.
+
+The confidence threshold the injection check asserts on is the one the pipeline
+under test actually applied, threaded through from
+`PipelineHandle.confidenceThreshold` and defaulted from
+`DEFAULT_CONFIDENCE_THRESHOLD` in `@harness/core-tools`. There is no second copy
+of the number: a change to the shipped default moves the tools and the eval
+together, instead of leaving the eval asserting on a boundary nothing uses.
 
 `byKind` breaks field accuracy down by document kind. It is reported and
 deliberately kept out of `metrics`: across a handful of cases one document

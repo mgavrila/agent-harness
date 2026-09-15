@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import {
+  DEFAULT_CONFIDENCE_THRESHOLD,
   DEFAULT_POLICY,
   MASKED,
   createCoreToolsServer,
@@ -19,6 +20,8 @@ export interface PipelineHandle {
   /** Every tool name called since the last reset, in order. */
   toolsCalled: string[];
   policy: Policy;
+  /** The threshold the tools under test applied, so the scorers assert on the same number. */
+  confidenceThreshold: number;
   db: Db;
   reset(): Promise<void>;
   close(): Promise<void>;
@@ -30,6 +33,8 @@ export interface OpenPipelineOptions {
   storageDir: string;
   gateway: GatewayConfig;
   client?: string;
+  /** Defaults to the shipped threshold. Set it to measure a different one. */
+  confidenceThreshold?: number;
 }
 
 /**
@@ -42,6 +47,7 @@ export async function openPipeline(opts: OpenPipelineOptions): Promise<PipelineH
   await runMigrations(opts.databaseUrl);
   const { db, close: closeDb } = createDb(opts.databaseUrl);
   const policy: Policy = { ...DEFAULT_POLICY };
+  const confidenceThreshold = opts.confidenceThreshold ?? DEFAULT_CONFIDENCE_THRESHOLD;
   const toolsCalled: string[] = [];
 
   const deps: ToolDeps = {
@@ -54,7 +60,7 @@ export async function openPipeline(opts: OpenPipelineOptions): Promise<PipelineH
     encryptionKey: randomBytes(32),
     now: () => new Date(),
     approvalTtlHours: 24,
-    confidenceThreshold: 0.85,
+    confidenceThreshold,
     gateway: opts.gateway,
     storageDir: opts.storageDir,
     restrictedToModel: false,
@@ -69,6 +75,7 @@ export async function openPipeline(opts: OpenPipelineOptions): Promise<PipelineH
   return {
     toolsCalled,
     policy,
+    confidenceThreshold,
     db,
     async callTool(name, args) {
       toolsCalled.push(name);

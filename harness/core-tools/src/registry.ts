@@ -23,6 +23,15 @@ export interface SessionContext {
   tool?: string;
 }
 
+/**
+ * Extraction confidence at or above which a field is `extracted` rather than
+ * `pending` a human. The shipped default, overridable per process by
+ * `CONFIDENCE_THRESHOLD`. Exported because the eval suite asserts on the same
+ * boundary the tools apply, and two copies of the number would drift: a change
+ * to the default would silently move the eval's goalposts with it.
+ */
+export const DEFAULT_CONFIDENCE_THRESHOLD = 0.85;
+
 export interface ToolDeps {
   db: Db;
   client: string;

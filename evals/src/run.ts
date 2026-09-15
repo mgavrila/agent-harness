@@ -24,6 +24,8 @@ export interface RunOptions {
   servingModel: Record<string, string>;
   evalSetVersion: string;
   limit?: number;
+  /** Threshold the pipeline applies and the scorers assert on. Defaults to the shipped one. */
+  confidenceThreshold?: number;
 }
 
 function emptySplit(): SplitReport {
@@ -81,7 +83,12 @@ export async function runEvals(opts: RunOptions): Promise<{ report: Report; mark
   const injectionCases = await loadInjectionCases(opts.injectionFile);
   const selected = selectCases(cases, opts.limit);
 
-  const pipeline = await openPipeline({ databaseUrl: opts.databaseUrl, storageDir: opts.corpusDir, gateway: opts.gateway });
+  const pipeline = await openPipeline({
+    databaseUrl: opts.databaseUrl,
+    storageDir: opts.corpusDir,
+    gateway: opts.gateway,
+    confidenceThreshold: opts.confidenceThreshold,
+  });
 
   interface Bucket {
     fieldTotal: number;
@@ -158,7 +165,7 @@ export async function runEvals(opts: RunOptions): Promise<{ report: Report; mark
       if (c.injection) {
         for (const ic of injectionCases) {
           injectionRun += 1;
-          const verdict = scoreInjection(outcome, ic, pipeline.policy);
+          const verdict = scoreInjection(outcome, ic, pipeline.policy, pipeline.confidenceThreshold);
           if (verdict.passed) injectionPassed += 1;
           else injectionFailures.push(...verdict.failures.map((f) => `${c.id} / ${ic.id}: ${f}`));
         }
@@ -170,6 +177,9 @@ export async function runEvals(opts: RunOptions): Promise<{ report: Report; mark
     // credited to its own split: pooling the credit and spreading it by field
     // count would move a text_layer win onto the scan score, and the whole
     // point of scoring the splits apart is that they are not interchangeable.
+    // `null` here means the judge did not run at all — no deps, or the route
+    // was down. It is not an agreement rate of 1, and `buildReport` keeps it out
+    // of the metric map rather than inventing one.
     const judge = opts.judgeDeps ? await judgeFreeText(opts.judgeDeps, judgeItems) : null;
     const agreedBySplit = new Map<string, number>();
     for (const verdict of judge?.verdicts ?? []) {

@@ -6,7 +6,7 @@ import { createDb, type Db } from '@harness/db';
 import { TEST_DATABASE_URL, resetDatabase } from '@harness/db/testing';
 import { DEFAULT_POLICY } from './policy.js';
 import { connectInProcess } from './in-process.js';
-import { registerTools, type AnyToolDef, type ToolDeps } from './registry.js';
+import { DEFAULT_CONFIDENCE_THRESHOLD, registerTools, type AnyToolDef, type ToolDeps } from './registry.js';
 
 export function makeTestDeps(db: Db, overrides: Partial<ToolDeps> = {}): ToolDeps {
   return {
@@ -17,7 +17,7 @@ export function makeTestDeps(db: Db, overrides: Partial<ToolDeps> = {}): ToolDep
     encryptionKey: randomBytes(32),
     now: () => new Date('2026-09-15T12:00:00Z'),
     approvalTtlHours: 24,
-    confidenceThreshold: 0.85,
+    confidenceThreshold: DEFAULT_CONFIDENCE_THRESHOLD,
     gateway: { baseUrl: 'http://127.0.0.1:1', apiKey: 'sk-test', timeoutMs: 5_000, maxCallsPerRun: 100 },
     storageDir: '/nonexistent-storage-dir',
     restrictedToModel: false,
