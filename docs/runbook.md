@@ -316,6 +316,29 @@ Restricted values are kept out of Slack in three places, on purpose:
 A withheld payload in a card is not a bug to route around. It means something
 wrote a restricted-looking value where it should not be; read the audit row.
 
+## Onboarding a client
+
+`pnpm new-client --pack <pack> --name <slug>` scaffolds `clients/<slug>/`. It
+does not make that client runnable on its own — the Compose file still names
+`demo-practice` — so finish by hand:
+
+1. `cp clients/<slug>/.env.example .env` and fill it in, with
+   `HARNESS_CLIENT=<slug>` and a storage directory this client does not share.
+2. Create the two Slack apps described under **Slack credentials** above and
+   paste both pairs of tokens.
+3. Review `clients/<slug>/SOUL.md` and `policy.yaml` before the first run.
+4. Point Compose at the client: in `harness/compose/docker-compose.yml`, the
+   `hermes-init` bind mount `../../clients/demo-practice:/srv/client:ro`, and
+   the `HARNESS_POLICY_FILE` value on both the `hermes` and the `approvals`
+   service. Three occurrences of `demo-practice` in total.
+5. Start it under its own Compose project so it does not collide with another
+   client's containers and volumes:
+   `COMPOSE_PROJECT_NAME=<slug> docker compose -f harness/compose/docker-compose.yml --profile demo up -d --build`.
+
+Do **not** use `pnpm demo:up` for a new client. It runs the default Compose
+project with the `demo-practice` paths above, so it starts demo-practice
+whatever `HARNESS_CLIENT` says.
+
 ## Playbooks
 
 Three jobs run in the Hermes cron fleet. Install or repair them with:
