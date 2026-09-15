@@ -147,6 +147,17 @@ describe('redactPages', () => {
     expect(out.hits[0].value).toBe('123456789');
   });
 
+  it('gives the formatted and bare encodings of one SSN a single token and field', () => {
+    const out = redactPages([
+      { num: 1, text: 'SSN 123-45-6789 in the header' },
+      { num: 2, text: 'Typed into the form field: 123456789' },
+    ]);
+    expect(out.pages[0].text).toBe('SSN {{ssn:1}} in the header');
+    expect(out.pages[1].text).toBe('Typed into the form field: {{ssn:1}}');
+    expect(out.hits).toHaveLength(1);
+    expect(out.hits[0].fieldName).toBe('ssn');
+  });
+
   it('does not treat a column of unpunctuated numbers as an SSN', () => {
     // Three lines of 3, 2 and 4 digits with no printed separator at either
     // slot is a column of figures, not a wrapped SSN field. Redacting it

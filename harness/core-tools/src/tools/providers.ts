@@ -35,13 +35,21 @@ const RESTRICTED_NAME_SUFFIXES = ['', 'number', 'no', 'id', 'registration'] as c
 
 /**
  * True when `name` denotes a restricted identifier. Normalizes away case and
- * separators, then matches a key exactly or a key plus a known suffix — so
- * `deadline` and `npi` are not restricted while `DEA-Number` is.
+ * separators, drops a trailing ordinal, then matches a key exactly or a key
+ * plus a known suffix — so `deadline` and `npi` are not restricted while
+ * `DEA-Number` is.
+ *
+ * The trailing ordinal matters: `fieldNameFor` in documents/redact.ts names a
+ * second distinct value of a kind `ssn_2`, `ein_2`, `dea_number_2`. Those are
+ * names this harness generates itself, so a caller replaying an earlier
+ * extraction through `providers_upsert` must not be able to land one in the
+ * plaintext `fields.value` column just because it carries a suffix.
  */
 export function isRestrictedName(name: string): boolean {
-  const normalized = name.toLowerCase().replace(/[^a-z0-9]/g, '');
+  // Separators are already gone, so the ordinal is a bare digit run at the end.
+  const stem = name.toLowerCase().replace(/[^a-z0-9]/g, '').replace(/\d+$/, '');
   return RESTRICTED_NAME_KEYS.some((key) =>
-    RESTRICTED_NAME_SUFFIXES.some((suffix) => normalized === `${key}${suffix}`),
+    RESTRICTED_NAME_SUFFIXES.some((suffix) => stem === `${key}${suffix}`),
   );
 }
 

@@ -160,8 +160,9 @@ const CANONICAL_FIELD: Record<RestrictedKind, string> = {
  * The `fields.name` a hit is stored under. The first hit of a kind gets the
  * canonical name so the healthcare pack can refer to `ssn` and `dea_number`
  * directly; a second distinct value is suffixed rather than overwriting.
- * Every name produced here satisfies `isRestrictedName` in tools/providers.ts,
- * so the value is encrypted even if a caller forgets `restricted: true`.
+ * Every name produced here satisfies `isRestrictedName` in tools/providers.ts
+ * — it strips exactly this trailing ordinal before matching — so the value is
+ * encrypted even if a caller forgets `restricted: true`.
  */
 export function fieldNameFor(kind: RestrictedKind, ordinal: number): string {
   return ordinal <= 1 ? CANONICAL_FIELD[kind] : `${CANONICAL_FIELD[kind]}_${ordinal}`;
@@ -174,15 +175,24 @@ interface Pattern {
   toValue: (raw: string) => string;
   /** Accept or reject a raw match — the shape alone is never enough. */
   accept: (raw: string) => boolean;
+  /**
+   * The identity of a value for token and ordinal purposes. Two matches with
+   * the same identity are one value: they share a token and a field name,
+   * however each was punctuated on the page.
+   */
+  identity: (value: string) => string;
 }
 
 // Order matters only for readability; the four shapes cannot overlap: each
 // requires a separator (or a check digit) the others don't produce.
 const PATTERNS: Pattern[] = [
-  { kind: 'ssn', regex: SSN_FORMATTED, toValue: ssnOrEinValue, accept: ssnAccept },
-  { kind: 'ssn', regex: SSN_BARE, toValue: ssnOrEinValue, accept: ssnAccept },
-  { kind: 'ein', regex: EIN_FORMATTED, toValue: ssnOrEinValue, accept: () => true },
-  { kind: 'dea', regex: DEA_SHAPE, toValue: deaValue, accept: deaAccept },
+  // `123-45-6789` and `123456789` are the same SSN, so both collapse to the
+  // digits. A DEA number's two-letter prefix is part of the identifier, so its
+  // identity is the whole normalized value.
+  { kind: 'ssn', regex: SSN_FORMATTED, toValue: ssnOrEinValue, accept: ssnAccept, identity: digitsOnly },
+  { kind: 'ssn', regex: SSN_BARE, toValue: ssnOrEinValue, accept: ssnAccept, identity: digitsOnly },
+  { kind: 'ein', regex: EIN_FORMATTED, toValue: ssnOrEinValue, accept: () => true, identity: digitsOnly },
+  { kind: 'dea', regex: DEA_SHAPE, toValue: deaValue, accept: deaAccept, identity: (v) => v.toUpperCase() },
 ];
 
 /**
@@ -193,27 +203,31 @@ const PATTERNS: Pattern[] = [
  *
  * The same value found twice gets the same token, so a form that repeats an SSN
  * in a header and a signature block still yields one field — including when
- * one occurrence is OCR-noisy and the other is clean, since both normalize to
- * the same value.
+ * one occurrence is OCR-noisy and the other is clean, and including when one
+ * is written `123-45-6789` and the other `123456789`: numbering is keyed on
+ * the digits, not on how the page punctuated them. One value therefore yields
+ * one token and one field, never an `ssn` and an `ssn_2` holding the same
+ * number.
  */
 export function redactPages(pages: PageText[]): RedactedText {
-  // kind -> value -> assigned ordinal, so numbering is stable across pages.
+  // kind -> value identity -> assigned ordinal, so numbering is stable across pages.
   const seen = new Map<RestrictedKind, Map<string, number>>();
   const hits: RedactionHit[] = [];
 
   const redactedPages = pages.map((page) => {
     let text = page.text;
-    for (const { kind, regex, toValue, accept } of PATTERNS) {
+    for (const { kind, regex, toValue, accept, identity } of PATTERNS) {
       // Fresh RegExp per page: the module-level literals carry /g lastIndex.
       text = text.replace(new RegExp(regex.source, regex.flags), (match) => {
         if (!accept(match)) return match;
         const value = toValue(match);
+        const key = identity(value);
         const byValue = seen.get(kind) ?? new Map<string, number>();
         seen.set(kind, byValue);
-        let ordinal = byValue.get(value);
+        let ordinal = byValue.get(key);
         if (ordinal === undefined) {
           ordinal = byValue.size + 1;
-          byValue.set(value, ordinal);
+          byValue.set(key, ordinal);
           hits.push({
             kind,
             value,
