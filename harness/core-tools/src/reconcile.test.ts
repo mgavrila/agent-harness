@@ -49,5 +49,7 @@ describe('reconcile', () => {
     expect(old.status).toBe('needs_review');
     const [fresh] = await db.select().from(toolEffects).where(eq(toolEffects.idempotencyKey, 'fresh'));
     expect(fresh.status).toBe('dispatching');
+    const [staged] = await db.select().from(toolEffects).where(eq(toolEffects.idempotencyKey, 'staged'));
+    expect(staged.status).toBe('staged');
   });
 });

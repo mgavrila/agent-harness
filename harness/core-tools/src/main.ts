@@ -11,8 +11,12 @@ loadEnv({ path: path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../.
 
 const { deps, close } = await buildDepsFromEnv();
 
-const repaired = await reconcile(deps.db, { now: deps.now });
-console.error(`core-tools: reconcile on startup: ${JSON.stringify(repaired)}`);
+try {
+  const repaired = await reconcile(deps.db, { now: deps.now });
+  console.error(`core-tools: reconcile on startup: ${JSON.stringify(repaired)}`);
+} catch (err) {
+  console.error(`core-tools: reconcile at startup failed: ${err instanceof Error ? err.message : String(err)}; continuing`);
+}
 
 serveStdio(() => createCoreToolsServer(deps));
 console.error(`core-tools listening on stdio (client=${deps.client}, caller=${deps.caller})`);
