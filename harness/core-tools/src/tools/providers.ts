@@ -26,6 +26,12 @@ export type CredentialInput = z.infer<typeof CredentialInput>;
 
 const RESTRICTED_FIELD_NAMES = new Set(['ssn', 'ein', 'dea_number', 'tax_id']);
 
+async function requireProvider(deps: ToolDeps, providerId: string) {
+  const p = await deps.db.query.providers.findFirst({ where: and(eq(providers.id, providerId), eq(providers.client, deps.client)) });
+  if (!p) throw new ToolError(`provider ${providerId} not found`);
+  return p;
+}
+
 async function findOrCreateProvider(db: Db, deps: ToolDeps, name: string, npi?: string) {
   const existing = npi
     ? await db.query.providers.findFirst({ where: and(eq(providers.client, deps.client), eq(providers.npi, npi)) })
@@ -43,6 +49,10 @@ async function findOrCreateProvider(db: Db, deps: ToolDeps, name: string, npi?: 
 }
 
 async function upsertField(db: Db, deps: ToolDeps, providerId: string, f: FieldInput) {
+  const existing = await db.query.fields.findFirst({ where: and(eq(fields.providerId, providerId), eq(fields.name, f.name)) });
+  if (existing?.status === 'verified') {
+    return 'verified' as const;
+  }
   const restricted = f.restricted ?? RESTRICTED_FIELD_NAMES.has(f.name);
   const confidence = f.confidence ?? 1;
   const status = confidence >= deps.confidenceThreshold ? 'extracted' : 'pending';
@@ -116,7 +126,7 @@ const providersUpsert = defineTool({
     for (const f of args.fields) {
       const status = await upsertField(deps.db, deps, provider.id, f);
       if (status === 'pending') pending += 1;
-      else extracted += 1;
+      else if (status === 'extracted') extracted += 1;
     }
     for (const c of args.credentials) {
       await upsertCredential(deps.db, deps, provider.id, c);
@@ -149,15 +159,14 @@ const providersGet = defineTool({
         id: z.string(),
         kind: z.string(),
         issuer: z.string().nullable(),
-        number: z.string(),
+        number: z.string().nullable(),
         state: z.string().nullable(),
         expires_at: z.string().nullable(),
       }),
     ),
   }),
   handler: async ({ provider_id }, deps) => {
-    const p = await deps.db.query.providers.findFirst({ where: and(eq(providers.id, provider_id), eq(providers.client, deps.client)) });
-    if (!p) throw new ToolError(`provider ${provider_id} not found`);
+    const p = await requireProvider(deps, provider_id);
     const fs = await deps.db.select().from(fields).where(eq(fields.providerId, provider_id));
     const cs = await deps.db.select().from(credentials).where(eq(credentials.providerId, provider_id));
     return {
@@ -174,7 +183,7 @@ const providersGet = defineTool({
         id: c.id,
         kind: c.kind,
         issuer: c.issuer,
-        number: c.numberEncrypted ? '[restricted]' : '',
+        number: c.numberEncrypted ? '[restricted]' : null,
         state: c.state,
         expires_at: c.expiresAt,
       })),
@@ -211,6 +220,7 @@ const providersConfirmField = defineTool({
   }),
   output: z.object({ provider_id: z.string(), field: z.string(), status: z.literal('verified') }),
   handler: async ({ provider_id, field, value, confirmed_by }, deps) => {
+    await requireProvider(deps, provider_id);
     const existing = await deps.db.query.fields.findFirst({ where: and(eq(fields.providerId, provider_id), eq(fields.name, field)) });
     const restricted = existing?.restricted ?? RESTRICTED_FIELD_NAMES.has(field);
     const values = {
@@ -242,6 +252,7 @@ const providersListPending = defineTool({
     fields: z.array(z.object({ name: z.string(), confidence: z.number().nullable(), source_page: z.number().nullable() })),
   }),
   handler: async ({ provider_id }, deps) => {
+    await requireProvider(deps, provider_id);
     const rows = await deps.db
       .select()
       .from(fields)

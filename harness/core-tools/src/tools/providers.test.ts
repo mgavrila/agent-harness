@@ -124,4 +124,56 @@ describe('providers tools', () => {
     expect(res.isError).toBe(true);
     await c();
   });
+
+  it('rejects cross-tenant access to a provider by id', async () => {
+    const otherDeps = makeTestDeps(db, { client: 'other-clinic' });
+    const otherFactory = () => {
+      const server = new McpServer({ name: 'providers-test-other', version: '0.0.0' });
+      registerTools(server, providerTools, otherDeps);
+      return server;
+    };
+    const { client: otherClient, close: closeOther } = await makeTestClient(otherFactory);
+    const up = await otherClient.callTool({ name: 'providers_upsert', arguments: upsertArgs });
+    const id = (up.structuredContent as { result: { provider_id: string } }).result.provider_id;
+    await closeOther();
+
+    const { client, close: c } = await makeTestClient(factory);
+    const getRes = await client.callTool({ name: 'providers_get', arguments: { provider_id: id } });
+    expect(getRes.isError).toBe(true);
+    const pendingRes = await client.callTool({ name: 'providers_list_pending', arguments: { provider_id: id } });
+    expect(pendingRes.isError).toBe(true);
+    const confirmRes = await client.callTool({
+      name: 'providers_confirm_field',
+      arguments: { provider_id: id, field: 'malpractice_carrier', value: 'Nope' },
+    });
+    expect(confirmRes.isError).toBe(true);
+
+    const rows = await db.select().from(fields).where(eq(fields.providerId, id));
+    expect(rows.find((r) => r.name === 'malpractice_carrier')!.value).toBe('MedPro');
+    await c();
+  });
+
+  it('preserves a verified field across re-extraction', async () => {
+    const { client, close: c } = await makeTestClient(factory);
+    const up = await client.callTool({ name: 'providers_upsert', arguments: upsertArgs });
+    const id = (up.structuredContent as { result: { provider_id: string } }).result.provider_id;
+    await client.callTool({
+      name: 'providers_confirm_field',
+      arguments: { provider_id: id, field: 'malpractice_carrier', value: 'MedPro Group', confirmed_by: 'U123' },
+    });
+
+    const reextract = await client.callTool({
+      name: 'providers_upsert',
+      arguments: { ...upsertArgs, fields: [{ name: 'malpractice_carrier', value: 'Other Carrier', confidence: 0.99 }], credentials: [] },
+    });
+    const out = (reextract.structuredContent as { result: { fields_pending: number; fields_extracted: number } }).result;
+    expect(out.fields_pending).toBe(0);
+    expect(out.fields_extracted).toBe(0);
+
+    const row = (await db.select().from(fields).where(eq(fields.providerId, id))).find((r) => r.name === 'malpractice_carrier')!;
+    expect(row.value).toBe('MedPro Group');
+    expect(row.status).toBe('verified');
+    expect(row.confirmedBy).toBe('U123');
+    await c();
+  });
 });
