@@ -283,6 +283,22 @@ export function parseLimitFlag(argv: readonly string[]): LimitFlagResult {
   return { ok: true, limit: Number(raw) };
 }
 
+export type UpdateBaselineFlagResult = { ok: true; update: boolean } | { ok: false; error: string };
+
+/**
+ * `--update-baseline` and `--update-baseline=true` both mean "write the
+ * report as the new baseline"; `--update-baseline=false` means "do not".
+ * Any other value is a usage error rather than a silent no-op, because a
+ * typo here would quietly leave the old baseline in place.
+ */
+export function parseUpdateBaselineFlag(argv: readonly string[]): UpdateBaselineFlagResult {
+  if (argv.includes('--update-baseline')) return { ok: true, update: true };
+  const raw = flagFrom(argv, 'update-baseline');
+  if (raw === undefined || raw === 'false') return { ok: true, update: false };
+  if (raw === 'true') return { ok: true, update: true };
+  return { ok: false, error: `--update-baseline takes no value, true or false, got ${JSON.stringify(raw)}` };
+}
+
 /**
  * CLI usage: `pnpm --filter @harness/evals start -- [flags]`
  *
@@ -297,7 +313,8 @@ export function parseLimitFlag(argv: readonly string[]): LimitFlagResult {
  *   --gateway=<url>     Override the gateway's base URL only. The key still comes from
  *                        LITELLM_MASTER_KEY via gatewayFromEnv() -- this never takes a key on
  *                        the command line.
- *   --update-baseline=true  After scoring, write the report as the new evals/baseline.json.
+ *   --update-baseline   After scoring, write the report to the --baseline path (default
+ *                        evals/baseline.json). `=true` is accepted too; `=false` is a no-op.
  */
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   // Validate CLI-only flags before anything that touches the environment or a
@@ -306,6 +323,11 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   const limitFlag = parseLimitFlag(process.argv);
   if (!limitFlag.ok) {
     process.stderr.write(`${limitFlag.error}\n`);
+    process.exit(2);
+  }
+  const updateBaselineFlag = parseUpdateBaselineFlag(process.argv);
+  if (!updateBaselineFlag.ok) {
+    process.stderr.write(`${updateBaselineFlag.error}\n`);
     process.exit(2);
   }
 
@@ -325,13 +347,14 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   if (gatewayOverride) gateway.baseUrl = gatewayOverride.replace(/\/+$/, '');
   const routing = JSON.parse(process.env.EVALS_SERVING_MODEL ?? '{}') as Record<string, string>;
   const limit = limitFlag.limit;
+  const baselineFile = path.resolve(flag('baseline') ?? path.join(repoRoot, 'evals/baseline.json'));
 
   const { report, markdown, exitCode } = await runEvals({
     corpusDir,
     casesFile: flag('cases') ?? path.join(corpusDir, 'cases.jsonl'),
     injectionFile: flag('injection') ?? path.join(repoRoot, 'packs/healthcare/evals/injection.jsonl'),
     outDir: path.resolve(flag('out') ?? path.join(repoRoot, 'evals/results')),
-    baselineFile: flag('baseline') ?? path.join(repoRoot, 'evals/baseline.json'),
+    baselineFile,
     databaseUrl: process.env.EVALS_DATABASE_URL ?? 'postgres://harness:harness@localhost:15432/harness_evals',
     gateway,
     judgeDeps: null,
@@ -341,8 +364,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   });
 
   process.stdout.write(`${markdown}\n`);
-  if (flag('update-baseline') === 'true') {
-    await writeFile(path.join(repoRoot, 'evals/baseline.json'), `${JSON.stringify(report, null, 2)}\n`, 'utf8');
+  if (updateBaselineFlag.update) {
+    await writeFile(baselineFile, `${JSON.stringify(report, null, 2)}\n`, 'utf8');
     process.stdout.write('baseline updated\n');
   }
   process.exit(exitCode);

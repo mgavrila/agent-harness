@@ -10,7 +10,7 @@ import { PDFDocument, StandardFonts } from 'pdf-lib';
 import { DEFAULT_POLICY, type ToolDeps } from '@harness/core-tools';
 import { startFakeGateway, type FakeGateway } from '@harness/core-tools/fake-gateway';
 import { createDb } from '@harness/db';
-import { runEvals, selectCases, parseLimitFlag } from './run.js';
+import { runEvals, selectCases, parseLimitFlag, parseUpdateBaselineFlag } from './run.js';
 import type { ExtractionCase } from './cases.js';
 import type { Report } from './report.js';
 
@@ -347,6 +347,22 @@ describe('selectCases', () => {
   });
 });
 
+describe('parseUpdateBaselineFlag', () => {
+  it('accepts the bare flag and =true, treats absence and =false as no-op', () => {
+    expect(parseUpdateBaselineFlag(['node', 'run.ts'])).toEqual({ ok: true, update: false });
+    expect(parseUpdateBaselineFlag(['node', 'run.ts', '--update-baseline'])).toEqual({ ok: true, update: true });
+    expect(parseUpdateBaselineFlag(['node', 'run.ts', '--update-baseline=true'])).toEqual({ ok: true, update: true });
+    expect(parseUpdateBaselineFlag(['node', 'run.ts', '--update-baseline=false'])).toEqual({ ok: true, update: false });
+  });
+
+  it('rejects any other value instead of silently ignoring it', () => {
+    for (const bad of ['yes', '1', '', 'TRUE']) {
+      const result = parseUpdateBaselineFlag(['node', 'run.ts', `--update-baseline=${bad}`]);
+      expect(result.ok).toBe(false);
+    }
+  });
+});
+
 describe('parseLimitFlag', () => {
   it('returns undefined when --limit is not given', () => {
     expect(parseLimitFlag(['node', 'run.ts'])).toEqual({ ok: true, limit: undefined });
@@ -400,6 +416,29 @@ describe('CLI', () => {
 
     await expect(readFile(path.join(outDir, 'report.json'), 'utf8')).rejects.toThrow();
   }, 60_000);
+
+  it('writes the new baseline to the --baseline path when --update-baseline is given bare', async () => {
+    const outDir = path.join(dir, 'cli-update-baseline-out');
+    const baselineFile = path.join(dir, 'cli-custom-baseline.json');
+    await execFileAsync(
+      tsxBin,
+      [
+        runScript,
+        `--gateway=${gateway.url}`,
+        `--out=${outDir}`,
+        `--cases=${path.join(dir, 'cases.jsonl')}`,
+        `--corpus=${corpus}`,
+        `--injection=${path.join(dir, 'injection.jsonl')}`,
+        `--baseline=${baselineFile}`,
+        '--update-baseline',
+      ],
+      { cwd: evalsDir, env: { ...process.env, LITELLM_MASTER_KEY: 'sk-eval', EVALS_DATABASE_URL: DATABASE_URL } },
+    );
+
+    const written = JSON.parse(await readFile(baselineFile, 'utf8')) as Report;
+    expect(written.metrics).toBeDefined();
+    await expect(readFile(path.join(evalsDir, 'baseline.json'), 'utf8')).rejects.toThrow();
+  }, 120_000);
 
   it('lets --gateway override the base URL that reaches openPipeline, independent of HARNESS_GATEWAY_URL', async () => {
     const outDir = path.join(dir, 'cli-gateway-override-out');
