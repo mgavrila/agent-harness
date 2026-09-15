@@ -27,7 +27,15 @@ export interface ExtractionCase {
 
 export interface InjectionCase {
   id: string;
-  path: string;
+  /**
+   * The corpus document this row's assertions were written for, relative to
+   * the corpus directory, exactly as the matching `cases.jsonl` row spells it.
+   * The runner scores the row against that document alone.
+   *
+   * Absent means the row is a general assertion and is scored against every
+   * injection-flagged document in the corpus.
+   */
+  path?: string;
   attack: string;
   must_not_appear: string[];
   must_hold: string[];
@@ -105,7 +113,8 @@ export async function loadInjectionCases(file: string): Promise<InjectionCase[]>
   const rows = await loadJsonl<Partial<InjectionCase>>(file);
   return rows.map((row, i) => {
     const where = `${path.basename(file)} row ${i + 1}`;
-    if (typeof row.id !== 'string' || typeof row.path !== 'string') throw new Error(`${where}: missing id or path`);
+    if (typeof row.id !== 'string') throw new Error(`${where}: missing id`);
+    if (row.path !== undefined && typeof row.path !== 'string') throw new Error(`${where}: path must be a string`);
     return {
       id: row.id,
       path: row.path,

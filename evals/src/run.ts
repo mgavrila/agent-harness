@@ -2,7 +2,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { gatewayFromEnv, type GatewayConfig, type ToolDeps } from '@harness/core-tools';
-import { loadExtractionCases, loadInjectionCases, type ExtractionCase } from './cases.js';
+import { loadExtractionCases, loadInjectionCases, type ExtractionCase, type InjectionCase } from './cases.js';
 import { FREE_TEXT_FIELDS, judgeFreeText, type JudgeItem } from './judge.js';
 import { openPipeline, runCase } from './pipeline.js';
 import { scoreCalibration, scoreExtraction, scoreInjection, type CalibrationRow, type CaseOutcome } from './score.js';
@@ -78,9 +78,43 @@ export function selectCases(cases: ExtractionCase[], limit?: number): Extraction
   return picked;
 }
 
+/**
+ * Which injection rows are asserted against this document. A row's `path`
+ * names the document its assertions were written for, so it is scored against
+ * that document alone. Scoring every row against every injection-flagged case
+ * checked one row's `must_not_appear` phrases against another row's document,
+ * where a phrase that was never printed passes for free and the attack the
+ * row describes goes unmeasured.
+ *
+ * A row with no `path` is a general assertion about any injected document and
+ * still applies to all of them.
+ */
+export function injectionCasesFor(c: ExtractionCase, injectionCases: InjectionCase[]): InjectionCase[] {
+  return injectionCases.filter((ic) => ic.path === undefined || ic.path === c.path);
+}
+
+/**
+ * A row whose `path` names no document in the corpus asserts nothing. The
+ * corpus is regenerated per seed, so a committed path can go stale silently
+ * and quietly switch off part of a zero-tolerance gate; say so rather than
+ * reporting a smaller `injection.cases` and moving on. Checked against the
+ * whole corpus, not the selected subset, so `--limit` does not warn.
+ */
+function warnOnUnmatchedInjectionRows(cases: ExtractionCase[], injectionCases: InjectionCase[]): void {
+  const known = new Set(cases.filter((c) => c.injection).map((c) => c.path));
+  for (const ic of injectionCases) {
+    if (ic.path !== undefined && !known.has(ic.path)) {
+      process.stderr.write(
+        `WARNING injection row ${ic.id} names ${ic.path}, which is not an injection document in this corpus; it asserts nothing\n`,
+      );
+    }
+  }
+}
+
 export async function runEvals(opts: RunOptions): Promise<{ report: Report; markdown: string; exitCode: number }> {
   const cases = await loadExtractionCases(opts.casesFile);
   const injectionCases = await loadInjectionCases(opts.injectionFile);
+  warnOnUnmatchedInjectionRows(cases, injectionCases);
   const selected = selectCases(cases, opts.limit);
 
   const pipeline = await openPipeline({
@@ -163,7 +197,7 @@ export async function runEvals(opts: RunOptions): Promise<{ report: Report; mark
       }
 
       if (c.injection) {
-        for (const ic of injectionCases) {
+        for (const ic of injectionCasesFor(c, injectionCases)) {
           injectionRun += 1;
           const verdict = scoreInjection(outcome, ic, pipeline.policy, pipeline.confidenceThreshold);
           if (verdict.passed) injectionPassed += 1;

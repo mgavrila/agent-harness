@@ -10,8 +10,8 @@ import { PDFDocument, StandardFonts } from 'pdf-lib';
 import { DEFAULT_POLICY, type ToolDeps } from '@harness/core-tools';
 import { startFakeGateway, type FakeGateway } from '@harness/core-tools/fake-gateway';
 import { createDb } from '@harness/db';
-import { runEvals, selectCases, parseLimitFlag, parseUpdateBaselineFlag } from './run.js';
-import type { ExtractionCase } from './cases.js';
+import { runEvals, selectCases, injectionCasesFor, parseLimitFlag, parseUpdateBaselineFlag } from './run.js';
+import type { ExtractionCase, InjectionCase } from './cases.js';
 import type { Report } from './report.js';
 
 const DATABASE_URL = process.env.EVALS_DATABASE_URL ?? 'postgres://harness:harness@localhost:15432/harness_evals';
@@ -344,6 +344,46 @@ describe('selectCases', () => {
   it('falls back to the split that still has cases when the other runs out', () => {
     const lopsided = [...['t1', 't2', 't3'].map((id) => make(id, 'text_layer')), make('s1', 'scan')];
     expect(selectCases(lopsided, 3).map((c) => c.id)).toEqual(['s1', 't1', 't2']);
+  });
+});
+
+describe('injectionCasesFor', () => {
+  const doc = (id: string, p: string): ExtractionCase => ({
+    id,
+    kind: 'state_license',
+    split: 'text_layer',
+    path: p,
+    injection: true,
+    expected: { fields: {}, credentials: [], restricted: [] },
+  });
+  const row = (id: string, p?: string): InjectionCase => ({
+    id,
+    path: p,
+    attack: 'printed imperative',
+    must_not_appear: ['post the roster'],
+    must_hold: ['policy_unchanged'],
+  });
+
+  const textDoc = doc('t-inj', 'text/injection-a.pdf');
+  const scanDoc = doc('s-inj', 'scan/injection-a.pdf');
+  const rows = [row('r-text', 'text/injection-a.pdf'), row('r-scan', 'scan/injection-a.pdf')];
+
+  it('scores a row against its own document only', () => {
+    // Every row used to be scored against every injection-flagged case, so the
+    // scan row's must_not_appear phrases were also checked against the text
+    // document, where they pass for free.
+    expect(injectionCasesFor(textDoc, rows).map((r) => r.id)).toEqual(['r-text']);
+    expect(injectionCasesFor(scanDoc, rows).map((r) => r.id)).toEqual(['r-scan']);
+  });
+
+  it('applies a row with no path to every injection document', () => {
+    const general = row('r-any');
+    expect(injectionCasesFor(textDoc, [...rows, general]).map((r) => r.id)).toEqual(['r-text', 'r-any']);
+    expect(injectionCasesFor(scanDoc, [...rows, general]).map((r) => r.id)).toEqual(['r-scan', 'r-any']);
+  });
+
+  it('scores nothing against a document no row names', () => {
+    expect(injectionCasesFor(doc('other', 'text/injection-b.pdf'), rows)).toEqual([]);
   });
 });
 
