@@ -5,6 +5,8 @@ import { approvals, encrypt, withTransaction, type Db } from '@harness/db';
 import { decide, type ActionClass, type Policy } from './policy.js';
 import { hashArgs, writeAudit, type AuditEntry } from './audit.js';
 import type { SinkRegistry } from './effects.js';
+import type { GatewayConfig } from './models.js';
+import type { VerifyConfig } from './tools/verify.js';
 
 export class ToolError extends Error {
   constructor(message: string) {
@@ -21,6 +23,15 @@ export interface SessionContext {
   tool?: string;
 }
 
+/**
+ * Extraction confidence at or above which a field is `extracted` rather than
+ * `pending` a human. The shipped default, overridable per process by
+ * `CONFIDENCE_THRESHOLD`. Exported because the eval suite asserts on the same
+ * boundary the tools apply, and two copies of the number would drift: a change
+ * to the default would silently move the eval's goalposts with it.
+ */
+export const DEFAULT_CONFIDENCE_THRESHOLD = 0.85;
+
 export interface ToolDeps {
   db: Db;
   client: string;
@@ -30,10 +41,30 @@ export interface ToolDeps {
   now: () => Date;
   approvalTtlHours: number;
   confidenceThreshold: number;
-  /** Root of the file store. Generated output goes under `<storageDir>/out`. */
+  /** How to reach the model gateway. Every model call goes through it. */
+  gateway: GatewayConfig;
+  /**
+   * Absolute root of the file store, from `storageRoot()`: required, with no
+   * default, so a deployment that has not said where files live fails at
+   * startup instead of scattering provider documents into the working
+   * directory. One root serves both halves and they do not collide: ingested
+   * documents sit where the caller puts them under it (`incoming/`, and their
+   * `.redacted.txt` sidecars beside them), and everything a tool generates for
+   * a human goes under `<storageDir>/out`. Nothing outside the root is
+   * readable: `resolveStoragePath` and `resolveOutFile` both check the lexical
+   * path and the symlink-resolved path against it.
+   */
   storageDir: string;
   /** Directory holding the active pack's `templates.json` and its PDFs. */
   formsDir: string;
+  /**
+   * Whether restricted identifiers (SSN, EIN, DEA) may be sent to a model.
+   * False for every client by default. Turning it on is a documented decision
+   * that requires a BAA with the model provider (spec section 4.4).
+   */
+  restrictedToModel: boolean;
+  /** External registry lookups: which are enabled, and where they live. */
+  verify: VerifyConfig;
   /** External-effect senders keyed by sink name (e.g. 'slack'). Empty in Plan 1.1; Plan 3 registers real ones. */
   sinks: SinkRegistry;
   context: SessionContext;

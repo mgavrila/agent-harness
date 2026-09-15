@@ -9,16 +9,13 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SKILLS_DIR = path.join(__dirname, '../../../packs/healthcare/skills');
 
 /**
- * Tools named in a skill's frontmatter that this repository does not (yet)
- * register. They are built by the sibling document-ingestion plan, developed
- * in another worktree; a skill may declare them as part of its contract
- * before that plan lands, but the name still has to be a deliberate, known
- * one and not a typo. Update this list only when a skill is meant to depend
- * on a tool that plan has not shipped here yet.
+ * Every tool a skill may name. This used to carry an allowlist for the
+ * `documents_*` and `verify_nppes` names, which a skill declared while the
+ * document-ingestion plan was still on its own branch; that plan has landed,
+ * so those names are in `ALL_TOOLS` like any other and the escape hatch is
+ * gone. A skill naming a tool this server does not register is now a typo.
  */
-const PLAN_2_TOOL_NAMES = new Set(['documents_ingest', 'documents_classify', 'documents_extract', 'documents_list', 'verify_nppes']);
-
-const KNOWN_TOOL_NAMES = new Set([...ALL_TOOLS.map((t) => t.name), ...PLAN_2_TOOL_NAMES]);
+const KNOWN_TOOL_NAMES = new Set(ALL_TOOLS.map((t) => t.name));
 
 const REQUIRED_HARNESS_KEYS = ['owner', 'eval_status', 'evals', 'action_classes', 'tools'] as const;
 
@@ -30,7 +27,10 @@ function readFrontmatter(name: string): Record<string, unknown> {
 }
 
 describe('healthcare pack skill frontmatter', () => {
-  const skillNames = readdirSync(SKILLS_DIR);
+  // Directories only: a stray file beside the skills is not a skill.
+  const skillNames = readdirSync(SKILLS_DIR, { withFileTypes: true })
+    .filter((e) => e.isDirectory())
+    .map((e) => e.name);
 
   it('discovers the four credentialing skills', () => {
     expect(skillNames.sort()).toEqual([

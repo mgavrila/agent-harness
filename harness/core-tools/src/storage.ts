@@ -1,33 +1,14 @@
 import { createHash } from 'node:crypto';
-import { mkdir, realpath, writeFile } from 'node:fs/promises';
+import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { ToolError } from './registry.js';
+import { realOrNearestAncestor } from './documents/storage.js';
 
-/**
- * Resolve symlinks in `target`, walking up to the nearest existing ancestor
- * when `target` itself does not exist yet and re-appending the remaining
- * segments untouched (a path segment that does not exist cannot itself be a
- * symlink, so this is safe).
- *
- * Duplicated from `documents/storage.ts` on the document-pipeline branch;
- * the two collapse into one helper when the branches merge.
- */
-export async function realOrNearestAncestor(target: string): Promise<string> {
-  const remainder: string[] = [];
-  let current = target;
-  for (;;) {
-    try {
-      const real = await realpath(current);
-      return remainder.length > 0 ? path.join(real, ...remainder) : real;
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
-      const parent = path.dirname(current);
-      if (parent === current) throw err; // reached the filesystem root; give up
-      remainder.unshift(path.basename(current));
-      current = parent;
-    }
-  }
-}
+// One containment primitive for the whole file store. It used to be duplicated
+// here verbatim while the document pipeline was on its own branch; two copies
+// of the check that decides whether a path is inside the storage root is how
+// one of them later drifts.
+export { realOrNearestAncestor };
 
 /**
  * Root of the harness file store. There is no default: a deployment that has
@@ -35,8 +16,10 @@ export async function realOrNearestAncestor(target: string): Promise<string> {
  * documents into whatever directory happened to be the working directory.
  */
 export function storageRoot(dir: string | undefined = process.env.HARNESS_STORAGE_DIR): string {
-  if (!dir || dir.trim() === '') throw new Error('HARNESS_STORAGE_DIR must be set to an absolute path');
-  return path.resolve(dir);
+  if (!dir || dir.trim() === '' || !path.isAbsolute(dir.trim())) {
+    throw new Error('HARNESS_STORAGE_DIR must be set to an absolute path');
+  }
+  return path.resolve(dir.trim());
 }
 
 /**

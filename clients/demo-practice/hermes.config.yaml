@@ -80,9 +80,10 @@ tool_loop_guardrails:
 # Only these variables reach the child; Hermes passes the declared env plus a
 # safe baseline and nothing else.
 #
-# Plan 2 adds `documents_*` and `verify_nppes` to this same core-tools server;
-# no config change is needed here when that lands, since tools are discovered
-# from the running server rather than listed in this file.
+# The `documents_*` and `verify_nppes` tools live on this same server; tools are
+# discovered from the running server rather than listed here, so adding one
+# needs no change to this file. The env block below is the exception: a
+# variable core-tools reads has to be named here or the child never sees it.
 mcp_servers:
   core-tools:
     command: "pnpm"
@@ -97,6 +98,12 @@ mcp_servers:
       CORE_TOOLS_CALLER: "hermes"
       APPROVAL_TTL_HOURS: "24"
       CONFIDENCE_THRESHOLD: "0.85"
+      # Every model call goes through the proxy, and core-tools refuses to
+      # start without the key. The provider keys never leave the proxy, so
+      # this is the only model credential the child holds. The URL is the
+      # compose service, not the host loopback in .env.
+      HARNESS_GATEWAY_URL: "${HARNESS_GATEWAY_URL}"
+      LITELLM_MASTER_KEY: "${LITELLM_MASTER_KEY}"
     timeout: 120
     connect_timeout: 60
 

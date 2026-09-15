@@ -84,6 +84,11 @@ describe('audit_query', () => {
       'audit_query',
       'deadlines_compute',
       'deadlines_upcoming',
+      'documents_classify',
+      'documents_extract',
+      'documents_get',
+      'documents_ingest',
+      'documents_list',
       'forms_fill',
       'forms_list_templates',
       'forms_release',
@@ -96,6 +101,8 @@ describe('audit_query', () => {
       'providers_list_pending',
       'providers_search',
       'providers_upsert',
+      'verify_nppes',
+      'verify_state_license',
     ]);
   });
 });

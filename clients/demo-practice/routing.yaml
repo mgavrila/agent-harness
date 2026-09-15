@@ -1,0 +1,54 @@
+# Model routing for the demo practice.
+#
+# DEMO ONLY. Every model below is a free hosted tier whose terms permit the
+# provider to train on submitted prompts. This table must never be copied to a
+# client that handles real patient or provider data. A real client needs a paid
+# tier with a BAA, or the local vLLM endpoint shown at the bottom.
+#
+# Routes are jobs, not providers. Change a model here and run
+#   pnpm gateway:config && docker compose --env-file .env -f harness/compose/docker-compose.yml up -d litellm
+# and nothing in the TypeScript changes.
+
+routes:
+  # Interactive Slack turns.
+  chat:
+    model: gemini/gemini-3-flash-preview
+    fallbacks:
+      - groq/openai/gpt-oss-120b
+    daily_budget_usd: 2
+
+  # Document classification and field extraction. Needs a response schema.
+  extract:
+    model: gemini/gemini-3-flash-preview
+    daily_budget_usd: 5
+
+  # Multi-step planning and form mapping.
+  reason:
+    model: gemini/gemini-3-flash-preview
+    fallbacks:
+      - groq/openai/gpt-oss-120b
+    daily_budget_usd: 2
+
+  # LLM-as-judge in evals. Deliberately a different model family than `extract`,
+  # so the judge is not grading its own output.
+  #
+  # groq/llama-3.3-70b-versatile is the other option the spec names, but it is
+  # past its deprecation date (2026-08-16) and reports
+  # supports_response_schema: false, so it cannot be used here.
+  judge:
+    model: groq/openai/gpt-oss-120b
+    daily_budget_usd: 1
+
+defaults:
+  daily_budget_usd: 1
+  num_retries: 2
+  request_timeout_s: 120
+
+# Live swap for the demo (spec section 9.6): point `extract` at OpenRouter.
+#   extract:
+#     model: openrouter/z-ai/glm-5.2:free
+#
+# Local GPU, later: no code change, only these two lines.
+#   extract:
+#     model: hosted_vllm/Qwen/Qwen3-8B
+#     api_base: http://vllm:8000/v1

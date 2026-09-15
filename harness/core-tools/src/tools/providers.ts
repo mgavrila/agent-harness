@@ -35,13 +35,21 @@ const RESTRICTED_NAME_SUFFIXES = ['', 'number', 'no', 'id', 'registration'] as c
 
 /**
  * True when `name` denotes a restricted identifier. Normalizes away case and
- * separators, then matches a key exactly or a key plus a known suffix — so
- * `deadline` and `npi` are not restricted while `DEA-Number` is.
+ * separators, drops a trailing ordinal, then matches a key exactly or a key
+ * plus a known suffix — so `deadline` and `npi` are not restricted while
+ * `DEA-Number` is.
+ *
+ * The trailing ordinal matters: `fieldNameFor` in documents/redact.ts names a
+ * second distinct value of a kind `ssn_2`, `ein_2`, `dea_number_2`. Those are
+ * names this harness generates itself, so a caller replaying an earlier
+ * extraction through `providers_upsert` must not be able to land one in the
+ * plaintext `fields.value` column just because it carries a suffix.
  */
 export function isRestrictedName(name: string): boolean {
-  const normalized = name.toLowerCase().replace(/[^a-z0-9]/g, '');
+  // Separators are already gone, so the ordinal is a bare digit run at the end.
+  const stem = name.toLowerCase().replace(/[^a-z0-9]/g, '').replace(/\d+$/, '');
   return RESTRICTED_NAME_KEYS.some((key) =>
-    RESTRICTED_NAME_SUFFIXES.some((suffix) => normalized === `${key}${suffix}`),
+    RESTRICTED_NAME_SUFFIXES.some((suffix) => stem === `${key}${suffix}`),
   );
 }
 
@@ -52,7 +60,7 @@ export async function requireProvider(deps: ToolDeps, providerId: string) {
 }
 
 /** Stands in for any value a caller is not allowed to read back. */
-const MASKED = '[restricted]';
+export const MASKED = '[restricted]';
 
 /**
  * A field value belongs in exactly one column: plaintext when it may be read
@@ -164,6 +172,54 @@ async function upsertCredential(deps: ToolDeps, providerId: string, c: Credentia
   }
 }
 
+export interface UpsertProviderInput {
+  name: string;
+  npi?: string;
+  fields: FieldInput[];
+  credentials: CredentialInput[];
+  /**
+   * Write to this provider row directly, skipping name/NPI matching entirely.
+   * The caller has already resolved and client-scoped this id (typically via
+   * `requireProvider`); re-deriving a match from `name`/`npi` here could
+   * silently attach to, rename, or duplicate a *different* provider of the
+   * same client — e.g. when the caller's provider has no NPI on file and the
+   * extracted NPI happens to belong to someone else. When set, `name` and
+   * `npi` are otherwise unused: the provider's own name and NPI are left
+   * untouched.
+   */
+  providerId?: string;
+}
+
+export interface UpsertProviderResult {
+  provider_id: string;
+  fields_pending: number;
+  fields_extracted: number;
+  credentials: number;
+}
+
+/**
+ * The write behind `providers_upsert`, callable from another tool handler.
+ * `documents_extract` uses it so the extraction path and the direct tool obey
+ * exactly one set of rules about restricted names, confidence thresholds and
+ * verified-field protection.
+ */
+export async function upsertProviderRecord(deps: ToolDeps, args: UpsertProviderInput): Promise<UpsertProviderResult> {
+  const providerId = args.providerId ?? (await findOrCreateProvider(deps, args.name, args.npi)).id;
+  let pending = 0;
+  let extracted = 0;
+  for (const f of args.fields) {
+    // A field already verified by a human keeps its value and counts as neither.
+    const status = await upsertField(deps, providerId, f);
+    if (status === 'pending') pending += 1;
+    else if (status === 'extracted') extracted += 1;
+  }
+  for (const c of args.credentials) {
+    await upsertCredential(deps, providerId, c);
+  }
+  const credCount = await deps.db.$count(credentials, eq(credentials.providerId, providerId));
+  return { provider_id: providerId, fields_pending: pending, fields_extracted: extracted, credentials: credCount };
+}
+
 const providersUpsert = defineTool({
   name: 'providers_upsert',
   description:
@@ -183,22 +239,7 @@ const providersUpsert = defineTool({
     fields_extracted: z.number(),
     credentials: z.number(),
   }),
-  handler: async (args, deps) => {
-    const provider = await findOrCreateProvider(deps, args.name, args.npi);
-    let pending = 0;
-    let extracted = 0;
-    for (const f of args.fields) {
-      // A field already verified by a human keeps its value and counts as neither.
-      const status = await upsertField(deps, provider.id, f);
-      if (status === 'pending') pending += 1;
-      else if (status === 'extracted') extracted += 1;
-    }
-    for (const c of args.credentials) {
-      await upsertCredential(deps, provider.id, c);
-    }
-    const credCount = await deps.db.$count(credentials, eq(credentials.providerId, provider.id));
-    return { provider_id: provider.id, fields_pending: pending, fields_extracted: extracted, credentials: credCount };
-  },
+  handler: async (args, deps) => upsertProviderRecord(deps, args),
   recordIds: (_args, result) => [result.provider_id],
   // A parked approval stores its payload as plaintext jsonb, so restricted
   // field values and credential numbers are masked out of it here. The full

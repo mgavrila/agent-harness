@@ -2,7 +2,7 @@
 # Install the demo-practice playbooks into the Hermes cron fleet.
 #
 # Run inside the hermes container:
-#   docker compose -f harness/compose/docker-compose.yml exec hermes \
+#   docker compose --env-file .env -f harness/compose/docker-compose.yml exec hermes \
 #     bash /opt/data/cron/playbooks.sh
 #
 # Idempotent: a job whose --name already exists is left alone, so re-running

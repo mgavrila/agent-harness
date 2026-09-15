@@ -7,6 +7,9 @@
     ".": "./src/server.ts",
     "./testing": "./src/testing.ts",
     "./effects": "./src/effects.ts",
+    "./fake-gateway": "./src/fake-gateway.ts",
+    "./in-process": "./src/in-process.ts",
+    "./models": "./src/models.ts",
     "./reconcile": "./src/reconcile.ts",
     "./storage": "./src/storage.ts"
   },
@@ -17,10 +20,13 @@
   },
   "dependencies": {
     "@harness/db": "workspace:*",
+    "@harness/gateway": "workspace:*",
+    "@harness/pack-healthcare": "workspace:*",
     "@modelcontextprotocol/server": "^2.0.0",
     "dotenv": "^17.4.2",
     "drizzle-orm": "^0.45.2",
     "pdf-lib": "1.17.1",
+    "pdf-parse": "2.4.5",
     "pg": "^8.23.0",
     "yaml": "^2.9.1",
     "zod": "^4.6.5"

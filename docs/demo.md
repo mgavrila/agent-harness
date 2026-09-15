@@ -102,7 +102,7 @@ Edit `clients/demo-practice/routing.yaml` to point the `chat` route at a
 different provider, restart the gateway, and ask the same expirations question.
 
 ```bash
-docker compose -f harness/compose/docker-compose.yml restart gateway
+docker compose --env-file .env -f harness/compose/docker-compose.yml restart litellm
 ```
 
 Nothing in the harness changed. The routing table is the only thing that knows
@@ -128,11 +128,11 @@ design anticipated:
 Run this before the demo. Each line either passes or tells you what is wrong.
 
 - [ ] `pnpm test` passes and `pnpm typecheck` is clean.
-- [ ] `docker compose -f harness/compose/docker-compose.yml --profile demo ps` shows `postgres`, `hermes` and `approvals` up, and `hermes-init` exited 0.
+- [ ] `docker compose --env-file .env -f harness/compose/docker-compose.yml --profile demo ps` shows `postgres`, `litellm`, `hermes` and `approvals` up, and `hermes-init` exited 0.
 - [ ] `curl -s localhost:${APPROVALS_HEALTH_HOST_PORT:-8787}/healthz | python3 -m json.tool` returns `"ok": true`.
-- [ ] `docker compose -f harness/compose/docker-compose.yml exec hermes hermes config get skills.write_approval` prints `true`.
-- [ ] `docker compose -f harness/compose/docker-compose.yml exec hermes hermes cron list` shows all three jobs.
-- [ ] The two Slack apps are separate: `docker compose -f harness/compose/docker-compose.yml --profile demo exec approvals printenv APPROVALS_SLACK_APP_TOKEN` and `... exec hermes printenv SLACK_APP_TOKEN` print **different** tokens, and `... exec hermes printenv APPROVALS_SLACK_APP_TOKEN` prints nothing.
+- [ ] `docker compose --env-file .env -f harness/compose/docker-compose.yml exec hermes hermes config get skills.write_approval` prints `true`.
+- [ ] `docker compose --env-file .env -f harness/compose/docker-compose.yml exec hermes hermes cron list` shows all three jobs.
+- [ ] The two Slack apps are separate: `docker compose --env-file .env -f harness/compose/docker-compose.yml --profile demo exec approvals printenv APPROVALS_SLACK_APP_TOKEN` and `... exec hermes printenv SLACK_APP_TOKEN` print **different** tokens, and `... exec hermes printenv APPROVALS_SLACK_APP_TOKEN` prints nothing.
 - [ ] In Slack, `/credentialing-intake` autocompletes: the pack skills were discovered through `skills.external_dirs`.
 - [ ] Asking the bot "what tools do you have?" lists `mcp_core_tools_*` names and **no** terminal or file tools.
 - [ ] A test release round-trips: ask for a roster of one provider, approve the card, and confirm the file arrives.

@@ -34,6 +34,8 @@ pnpm install
 cp .env.example .env            # then set HARNESS_ENCRYPTION_KEY=$(openssl rand -base64 32)
 pnpm db:up                      # Postgres 16 with databases harness and harness_test
 pnpm db:migrate
+pnpm gateway:config             # render clients/demo-practice/routing.yaml -> LiteLLM config
+pnpm gateway:up                 # LiteLLM proxy on 127.0.0.1:4000
 pnpm test
 pnpm --filter @harness/core-tools start   # core-tools MCP server on stdio
 ```
@@ -43,6 +45,42 @@ Inspect the tools interactively:
 ```bash
 npx @modelcontextprotocol/inspector pnpm --filter @harness/core-tools start
 ```
+
+## Document pipeline prerequisites
+
+Text extraction and OCR shell out to two binaries:
+
+```bash
+brew install tesseract poppler   # macOS
+# Debian/Ubuntu: apt-get install -y tesseract-ocr poppler-utils
+```
+
+The Compose image for `core-tools` installs both; see
+`harness/compose/core-tools.Dockerfile`.
+
+## Evals
+
+```bash
+pnpm synth        # 20 synthetic providers, 4 documents each, text-layer and scanned
+pnpm evals        # run the pipeline over them and score it
+```
+
+`pnpm evals` writes `evals/results/report.json` and `report.md` and exits
+non-zero when a metric regressed against `evals/baseline.json` or an injection
+case did not hold. The rule it enforces is in `docs/promotion-gate.md`.
+
+Add `--limit=24` to run a sample instead of all 162 cases, which is what a free
+provider tier can absorb. The sample keeps the injection documents and takes the
+rest evenly from both splits.
+
+Add `--gateway=<url>` to point a run at a gateway other than
+`HARNESS_GATEWAY_URL` (a staging proxy, or a fake one for an ad hoc check). It
+overrides the base URL only; the proxy key still comes from
+`LITELLM_MASTER_KEY` in the environment.
+
+No baseline is committed yet. Until one is, a run scores itself and reports "no
+baseline" rather than a verdict; `docs/promotion-gate.md` says why and how to
+record the first one.
 
 ## Run the demo practice
 

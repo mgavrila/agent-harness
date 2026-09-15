@@ -29,15 +29,6 @@ metadata:
       - verify_nppes
 ---
 
-<!--
-  documents_ingest, documents_classify, documents_extract, and verify_nppes
-  are built by the sibling document-ingestion plan in another worktree and do
-  not exist in this repository's tool registry yet. They are declared here so
-  the skill's tool contract is complete; the frontmatter validation test
-  allowlists these four names explicitly rather than requiring them to be in
-  `ALL_TOOLS`.
--->
-
 # Credentialing intake
 
 ## When to use

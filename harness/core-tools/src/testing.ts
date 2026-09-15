@@ -3,13 +3,14 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeEach, onTestFinished } from 'vitest';
-import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
-import { createMcpHandler, McpServer } from '@modelcontextprotocol/server';
+import type { Client } from '@modelcontextprotocol/client';
+import { McpServer } from '@modelcontextprotocol/server';
 import { createDb, type Db } from '@harness/db';
 import { TEST_DATABASE_URL, resetDatabase } from '@harness/db/testing';
 import { DEFAULT_POLICY } from './policy.js';
+import { connectInProcess } from './in-process.js';
 import { defaultFormsDir } from './forms/templates.js';
-import { registerTools, type AnyToolDef, type ToolDeps } from './registry.js';
+import { DEFAULT_CONFIDENCE_THRESHOLD, registerTools, type AnyToolDef, type ToolDeps } from './registry.js';
 
 export function makeTestDeps(db: Db, overrides: Partial<ToolDeps> = {}): ToolDeps {
   return {
@@ -20,14 +21,24 @@ export function makeTestDeps(db: Db, overrides: Partial<ToolDeps> = {}): ToolDep
     encryptionKey: randomBytes(32),
     now: () => new Date('2026-09-15T12:00:00Z'),
     approvalTtlHours: 24,
-    confidenceThreshold: 0.85,
-    sinks: {},
-    context: {},
-    tools: new Map(),
+    confidenceThreshold: DEFAULT_CONFIDENCE_THRESHOLD,
+    gateway: { baseUrl: 'http://127.0.0.1:1', apiKey: 'sk-test', timeoutMs: 5_000, maxCallsPerRun: 100 },
     // A throwaway directory per call, so a test that forgets to override it
     // still cannot write into the repository.
     storageDir: mkdtempSync(path.join(tmpdir(), 'harness-test-storage-')),
     formsDir: defaultFormsDir(),
+    restrictedToModel: false,
+    verify: {
+      nppesEnabled: true,
+      // Unroutable by default: a test that wants a lookup starts its own stub
+      // and overrides this, so no test can reach the real registry by accident.
+      nppesBaseUrl: 'http://127.0.0.1:1/api/',
+      stateLicenseEnabled: false,
+      timeoutMs: 5_000,
+    },
+    sinks: {},
+    context: {},
+    tools: new Map(),
     ...overrides,
   };
 }
@@ -52,16 +63,8 @@ export type TestClient = Client;
  * throws, which a close written at the end of the test body would skip.
  */
 export async function connectTestClient(factory: () => McpServer): Promise<TestClient> {
-  const handler = createMcpHandler(factory);
-  const transport = new StreamableHTTPClientTransport(new URL('http://test.local/mcp'), {
-    fetch: (url, init) => handler.fetch(new Request(url, init)),
-  });
-  const client = new Client({ name: 'test-harness', version: '1.0.0' }, { versionNegotiation: { mode: 'auto' } });
-  await client.connect(transport);
-  onTestFinished(async () => {
-    await client.close();
-    await handler.close();
-  });
+  const { client, close } = await connectInProcess(factory);
+  onTestFinished(close);
   return client;
 }
 
@@ -91,3 +94,5 @@ export function approvalIdOf(res: { structuredContent?: unknown }): string {
   }
   return envelope.approval_id;
 }
+
+export { startFakeGateway, type FakeGateway, type FakeGatewayCall, type FakeReply, type Responder } from './fake-gateway.js';

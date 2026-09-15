@@ -25,14 +25,28 @@ export const providers = pgTable('providers', {
 
 export const documents = pgTable('documents', {
   id: uuid('id').primaryKey().defaultRandom(),
+  /**
+   * The document is scoped to this client independently of `providerId`: a
+   * document that has not yet been attached to a provider must still be
+   * invisible to any other client of this process.
+   */
+  client: text('client').notNull(),
   providerId: uuid('provider_id').references(() => providers.id),
   kind: text('kind'),
   storagePath: text('storage_path').notNull(),
   sha256: text('sha256').notNull(),
   pages: integer('pages'),
   ocrUsed: boolean('ocr_used').notNull().default(false),
+  /**
+   * Path of the redacted plain text extracted from this document, relative to
+   * HARNESS_STORAGE_DIR. Null until `documents_extract` has run. The file holds
+   * redacted text only: restricted identifiers are already replaced by tokens.
+   */
+  textPath: text('text_path'),
   ingestedAt: timestamp('ingested_at', { withTimezone: true }).notNull().defaultNow(),
-});
+}, (t) => [
+  index('documents_client_ingested_idx').on(t.client, t.ingestedAt),
+]);
 
 export const fields = pgTable('fields', {
   id: uuid('id').primaryKey().defaultRandom(),

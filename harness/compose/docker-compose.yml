@@ -1,10 +1,14 @@
 # The harness stack.
 #
-# `postgres` has no profile, so it starts with a bare `docker compose up`.
-# Everything else is in the `demo` profile: `pnpm demo:up` brings up the whole
-# client instance. The LiteLLM `gateway` service is defined by the model-gateway
-# plan; until it lands, Hermes starts and every model call fails, which is
-# visible in the gateway logs rather than silent.
+# `postgres` and `litellm` have no profile, so they start with a bare
+# `docker compose up`: the database and the model gateway are what everything
+# else needs. `core-tools` is build-only (Hermes launches it over stdio, not as
+# a service). The rest is in the `demo` profile, and `pnpm demo:up` brings up
+# the whole client instance.
+#
+# Every variable below is interpolated from the repository-root `.env`, so run
+# these through the `pnpm` scripts, which pass `--env-file .env`. Compose's own
+# default is `.env` beside this file, where there is none.
 services:
   postgres:
     image: postgres:16
@@ -22,6 +26,55 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+
+  litellm:
+    image: ghcr.io/berriai/litellm:main-stable
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["--config", "/app/config.yaml", "--port", "4000"]
+    environment:
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?set LITELLM_MASTER_KEY in .env}
+      DATABASE_URL: postgres://harness:harness@postgres:5432/litellm
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      VLLM_API_KEY: ${VLLM_API_KEY:-none}
+    volumes:
+      - ../gateway/litellm.config.yaml:/app/config.yaml:ro
+    ports:
+      # Loopback only. The gateway holds every provider key; nothing outside
+      # this host may reach it.
+      - "127.0.0.1:4000:4000"
+    healthcheck:
+      # /health/liveliness is the unauthenticated probe. /health needs a key.
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:4000/health/liveliness').status==200 else 1)\""]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  # Built, not started: Hermes launches core-tools over stdio in Plan 3.
+  # `docker compose build core-tools` proves the image still builds.
+  core-tools:
+    build:
+      context: ../..
+      dockerfile: harness/compose/core-tools.Dockerfile
+    profiles: ["build-only"]
+    environment:
+      DATABASE_URL: postgres://harness:harness@postgres:5432/harness
+      HARNESS_GATEWAY_URL: http://litellm:4000
+      HARNESS_STORAGE_DIR: /data/storage
+      HARNESS_ENCRYPTION_KEY: ${HARNESS_ENCRYPTION_KEY:?set HARNESS_ENCRYPTION_KEY in .env}
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?set LITELLM_MASTER_KEY in .env}
+      HARNESS_CLIENT: ${HARNESS_CLIENT:-demo-practice}
+    volumes:
+      - ../../storage:/data/storage
+    depends_on:
+      postgres:
+        condition: service_healthy
+      litellm:
+        condition: service_healthy
 
   # Seeds the Hermes data volume from the client folder. SOUL.md and config.yaml
   # are ours and are rewritten on every start; the cron directory is Hermes's
@@ -90,6 +143,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      litellm:
+        condition: service_healthy
       hermes-init:
         condition: service_completed_successfully
     env_file:
@@ -107,6 +162,12 @@ services:
       HARNESS_STORAGE_DIR: "/srv/harness-storage"
       HARNESS_FORMS_DIR: "/srv/agent-harness/packs/healthcare/forms"
       HARNESS_POLICY_FILE: "/srv/agent-harness/clients/demo-practice/policy.yaml"
+      # The core-tools child Hermes launches reaches the proxy on the compose
+      # network, not on the host loopback the .env value names. The master key
+      # comes from .env: it is the only credential this container needs for
+      # models, because the provider keys never leave the proxy.
+      HARNESS_GATEWAY_URL: "http://litellm:4000"
+      LITELLM_MASTER_KEY: "${LITELLM_MASTER_KEY:?set LITELLM_MASTER_KEY in .env}"
     volumes:
       - hermesdata:/opt/data
       - storage:/srv/harness-storage
@@ -145,6 +206,11 @@ services:
       HARNESS_STORAGE_DIR: "/srv/harness-storage"
       HARNESS_FORMS_DIR: "/srv/agent-harness/packs/healthcare/forms"
       HARNESS_POLICY_FILE: "/srv/agent-harness/clients/demo-practice/policy.yaml"
+      # Passed to the core-tools child this app spawns, which refuses to start
+      # without a gateway key. Same proxy as Hermes, reached on the compose
+      # network rather than the host loopback the .env value names.
+      HARNESS_GATEWAY_URL: "http://litellm:4000"
+      LITELLM_MASTER_KEY: "${LITELLM_MASTER_KEY:?set LITELLM_MASTER_KEY in .env}"
       # The approver's own Slack app — a second app, not Hermes's. One app
       # token cannot serve two Socket Mode connections: Slack delivers each
       # event to exactly one of them, so the buttons would work half the time.

@@ -81,6 +81,32 @@ describe('providers tools', () => {
     expect(out.credentials.find((cr) => cr.kind === 'dea')!.number).toBe('[restricted]');
   });
 
+  it('encrypts and masks an ordinal-suffixed restricted name the caller did not flag', async () => {
+    // The name a second redaction hit is stored under. A caller replaying an
+    // earlier extraction passes it with no `restricted` flag at all; the name
+    // alone has to be enough to keep the value out of the plaintext column.
+    const client = await connectProviders();
+    const up = await client.callTool({
+      name: 'providers_upsert',
+      arguments: {
+        name: 'Dr. Ada Lovelace',
+        fields: [{ name: 'ssn_2', value: '321-65-4321', confidence: 1 }],
+        credentials: [],
+      },
+    });
+    const id = resultOf<UpsertResult>(up).provider_id;
+
+    const rows = await db.select().from(fields).where(eq(fields.providerId, id));
+    const row = rows.find((r) => r.name === 'ssn_2')!;
+    expect(row.restricted).toBe(true);
+    expect(row.value).toBeNull();
+    expect(decrypt(row.valueEncrypted!, deps.encryptionKey)).toBe('321-65-4321');
+
+    const got = await client.callTool({ name: 'providers_get', arguments: { provider_id: id } });
+    const out = resultOf<{ fields: { name: string; value: string | null }[] }>(got);
+    expect(out.fields.find((f) => f.name === 'ssn_2')!.value).toBe('[restricted]');
+  });
+
   it('search finds by name fragment and by npi', async () => {
     const client = await connectProviders();
     await client.callTool({ name: 'providers_upsert', arguments: upsertArgs });
@@ -247,4 +273,13 @@ describe('isRestrictedName', () => {
   it.each(['npi', 'first_name', 'deadline'])('treats %s as unrestricted', (name) => {
     expect(isRestrictedName(name)).toBe(false);
   });
+
+  // fieldNameFor in documents/redact.ts generates exactly these names for a
+  // second distinct value of a kind, so they are names this harness hands out.
+  it.each(['ssn_2', 'ein_2', 'dea_number_2', 'SSN-3', 'dea_no_10'])(
+    'treats the ordinal-suffixed name %s as restricted',
+    (name) => {
+      expect(isRestrictedName(name)).toBe(true);
+    },
+  );
 });

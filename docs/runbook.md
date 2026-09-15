@@ -199,16 +199,125 @@ the schema changed. Migration `0003` needed its snapshot patched by hand
 because of exactly this mistake. `--custom` is only for a migration with no
 corresponding `schema.ts` change (e.g. a one-off data backfill).
 
+## Model calls
+
+Every gateway call inserts a `model_calls` row: run id, client, route, model,
+token counts, and the USD cost LiteLLM reports in the `x-litellm-response-cost`
+header. Use it to attribute spend to a run, a client or a route:
+
+```sql
+select route, model, count(*), sum(cost_usd)
+from model_calls
+where created_at > now() - interval '1 day'
+group by 1, 2 order by 4 desc;
+```
+
+**This table is not the budget authority.** Two things make it undercount:
+
+- The insert runs on the handle the tool handler was given, which is the
+  handler's transaction. A handler that throws after a successful model call
+  rolls the row back — the money was spent, the row is gone.
+- A call made outside a tool handler (the eval runner's judge) writes a row
+  with a null run id, and a call made by Hermes itself never reaches this
+  process at all.
+
+LiteLLM's own spend tables in the `litellm` database are what enforce
+`max_budget`, and they are authoritative. When the two disagree, LiteLLM is
+right. Reconcile with:
+
+```sql
+-- in the litellm database
+select model, sum(spend) from "LiteLLM_SpendLogs"
+where "startTime" > now() - interval '1 day' group by 1;
+```
+
+A `model route "extract" is over its daily budget` error means LiteLLM refused
+the call, not that the harness declined to make it. Raise `daily_budget_usd` in
+`clients/<name>/routing.yaml` and re-run `pnpm gateway:config && pnpm gateway:up`.
+
+## Document pipeline
+
+`documents_extract` does five things in one transaction: read the text, redact
+it, prompt the `extract` route, upsert the provider, and write the redacted text
+beside the document. If any step throws, none of them happened — including the
+`documents.text_path` update, so a document with `text_path = null` has never
+been successfully extracted.
+
+Only redacted text is ever written to disk, whatever `HARNESS_RESTRICTED_TO_MODEL`
+says. That flag governs the prompt, not the file.
+
+`ocr_used = true` means the PDF had no usable text layer and every page went
+through `pdftoppm` and `tesseract`. Expect lower field accuracy; the eval suite
+scores that split separately for exactly this reason.
+
+A document that fails with `unsupported document type` is neither a PDF nor a
+recognised image. A document that fails with `tesseract is not installed` means
+the host is missing the OCR binaries:
+
+```bash
+brew install tesseract poppler                      # macOS
+apt-get install -y tesseract-ocr poppler-utils      # Debian
+```
+
+## Evals
+
+`pnpm evals` runs the real toolset in-process against the `harness_evals`
+database, which it **truncates between every case**. Never point
+`EVALS_DATABASE_URL` at a database anyone else is using.
+
+The run exits non-zero on a regression against `evals/baseline.json` or on an
+injection case that did not hold. `docs/promotion-gate.md` is the rule; the
+report names which metric moved and by how much.
+
+`EVALS_SERVING_MODEL` is a JSON object of route to model identifier, and it is
+what lands in the report's `serving_model`. Set it from the routing table the
+run actually used; a score with no model behind it is not comparable to
+anything.
+
+The judge is off on the CLI path (`judgeDeps: null`), so a CLI run scores every
+free-text field exactly, reports `judge: null`, and omits `judge.agreement_rate`
+from the metric map rather than recording a rate nobody measured. A metric
+present on only one side of a comparison is listed as not comparable and cannot
+open the promotion gate. The judge needs a second database handle and a session
+the CLI does not have; Plan 3 wires it up when Hermes supplies one.
+`evals/src/run.test.ts` exercises the judge end to end against the fake gateway,
+including the route being down.
+
+### Which model a `model_calls` row names
+
+`model_calls.model` records the **route alias** LiteLLM echoes back — `extract`,
+`judge` — not the underlying deployment that served the call. Per-provider cost
+attribution needs the deployment, which LiteLLM returns in the
+`x-litellm-model-id` response header; recording that header is a later change,
+and until then the deployment behind a route is whatever
+`clients/<name>/routing.yaml` said at the time of the run.
 ## Storage
 
-`HARNESS_STORAGE_DIR` is the root of the file store. Generated output — filled
-forms and rosters — lives under `<dir>/out`, and nothing else writes there.
-File ids are relative paths inside that tree and are content-addressed: the
-same bytes always produce the same id, which is what makes `forms_release`
-idempotent.
+`HARNESS_STORAGE_DIR` is the root of the file store, and there is exactly one
+root. It is **required and has no default**: `storageRoot()` throws at startup
+rather than let a deployment that has not said where files live scatter
+provider documents into whatever directory happened to be the working
+directory. Give it an absolute path; a relative one is resolved against the
+process working directory, which is rarely what was meant.
 
-`resolveOutFile` refuses an absolute path or any id containing `..`, so a file
-id that reaches the tools from a model cannot name a file outside the tree.
+Two things live under that root and do not collide:
+
+- **Ingested documents**, wherever the caller puts them — `incoming/` by
+  convention — each with its redacted text beside it as
+  `<name>.<ext>.redacted.txt`. The suffix is appended to the whole file name,
+  not swapped for the extension, so `a.pdf` and `a.png` keep separate sidecars.
+- **Generated output** — filled forms and rosters — under `<dir>/out`, and
+  nothing else writes there. File ids are relative paths inside that tree and
+  are content-addressed: the same bytes always produce the same id, which is
+  what makes `forms_release` idempotent.
+
+Both halves are contained by the same pair of checks, `resolveStoragePath` for
+ingest and `resolveOutFile` for output. Each compares the lexical path *and*
+the symlink-resolved path against its root, so neither an absolute path, nor a
+`..` segment, nor a symlink planted inside the tree can name a file outside it.
+`realOrNearestAncestor` is the shared primitive behind both; it lives in
+`documents/storage.ts` and `storage.ts` imports it, so there is one
+implementation to keep right.
 
 In Compose, the same named volume is mounted into the `hermes` container (where
 the core-tools child writes the file) and the `approvals` container (where the
@@ -333,7 +442,7 @@ does not make that client runnable on its own — the Compose file still names
    service. Three occurrences of `demo-practice` in total.
 5. Start it under its own Compose project so it does not collide with another
    client's containers and volumes:
-   `COMPOSE_PROJECT_NAME=<slug> docker compose -f harness/compose/docker-compose.yml --profile demo up -d --build`.
+   `COMPOSE_PROJECT_NAME=<slug> docker compose --env-file .env -f harness/compose/docker-compose.yml --profile demo up -d --build`.
 
 Do **not** use `pnpm demo:up` for a new client. It runs the default Compose
 project with the `demo-practice` paths above, so it starts demo-practice
@@ -344,7 +453,7 @@ whatever `HARNESS_CLIENT` says.
 Three jobs run in the Hermes cron fleet. Install or repair them with:
 
 ```bash
-docker compose -f harness/compose/docker-compose.yml exec hermes \
+docker compose --env-file .env -f harness/compose/docker-compose.yml exec hermes \
   bash /opt/data/cron/playbooks.sh
 ```
 
