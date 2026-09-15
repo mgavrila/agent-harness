@@ -15,7 +15,7 @@ const db = useTestDb();
  */
 let registry: Server;
 let registryUrl: string;
-let reply: { status: number; body: unknown } = { status: 200, body: { result_count: 0, results: [] } };
+let reply: { status: number; body: unknown; location?: string } = { status: 200, body: { result_count: 0, results: [] } };
 
 const INDIVIDUAL = {
   result_count: 1,
@@ -45,7 +45,7 @@ const MALFORMED = { Errors: [{ description: 'NPI must be 10 digits', field: 'num
 
 beforeAll(async () => {
   registry = createServer((_req, res) => {
-    res.writeHead(reply.status, { 'content-type': 'application/json' });
+    res.writeHead(reply.status, { 'content-type': 'application/json', ...(reply.location ? { location: reply.location } : {}) });
     res.end(JSON.stringify(reply.body));
   });
   await new Promise<void>((r) => registry.listen(0, '127.0.0.1', r));
@@ -156,6 +156,14 @@ describe('verify_nppes', () => {
 
   it('surfaces a registry outage as a ToolError', async () => {
     reply = { status: 503, body: {} };
+    const client = await connect();
+    const res = await client.callTool({ name: 'verify_nppes', arguments: { npi: '1063837144' } });
+    expect(res.isError).toBe(true);
+    expect(JSON.stringify(res.content)).toMatch(/NPPES/);
+  });
+
+  it('refuses a redirect to another host', async () => {
+    reply = { status: 302, body: {}, location: 'http://169.254.169.254/latest/meta-data/' };
     const client = await connect();
     const res = await client.callTool({ name: 'verify_nppes', arguments: { npi: '1063837144' } });
     expect(res.isError).toBe(true);

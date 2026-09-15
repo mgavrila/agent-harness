@@ -102,10 +102,19 @@ export async function fetchNppes(npi: string, cfg: VerifyConfig): Promise<NppesR
 
   let response: Response;
   try {
-    response = await fetch(url, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(cfg.timeoutMs) });
+    response = await fetch(url, {
+      headers: { accept: 'application/json' },
+      signal: AbortSignal.timeout(cfg.timeoutMs),
+      // Never follow a redirect: only cfg.nppesBaseUrl may ever receive the
+      // NPI, and 'error' makes fetch reject rather than silently retarget the
+      // request at whatever host the response names.
+      redirect: 'error',
+    });
   } catch (err) {
     const name = err instanceof Error ? err.name : '';
     if (name === 'TimeoutError' || name === 'AbortError') throw new ToolError('NPPES did not answer in time');
+    // Covers both a transport failure and a rejected redirect; neither the
+    // triggering URL nor any response body belongs in the message.
     throw new ToolError('NPPES is unreachable');
   }
   if (!response.ok) throw new ToolError(`NPPES returned HTTP ${response.status}`);
