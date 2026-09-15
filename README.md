@@ -26,3 +26,20 @@ evals/       runner and judges
 scripts/     new-client.py
 docs/        specs, ADRs, runbook
 ```
+
+## Run locally
+
+```bash
+pnpm install
+cp .env.example .env            # then set HARNESS_ENCRYPTION_KEY=$(openssl rand -base64 32)
+pnpm db:up                      # Postgres 16 with databases harness and harness_test
+pnpm db:migrate
+pnpm test
+pnpm --filter @harness/core-tools start   # core-tools MCP server on stdio
+```
+
+Inspect the tools interactively:
+
+```bash
+npx @modelcontextprotocol/inspector pnpm --filter @harness/core-tools start
+```
