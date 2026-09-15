@@ -116,7 +116,7 @@ function recordFrom(result: NppesResult): NppesRecord {
  * simply has no such NPI, which is the expected answer for every synthetic NPI
  * in the demo corpus and is not an error.
  */
-export async function fetchNppes(npi: string, cfg: VerifyConfig): Promise<NppesRecord | null> {
+async function fetchNppes(npi: string, cfg: VerifyConfig): Promise<NppesRecord | null> {
   const url = new URL(cfg.nppesBaseUrl);
   url.searchParams.set('version', '2.1');
   url.searchParams.set('number', npi);

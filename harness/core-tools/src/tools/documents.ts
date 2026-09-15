@@ -193,7 +193,7 @@ async function readForModel(deps: ToolDeps, row: typeof documents.$inferSelect) 
   // The flag exists so a client with a BAA can opt in; it is off by default and
   // turning it on is a documented decision (spec 4.4).
   const promptPages = deps.restrictedToModel ? pages : redacted;
-  return { abs, pages, redacted, promptPages, hits, ocrUsed };
+  return { abs, redacted, promptPages, hits, ocrUsed };
 }
 
 /**

@@ -226,15 +226,14 @@ async function handleUnexpectedError(db: Db, tool: AnyToolDef, base: AuditBase, 
  * `audit_log.run_id` foreign key.
  */
 function restoreContext(target: SessionContext, snapshot: SessionContext): void {
-  for (const key of Object.keys(target) as (keyof SessionContext)[]) {
-    if (!(key in snapshot)) delete target[key];
-  }
-  Object.assign(target, snapshot);
-  // A snapshot taken while a key held `undefined` would otherwise reinstate it
-  // as an own property, so `'tool' in context` stays true for a tool that is
-  // no longer running. Absent and explicitly-undefined must look the same.
-  for (const key of Object.keys(target) as (keyof SessionContext)[]) {
-    if (target[key] === undefined) delete target[key];
+  for (const key of Object.keys(target) as (keyof SessionContext)[]) delete target[key];
+  // Only the keys that actually held a value are put back. A snapshot taken
+  // while a key held `undefined` must not reinstate it as an own property, or
+  // `'tool' in context` would stay true for a tool that is no longer running:
+  // absent and explicitly-undefined have to look the same.
+  for (const key of Object.keys(snapshot) as (keyof SessionContext)[]) {
+    const value = snapshot[key];
+    if (value !== undefined) target[key] = value;
   }
 }
 
