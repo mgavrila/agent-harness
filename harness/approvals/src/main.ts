@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { config as loadEnv } from 'dotenv';
 import { App, LogLevel } from '@slack/bolt';
 import { createDb, loadKey } from '@harness/db';
+import { outRoot } from '@harness/core-tools/storage';
 import { slackSinks } from './sinks.js';
 import { webClientApi } from './slack.js';
 import { createMcpCoreToolsClient } from './execute.js';
@@ -134,7 +135,11 @@ const deps = {
   db,
   api,
   core,
-  sinks: slackSinks(api, { defaultChannel: channel, storageRoot }),
+  // The out tree, not the whole store. `forms_release` already narrows to
+  // `<root>/out`, and a backstop that accepts more than the thing it backs up
+  // is not a backstop: the rest of the store holds ingested documents, which
+  // must never be uploadable.
+  sinks: slackSinks(api, { defaultChannel: channel, outDir: outRoot(storageRoot) }),
   client,
   channel,
   encryptionKey: loadKey(),

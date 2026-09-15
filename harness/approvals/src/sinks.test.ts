@@ -120,16 +120,43 @@ describe('slack sinks', () => {
       const slack = new FakeSlack();
       const out = await dispatchStagedEffects(
         db,
-        slackSinks(slack, { defaultChannel: 'C0DEFAULT', storageRoot: root }),
+        slackSinks(slack, { defaultChannel: 'C0DEFAULT', outDir: root }),
         { key },
       );
       expect(out).toMatchObject({ dispatched: 0 });
       const [row] = await db.select().from(toolEffects);
       expect(row.status).toBe('staged');
-      expect(row.lastError).toBe(`slack_file: path outside storage root (effect ${row.id})`);
+      expect(row.lastError).toBe(`slack_file: path outside the release directory (effect ${row.id})`);
       expect(slack.uploads).toHaveLength(0);
     } finally {
       await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses a file elsewhere in the store when the sink is scoped to the out tree', async () => {
+    // What main.ts passes is `<HARNESS_STORAGE_DIR>/out`, not the store root,
+    // so the ingested-document subtree is not uploadable even though it is
+    // under the same HARNESS_STORAGE_DIR.
+    const store = await mkdtemp(path.join(tmpdir(), 'harness-root-'));
+    try {
+      const ingested = path.join(store, 'documents');
+      await mkdir(ingested, { recursive: true });
+      const doc = path.join(ingested, 'w9.pdf');
+      await writeFile(doc, 'a scanned W-9');
+      await mkdir(path.join(store, 'out'), { recursive: true });
+      await stage('slack_file', { path: doc, filename: 'w9.pdf' }, 'Release w9.pdf to Slack', 'k11');
+      const slack = new FakeSlack();
+      const out = await dispatchStagedEffects(
+        db,
+        slackSinks(slack, { defaultChannel: 'C0DEFAULT', outDir: path.join(store, 'out') }),
+        { key },
+      );
+      expect(out).toMatchObject({ dispatched: 0 });
+      const [row] = await db.select().from(toolEffects);
+      expect(row.lastError).toBe(`slack_file: path outside the release directory (effect ${row.id})`);
+      expect(slack.uploads).toHaveLength(0);
+    } finally {
+      await rm(store, { recursive: true, force: true });
     }
   });
 
@@ -150,12 +177,12 @@ describe('slack sinks', () => {
         'k10',
       );
       const slack = new FakeSlack();
-      const out = await dispatchStagedEffects(db, slackSinks(slack, { defaultChannel: 'C0DEFAULT', storageRoot: root }), {
+      const out = await dispatchStagedEffects(db, slackSinks(slack, { defaultChannel: 'C0DEFAULT', outDir: root }), {
         key,
       });
       expect(out).toMatchObject({ dispatched: 0 });
       const [row] = await db.select().from(toolEffects);
-      expect(row.lastError).toBe(`slack_file: path outside storage root (effect ${row.id})`);
+      expect(row.lastError).toBe(`slack_file: path outside the release directory (effect ${row.id})`);
       expect(slack.uploads).toHaveLength(0);
     } finally {
       await rm(root, { recursive: true, force: true });
@@ -173,7 +200,7 @@ describe('slack sinks', () => {
       const slack = new FakeSlack();
       const out = await dispatchStagedEffects(
         db,
-        slackSinks(slack, { defaultChannel: 'C0DEFAULT', storageRoot: root }),
+        slackSinks(slack, { defaultChannel: 'C0DEFAULT', outDir: root }),
         { key },
       );
       expect(out).toMatchObject({ dispatched: 1 });

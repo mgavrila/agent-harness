@@ -49,14 +49,14 @@ async function assertUnderRoot(candidate: string, root: string, effectId: string
   const resolved = path.resolve(candidate);
   const rel = path.relative(resolvedRoot, resolved);
   if (rel === '..' || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel)) {
-    throw new Error(`slack_file: path outside storage root (effect ${effectId})`);
+    throw new Error(`slack_file: path outside the release directory (effect ${effectId})`);
   }
   const realRoot = await realOrNearestAncestor(resolvedRoot);
   const realCandidate = await realOrNearestAncestor(resolved);
   // The separator matters: `${realRoot}-evil` starts with `realRoot` but is
   // not inside it.
   if (realCandidate !== realRoot && !realCandidate.startsWith(realRoot + path.sep)) {
-    throw new Error(`slack_file: path outside storage root (effect ${effectId})`);
+    throw new Error(`slack_file: path outside the release directory (effect ${effectId})`);
   }
 }
 
@@ -65,7 +65,7 @@ async function assertUnderRoot(candidate: string, root: string, effectId: string
  * dispatcher stores the return value in `tool_effects.result` as plaintext
  * jsonb, so nothing from the payload may come back out.
  */
-export function slackSinks(api: SlackApi, opts: { defaultChannel: string; storageRoot?: string }): SinkRegistry {
+export function slackSinks(api: SlackApi, opts: { defaultChannel: string; outDir?: string }): SinkRegistry {
   const messageSink: SinkHandler = async (payload) => {
     const p = parsePayload(MessagePayload, payload, 'slack_message');
     const channel = p.channel ?? opts.defaultChannel;
@@ -76,10 +76,11 @@ export function slackSinks(api: SlackApi, opts: { defaultChannel: string; storag
   const fileSink: SinkHandler = async (payload, effect) => {
     const p = parsePayload(FilePayload, payload, 'slack_file');
     const channel = p.channel ?? opts.defaultChannel;
-    // `storageRoot` is optional here so existing callers (and today's tests,
-    // which stage paths under an arbitrary tmpdir) are unaffected; the runner
-    // that wires this sink up for real will pass `HARNESS_STORAGE_DIR`.
-    if (opts.storageRoot) await assertUnderRoot(p.path, opts.storageRoot, effect.id);
+    // `outDir` is the fill output tree (`<HARNESS_STORAGE_DIR>/out`), not the
+    // whole store: the rest of it holds ingested documents, which must never
+    // be uploadable. Optional so today's tests, which stage paths under an
+    // arbitrary tmpdir, are unaffected; main.ts always passes it.
+    if (opts.outDir) await assertUnderRoot(p.path, opts.outDir, effect.id);
     let bytes: Buffer;
     try {
       bytes = await readFile(p.path);
