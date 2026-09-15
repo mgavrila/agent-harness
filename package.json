@@ -3,7 +3,9 @@
   "private": true,
   "type": "module",
   "packageManager": "pnpm@11.4.0",
-  "engines": { "node": ">=22" },
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "test": "pnpm -r --if-present test",
     "typecheck": "pnpm -r --if-present typecheck",
@@ -14,6 +16,8 @@
     "gateway:up": "docker compose --env-file .env -f harness/compose/docker-compose.yml up -d litellm",
     "gateway:logs": "docker compose --env-file .env -f harness/compose/docker-compose.yml logs -f litellm",
     "synth": "pnpm --filter @harness/pack-healthcare generate",
-    "synth:fast": "pnpm --filter @harness/pack-healthcare generate -- --scans=false"
+    "synth:fast": "pnpm --filter @harness/pack-healthcare generate -- --scans=false",
+    "evals": "pnpm --filter @harness/evals start",
+    "evals:baseline": "pnpm --filter @harness/evals start -- --update-baseline=true"
   }
 }

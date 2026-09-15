@@ -22,9 +22,15 @@ importers:
       '@harness/pack-healthcare':
         specifier: workspace:*
         version: link:../packs/healthcare
+      dotenv:
+        specifier: ^17.4.2
+        version: 17.4.2
       drizzle-orm:
         specifier: ^0.45.2
         version: 0.45.2(@types/pg@8.23.1)(pg@8.23.0)
+      zod:
+        specifier: ^4.6.5
+        version: 4.6.5
     devDependencies:
       '@types/node':
         specifier: ^26.5.1

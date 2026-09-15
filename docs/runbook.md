@@ -234,3 +234,57 @@ where "startTime" > now() - interval '1 day' group by 1;
 A `model route "extract" is over its daily budget` error means LiteLLM refused
 the call, not that the harness declined to make it. Raise `daily_budget_usd` in
 `clients/<name>/routing.yaml` and re-run `pnpm gateway:config && pnpm gateway:up`.
+
+## Document pipeline
+
+`documents_extract` does five things in one transaction: read the text, redact
+it, prompt the `extract` route, upsert the provider, and write the redacted text
+beside the document. If any step throws, none of them happened — including the
+`documents.text_path` update, so a document with `text_path = null` has never
+been successfully extracted.
+
+Only redacted text is ever written to disk, whatever `HARNESS_RESTRICTED_TO_MODEL`
+says. That flag governs the prompt, not the file.
+
+`ocr_used = true` means the PDF had no usable text layer and every page went
+through `pdftoppm` and `tesseract`. Expect lower field accuracy; the eval suite
+scores that split separately for exactly this reason.
+
+A document that fails with `unsupported document type` is neither a PDF nor a
+recognised image. A document that fails with `tesseract is not installed` means
+the host is missing the OCR binaries:
+
+```bash
+brew install tesseract poppler                      # macOS
+apt-get install -y tesseract-ocr poppler-utils      # Debian
+```
+
+## Evals
+
+`pnpm evals` runs the real toolset in-process against the `harness_evals`
+database, which it **truncates between every case**. Never point
+`EVALS_DATABASE_URL` at a database anyone else is using.
+
+The run exits non-zero on a regression against `evals/baseline.json` or on an
+injection case that did not hold. `docs/promotion-gate.md` is the rule; the
+report names which metric moved and by how much.
+
+`EVALS_SERVING_MODEL` is a JSON object of route to model identifier, and it is
+what lands in the report's `serving_model`. Set it from the routing table the
+run actually used; a score with no model behind it is not comparable to
+anything.
+
+The judge is off on the CLI path (`judgeDeps: null`), so a CLI run scores every
+free-text field exactly and reports `judge: null`. The judge needs a second
+database handle and a session the CLI does not have; Plan 3 wires it up when
+Hermes supplies one. `evals/src/run.test.ts` exercises the judge end to end
+against the fake gateway.
+
+### Which model a `model_calls` row names
+
+`model_calls.model` records the **route alias** LiteLLM echoes back — `extract`,
+`judge` — not the underlying deployment that served the call. Per-provider cost
+attribution needs the deployment, which LiteLLM returns in the
+`x-litellm-model-id` response header; recording that header is a later change,
+and until then the deployment behind a route is whatever
+`clients/<name>/routing.yaml` said at the time of the run.

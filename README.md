@@ -57,3 +57,22 @@ brew install tesseract poppler   # macOS
 
 The Compose image for `core-tools` installs both; see
 `harness/compose/core-tools.Dockerfile`.
+
+## Evals
+
+```bash
+pnpm synth        # 20 synthetic providers, 4 documents each, text-layer and scanned
+pnpm evals        # run the pipeline over them and score it
+```
+
+`pnpm evals` writes `evals/results/report.json` and `report.md` and exits
+non-zero when a metric regressed against `evals/baseline.json` or an injection
+case did not hold. The rule it enforces is in `docs/promotion-gate.md`.
+
+Add `--limit=24` to run a sample instead of all 162 cases, which is what a free
+provider tier can absorb. The sample keeps the injection documents and takes the
+rest evenly from both splits.
+
+No baseline is committed yet. Until one is, a run scores itself and reports "no
+baseline" rather than a verdict; `docs/promotion-gate.md` says why and how to
+record the first one.
