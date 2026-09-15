@@ -91,6 +91,22 @@ function safeNote(note: string | null): string | null {
   return containsRestrictedPattern(note) ? 'note withheld: it did not pass the redaction check' : note;
 }
 
+const EXECUTION_FAILURE_FALLBACK = 'Execution failed; see the audit log. Nothing was sent.';
+const MAX_EXECUTION_ERROR_LENGTH = 300;
+
+/**
+ * A tool's error message is free text from the outside world (a remote API's
+ * response, a stack frame), so it gets the same redaction check as a payload
+ * or a decision note before it can appear on a card. The check runs on the
+ * untruncated string, so a restricted value split across the 300-character
+ * cutoff cannot leak its first half.
+ */
+function executionFailureLine(error: string | undefined): string {
+  if (!error || containsRestrictedPattern(error)) return EXECUTION_FAILURE_FALLBACK;
+  const capped = error.length > MAX_EXECUTION_ERROR_LENGTH ? `${error.slice(0, MAX_EXECUTION_ERROR_LENGTH)}…` : error;
+  return `Execution failed: ${capped}. Nothing was sent.`;
+}
+
 export function decidedBlocks(row: ApprovalRow, outcome: { executed: boolean; tool?: string; error?: string }): unknown[] {
   const who = row.decidedBy ? `<@${row.decidedBy}>` : 'someone';
   const when = row.decidedAt ? ` at ${slackDate(row.decidedAt)}` : '';
@@ -98,7 +114,7 @@ export function decidedBlocks(row: ApprovalRow, outcome: { executed: boolean; to
   if (row.status === 'approved') {
     lines.push(`:white_check_mark: Approved by ${who}${when}.`);
     if (outcome.executed) lines.push(`Executed \`${outcome.tool ?? row.action}\`. Delivery is queued in the effects outbox.`);
-    else lines.push(`Execution failed: ${outcome.error ?? 'see the audit log'}. Nothing was sent.`);
+    else lines.push(executionFailureLine(outcome.error));
   } else {
     lines.push(`:no_entry: Declined by ${who}${when}. Nothing was sent.`);
     const note = safeNote(row.decisionNote);

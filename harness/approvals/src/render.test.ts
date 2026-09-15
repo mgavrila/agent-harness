@@ -100,6 +100,42 @@ describe('decidedBlocks', () => {
     expect(JSON.stringify(blocks)).not.toContain('123-45-6789');
     expect(JSON.stringify(blocks)).toContain('note withheld');
   });
+
+  it('withholds an execution error that fails the redaction check', () => {
+    const blocks = decidedBlocks(
+      row({ status: 'approved', decidedBy: 'U012', decidedAt: new Date('2026-09-15T12:05:00Z') }),
+      { executed: false, error: 'lookup failed for ssn 123-45-6789' },
+    );
+    expect(JSON.stringify(blocks)).not.toContain('123-45-6789');
+    expect(JSON.stringify(blocks)).toContain('Execution failed; see the audit log. Nothing was sent.');
+  });
+
+  it('shows a short safe execution error', () => {
+    const blocks = decidedBlocks(
+      row({ status: 'approved', decidedBy: 'U012', decidedAt: new Date('2026-09-15T12:05:00Z') }),
+      { executed: false, error: 'channel_not_found' },
+    );
+    expect(JSON.stringify(blocks)).toContain('channel_not_found');
+  });
+
+  it('caps a long safe execution error at 300 characters', () => {
+    const blocks = decidedBlocks(
+      row({ status: 'approved', decidedBy: 'U012', decidedAt: new Date('2026-09-15T12:05:00Z') }),
+      { executed: false, error: 'x'.repeat(5000) },
+    );
+    const text = JSON.stringify(blocks);
+    const match = text.match(/x{50,}…/);
+    expect(match).not.toBeNull();
+    expect(match![0].length).toBeLessThanOrEqual(301);
+  });
+
+  it('renders the fallback when no execution error is given', () => {
+    const blocks = decidedBlocks(
+      row({ status: 'approved', decidedBy: 'U012', decidedAt: new Date('2026-09-15T12:05:00Z') }),
+      { executed: false },
+    );
+    expect(JSON.stringify(blocks)).toContain('Execution failed; see the audit log. Nothing was sent.');
+  });
 });
 
 describe('editModalView', () => {
