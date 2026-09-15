@@ -130,6 +130,28 @@ describe('runner ticks', () => {
     expect(handle.status()).toEqual(before);
   });
 
+  it('marks a loop unhealthy on a failed tick, and healthy again once it recovers', async () => {
+    const api = new FakeSlack();
+    const core = new FakeCoreToolsClient();
+    core.failReconcileWith = 'boom';
+    const deps = makeDeps(api, core);
+    const handle = startRunner(deps, { pollMs: 3_600_000, dispatchMs: 3_600_000, reconcileMs: 10, staleAfterMinutes: 10 });
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 40));
+      const unhealthy = await collectHealth(db, 'demo-practice', handle, now);
+      expect(unhealthy.ok).toBe(false);
+      expect(unhealthy.runner.loops.reconcile.lastError).toContain('boom');
+
+      core.failReconcileWith = undefined;
+      await new Promise((resolve) => setTimeout(resolve, 40));
+      const healthy = await collectHealth(db, 'demo-practice', handle, now);
+      expect(healthy.ok).toBe(true);
+      expect(healthy.runner.loops.reconcile.lastError).toBeNull();
+    } finally {
+      await handle.stop();
+    }
+  });
+
   it('writes an out-file effect to Slack when the file exists', async () => {
     const dir = await mkdtemp(path.join(tmpdir(), 'harness-runner-'));
     const file = path.join(dir, 'out', 'roster', 'aetna-abc123def456.csv');

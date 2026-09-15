@@ -5,6 +5,7 @@ import {
   EDIT_ACTION_ID,
   EDIT_MODAL_CALLBACK_ID,
   editModalView,
+  parseEditModalMetadata,
 } from './render.js';
 
 /**
@@ -26,8 +27,16 @@ export interface ActionArgs {
 export interface ViewArgs {
   ack: () => Promise<void>;
   userId: string;
+  /**
+   * The interaction's channel, when Bolt happens to supply one. The view
+   * submission handler does not trust this: it decodes the channel the Edit
+   * button was actually pressed from out of `privateMetadata` instead, since
+   * Slack's `view_submission` payload does not otherwise carry a channel.
+   * Kept on the interface for symmetry with `ActionArgs` and so a caller that
+   * cannot parse the metadata still has a channel to report an error to.
+   */
   channel: string;
-  /** The modal's `private_metadata`: the approval id. */
+  /** The modal's `private_metadata`: JSON carrying the approval id and the channel (`editModalView`/`parseEditModalMetadata`). */
   privateMetadata: string;
   note: string;
 }
@@ -147,7 +156,7 @@ export function registerApprovalHandlers(registry: HandlerRegistry, deps: AppDep
         console.error(`approvals: Edit on ${value} arrived without a trigger id; cannot open the modal`);
         return;
       }
-      await deps.api.views.open({ trigger_id: triggerId, view: editModalView(value) });
+      await deps.api.views.open({ trigger_id: triggerId, view: editModalView(value, channel) });
     } catch (err) {
       console.error(`approvals: could not open the note modal: ${err instanceof Error ? err.message : String(err)}`);
     }
@@ -156,13 +165,22 @@ export function registerApprovalHandlers(registry: HandlerRegistry, deps: AppDep
   registry.view(EDIT_MODAL_CALLBACK_ID, async ({ ack, userId, channel, privateMetadata, note }) => {
     await ackFirst(ack);
     try {
-      if (!(await authorize(deps, channel, userId, privateMetadata))) return;
-      if (!(await validId(deps, channel, userId, privateMetadata))) return;
+      const metadata = parseEditModalMetadata(privateMetadata);
+      if (!metadata) {
+        // No parsed channel to address an ephemeral to; fall back to whatever
+        // Bolt gave us, and only log if even that is unavailable.
+        console.error(`approvals: modal submission arrived with unreadable private metadata`);
+        if (channel) await tellUser(deps, channel, userId, NOT_FOUND_TEXT);
+        return;
+      }
+      const { approvalId, channel: modalChannel } = metadata;
+      if (!(await authorize(deps, modalChannel, userId, approvalId))) return;
+      if (!(await validId(deps, modalChannel, userId, approvalId))) return;
       const trimmed = note.trim();
       report(
-        privateMetadata,
+        approvalId,
         await decideApproval(deps, {
-          approvalId: privateMetadata,
+          approvalId,
           decision: 'declined',
           decidedBy: userId,
           note: trimmed === '' ? undefined : trimmed,

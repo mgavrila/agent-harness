@@ -23,11 +23,23 @@ export interface RunnerIntervals {
   staleAfterMinutes: number;
 }
 
+/** One loop's own view of its health: cleared on every successful tick, so a
+ * transient failure does not latch the whole process unhealthy forever. */
+export interface RunnerLoopStatus {
+  lastError: string | null;
+  lastErrorAt: string | null;
+  lastOkAt: string | null;
+}
+
 export interface RunnerStatus {
   lastPollAt: string | null;
   lastDispatchAt: string | null;
   lastReconcileAt: string | null;
+  /** The most recent error from any loop, kept for the process's own logs; not
+   * cleared on a later success elsewhere, so it is never used to decide health
+   * — see `loops` below and `collectHealth`. */
   lastError: string | null;
+  loops: { poll: RunnerLoopStatus; dispatch: RunnerLoopStatus; reconcile: RunnerLoopStatus };
 }
 
 export function runPollTick(deps: RunnerDeps): Promise<PollResult> {
@@ -60,8 +72,18 @@ export interface RunnerHandle {
  * itself, and every failure is logged and swallowed: a Slack outage must not
  * stop the dispatcher from retrying five seconds later.
  */
+function emptyLoopStatus(): RunnerLoopStatus {
+  return { lastError: null, lastErrorAt: null, lastOkAt: null };
+}
+
 export function startRunner(deps: RunnerDeps, intervals: RunnerIntervals): RunnerHandle {
-  const status: RunnerStatus = { lastPollAt: null, lastDispatchAt: null, lastReconcileAt: null, lastError: null };
+  const status: RunnerStatus = {
+    lastPollAt: null,
+    lastDispatchAt: null,
+    lastReconcileAt: null,
+    lastError: null,
+    loops: { poll: emptyLoopStatus(), dispatch: emptyLoopStatus(), reconcile: emptyLoopStatus() },
+  };
   const timers: NodeJS.Timeout[] = [];
   const inFlight = new Set<Promise<void>>();
   let stopped = false;
@@ -72,15 +94,22 @@ export function startRunner(deps: RunnerDeps, intervals: RunnerIntervals): Runne
       if (stopped || running) return;
       running = true;
       const work = (async () => {
+        const at = deps.now().toISOString();
         try {
           await tick();
-          const at = deps.now().toISOString();
           if (name === 'poll') status.lastPollAt = at;
           else if (name === 'dispatch') status.lastDispatchAt = at;
           else status.lastReconcileAt = at;
+          // A tick that succeeds clears this loop's own error: one transient
+          // failure must never latch `/healthz` unhealthy until a restart.
+          status.loops[name].lastError = null;
+          status.loops[name].lastOkAt = at;
         } catch (err) {
-          status.lastError = `${name}: ${err instanceof Error ? err.message : String(err)}`;
-          console.error(`approvals: ${status.lastError}`);
+          const message = `${name}: ${err instanceof Error ? err.message : String(err)}`;
+          status.lastError = message;
+          status.loops[name].lastError = message;
+          status.loops[name].lastErrorAt = at;
+          console.error(`approvals: ${message}`);
         } finally {
           running = false;
         }
@@ -96,7 +125,14 @@ export function startRunner(deps: RunnerDeps, intervals: RunnerIntervals): Runne
   loop('reconcile', intervals.reconcileMs, () => runReconcileTick(deps, intervals.staleAfterMinutes));
 
   return {
-    status: () => ({ ...status }),
+    status: () => ({
+      ...status,
+      loops: {
+        poll: { ...status.loops.poll },
+        dispatch: { ...status.loops.dispatch },
+        reconcile: { ...status.loops.reconcile },
+      },
+    }),
     async stop() {
       stopped = true;
       for (const timer of timers) clearInterval(timer);
@@ -120,8 +156,12 @@ function countEffects(db: Db, client: string, status: string): Promise<number> {
 
 /**
  * What the watchdogs read. `ok` is false when something needs a human: an
- * effect gave up or is parked for review, or a loop recorded an error. A
- * backlog of `staged` rows is normal between ticks and does not fail health.
+ * effect gave up or is parked for review, or a loop's *most recent* tick
+ * failed. A loop that failed once and has since recovered clears its own
+ * `loops.<name>.lastError`, so a transient failure does not latch this
+ * unhealthy until a restart; `runner.lastError` is kept only for logs and is
+ * never consulted here. A backlog of `staged` rows is normal between ticks
+ * and does not fail health either.
  */
 export async function collectHealth(db: Db, client: string, runner: RunnerHandle, now: () => Date): Promise<HealthSnapshot> {
   const [staged, failed, needsReview] = await Promise.all([
@@ -131,8 +171,9 @@ export async function collectHealth(db: Db, client: string, runner: RunnerHandle
   ]);
   const pending = await db.$count(approvals, and(eq(approvals.client, client), eq(approvals.status, 'pending')));
   const status = runner.status();
+  const aLoopIsFailing = Object.values(status.loops).some((loop) => loop.lastError !== null);
   return {
-    ok: failed === 0 && needsReview === 0 && status.lastError === null,
+    ok: failed === 0 && needsReview === 0 && !aLoopIsFailing,
     client,
     now: now().toISOString(),
     runner: status,

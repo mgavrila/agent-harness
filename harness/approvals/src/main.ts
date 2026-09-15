@@ -7,7 +7,15 @@ import { slackSinks } from './sinks.js';
 import { webClientApi } from './slack.js';
 import { createMcpCoreToolsClient } from './execute.js';
 import { registerApprovalHandlers, parseAllowedUsers, type ActionArgs, type HandlerRegistry, type ViewArgs } from './app.js';
-import { EDIT_MODAL_CALLBACK_ID, EDIT_NOTE_ACTION_ID, EDIT_NOTE_BLOCK_ID, APPROVE_ACTION_ID, DECLINE_ACTION_ID, EDIT_ACTION_ID } from './render.js';
+import {
+  EDIT_MODAL_CALLBACK_ID,
+  EDIT_NOTE_ACTION_ID,
+  EDIT_NOTE_BLOCK_ID,
+  APPROVE_ACTION_ID,
+  DECLINE_ACTION_ID,
+  EDIT_ACTION_ID,
+  parseEditModalMetadata,
+} from './render.js';
 import { collectHealth, startRunner } from './runner.js';
 import { startHealthServer } from './health.js';
 
@@ -45,11 +53,14 @@ const bolt = new App({
  * Bolt-specific lives here, so `app.ts` and its tests stay free of Bolt types.
  *
  * `channel` for a block action comes from `body.channel.id`, the channel the
- * interactive message lives in. A view submission carries no such field in
- * general (a modal is not itself posted to a channel); Bolt's `ViewOutput`
- * does define an optional `channel`, so that is used when Slack populates it,
- * with an empty string otherwise. An unauthorized modal submission then loses
- * only the ephemeral notice, never the authorization check itself.
+ * interactive message lives in. A view submission carries no channel of its
+ * own in Slack's payload — Bolt's `view.channel` is not populated for a modal
+ * opened by `trigger_id` from a button click, which is this app's only path
+ * to one — so `channel` here is decoded from `private_metadata` instead
+ * (`editModalView` encoded it there when the modal was opened). `app.ts`'s own
+ * view handler decodes the same metadata and does not trust this value either;
+ * it is passed through only so a metadata parse failure still has a channel to
+ * report the failure to.
  */
 const registry: HandlerRegistry = {
   action(actionId, handler) {
@@ -69,13 +80,14 @@ const registry: HandlerRegistry = {
   view(callbackId, handler) {
     bolt.view(callbackId, async ({ ack, body, view }) => {
       const state = view.state as { values?: Record<string, Record<string, { value?: string | null }>> };
+      const privateMetadata = view.private_metadata ?? '';
       const args: ViewArgs = {
         ack: async () => {
           await ack();
         },
         userId: (body as { user?: { id?: string } }).user?.id ?? 'unknown',
-        channel: (view as { channel?: string }).channel ?? '',
-        privateMetadata: view.private_metadata ?? '',
+        channel: parseEditModalMetadata(privateMetadata)?.channel ?? '',
+        privateMetadata,
         note: state.values?.[EDIT_NOTE_BLOCK_ID]?.[EDIT_NOTE_ACTION_ID]?.value ?? '',
       };
       await handler(args);

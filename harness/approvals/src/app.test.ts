@@ -86,7 +86,7 @@ describe('approval handlers', () => {
     await registry.actions.get(EDIT_ACTION_ID)!({ ack: a.ack, userId: 'U012', channel: 'C0DEMO', value: row.id, triggerId: 'T1' });
     expect(api.opened).toHaveLength(1);
     expect(api.opened[0].trigger_id).toBe('T1');
-    expect(api.opened[0].view.private_metadata).toBe(row.id);
+    expect(JSON.parse(api.opened[0].view.private_metadata as string)).toEqual({ approval_id: row.id, channel: 'C0DEMO' });
     const [after] = await db.select().from(approvals).where(eq(approvals.id, row.id));
     expect(after.status).toBe('pending');
   });
@@ -99,12 +99,43 @@ describe('approval handlers', () => {
       ack: a.ack,
       userId: 'U012',
       channel: 'C0DEMO',
-      privateMetadata: row.id,
+      privateMetadata: JSON.stringify({ approval_id: row.id, channel: 'C0DEMO' }),
       note: 'Use the Q4 roster.',
     });
     expect(core.executed).toEqual([]);
     const [after] = await db.select().from(approvals).where(eq(approvals.id, row.id));
     expect(after).toMatchObject({ status: 'declined', decisionNote: 'Use the Q4 roster.' });
+  });
+
+  it('trusts the channel carried in private metadata over the one Bolt happened to pass through', async () => {
+    const row = await seed();
+    const { registry, api } = wire(new Set());
+    const a = acked();
+    await registry.views.get(EDIT_MODAL_CALLBACK_ID)!({
+      ack: a.ack,
+      userId: 'U012',
+      channel: 'C0WRONG',
+      privateMetadata: JSON.stringify({ approval_id: row.id, channel: 'C0RIGHT' }),
+      note: '',
+    });
+    expect(api.ephemeral).toHaveLength(1);
+    expect(api.ephemeral[0]).toMatchObject({ channel: 'C0RIGHT', user: 'U012' });
+    const [after] = await db.select().from(approvals).where(eq(approvals.id, row.id));
+    expect(after.status).toBe('pending');
+  });
+
+  it('reports and tells the user when the modal metadata cannot be parsed', async () => {
+    const { registry, api } = wire();
+    const a = acked();
+    await registry.views.get(EDIT_MODAL_CALLBACK_ID)!({
+      ack: a.ack,
+      userId: 'U012',
+      channel: 'C0DEMO',
+      privateMetadata: 'not-json',
+      note: '',
+    });
+    expect(api.ephemeral).toHaveLength(1);
+    expect(api.ephemeral[0]).toMatchObject({ channel: 'C0DEMO', user: 'U012', text: 'That approval no longer exists.' });
   });
 
   it('acknowledges and posts nothing when the button names an unknown approval', async () => {

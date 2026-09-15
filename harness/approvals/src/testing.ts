@@ -88,6 +88,8 @@ export class FakeCoreToolsClient implements CoreToolsClient {
   reconciled: number[] = [];
   /** When set, `execute` reports this failure instead of succeeding. */
   failExecuteWith?: string;
+  /** When set, `reconcile` throws this instead of succeeding — for exercising a tick failure. */
+  failReconcileWith?: string;
   /** The tool name a successful execution reports. */
   executedTool = 'forms_release';
   closed = false;
@@ -99,6 +101,7 @@ export class FakeCoreToolsClient implements CoreToolsClient {
   }
 
   async reconcile(staleAfterMinutes: number): Promise<{ approvals_expired: number; dispatches_parked: number }> {
+    if (this.failReconcileWith) throw new Error(this.failReconcileWith);
     this.reconciled.push(staleAfterMinutes);
     return { approvals_expired: 0, dispatches_parked: 0 };
   }

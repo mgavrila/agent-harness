@@ -6,6 +6,7 @@ import {
   approvalFallbackText,
   decidedBlocks,
   editModalView,
+  parseEditModalMetadata,
   APPROVE_ACTION_ID,
   DECLINE_ACTION_ID,
   EDIT_ACTION_ID,
@@ -139,9 +140,25 @@ describe('decidedBlocks', () => {
 });
 
 describe('editModalView', () => {
-  it('carries the approval id in private_metadata', () => {
-    const view = editModalView(row().id) as { callback_id: string; private_metadata: string };
+  it('carries the approval id and channel in private_metadata', () => {
+    const view = editModalView(row().id, 'C0DEMO') as { callback_id: string; private_metadata: string };
     expect(view.callback_id).toBe(EDIT_MODAL_CALLBACK_ID);
-    expect(view.private_metadata).toBe(row().id);
+    expect(JSON.parse(view.private_metadata)).toEqual({ approval_id: row().id, channel: 'C0DEMO' });
+  });
+});
+
+describe('parseEditModalMetadata', () => {
+  it('round-trips what editModalView encoded', () => {
+    const view = editModalView(row().id, 'C0DEMO') as { private_metadata: string };
+    expect(parseEditModalMetadata(view.private_metadata)).toEqual({ approvalId: row().id, channel: 'C0DEMO' });
+  });
+
+  it('returns null for anything that is not the expected shape', () => {
+    expect(parseEditModalMetadata('not-json')).toBeNull();
+    expect(parseEditModalMetadata(row().id)).toBeNull();
+    expect(parseEditModalMetadata('{}')).toBeNull();
+    expect(parseEditModalMetadata(JSON.stringify({ approval_id: row().id }))).toBeNull();
+    expect(parseEditModalMetadata(JSON.stringify({ approval_id: '', channel: 'C0DEMO' }))).toBeNull();
+    expect(parseEditModalMetadata(JSON.stringify({ approval_id: row().id, channel: '' }))).toBeNull();
   });
 });
