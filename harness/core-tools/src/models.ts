@@ -175,9 +175,12 @@ function stripFence(text: string): string {
  * request, not a guarantee every provider honors, so this is checked again on
  * this side. The message carries only the zod issue paths and zod's own
  * type-name wording, never a value from the reply, which may contain document
- * text.
+ * text — so, unlike most failures, it is safe to surface to the agent, which
+ * needs the field detail to have any chance of recovering. A `ToolError`
+ * subclass rather than a plain `Error` for exactly that reason: only a
+ * `ToolError`'s message reaches the caller (see `runAuto` in registry.ts).
  */
-export class ModelOutputError extends Error {
+export class ModelOutputError extends ToolError {
   constructor(route: string, detail: string) {
     super(`model output invalid on route ${route}: ${detail}`);
     this.name = 'ModelOutputError';

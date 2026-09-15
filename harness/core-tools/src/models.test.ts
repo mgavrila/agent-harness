@@ -191,6 +191,7 @@ describe('callModelJson', () => {
       validate,
     }).catch((e: Error) => e)) as Error;
     expect(err).toBeInstanceOf(ModelOutputError);
+    expect(err).toBeInstanceOf(ToolError);
     expect(err.message).toContain('answer');
     expect(err.message).not.toContain('SECRET_REPLY_VALUE');
   });
