@@ -2,7 +2,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { stringify as stringifyYaml } from 'yaml';
-import { ROUTES, parseRouting, type Route, type RoutingFile } from './routing.schema.js';
+import { ROUTES, parseRouting, type RoutingFile } from './routing.schema.js';
 
 /**
  * Which environment variable holds the credential for a provider prefix. The
@@ -97,11 +97,6 @@ export function renderLiteLlmConfig(routing: RoutingFile): string {
   };
 
   return HEADER + stringifyYaml(config, { lineWidth: 0 });
-}
-
-/** Route name -> the LiteLLM `model_name` a client asks for. Identical today; a function so callers do not hardcode it. */
-export function deploymentNameFor(route: Route): string {
-  return route;
 }
 
 const here = path.dirname(fileURLToPath(import.meta.url));
