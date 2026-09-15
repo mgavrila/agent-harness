@@ -27,6 +27,12 @@ export interface SlackViewOpenArgs {
   view: Record<string, unknown>;
 }
 
+export interface SlackEphemeralArgs {
+  channel: string;
+  user: string;
+  text: string;
+}
+
 export interface SlackPostResult {
   ok?: boolean;
   ts?: string;
@@ -42,6 +48,7 @@ export interface SlackApi {
   chat: {
     postMessage(args: SlackPostMessageArgs): Promise<SlackPostResult>;
     update(args: SlackUpdateArgs): Promise<SlackPostResult>;
+    postEphemeral(args: SlackEphemeralArgs): Promise<SlackPostResult>;
   };
   files: {
     uploadV2(args: SlackUploadArgs): Promise<{ ok?: boolean }>;
@@ -73,6 +80,12 @@ export function webClientApi(client: WebClient): SlackApi {
           ts: args.ts,
           text: args.text,
           blocks: args.blocks as never,
+        }),
+      postEphemeral: (args) =>
+        client.chat.postEphemeral({
+          channel: args.channel,
+          user: args.user,
+          text: args.text,
         }),
     },
     files: {

@@ -3,6 +3,7 @@ import { createDb, type Db } from '@harness/db';
 import { TEST_DATABASE_URL, resetDatabase } from '@harness/db/testing';
 import type {
   SlackApi,
+  SlackEphemeralArgs,
   SlackPostMessageArgs,
   SlackPostResult,
   SlackUpdateArgs,
@@ -31,6 +32,7 @@ export class FakeSlack implements SlackApi {
   updates: SlackUpdateArgs[] = [];
   uploads: SlackUploadArgs[] = [];
   opened: SlackViewOpenArgs[] = [];
+  ephemeral: SlackEphemeralArgs[] = [];
   /** When set, every call rejects with this message. */
   failWith?: string;
 
@@ -55,6 +57,11 @@ export class FakeSlack implements SlackApi {
       this.guard();
       this.updates.push(args);
       return { ok: true, ts: args.ts, channel: args.channel };
+    },
+    postEphemeral: async (args: SlackEphemeralArgs): Promise<SlackPostResult> => {
+      this.guard();
+      this.ephemeral.push(args);
+      return { ok: true, channel: args.channel };
     },
   };
 

@@ -9,12 +9,15 @@ import {
 
 /**
  * What a button press reduces to. Bolt's own payload types are large and
- * change between majors; `main.ts` narrows them onto these three fields once,
- * so the handlers and their tests never touch a Bolt type.
+ * change between majors; `main.ts` narrows them onto these fields once, so
+ * the handlers and their tests never touch a Bolt type. `channel` is the
+ * interaction's channel (`body.channel.id` in Bolt), used only to address an
+ * ephemeral refusal notice back to the user who clicked.
  */
 export interface ActionArgs {
   ack: () => Promise<void>;
   userId: string;
+  channel: string;
   /** The button's `value`: the approval id. */
   value: string;
   triggerId?: string;
@@ -23,6 +26,7 @@ export interface ActionArgs {
 export interface ViewArgs {
   ack: () => Promise<void>;
   userId: string;
+  channel: string;
   /** The modal's `private_metadata`: the approval id. */
   privateMetadata: string;
   note: string;
@@ -31,6 +35,33 @@ export interface ViewArgs {
 export interface HandlerRegistry {
   action(actionId: string, handler: (args: ActionArgs) => Promise<void>): void;
   view(callbackId: string, handler: (args: ViewArgs) => Promise<void>): void;
+}
+
+/**
+ * `registerApprovalHandlers`'s dependencies: everything `decideApproval`
+ * needs, plus who is allowed to decide anything at all. `allowedUsers` is
+ * Slack user ids; an empty set is a misconfiguration, not "allow everyone",
+ * so it fails closed and refuses every decision.
+ */
+export interface AppDeps extends DecisionDeps {
+  allowedUsers: ReadonlySet<string>;
+}
+
+const UNAUTHORIZED_TEXT = 'You are not an approver for this workspace.';
+const NOT_FOUND_TEXT = 'That approval no longer exists.';
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Parse `SLACK_ALLOWED_USERS`: comma-separated Slack user ids, trimmed, empty
+ * entries dropped. Task 7's entrypoint reads the env var and calls this; it
+ * is not wired to anything here.
+ */
+export function parseAllowedUsers(env: string | undefined): ReadonlySet<string> {
+  const ids = (env ?? '')
+    .split(',')
+    .map((id) => id.trim())
+    .filter((id) => id !== '');
+  return new Set(ids);
 }
 
 /** Slack drops an interaction that is not acknowledged within three seconds. */
@@ -42,49 +73,103 @@ async function ackFirst(ack: () => Promise<void>): Promise<void> {
   }
 }
 
+/** Best-effort notice to the one user who clicked; a failure here is only logged. */
+async function tellUser(deps: AppDeps, channel: string, userId: string, text: string): Promise<void> {
+  try {
+    await deps.api.chat.postEphemeral({ channel, user: userId, text });
+  } catch (err) {
+    console.error(`approvals: could not post an ephemeral notice to ${userId}: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+/**
+ * True when the caller may act on approvals at all. Checked before every
+ * decision-affecting action and the modal submission, and before the id is
+ * even looked at, so an unauthorized user learns nothing about whether the
+ * approval exists. Nothing about the approval's contents is logged.
+ */
+async function authorize(deps: AppDeps, channel: string, userId: string, approvalId: string): Promise<boolean> {
+  if (deps.allowedUsers.has(userId)) return true;
+  console.error(`approvals: user ${userId} is not an approver; refused action on ${approvalId}`);
+  await tellUser(deps, channel, userId, UNAUTHORIZED_TEXT);
+  return false;
+}
+
+/** A button value or private_metadata that is not a well-formed uuid can never name a row. */
+async function validId(deps: AppDeps, channel: string, userId: string, id: string): Promise<boolean> {
+  if (UUID_RE.test(id)) return true;
+  console.error(`approvals: rejected a malformed approval id from ${userId}`);
+  await tellUser(deps, channel, userId, NOT_FOUND_TEXT);
+  return false;
+}
+
 function report(approvalId: string, result: Awaited<ReturnType<typeof decideApproval>>): void {
   if (result.outcome === 'not_actionable') {
     console.error(`approvals: ${approvalId} was not actionable (already decided, expired, or another client's)`);
   }
 }
 
-export function registerApprovalHandlers(registry: HandlerRegistry, deps: DecisionDeps): void {
-  registry.action(APPROVE_ACTION_ID, async ({ ack, userId, value }) => {
+export function registerApprovalHandlers(registry: HandlerRegistry, deps: AppDeps): void {
+  if (deps.allowedUsers.size === 0) {
+    console.error('approvals: SLACK_ALLOWED_USERS is empty; all decisions are refused');
+  }
+
+  registry.action(APPROVE_ACTION_ID, async ({ ack, userId, channel, value }) => {
     await ackFirst(ack);
-    report(value, await decideApproval(deps, { approvalId: value, decision: 'approved', decidedBy: userId }));
+    try {
+      if (!(await authorize(deps, channel, userId, value))) return;
+      if (!(await validId(deps, channel, userId, value))) return;
+      report(value, await decideApproval(deps, { approvalId: value, decision: 'approved', decidedBy: userId }));
+    } catch (err) {
+      console.error(`approvals: Approve handler failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
   });
 
-  registry.action(DECLINE_ACTION_ID, async ({ ack, userId, value }) => {
+  registry.action(DECLINE_ACTION_ID, async ({ ack, userId, channel, value }) => {
     await ackFirst(ack);
-    report(value, await decideApproval(deps, { approvalId: value, decision: 'declined', decidedBy: userId }));
+    try {
+      if (!(await authorize(deps, channel, userId, value))) return;
+      if (!(await validId(deps, channel, userId, value))) return;
+      report(value, await decideApproval(deps, { approvalId: value, decision: 'declined', decidedBy: userId }));
+    } catch (err) {
+      console.error(`approvals: Decline handler failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
   });
 
   // Edit never releases anything: it opens a note box, and submitting it
   // declines with that note so the agent redoes the action and asks again.
-  registry.action(EDIT_ACTION_ID, async ({ ack, value, triggerId }) => {
+  registry.action(EDIT_ACTION_ID, async ({ ack, userId, channel, value, triggerId }) => {
     await ackFirst(ack);
-    if (!triggerId) {
-      console.error(`approvals: Edit on ${value} arrived without a trigger id; cannot open the modal`);
-      return;
-    }
     try {
+      if (!(await authorize(deps, channel, userId, value))) return;
+      if (!(await validId(deps, channel, userId, value))) return;
+      if (!triggerId) {
+        console.error(`approvals: Edit on ${value} arrived without a trigger id; cannot open the modal`);
+        return;
+      }
       await deps.api.views.open({ trigger_id: triggerId, view: editModalView(value) });
     } catch (err) {
-      console.error(`approvals: could not open the note modal for ${value}: ${err instanceof Error ? err.message : String(err)}`);
+      console.error(`approvals: could not open the note modal: ${err instanceof Error ? err.message : String(err)}`);
     }
   });
 
-  registry.view(EDIT_MODAL_CALLBACK_ID, async ({ ack, userId, privateMetadata, note }) => {
+  registry.view(EDIT_MODAL_CALLBACK_ID, async ({ ack, userId, channel, privateMetadata, note }) => {
     await ackFirst(ack);
-    const trimmed = note.trim();
-    report(
-      privateMetadata,
-      await decideApproval(deps, {
-        approvalId: privateMetadata,
-        decision: 'declined',
-        decidedBy: userId,
-        note: trimmed === '' ? undefined : trimmed,
-      }),
-    );
+    try {
+      if (!(await authorize(deps, channel, userId, privateMetadata))) return;
+      if (!(await validId(deps, channel, userId, privateMetadata))) return;
+      const trimmed = note.trim();
+      report(
+        privateMetadata,
+        await decideApproval(deps, {
+          approvalId: privateMetadata,
+          decision: 'declined',
+          decidedBy: userId,
+          note: trimmed === '' ? undefined : trimmed,
+        }),
+      );
+    } catch (err) {
+      console.error(`approvals: modal submission handler failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
   });
 }

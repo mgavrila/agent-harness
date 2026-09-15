@@ -11,4 +11,11 @@ export {
 } from './render.js';
 export { createMcpCoreToolsClient, type CoreToolsClient, type ExecuteOutcome, type McpLauncher } from './execute.js';
 export { decideApproval, threadReplyText, type DecisionDeps, type DecisionInput, type DecisionResult } from './decisions.js';
-export { registerApprovalHandlers, type ActionArgs, type HandlerRegistry, type ViewArgs } from './app.js';
+export {
+  registerApprovalHandlers,
+  parseAllowedUsers,
+  type ActionArgs,
+  type AppDeps,
+  type HandlerRegistry,
+  type ViewArgs,
+} from './app.js';

@@ -113,6 +113,7 @@ describe('postPendingApprovals', () => {
       ...slack,
       chat: {
         update: slack.chat.update,
+        postEphemeral: slack.chat.postEphemeral,
         postMessage: async (args: Parameters<typeof slack.chat.postMessage>[0]) => {
           // By the time this fires, the first run has already claimed the row
           // (set slack_channel) but has not yet posted, so a second poller
