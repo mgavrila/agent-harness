@@ -3,12 +3,16 @@ import { fileURLToPath } from 'node:url';
 import { config as loadEnv } from 'dotenv';
 import { serveStdio } from '@modelcontextprotocol/server/stdio';
 import { buildDepsFromEnv, createCoreToolsServer } from './server.js';
+import { reconcile } from './reconcile.js';
 
 // The repository root .env, resolved from this file rather than from the
 // process working directory, which is whatever launched the MCP server.
 loadEnv({ path: path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../.env'), quiet: true });
 
 const { deps, close } = await buildDepsFromEnv();
+
+const repaired = await reconcile(deps.db, { now: deps.now });
+console.error(`core-tools: reconcile on startup: ${JSON.stringify(repaired)}`);
 
 serveStdio(() => createCoreToolsServer(deps));
 console.error(`core-tools listening on stdio (client=${deps.client}, caller=${deps.caller})`);

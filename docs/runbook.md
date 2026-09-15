@@ -104,3 +104,40 @@ calls than the audit log shows is most likely sending malformed arguments, not
 losing audit writes. Malformed calls are visible only in the agent runtime's own
 logs. Everything that gets past validation is audited, including calls that are
 blocked by policy, parked for approval, or fail inside the handler.
+
+## Effects outbox
+
+External side effects (Slack messages, file uploads) are never sent from
+inside a tool handler. The handler stages a row in `tool_effects` within its
+transaction; a dispatcher sends staged rows after commit, keyed by
+`idempotency_key`. Statuses: `staged` → `dispatching` → `dispatched`, or
+`failed` after the retry limit, or `needs_review` when a dispatch never
+reported completion. Rows in `needs_review` require a human to check the
+sink (did the message arrive?) and then set the row to `dispatched` or
+`cancelled` by hand:
+
+```sql
+select id, tool, sink, summary, attempts, last_error, updated_at
+from tool_effects where status in ('failed','needs_review') order by updated_at;
+update tool_effects set status = 'cancelled' where id = '<id>';
+```
+
+## Reconciliation
+
+`harness_reconcile` (also run once at process start) expires approvals past
+their TTL and parks stuck dispatches. Run it on a schedule in production
+(Plan 3 adds a cron playbook). It never re-sends anything.
+
+## Writing migrations
+
+Edit `harness/db/src/schema.ts` first, then run plain `pnpm drizzle-kit
+generate` from `harness/db/` so drizzle-kit writes both the SQL migration and
+the snapshot together. Hand-edit the generated SQL only for things drizzle-kit
+cannot express (triggers, partial indexes), then run `generate` again and
+confirm it reports "No schema changes" before committing.
+
+Do not use `generate --custom` for a schema change: it writes an empty
+migration file without advancing the snapshot, so drizzle-kit does not know
+the schema changed. Migration `0003` needed its snapshot patched by hand
+because of exactly this mistake. `--custom` is only for a migration with no
+corresponding `schema.ts` change (e.g. a one-off data backfill).
