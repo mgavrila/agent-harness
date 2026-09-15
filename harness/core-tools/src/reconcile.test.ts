@@ -1,23 +1,11 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { eq } from 'drizzle-orm';
-import { approvals, toolEffects, type Db } from '@harness/db';
+import { approvals, toolEffects } from '@harness/db';
 import { reconcile } from './reconcile.js';
-import { openTestDb } from './testing.js';
+import { useTestDb } from './testing.js';
 
-let db: Db;
-let close: () => Promise<void>;
-let reset: () => Promise<void>;
+const db = useTestDb();
 const now = () => new Date('2026-09-15T12:00:00Z');
-
-beforeAll(() => {
-  ({ db, close, reset } = openTestDb());
-});
-afterAll(async () => {
-  await close();
-});
-beforeEach(async () => {
-  await reset();
-});
 
 describe('reconcile', () => {
   it('expires pending and approved rows past expiry, leaves live and decided rows alone', async () => {

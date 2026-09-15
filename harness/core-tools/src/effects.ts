@@ -40,19 +40,19 @@ export interface StageEffectInput {
  * behind, and a committed handler always has its effect recorded before
  * anything is sent. The payload is stored encrypted only.
  */
-export async function stageEffect(deps: ToolDeps, e: StageEffectInput): Promise<{ effect_id: string; staged: boolean }> {
+export async function stageEffect(deps: ToolDeps, input: StageEffectInput): Promise<{ effect_id: string; staged: boolean }> {
   // Idempotency keys are caller-supplied and only meaningful within a client;
   // two clients computing the same key (e.g. `roster:aetna`) must not collide.
-  const scopedKey = `${deps.client}:${e.idempotencyKey}`;
+  const scopedKey = `${deps.client}:${input.idempotencyKey}`;
   const inserted = await deps.db
     .insert(toolEffects)
     .values({
       client: deps.client,
       tool: deps.context.tool ?? 'unknown',
-      sink: e.sink,
+      sink: input.sink,
       idempotencyKey: scopedKey,
-      payloadEncrypted: encrypt(JSON.stringify(e.payload ?? null), deps.encryptionKey),
-      summary: e.summary.slice(0, 200),
+      payloadEncrypted: encrypt(JSON.stringify(input.payload ?? null), deps.encryptionKey),
+      summary: input.summary.slice(0, 200),
       runId: deps.context.runId ?? null,
     })
     .onConflictDoNothing({ target: toolEffects.idempotencyKey })
@@ -79,17 +79,101 @@ export interface DispatchResult {
   conflicted: number;
 }
 
+type EffectRow = typeof toolEffects.$inferSelect;
+
+/** Which counter a single row's dispatch attempt lands in. */
+type DispatchOutcome = 'dispatched' | 'failed' | 'retried' | 'conflicted';
+
 /**
- * Send staged effects. Each row is claimed with FOR UPDATE SKIP LOCKED and
- * moved to `dispatching` in its own short transaction, then the sink runs
- * outside any transaction (it is an external call). Success marks
- * `dispatched`; an error increments `attempts` and returns the row to
- * `staged` until `maxAttempts`, after which it is `failed`. A sink that is
- * not registered leaves the row `staged` and counts as skipped.
+ * Take ownership of one staged row: FOR UPDATE SKIP LOCKED, then move it to
+ * `dispatching` in its own short transaction, so the sink call that follows
+ * holds no locks. Returns null when another dispatcher got there first.
+ */
+async function claimEffect(db: Db, id: string, now: () => Date): Promise<EffectRow | null> {
+  return withTransaction(db, async (tx) => {
+    const [locked] = await tx
+      .select()
+      .from(toolEffects)
+      .where(and(eq(toolEffects.id, id), eq(toolEffects.status, 'staged')))
+      .for('update', { skipLocked: true });
+    if (!locked) return null;
+    const [row] = await tx
+      .update(toolEffects)
+      .set({ status: 'dispatching', attempts: sql`${toolEffects.attempts} + 1`, updatedAt: now() })
+      .where(eq(toolEffects.id, locked.id))
+      .returning();
+    return row;
+  });
+}
+
+/**
+ * Write the outcome of a dispatch, but only onto a row still in `dispatching`.
+ * Anything else was moved on by reconcile or by an operator while the sink was
+ * running, and overwriting it would undo their decision; that is reported as
+ * false so the caller can count it conflicted and leave the row alone.
+ */
+async function finishDispatch(db: Db, id: string, values: Partial<EffectRow>): Promise<boolean> {
+  const updated = await db
+    .update(toolEffects)
+    .set(values)
+    .where(and(eq(toolEffects.id, id), eq(toolEffects.status, 'dispatching')))
+    .returning({ id: toolEffects.id });
+  if (updated.length > 0) return true;
+  console.error(`effects: effect ${id} changed state during dispatch; leaving as-is`);
+  return false;
+}
+
+/**
+ * Decrypt a claimed row's payload, hand it to the sink, and record what
+ * happened. Success marks `dispatched`; an error returns the row to `staged`
+ * for another attempt, or marks it `failed` once `maxAttempts` is reached.
+ */
+async function sendClaimedEffect(
+  db: Db,
+  handler: SinkHandler,
+  claimed: EffectRow,
+  opts: { key: Buffer; maxAttempts: number; now: () => Date },
+): Promise<DispatchOutcome> {
+  const { key, maxAttempts, now } = opts;
+  try {
+    const payload: unknown = JSON.parse(decrypt(claimed.payloadEncrypted, key));
+    const sinkResult = await handler(payload, {
+      id: claimed.id,
+      idempotencyKey: claimed.idempotencyKey,
+      tool: claimed.tool,
+      client: claimed.client,
+      summary: claimed.summary,
+      runId: claimed.runId,
+      attempts: claimed.attempts,
+    });
+    const written = await finishDispatch(db, claimed.id, {
+      status: 'dispatched',
+      dispatchedAt: now(),
+      updatedAt: now(),
+      lastError: null,
+      result: sinkResult ?? null,
+    });
+    return written ? 'dispatched' : 'conflicted';
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const exhausted = claimed.attempts >= maxAttempts;
+    const written = await finishDispatch(db, claimed.id, {
+      status: exhausted ? 'failed' : 'staged',
+      lastError: message.slice(0, 500),
+      updatedAt: now(),
+    });
+    if (!written) return 'conflicted';
+    return exhausted ? 'failed' : 'retried';
+  }
+}
+
+/**
+ * Send staged effects, oldest first. The sink runs outside any transaction (it
+ * is an external call), between claiming the row and recording the outcome. A
+ * sink that is not registered leaves the row `staged` and counts as skipped.
  */
 export async function dispatchStagedEffects(db: Db, sinks: SinkRegistry, opts: DispatchOptions): Promise<DispatchResult> {
-  const limit = opts.limit ?? 50;
-  const maxAttempts = opts.maxAttempts ?? 3;
+  const { key, limit = 50, maxAttempts = 3 } = opts;
   const now = opts.now ?? (() => new Date());
   const result: DispatchResult = { dispatched: 0, failed: 0, retried: 0, skipped: 0, conflicted: 0 };
 
@@ -106,64 +190,10 @@ export async function dispatchStagedEffects(db: Db, sinks: SinkRegistry, opts: D
       result.skipped += 1;
       continue;
     }
-
-    const claimed = await withTransaction(db, async (tx) => {
-      const [locked] = await tx
-        .select()
-        .from(toolEffects)
-        .where(and(eq(toolEffects.id, candidate.id), eq(toolEffects.status, 'staged')))
-        .for('update', { skipLocked: true });
-      if (!locked) return null;
-      const [row] = await tx
-        .update(toolEffects)
-        .set({ status: 'dispatching', attempts: sql`${toolEffects.attempts} + 1`, updatedAt: now() })
-        .where(eq(toolEffects.id, locked.id))
-        .returning();
-      return row;
-    });
+    const claimed = await claimEffect(db, candidate.id, now);
     if (!claimed) continue;
-
-    try {
-      const payload: unknown = JSON.parse(decrypt(claimed.payloadEncrypted, opts.key));
-      const sinkResult = await handler(payload, {
-        id: claimed.id,
-        idempotencyKey: claimed.idempotencyKey,
-        tool: claimed.tool,
-        client: claimed.client,
-        summary: claimed.summary,
-        runId: claimed.runId,
-        attempts: claimed.attempts,
-      });
-      // Only a row still in `dispatching` is ours to finish. Anything else was
-      // moved on by reconcile or by an operator while the sink was running, and
-      // overwriting it would undo their decision.
-      const updated = await db
-        .update(toolEffects)
-        .set({ status: 'dispatched', dispatchedAt: now(), updatedAt: now(), lastError: null, result: sinkResult ?? null })
-        .where(and(eq(toolEffects.id, claimed.id), eq(toolEffects.status, 'dispatching')))
-        .returning({ id: toolEffects.id });
-      if (updated.length === 0) {
-        console.error(`effects: effect ${claimed.id} changed state during dispatch; leaving as-is`);
-        result.conflicted += 1;
-        continue;
-      }
-      result.dispatched += 1;
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      const exhausted = claimed.attempts >= maxAttempts;
-      const updated = await db
-        .update(toolEffects)
-        .set({ status: exhausted ? 'failed' : 'staged', lastError: message.slice(0, 500), updatedAt: now() })
-        .where(and(eq(toolEffects.id, claimed.id), eq(toolEffects.status, 'dispatching')))
-        .returning({ id: toolEffects.id });
-      if (updated.length === 0) {
-        console.error(`effects: effect ${claimed.id} changed state during dispatch; leaving as-is`);
-        result.conflicted += 1;
-        continue;
-      }
-      if (exhausted) result.failed += 1;
-      else result.retried += 1;
-    }
+    const outcome = await sendClaimedEffect(db, handler, claimed, { key, maxAttempts, now });
+    result[outcome] += 1;
   }
   return result;
 }

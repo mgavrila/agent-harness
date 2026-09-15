@@ -1,28 +1,14 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import * as z from 'zod/v4';
-import { McpServer } from '@modelcontextprotocol/server';
 import { eq } from 'drizzle-orm';
-import { approvals, auditLog, providers, type Db } from '@harness/db';
-import { defineTool, registerTools, ToolError, type ToolDeps } from '../registry.js';
-import { makeTestDeps, makeTestClient, openTestDb } from '../testing.js';
+import { approvals, auditLog, providers } from '@harness/db';
+import { defineTool, ToolError } from '../registry.js';
+import { approvalIdOf, connectTools, makeTestDeps, resultOf, useTestDb, type TestClient } from '../testing.js';
 import { DEFAULT_POLICY } from '../policy.js';
 import { approvalTools } from './approvals.js';
 
-let db: Db;
-let close: () => Promise<void>;
-let reset: () => Promise<void>;
-let deps: ToolDeps;
-
-beforeAll(() => {
-  ({ db, close, reset } = openTestDb());
-  deps = makeTestDeps(db);
-});
-afterAll(async () => {
-  await close();
-});
-beforeEach(async () => {
-  await reset();
-});
+const db = useTestDb();
+const deps = makeTestDeps(db);
 
 const createProviderExternal = defineTool({
   name: 'create_provider_external',
@@ -38,25 +24,24 @@ const createProviderExternal = defineTool({
   recordIds: (_a, r) => [r.provider_id],
 });
 
-const factory = () => {
-  const server = new McpServer({ name: 'approvals-test', version: '0.0.0' });
-  registerTools(server, [createProviderExternal, ...approvalTools], deps);
-  return server;
-};
+const replayableTools = [createProviderExternal, ...approvalTools];
 
-async function park(client: Awaited<ReturnType<typeof makeTestClient>>['client'], args: Record<string, unknown>) {
+const connectApprovals = () => connectTools('approvals-test', replayableTools, deps);
+
+/** Call the external-class tool, which policy parks, and return the approval id. */
+async function park(client: TestClient, args: Record<string, unknown>) {
   const res = await client.callTool({ name: 'create_provider_external', arguments: args });
-  return (res.structuredContent as { approval_id: string }).approval_id;
+  return approvalIdOf(res);
 }
 
 describe('approvals_execute', () => {
   it('executes an approved action once, audits it against the original tool, and records executed_at', async () => {
-    const { client, close: c } = await makeTestClient(factory);
+    const client = await connectApprovals();
     const id = await park(client, { name: 'Dr. Approved' });
     await db.update(approvals).set({ status: 'approved', decidedBy: 'U1', decidedAt: deps.now() }).where(eq(approvals.id, id));
 
     const res = await client.callTool({ name: 'approvals_execute', arguments: { approval_id: id } });
-    const out = (res.structuredContent as { result: { status: string; tool: string; result: { provider_id: string } } }).result;
+    const out = resultOf<{ status: string; tool: string; result: { provider_id: string } }>(res);
     expect(out.status).toBe('executed');
     expect(out.tool).toBe('create_provider_external');
     expect(await db.select().from(providers)).toHaveLength(1);
@@ -69,11 +54,10 @@ describe('approvals_execute', () => {
     const again = await client.callTool({ name: 'approvals_execute', arguments: { approval_id: id } });
     expect(again.isError).toBe(true);
     expect(await db.select().from(providers)).toHaveLength(1);
-    await c();
   });
 
   it('refuses pending, declined, and expired approvals', async () => {
-    const { client, close: c } = await makeTestClient(factory);
+    const client = await connectApprovals();
     const pending = await park(client, { name: 'A' });
     const declined = await park(client, { name: 'B' });
     const expired = await park(client, { name: 'C' });
@@ -84,11 +68,10 @@ describe('approvals_execute', () => {
       expect(res.isError).toBe(true);
     }
     expect(await db.select().from(providers)).toHaveLength(0);
-    await c();
   });
 
   it('rolls back to approved when the replayed handler throws', async () => {
-    const { client, close: c } = await makeTestClient(factory);
+    const client = await connectApprovals();
     const id = await park(client, { name: 'Dr. Boom', explode: true });
     await db.update(approvals).set({ status: 'approved' }).where(eq(approvals.id, id));
     const res = await client.callTool({ name: 'approvals_execute', arguments: { approval_id: id } });
@@ -98,11 +81,10 @@ describe('approvals_execute', () => {
     expect(row.executedAt).toBeNull();
     const errors = await db.select().from(auditLog).where(eq(auditLog.decision, 'error'));
     expect(errors).toHaveLength(1);
-    await c();
   });
 
   it('carries the parking row\'s derived_from onto the audit row written at replay', async () => {
-    const { client, close: c } = await makeTestClient(factory);
+    const client = await connectApprovals();
     await park(client, { name: 'Dr. First' });
     const [firstAudit] = await db.select().from(auditLog);
 
@@ -110,7 +92,7 @@ describe('approvals_execute', () => {
       name: 'create_provider_external',
       arguments: { name: 'Dr. Second', derived_from: [firstAudit.id] },
     });
-    const id = (res.structuredContent as { approval_id: string }).approval_id;
+    const id = approvalIdOf(res);
     const parking = (await db.select().from(auditLog).where(eq(auditLog.approvalId, id)))[0];
     expect(parking.derivedFrom).toEqual([firstAudit.id]);
 
@@ -121,11 +103,10 @@ describe('approvals_execute', () => {
     const rows = await db.select().from(auditLog).where(eq(auditLog.approvalId, id));
     const auto = rows.find((r) => r.decision === 'auto')!;
     expect(auto.derivedFrom).toEqual(parking.derivedFrom);
-    await c();
   });
 
   it('refuses to replay an action whose class has since become blocked by policy', async () => {
-    const { client, close: c } = await makeTestClient(factory);
+    const client = await connectApprovals();
     const id = await park(client, { name: 'Dr. Blocked' });
     await db.update(approvals).set({ status: 'approved', decidedBy: 'U1', decidedAt: deps.now() }).where(eq(approvals.id, id));
 
@@ -135,27 +116,20 @@ describe('approvals_execute', () => {
       policy: { ...DEFAULT_POLICY, external: 'blocked' },
       encryptionKey: deps.encryptionKey,
     });
-    const { client: strictClient, close: c2 } = await makeTestClient(() => {
-      const server = new McpServer({ name: 'approvals-test-blocked', version: '0.0.0' });
-      registerTools(server, [createProviderExternal, ...approvalTools], strictDeps);
-      return server;
-    });
+    const strictClient = await connectTools('approvals-test-blocked', replayableTools, strictDeps);
     const res = await strictClient.callTool({ name: 'approvals_execute', arguments: { approval_id: id } });
     expect(res.isError).toBe(true);
     const [row] = await db.select().from(approvals).where(eq(approvals.id, id));
     expect(row.status).toBe('approved');
     expect(row.executedAt).toBeNull();
     expect(await db.select().from(providers)).toHaveLength(0);
-    await c2();
-    await c();
   });
 
   it('refuses an approval that belongs to another client', async () => {
-    const { client, close: c } = await makeTestClient(factory);
+    const client = await connectApprovals();
     const id = await park(client, { name: 'Dr. Other' });
     await db.update(approvals).set({ status: 'approved', client: 'other-clinic' }).where(eq(approvals.id, id));
     const res = await client.callTool({ name: 'approvals_execute', arguments: { approval_id: id } });
     expect(res.isError).toBe(true);
-    await c();
   });
 });

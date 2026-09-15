@@ -157,7 +157,7 @@ export const auditLog = pgTable('audit_log', {
   tool: text('tool').notNull(),
   actionClass: text('action_class').notNull(),
   argsHash: text('args_hash').notNull(),
-  recordIds: jsonb('record_ids').notNull().default([]),
+  recordIds: jsonb('record_ids').$type<string[]>().notNull().default([]),
   decision: text('decision').notNull(),
   approvalId: uuid('approval_id').references(() => approvals.id),
   error: text('error'),

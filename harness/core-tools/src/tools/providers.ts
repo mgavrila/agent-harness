@@ -1,6 +1,6 @@
 import * as z from 'zod/v4';
 import { and, eq, ilike, or, sql } from 'drizzle-orm';
-import { providers, fields, credentials, encrypt, type Db } from '@harness/db';
+import { providers, fields, credentials, encrypt } from '@harness/db';
 import { defineTool, ToolError, type AnyToolDef, type ToolDeps } from '../registry.js';
 
 export const FieldInput = z.object({
@@ -51,24 +51,64 @@ export async function requireProvider(deps: ToolDeps, providerId: string) {
   return p;
 }
 
-async function findOrCreateProvider(db: Db, deps: ToolDeps, name: string, npi?: string) {
-  const existing = npi
-    ? await db.query.providers.findFirst({ where: and(eq(providers.client, deps.client), eq(providers.npi, npi)) })
-    : await db.query.providers.findFirst({ where: and(eq(providers.client, deps.client), eq(providers.name, name)) });
+/** Stands in for any value a caller is not allowed to read back. */
+const MASKED = '[restricted]';
+
+/**
+ * A field value belongs in exactly one column: plaintext when it may be read
+ * back, encrypted when it may not. Never both, so that masking a value cannot
+ * leave a readable copy behind.
+ */
+function fieldValueColumns(value: string, restricted: boolean, key: Buffer) {
+  return {
+    value: restricted ? null : value,
+    valueEncrypted: restricted ? encrypt(value, key) : null,
+  };
+}
+
+/** A field as a caller sees it. A restricted value is reported as masked, never decrypted. */
+function maskField(f: typeof fields.$inferSelect) {
+  return {
+    name: f.name,
+    value: f.restricted ? MASKED : f.value,
+    restricted: f.restricted,
+    confidence: f.confidence,
+    status: f.status,
+    source_page: f.sourcePage,
+  };
+}
+
+/** A credential as a caller sees it. The number is never returned, only whether one is on file. */
+function maskCredential(c: typeof credentials.$inferSelect) {
+  return {
+    id: c.id,
+    kind: c.kind,
+    issuer: c.issuer,
+    number: c.numberEncrypted ? MASKED : null,
+    state: c.state,
+    expires_at: c.expiresAt,
+  };
+}
+
+async function findOrCreateProvider(deps: ToolDeps, name: string, npi?: string) {
+  const match = npi ? eq(providers.npi, npi) : eq(providers.name, name);
+  const existing = await deps.db.query.providers.findFirst({
+    where: and(eq(providers.client, deps.client), match),
+  });
   if (existing) {
-    const [updated] = await db
+    const [updated] = await deps.db
       .update(providers)
       .set({ name, npi: npi ?? existing.npi, updatedAt: deps.now() })
       .where(eq(providers.id, existing.id))
       .returning();
     return updated;
   }
-  const [created] = await db.insert(providers).values({ client: deps.client, name, npi: npi ?? null }).returning();
+  const [created] = await deps.db.insert(providers).values({ client: deps.client, name, npi: npi ?? null }).returning();
   return created;
 }
 
-async function upsertField(db: Db, deps: ToolDeps, providerId: string, f: FieldInput) {
-  const existing = await db.query.fields.findFirst({ where: and(eq(fields.providerId, providerId), eq(fields.name, f.name)) });
+async function upsertField(deps: ToolDeps, providerId: string, f: FieldInput) {
+  const existing = await deps.db.query.fields.findFirst({ where: and(eq(fields.providerId, providerId), eq(fields.name, f.name)) });
   if (existing?.status === 'verified') {
     return 'verified' as const;
   }
@@ -78,26 +118,29 @@ async function upsertField(db: Db, deps: ToolDeps, providerId: string, f: FieldI
   const values = {
     providerId,
     name: f.name,
-    value: restricted ? null : f.value,
-    valueEncrypted: restricted ? encrypt(f.value, deps.encryptionKey) : null,
+    ...fieldValueColumns(f.value, restricted, deps.encryptionKey),
     restricted,
     confidence,
     sourceDocId: f.source_doc_id ?? null,
     sourcePage: f.source_page ?? null,
     status,
   };
-  await db
+  await deps.db
     .insert(fields)
     .values(values)
     .onConflictDoUpdate({
       target: [fields.providerId, fields.name],
+      // A verified field returned above, so any confirmation recorded on the
+      // row being overwritten refers to a value this extraction replaces.
       set: { ...values, confirmedBy: null, confirmedAt: null },
     });
   return status;
 }
 
-async function upsertCredential(db: Db, deps: ToolDeps, providerId: string, c: CredentialInput) {
-  const existing = await db.query.credentials.findFirst({
+async function upsertCredential(deps: ToolDeps, providerId: string, c: CredentialInput) {
+  // A provider can hold one credential of a kind per state (two licences in
+  // two states), so the state — null included — is part of the match.
+  const existing = await deps.db.query.credentials.findFirst({
     where: and(
       eq(credentials.providerId, providerId),
       eq(credentials.kind, c.kind),
@@ -115,9 +158,9 @@ async function upsertCredential(db: Db, deps: ToolDeps, providerId: string, c: C
     sourceDocId: c.source_doc_id ?? null,
   };
   if (existing) {
-    await db.update(credentials).set(values).where(eq(credentials.id, existing.id));
+    await deps.db.update(credentials).set(values).where(eq(credentials.id, existing.id));
   } else {
-    await db.insert(credentials).values(values);
+    await deps.db.insert(credentials).values(values);
   }
 }
 
@@ -141,16 +184,17 @@ const providersUpsert = defineTool({
     credentials: z.number(),
   }),
   handler: async (args, deps) => {
-    const provider = await findOrCreateProvider(deps.db, deps, args.name, args.npi);
+    const provider = await findOrCreateProvider(deps, args.name, args.npi);
     let pending = 0;
     let extracted = 0;
     for (const f of args.fields) {
-      const status = await upsertField(deps.db, deps, provider.id, f);
+      // A field already verified by a human keeps its value and counts as neither.
+      const status = await upsertField(deps, provider.id, f);
       if (status === 'pending') pending += 1;
       else if (status === 'extracted') extracted += 1;
     }
     for (const c of args.credentials) {
-      await upsertCredential(deps.db, deps, provider.id, c);
+      await upsertCredential(deps, provider.id, c);
     }
     const credCount = await deps.db.$count(credentials, eq(credentials.providerId, provider.id));
     return { provider_id: provider.id, fields_pending: pending, fields_extracted: extracted, credentials: credCount };
@@ -162,9 +206,9 @@ const providersUpsert = defineTool({
   redact: (args) => ({
     ...args,
     fields: args.fields.map((f) =>
-      f.restricted === true || isRestrictedName(f.name) ? { ...f, value: '[restricted]' } : f,
+      f.restricted === true || isRestrictedName(f.name) ? { ...f, value: MASKED } : f,
     ),
-    credentials: args.credentials.map((c) => (c.number === undefined ? c : { ...c, number: '[restricted]' })),
+    credentials: args.credentials.map((c) => (c.number === undefined ? c : { ...c, number: MASKED })),
   }),
 });
 
@@ -198,26 +242,12 @@ const providersGet = defineTool({
   }),
   handler: async ({ provider_id }, deps) => {
     const p = await requireProvider(deps, provider_id);
-    const fs = await deps.db.select().from(fields).where(eq(fields.providerId, provider_id));
-    const cs = await deps.db.select().from(credentials).where(eq(credentials.providerId, provider_id));
+    const fieldRows = await deps.db.select().from(fields).where(eq(fields.providerId, provider_id));
+    const credentialRows = await deps.db.select().from(credentials).where(eq(credentials.providerId, provider_id));
     return {
       provider: { id: p.id, name: p.name, npi: p.npi, status: p.status },
-      fields: fs.map((f) => ({
-        name: f.name,
-        value: f.restricted ? '[restricted]' : f.value,
-        restricted: f.restricted,
-        confidence: f.confidence,
-        status: f.status,
-        source_page: f.sourcePage,
-      })),
-      credentials: cs.map((c) => ({
-        id: c.id,
-        kind: c.kind,
-        issuer: c.issuer,
-        number: c.numberEncrypted ? '[restricted]' : null,
-        state: c.state,
-        expires_at: c.expiresAt,
-      })),
+      fields: fieldRows.map(maskField),
+      credentials: credentialRows.map(maskCredential),
     };
   },
   recordIds: ({ provider_id }) => [provider_id],
@@ -257,8 +287,7 @@ const providersConfirmField = defineTool({
     const values = {
       providerId: provider_id,
       name: field,
-      value: restricted ? null : value,
-      valueEncrypted: restricted ? encrypt(value, deps.encryptionKey) : null,
+      ...fieldValueColumns(value, restricted, deps.encryptionKey),
       restricted,
       confidence: 1,
       status: 'verified',
@@ -272,7 +301,7 @@ const providersConfirmField = defineTool({
     return { provider_id, field, status: 'verified' as const };
   },
   recordIds: ({ provider_id }) => [provider_id],
-  redact: (args) => (isRestrictedName(args.field) ? { ...args, value: '[restricted]' } : args),
+  redact: (args) => (isRestrictedName(args.field) ? { ...args, value: MASKED } : args),
 });
 
 const providersListPending = defineTool({

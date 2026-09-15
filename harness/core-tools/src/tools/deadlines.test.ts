@@ -1,36 +1,33 @@
 import { randomUUID } from 'node:crypto';
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
-import { McpServer } from '@modelcontextprotocol/server';
+import { describe, it, expect } from 'vitest';
 import { and, eq } from 'drizzle-orm';
-import { credentials, deadlines, type Db } from '@harness/db';
-import { registerTools, type ToolDeps } from '../registry.js';
-import { makeTestDeps, makeTestClient, openTestDb } from '../testing.js';
+import { credentials, deadlines } from '@harness/db';
+import { connectTools, makeTestDeps, resultOf, useTestDb, type TestClient } from '../testing.js';
 import { providerTools } from './providers.js';
 import { deadlineTools } from './deadlines.js';
 
-let db: Db;
-let close: () => Promise<void>;
-let reset: () => Promise<void>;
-let deps: ToolDeps;
+const db = useTestDb();
+const deps = makeTestDeps(db, { now: () => new Date('2026-09-15T12:00:00Z') });
 
-beforeAll(() => {
-  ({ db, close, reset } = openTestDb());
-  deps = makeTestDeps(db, { now: () => new Date('2026-09-15T12:00:00Z') });
-});
-afterAll(async () => {
-  await close();
-});
-beforeEach(async () => {
-  await reset();
-});
+const connectDeadlines = () => connectTools('deadlines-test', [...providerTools, ...deadlineTools], deps);
 
-const factory = () => {
-  const server = new McpServer({ name: 'deadlines-test', version: '0.0.0' });
-  registerTools(server, [...providerTools, ...deadlineTools], deps);
-  return server;
-};
+interface ComputedDeadline {
+  credential_id: string;
+  kind: string;
+  due_at: string;
+}
 
-async function seed(client: Awaited<ReturnType<typeof makeTestClient>>['client']) {
+interface UpcomingItem {
+  provider_name: string;
+  credential_kind: string;
+  kind: string;
+  due_at: string;
+  days_left: number;
+  overdue: boolean;
+}
+
+/** Create a provider with three credentials, and return its id. */
+async function seed(client: TestClient) {
   const res = await client.callTool({
     name: 'providers_upsert',
     arguments: {
@@ -43,33 +40,31 @@ async function seed(client: Awaited<ReturnType<typeof makeTestClient>>['client']
       ],
     },
   });
-  return (res.structuredContent as { result: { provider_id: string } }).result.provider_id;
+  return resultOf<{ provider_id: string }>(res).provider_id;
 }
 
 describe('deadlines tools', () => {
   it('compute writes one row per credential and kind, idempotently', async () => {
-    const { client, close: c } = await makeTestClient(factory);
+    const client = await connectDeadlines();
     const id = await seed(client);
     const first = await client.callTool({ name: 'deadlines_compute', arguments: { provider_id: id } });
-    expect((first.structuredContent as { result: { deadlines: unknown[] } }).result.deadlines).toHaveLength(6);
+    expect(resultOf<{ deadlines: unknown[] }>(first).deadlines).toHaveLength(6);
     await client.callTool({ name: 'deadlines_compute', arguments: { provider_id: id } });
     expect(await db.select().from(deadlines)).toHaveLength(6);
-    await c();
   });
 
   it('compute rejects an unknown provider', async () => {
-    const { client, close: c } = await makeTestClient(factory);
+    const client = await connectDeadlines();
     const res = await client.callTool({ name: 'deadlines_compute', arguments: { provider_id: randomUUID() } });
     expect(res.isError).toBe(true);
-    await c();
   });
 
   it('upcoming returns items inside the window, flags overdue, sorted by due date', async () => {
-    const { client, close: c } = await makeTestClient(factory);
+    const client = await connectDeadlines();
     const id = await seed(client);
     await client.callTool({ name: 'deadlines_compute', arguments: { provider_id: id } });
     const res = await client.callTool({ name: 'deadlines_upcoming', arguments: { window_days: 90 } });
-    const items = (res.structuredContent as { result: { items: { credential_kind: string; kind: string; due_at: string; days_left: number; overdue: boolean; provider_name: string }[] } }).result.items;
+    const { items } = resultOf<{ items: UpcomingItem[] }>(res);
     // today 2026-09-15: malpractice expiration 09-01 (overdue), malpractice renewal_start 07-03 (overdue),
     // license renewal_start 07-17 (overdue), license expiration 10-15 (30 days). DEA (2027-06-30, renewal 2027-04-01) is outside.
     expect(items.map((i) => `${i.credential_kind}:${i.kind}`)).toEqual([
@@ -80,11 +75,10 @@ describe('deadlines tools', () => {
     ]);
     expect(items[0].overdue).toBe(true);
     expect(items[3]).toMatchObject({ days_left: 30, overdue: false, provider_name: 'Dr. Grace Hopper' });
-    await c();
   });
 
   it('compute retires stale deadlines when a credential loses its expiry, preserving notifiedAt on survivors', async () => {
-    const { client, close: c } = await makeTestClient(factory);
+    const client = await connectDeadlines();
     const id = await seed(client);
     await client.callTool({ name: 'deadlines_compute', arguments: { provider_id: id } });
 
@@ -107,9 +101,7 @@ describe('deadlines tools', () => {
     });
 
     const second = await client.callTool({ name: 'deadlines_compute', arguments: { provider_id: id } });
-    const secondDeadlines = (
-      second.structuredContent as { result: { deadlines: { credential_id: string; kind: string; due_at: string }[] } }
-    ).result.deadlines;
+    const secondDeadlines = resultOf<{ deadlines: ComputedDeadline[] }>(second).deadlines;
     expect(secondDeadlines).toHaveLength(4);
 
     const malpracticeCred = await db.query.credentials.findFirst({
@@ -141,29 +133,25 @@ describe('deadlines tools', () => {
     );
     expect(moved?.dueAt).toBe('2027-01-31');
     expect(moved?.notifiedAt).toBeNull();
-
-    await c();
   });
 
   it('upcoming caps the number of rows at limit', async () => {
-    const { client, close: c } = await makeTestClient(factory);
+    const client = await connectDeadlines();
     const id = await seed(client);
     await client.callTool({ name: 'deadlines_compute', arguments: { provider_id: id } });
     const res = await client.callTool({ name: 'deadlines_upcoming', arguments: { window_days: 90, limit: 2 } });
-    const items = (res.structuredContent as { result: { items: { kind: string }[] } }).result.items;
+    const { items } = resultOf<{ items: UpcomingItem[] }>(res);
     expect(items).toHaveLength(2);
     const rejected = await client.callTool({ name: 'deadlines_upcoming', arguments: { limit: 0 } });
     expect(rejected.isError).toBe(true);
-    await c();
   });
 
   it('upcoming accepts an explicit today', async () => {
-    const { client, close: c } = await makeTestClient(factory);
+    const client = await connectDeadlines();
     const id = await seed(client);
     await client.callTool({ name: 'deadlines_compute', arguments: { provider_id: id } });
     const res = await client.callTool({ name: 'deadlines_upcoming', arguments: { window_days: 30, today: '2027-06-15' } });
-    const items = (res.structuredContent as { result: { items: { credential_kind: string; kind: string }[] } }).result.items;
+    const { items } = resultOf<{ items: UpcomingItem[] }>(res);
     expect(items.some((i) => i.credential_kind === 'dea' && i.kind === 'expiration')).toBe(true);
-    await c();
   });
 });

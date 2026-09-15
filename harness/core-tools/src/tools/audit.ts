@@ -53,7 +53,7 @@ const auditQuery = defineTool({
         action_class: r.actionClass,
         decision: r.decision,
         caller: r.caller,
-        record_ids: (r.recordIds as string[]) ?? [],
+        record_ids: r.recordIds,
         approval_id: r.approvalId,
         // The error text itself stays in the database: it can carry record
         // identifiers or restricted values, so operators read it with psql.
@@ -62,7 +62,7 @@ const auditQuery = defineTool({
         run_id: r.runId,
         skill: r.skill,
         skill_version: r.skillVersion,
-        derived_from: (r.derivedFrom as string[]) ?? [],
+        derived_from: r.derivedFrom,
       })),
     };
   },

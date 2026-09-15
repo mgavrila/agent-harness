@@ -69,8 +69,27 @@ function envelope<O extends z.ZodObject>(output: O) {
   });
 }
 
-function textResult(payload: unknown, isError = false) {
-  return { content: [{ type: 'text' as const, text: typeof payload === 'string' ? payload : JSON.stringify(payload) }], isError };
+/** A call either produced a result or was parked for a human decision. */
+type Envelope = { status: 'ok'; result: unknown } | { status: 'pending'; approval_id: string };
+
+/**
+ * What a tool call resolves to. A type alias rather than an interface, so that
+ * it keeps the implicit index signature the MCP callback signature expects.
+ */
+type ToolCallResult = {
+  content: { type: 'text'; text: string }[];
+  isError: boolean;
+  structuredContent?: Envelope;
+};
+
+function textResult(payload: unknown, isError = false): ToolCallResult {
+  const text = typeof payload === 'string' ? payload : JSON.stringify(payload);
+  return { content: [{ type: 'text', text }], isError };
+}
+
+/** A successful call: the envelope is returned both as text and as structured content. */
+function envelopeResult(structured: Envelope): ToolCallResult {
+  return { ...textResult(structured), structuredContent: structured };
 }
 
 /**
@@ -152,7 +171,7 @@ export function auditBaseFor(deps: ToolDeps, tool: AnyToolDef, argsHash: string,
  * wrapped so a secondary failure cannot escape the MCP callback. The message is
  * deliberately generic; the detail is in the audit log when it could be written.
  */
-async function handleUnexpectedError(db: Db, tool: AnyToolDef, base: AuditBase, err: unknown) {
+async function handleUnexpectedError(db: Db, tool: AnyToolDef, base: AuditBase, err: unknown): Promise<ToolCallResult> {
   const message = err instanceof Error ? err.message : String(err);
   try {
     await writeAudit(db, { ...base, decision: 'error', error: message });
@@ -184,6 +203,109 @@ function restoreContext(target: SessionContext, snapshot: SessionContext): void 
   }
 }
 
+/** Run `fn`, rewinding the shared session context to its prior state if `fn` throws. */
+async function preservingContext<T>(context: SessionContext, fn: () => Promise<T>): Promise<T> {
+  const snapshot: SessionContext = { ...context };
+  try {
+    return await fn();
+  } catch (err) {
+    restoreContext(context, snapshot);
+    throw err;
+  }
+}
+
+/**
+ * Run `fn` with `context.tool` naming the tool being executed, so that anything
+ * the handler stages (an effect row, say) is attributed to it, and restore the
+ * previous name afterwards. Nesting is why the old value is put back rather
+ * than cleared: `approvals_execute` replays another tool inside its own call.
+ */
+export async function withCurrentTool<T>(context: SessionContext, tool: string, fn: () => Promise<T>): Promise<T> {
+  const previous = context.tool;
+  context.tool = tool;
+  try {
+    return await fn();
+  } finally {
+    context.tool = previous;
+  }
+}
+
+/** Policy says no: record the refusal and tell the caller, without running anything. */
+async function runBlocked(deps: ToolDeps, tool: AnyToolDef, base: AuditBase): Promise<ToolCallResult> {
+  try {
+    await writeAudit(deps.db, { ...base, decision: 'blocked' });
+  } catch (err) {
+    return await handleUnexpectedError(deps.db, tool, base, err);
+  }
+  return textResult(`Tool ${tool.name} is blocked by policy (action class ${tool.actionClass}).`, true);
+}
+
+/**
+ * Policy says a human decides: park the request and return its approval id.
+ * The parked row and its audit row commit together, so a request a caller was
+ * told about is always one an approver can find.
+ */
+async function runForApproval(
+  deps: ToolDeps,
+  tool: AnyToolDef,
+  base: AuditBase,
+  args: Record<string, unknown>,
+): Promise<ToolCallResult> {
+  try {
+    const row = await preservingContext(deps.context, () =>
+      withTransaction(deps.db, async (tx) => {
+        const parked = await createOrReuseApproval(tx, deps, tool, args, base.argsHash);
+        await writeAudit(tx, { ...base, decision: 'approval', approvalId: parked.id });
+        return parked;
+      }),
+    );
+    return envelopeResult({ status: 'pending', approval_id: row.id });
+  } catch (err) {
+    return await handleUnexpectedError(deps.db, tool, base, err);
+  }
+}
+
+/**
+ * Policy says go: run the handler and its audit row in one transaction, so a
+ * handler that throws leaves neither its writes nor a success row behind. The
+ * raw message reaches the caller only for a `ToolError`, which a tool raises
+ * deliberately; anything else could carry restricted values and stays in the
+ * audit log.
+ */
+async function runAuto(
+  deps: ToolDeps,
+  tool: AnyToolDef,
+  base: AuditBase,
+  args: Record<string, unknown>,
+): Promise<ToolCallResult> {
+  try {
+    const result = await preservingContext(deps.context, () =>
+      withTransaction(deps.db, async (tx) => {
+        // Spread keeps the one shared context object, which the handler may mutate.
+        const txDeps: ToolDeps = { ...deps, db: tx };
+        return await withCurrentTool(deps.context, tool.name, async () => {
+          const out = await tool.handler(args, txDeps);
+          await writeAudit(tx, { ...base, decision: 'auto', recordIds: tool.recordIds?.(args, out) ?? [] });
+          return out;
+        });
+      }),
+    );
+    return envelopeResult({ status: 'ok', result });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    try {
+      await writeAudit(deps.db, { ...base, decision: 'error', error: message });
+    } catch (auditErr) {
+      return await handleUnexpectedError(deps.db, tool, base, auditErr);
+    }
+    const text =
+      err instanceof ToolError
+        ? `Tool ${tool.name} failed: ${message}`
+        : `Tool ${tool.name} failed (internal error; see audit log).`;
+    return textResult(text, true);
+  }
+}
+
 export function registerTools(server: McpServer, tools: AnyToolDef[], deps: ToolDeps): void {
   for (const tool of tools) deps.tools.set(tool.name, tool);
   for (const tool of tools) {
@@ -198,66 +320,18 @@ export function registerTools(server: McpServer, tools: AnyToolDef[], deps: Tool
       tool.name,
       { description: tool.description, inputSchema, outputSchema: envelope(tool.output) },
       async (args: Record<string, unknown>) => {
-        const { derived_from, ...rawArgs } = args as Record<string, unknown> & { derived_from?: string[] };
-        const handlerArgs = rawArgs;
-        const behavior = decide(tool.actionClass, deps.policy);
-        const argsHash = hashArgs(handlerArgs);
-        const base = auditBaseFor(deps, tool, argsHash, derived_from ?? []);
+        // `derived_from` is the registry's own argument: it is audited as lineage
+        // and never reaches the handler or the arguments hash.
+        const { derived_from, ...handlerArgs } = args as Record<string, unknown> & { derived_from?: string[] };
+        const base = auditBaseFor(deps, tool, hashArgs(handlerArgs), derived_from ?? []);
 
-        if (behavior === 'blocked') {
-          try {
-            await writeAudit(deps.db, { ...base, decision: 'blocked' });
-            return textResult(`Tool ${tool.name} is blocked by policy (action class ${tool.actionClass}).`, true);
-          } catch (err) {
-            return await handleUnexpectedError(deps.db, tool, base, err);
-          }
-        }
-
-        if (behavior === 'approval') {
-          const contextSnapshot: SessionContext = { ...deps.context };
-          try {
-            const row = await withTransaction(deps.db, async (tx) => {
-              const parked = await createOrReuseApproval(tx, deps, tool, handlerArgs, argsHash);
-              await writeAudit(tx, { ...base, decision: 'approval', approvalId: parked.id });
-              return parked;
-            });
-            const structured = { status: 'pending' as const, approval_id: row.id };
-            return { ...textResult(structured), structuredContent: structured };
-          } catch (err) {
-            restoreContext(deps.context, contextSnapshot);
-            return await handleUnexpectedError(deps.db, tool, base, err);
-          }
-        }
-
-        const contextSnapshot: SessionContext = { ...deps.context };
-        try {
-          const result = await withTransaction(deps.db, async (tx) => {
-            const txDeps: ToolDeps = { ...deps, db: tx, context: deps.context };
-            const previousTool = deps.context.tool;
-            deps.context.tool = tool.name;
-            try {
-              const out = await tool.handler(handlerArgs, txDeps);
-              await writeAudit(tx, { ...base, decision: 'auto', recordIds: tool.recordIds?.(handlerArgs, out) ?? [] });
-              return out;
-            } finally {
-              deps.context.tool = previousTool;
-            }
-          });
-          const structured = { status: 'ok' as const, result };
-          return { ...textResult(structured), structuredContent: structured };
-        } catch (err) {
-          restoreContext(deps.context, contextSnapshot);
-          const message = err instanceof Error ? err.message : String(err);
-          try {
-            await writeAudit(deps.db, { ...base, decision: 'error', error: message });
-          } catch (auditErr) {
-            return await handleUnexpectedError(deps.db, tool, base, auditErr);
-          }
-          const text =
-            err instanceof ToolError
-              ? `Tool ${tool.name} failed: ${message}`
-              : `Tool ${tool.name} failed (internal error; see audit log).`;
-          return textResult(text, true);
+        switch (decide(tool.actionClass, deps.policy)) {
+          case 'blocked':
+            return await runBlocked(deps, tool, base);
+          case 'approval':
+            return await runForApproval(deps, tool, base, handlerArgs);
+          default:
+            return await runAuto(deps, tool, base, handlerArgs);
         }
       },
     );

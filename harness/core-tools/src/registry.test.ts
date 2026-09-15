@@ -1,11 +1,10 @@
 import { randomUUID } from 'node:crypto';
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import * as z from 'zod/v4';
-import { McpServer } from '@modelcontextprotocol/server';
 import { eq } from 'drizzle-orm';
-import { approvals, auditLog, decrypt, providers, runs, type Db } from '@harness/db';
-import { defineTool, registerTools, ToolError } from './registry.js';
-import { makeTestDeps, makeTestClient, openTestDb } from './testing.js';
+import { approvals, auditLog, decrypt, providers, runs } from '@harness/db';
+import { defineTool, ToolError } from './registry.js';
+import { approvalIdOf, connectTools, makeTestDeps, useTestDb } from './testing.js';
 
 function textOf(res: { content: unknown }): string {
   const content = res.content as Array<{ type: string; text?: string }>;
@@ -111,53 +110,25 @@ const writeOk = defineTool({
   },
 });
 
-let db: Db;
-let close: () => Promise<void>;
-let reset: () => Promise<void>;
+const db = useTestDb();
 
-beforeAll(() => {
-  ({ db, close, reset } = openTestDb());
-});
-afterAll(async () => {
-  await close();
-});
-beforeEach(async () => {
-  await reset();
-});
+const allTools = [echo, sendExternal, pay, boom, boomToolError, writeThenThrow, writeOk];
 
-function factory() {
-  const server = new McpServer({ name: 'registry-test', version: '0.0.0' });
-  registerTools(server, [echo, sendExternal, pay, boom, boomToolError, writeThenThrow, writeOk], makeTestDeps(db));
-  return server;
-}
-
-function factoryWithBrokenClock() {
-  const server = new McpServer({ name: 'registry-test-broken-clock', version: '0.0.0' });
-  registerTools(
-    server,
-    [sendExternal],
-    makeTestDeps(db, {
-      now: () => {
-        throw new Error('clock down');
-      },
-    }),
-  );
-  return server;
-}
+/** A client over the whole fixture set, with fresh default deps. */
+const connectDefault = () => connectTools('registry-test', allTools, makeTestDeps(db));
 
 describe('registerTools', () => {
   it('runs auto tools, returns ok envelope, audits with record ids', async () => {
-    const { client, close: c } = await makeTestClient(factory);
+    const client = await connectDefault();
     const res = await client.callTool({ name: 'echo_read', arguments: { text: 'hi' } });
     expect(res.structuredContent).toEqual({ status: 'ok', result: { text: 'hi' } });
     const rows = await db.select().from(auditLog);
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ tool: 'echo_read', decision: 'auto', recordIds: ['rec-1'], caller: 'test-caller' });
-    await c();
   });
 
   it('parks approval-class tools and creates one approval row per identical request', async () => {
-    const { client, close: c } = await makeTestClient(factory);
+    const client = await connectDefault();
     const first = await client.callTool({ name: 'send_external', arguments: { to: 'payer@example.com' } });
     const second = await client.callTool({ name: 'send_external', arguments: { to: 'payer@example.com' } });
     expect(first.structuredContent).toMatchObject({ status: 'pending' });
@@ -168,83 +139,68 @@ describe('registerTools', () => {
     expect(rows[0].payload).toEqual({ tool: 'send_external', args: { to: 'payer@example.com' } });
     const audits = await db.select().from(auditLog);
     expect(audits.every((a) => a.decision === 'approval' && a.approvalId === rows[0].id)).toBe(true);
-    await c();
   });
 
   it('blocks financial tools with isError and an audit row', async () => {
-    const { client, close: c } = await makeTestClient(factory);
+    const client = await connectDefault();
     const res = await client.callTool({ name: 'pay', arguments: { amount: 5 } });
     expect(res.isError).toBe(true);
     const rows = await db.select().from(auditLog);
     expect(rows[0]).toMatchObject({ tool: 'pay', decision: 'blocked' });
-    await c();
   });
 
   it('converts thrown errors into isError results and audits them, without leaking the raw message', async () => {
-    const { client, close: c } = await makeTestClient(factory);
+    const client = await connectDefault();
     const res = await client.callTool({ name: 'boom', arguments: {} });
     expect(res.isError).toBe(true);
     expect(textOf(res)).not.toContain('kaboom');
     const rows = await db.select().from(auditLog);
     expect(rows[0]).toMatchObject({ tool: 'boom', decision: 'error', error: 'kaboom' });
-    await c();
   });
 
   it('surfaces the ToolError message to the caller for a ToolError, while still auditing it', async () => {
-    const { client, close: c } = await makeTestClient(factory);
+    const client = await connectDefault();
     const res = await client.callTool({ name: 'boom_tool_error', arguments: {} });
     expect(res.isError).toBe(true);
     expect(textOf(res)).toContain('provider not found');
     const rows = await db.select().from(auditLog);
     expect(rows[0]).toMatchObject({ tool: 'boom_tool_error', decision: 'error', error: 'provider not found' });
-    await c();
   });
 
   it('rejects invalid arguments before the handler runs', async () => {
-    const { client, close: c } = await makeTestClient(factory);
+    const client = await connectDefault();
     const res = await client.callTool({ name: 'echo_read', arguments: { text: 42 } });
     expect(res.isError).toBe(true);
     expect(await db.select().from(auditLog)).toHaveLength(0);
-    await c();
   });
 
   it('does not reuse a decided approval: a new request parks a fresh pending row', async () => {
-    const { client, close: c } = await makeTestClient(factory);
+    const client = await connectDefault();
     const first = await client.callTool({ name: 'send_external', arguments: { to: 'payer@example.com' } });
-    const firstId = (first.structuredContent as { approval_id: string }).approval_id;
+    const firstId = approvalIdOf(first);
     await db.update(approvals).set({ status: 'declined', decidedBy: 'U1' }).where(eq(approvals.id, firstId));
 
     const second = await client.callTool({ name: 'send_external', arguments: { to: 'payer@example.com' } });
-    const secondId = (second.structuredContent as { status: string; approval_id: string }).approval_id;
-    expect((second.structuredContent as { status: string }).status).toBe('pending');
+    const secondId = approvalIdOf(second);
+    expect(second.structuredContent).toMatchObject({ status: 'pending' });
     expect(secondId).not.toBe(firstId);
 
     const rows = await db.select().from(approvals);
     expect(rows).toHaveLength(2);
     expect(rows.find((r) => r.id === firstId)!.status).toBe('declined');
     expect(rows.find((r) => r.id === secondId)!.status).toBe('pending');
-    await c();
   });
 
   it('expires a stale pending approval and parks a new one', async () => {
     const shortTtl = makeTestDeps(db, { approvalTtlHours: 1 });
-    const { client, close: c } = await makeTestClient(() => {
-      const server = new McpServer({ name: 'registry-test-ttl', version: '0.0.0' });
-      registerTools(server, [sendExternal], shortTtl);
-      return server;
-    });
+    const client = await connectTools('registry-test-ttl', [sendExternal], shortTtl);
     const first = await client.callTool({ name: 'send_external', arguments: { to: 'payer@example.com' } });
-    const firstId = (first.structuredContent as { approval_id: string }).approval_id;
-    await c();
+    const firstId = approvalIdOf(first);
 
     const later = makeTestDeps(db, { approvalTtlHours: 1, now: () => new Date('2026-09-15T14:00:00Z') });
-    const { client: client2, close: c2 } = await makeTestClient(() => {
-      const server = new McpServer({ name: 'registry-test-ttl-later', version: '0.0.0' });
-      registerTools(server, [sendExternal], later);
-      return server;
-    });
+    const client2 = await connectTools('registry-test-ttl-later', [sendExternal], later);
     const second = await client2.callTool({ name: 'send_external', arguments: { to: 'payer@example.com' } });
-    const secondId = (second.structuredContent as { approval_id: string }).approval_id;
+    const secondId = approvalIdOf(second);
     expect(secondId).not.toBe(firstId);
 
     const rows = await db.select().from(approvals);
@@ -253,25 +209,19 @@ describe('registerTools', () => {
     expect(expired.status).toBe('expired');
     expect(expired.decidedAt).not.toBeNull();
     expect(rows.find((r) => r.id === secondId)!.status).toBe('pending');
-    await c2();
   });
 
   it('reuses a live pending approval rather than parking a duplicate', async () => {
-    const { client, close: c } = await makeTestClient(factory);
+    const client = await connectDefault();
     const first = await client.callTool({ name: 'send_external', arguments: { to: 'payer@example.com' } });
     const second = await client.callTool({ name: 'send_external', arguments: { to: 'payer@example.com' } });
     expect(second.structuredContent).toEqual(first.structuredContent);
     expect(await db.select().from(approvals)).toHaveLength(1);
-    await c();
   });
 
   it('stores a redacted approval payload and the full args encrypted', async () => {
     const deps = makeTestDeps(db);
-    const { client, close: c } = await makeTestClient(() => {
-      const server = new McpServer({ name: 'registry-test-redact', version: '0.0.0' });
-      registerTools(server, [sendExternalRedacted], deps);
-      return server;
-    });
+    const client = await connectTools('registry-test-redact', [sendExternalRedacted], deps);
     await client.callTool({ name: 'send_external_redacted', arguments: { to: 'ssn-999-88-7777', note: 'keep me' } });
 
     const [row] = await db.select().from(approvals);
@@ -284,11 +234,15 @@ describe('registerTools', () => {
       tool: 'send_external_redacted',
       args: { to: 'ssn-999-88-7777', note: 'keep me' },
     });
-    await c();
   });
 
   it('never throws out of the approval path and still audits when now() throws', async () => {
-    const { client, close: c } = await makeTestClient(factoryWithBrokenClock);
+    const brokenClock = makeTestDeps(db, {
+      now: () => {
+        throw new Error('clock down');
+      },
+    });
+    const client = await connectTools('registry-test-broken-clock', [sendExternal], brokenClock);
     const res = await client.callTool({ name: 'send_external', arguments: { to: 'payer@example.com' } });
     expect(res.isError).toBe(true);
     expect(await db.select().from(approvals)).toHaveLength(0);
@@ -296,11 +250,10 @@ describe('registerTools', () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ tool: 'send_external', decision: 'error' });
     expect(rows[0].error).toContain('clock down');
-    await c();
   });
 
   it('rolls back handler writes when the handler throws, and still audits the error', async () => {
-    const { client, close: c } = await makeTestClient(factory);
+    const client = await connectDefault();
     const res = await client.callTool({ name: 'write_then_throw', arguments: { name: 'Dr. Rollback' } });
     expect(res.isError).toBe(true);
     expect(textOf(res)).toContain('rolled back on purpose');
@@ -308,18 +261,16 @@ describe('registerTools', () => {
     const audits = await db.select().from(auditLog);
     expect(audits).toHaveLength(1);
     expect(audits[0]).toMatchObject({ tool: 'write_then_throw', decision: 'error', error: 'rolled back on purpose' });
-    await c();
   });
 
   it('commits handler writes together with the audit row', async () => {
-    const { client, close: c } = await makeTestClient(factory);
+    const client = await connectDefault();
     const res = await client.callTool({ name: 'write_ok', arguments: { name: 'Dr. Commit' } });
     expect(res.structuredContent).toEqual({ status: 'ok', result: { ok: true } });
     expect(await db.select().from(providers)).toHaveLength(1);
     const audits = await db.select().from(auditLog);
     expect(audits).toHaveLength(1);
     expect(audits[0]).toMatchObject({ tool: 'write_ok', decision: 'auto' });
-    await c();
   });
 
   it('rolls the parked approval back when the audit write in the same transaction fails', async () => {
@@ -327,25 +278,16 @@ describe('registerTools', () => {
     // run_id foreign key, which is the only way to fail the write after the
     // approval row is already inserted in the same transaction.
     const deps = makeTestDeps(db, { context: { runId: randomUUID() } });
-    const { client, close: c } = await makeTestClient(() => {
-      const server = new McpServer({ name: 'registry-test-approval-atomicity', version: '0.0.0' });
-      registerTools(server, [sendExternal], deps);
-      return server;
-    });
+    const client = await connectTools('registry-test-approval-atomicity', [sendExternal], deps);
 
     const res = await client.callTool({ name: 'send_external', arguments: { to: 'payer@example.com' } });
     expect(res.isError).toBe(true);
     expect(await db.select().from(approvals)).toHaveLength(0);
-    await c();
   });
 
   it('restores session context when a tool transaction rolls back', async () => {
     const deps = makeTestDeps(db);
-    const { client, close: c } = await makeTestClient(() => {
-      const server = new McpServer({ name: 'registry-test-context-rollback', version: '0.0.0' });
-      registerTools(server, [mutateContextThenThrow, echo], deps);
-      return server;
-    });
+    const client = await connectTools('registry-test-context-rollback', [mutateContextThenThrow, echo], deps);
 
     const res = await client.callTool({ name: 'mutate_context_then_throw', arguments: {} });
     expect(res.isError).toBe(true);
@@ -358,6 +300,5 @@ describe('registerTools', () => {
     const rows = await db.select().from(auditLog);
     const echoAudit = rows.find((r) => r.tool === 'echo_read')!;
     expect(echoAudit.runId).toBeNull();
-    await c();
   });
 });

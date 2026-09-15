@@ -1,7 +1,7 @@
 import * as z from 'zod/v4';
 import { and, eq, gt } from 'drizzle-orm';
 import { approvals, auditLog, decrypt } from '@harness/db';
-import { auditBaseFor, defineTool, ToolError, type AnyToolDef, type ToolDeps } from '../registry.js';
+import { auditBaseFor, defineTool, ToolError, withCurrentTool, type AnyToolDef } from '../registry.js';
 import { writeAudit, hashArgs } from '../audit.js';
 import { decide } from '../policy.js';
 
@@ -47,15 +47,9 @@ const approvalsExecute = defineTool({
     }
 
     const args = target.input.parse(parsed.args) as Record<string, unknown>;
-    const targetDeps: ToolDeps = { ...deps, context: deps.context };
-    const previousTool = deps.context.tool;
-    deps.context.tool = target.name;
-    let result: unknown;
-    try {
-      result = await target.handler(args, targetDeps);
-    } finally {
-      deps.context.tool = previousTool;
-    }
+    // The replayed tool runs on this handler's deps, so it shares the open
+    // transaction and the session context.
+    const result: unknown = await withCurrentTool(deps.context, target.name, () => target.handler(args, deps));
     // The replay continues the chain the parked call started, so it inherits
     // that call's lineage rather than starting a fresh, empty one.
     const parking = await deps.db.query.auditLog.findFirst({

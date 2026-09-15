@@ -5,6 +5,9 @@ import { defineTool, type AnyToolDef } from '../registry.js';
 import { computeDeadlines, daysUntil, addDays } from '../deadlines/compute.js';
 import { requireProvider } from './providers.js';
 
+/** Identifies a deadline row within a provider, matching `deadlines_credential_kind_uq`. */
+const deadlineKey = (d: { credentialId: string; kind: string }) => `${d.credentialId}:${d.kind}`;
+
 const deadlinesCompute = defineTool({
   name: 'deadlines_compute',
   description: 'Recompute expiration and renewal-start deadlines for a provider from its credentials. Deterministic, no model call.',
@@ -32,14 +35,14 @@ const deadlinesCompute = defineTool({
           },
         });
     }
-    const validKeys = new Set(computed.map((d) => `${d.credentialId}:${d.kind}`));
+    // A credential that lost its expiry, or was removed, leaves deadlines
+    // behind that nothing recomputes. Retire whatever this run did not produce.
+    const computedKeys = new Set(computed.map(deadlineKey));
     const existingRows = await deps.db
       .select({ id: deadlines.id, credentialId: deadlines.credentialId, kind: deadlines.kind })
       .from(deadlines)
       .where(eq(deadlines.providerId, provider_id));
-    const staleIds = existingRows
-      .filter((r) => !validKeys.has(`${r.credentialId}:${r.kind}`))
-      .map((r) => r.id);
+    const staleIds = existingRows.filter((r) => !computedKeys.has(deadlineKey(r))).map((r) => r.id);
     if (staleIds.length > 0) {
       await deps.db.delete(deadlines).where(inArray(deadlines.id, staleIds));
     }

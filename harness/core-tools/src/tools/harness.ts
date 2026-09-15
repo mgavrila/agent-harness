@@ -33,20 +33,21 @@ const harnessSetContext = defineTool({
     // client's run must not be adopted, and must not leave this session
     // stamping that client's run onto its audit rows.
     const nextRunId = run_id !== undefined ? (run_id ?? undefined) : deps.context.runId;
-    let createRun = false;
+    let runToCreate: string | undefined;
     if (nextRunId) {
       const existing = await deps.db.query.runs.findFirst({ where: eq(runs.id, nextRunId) });
       if (existing && existing.client !== deps.client) {
         throw new ToolError(`run ${nextRunId} belongs to another client`);
       }
-      createRun = !existing;
+      if (!existing) runToCreate = nextRunId;
     }
 
+    // An omitted field leaves the context as it was; an explicit null clears it.
     if (run_id !== undefined) deps.context.runId = run_id ?? undefined;
     if (skill !== undefined) deps.context.skill = skill ?? undefined;
     if (skill_version !== undefined) deps.context.skillVersion = skill_version ?? undefined;
-    if (nextRunId && createRun) {
-      await deps.db.insert(runs).values({ id: nextRunId, client: deps.client, caller: deps.caller });
+    if (runToCreate) {
+      await deps.db.insert(runs).values({ id: runToCreate, client: deps.client, caller: deps.caller });
     }
     return { run_id: deps.context.runId ?? null, skill: deps.context.skill ?? null, skill_version: deps.context.skillVersion ?? null };
   },

@@ -1,27 +1,13 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import * as z from 'zod/v4';
-import { McpServer } from '@modelcontextprotocol/server';
 import { eq } from 'drizzle-orm';
-import { toolEffects, type Db } from '@harness/db';
-import { defineTool, registerTools, type ToolDeps } from './registry.js';
+import { toolEffects } from '@harness/db';
+import { defineTool } from './registry.js';
 import { stageEffect, dispatchStagedEffects, type SinkRegistry } from './effects.js';
-import { makeTestDeps, makeTestClient, openTestDb } from './testing.js';
+import { connectTools, makeTestDeps, resultOf, useTestDb } from './testing.js';
 
-let db: Db;
-let close: () => Promise<void>;
-let reset: () => Promise<void>;
-let deps: ToolDeps;
-
-beforeAll(() => {
-  ({ db, close, reset } = openTestDb());
-  deps = makeTestDeps(db);
-});
-afterAll(async () => {
-  await close();
-});
-beforeEach(async () => {
-  await reset();
-});
+const db = useTestDb();
+const deps = makeTestDeps(db);
 
 const sendRoster = defineTool({
   name: 'send_roster',
@@ -41,66 +27,56 @@ const sendRoster = defineTool({
   },
 });
 
-const factory = () => {
-  const server = new McpServer({ name: 'effects-test', version: '0.0.0' });
-  registerTools(server, [sendRoster], deps);
-  return server;
-};
+interface StageResult {
+  effect_id: string;
+  staged: boolean;
+}
+
+const connectSender = () => connectTools('effects-test', [sendRoster], deps);
 
 describe('effects outbox', () => {
   it('stages an effect inside the tool transaction, encrypted, with status staged', async () => {
-    const { client, close: c } = await makeTestClient(factory);
+    const client = await connectSender();
     const res = await client.callTool({ name: 'send_roster', arguments: { payer: 'aetna' } });
-    const out = (res.structuredContent as { result: { effect_id: string; staged: boolean } }).result;
+    const out = resultOf<StageResult>(res);
     expect(out.staged).toBe(true);
     const [row] = await db.select().from(toolEffects).where(eq(toolEffects.id, out.effect_id));
     expect(row).toMatchObject({ status: 'staged', sink: 'slack', idempotencyKey: 'test:roster:aetna', client: 'test', tool: 'send_roster' });
     expect(row.payloadEncrypted.toString()).not.toContain('123-45-6789');
-    await c();
   });
 
   it('does not keep a staged effect when the handler throws after staging', async () => {
-    const { client, close: c } = await makeTestClient(factory);
+    const client = await connectSender();
     const res = await client.callTool({ name: 'send_roster', arguments: { payer: 'aetna', fail_after_stage: true } });
     expect(res.isError).toBe(true);
     expect(await db.select().from(toolEffects)).toHaveLength(0);
-    await c();
   });
 
   it('staging the same key twice keeps one row and reports staged: false', async () => {
-    const { client, close: c } = await makeTestClient(factory);
+    const client = await connectSender();
     await client.callTool({ name: 'send_roster', arguments: { payer: 'aetna' } });
     const second = await client.callTool({ name: 'send_roster', arguments: { payer: 'aetna' } });
-    expect((second.structuredContent as { result: { staged: boolean } }).result.staged).toBe(false);
+    expect(resultOf<StageResult>(second).staged).toBe(false);
     expect(await db.select().from(toolEffects)).toHaveLength(1);
-    await c();
   });
 
   it('scopes idempotency keys by client so two clients staging the same key do not collide', async () => {
     const otherDeps = makeTestDeps(db, { client: 'other-clinic' });
-    const otherFactory = () => {
-      const server = new McpServer({ name: 'effects-test-other', version: '0.0.0' });
-      registerTools(server, [sendRoster], otherDeps);
-      return server;
-    };
-    const { client, close: c } = await makeTestClient(factory);
-    const { client: otherClient, close: otherClose } = await makeTestClient(otherFactory);
+    const client = await connectSender();
+    const otherClient = await connectTools('effects-test-other', [sendRoster], otherDeps);
 
     const first = await client.callTool({ name: 'send_roster', arguments: { payer: 'aetna' } });
     const second = await otherClient.callTool({ name: 'send_roster', arguments: { payer: 'aetna' } });
-    expect((first.structuredContent as { result: { staged: boolean } }).result.staged).toBe(true);
-    expect((second.structuredContent as { result: { staged: boolean } }).result.staged).toBe(true);
+    expect(resultOf<StageResult>(first).staged).toBe(true);
+    expect(resultOf<StageResult>(second).staged).toBe(true);
 
     const rows = await db.select().from(toolEffects);
     expect(rows).toHaveLength(2);
     expect(rows.map((r) => r.idempotencyKey).sort()).toEqual(['other-clinic:roster:aetna', 'test:roster:aetna']);
-
-    await c();
-    await otherClose();
   });
 
   it('dispatches once with the decrypted payload, never twice', async () => {
-    const { client, close: c } = await makeTestClient(factory);
+    const client = await connectSender();
     await client.callTool({ name: 'send_roster', arguments: { payer: 'aetna' } });
     const calls: unknown[] = [];
     const sinks: SinkRegistry = { slack: async (payload) => { calls.push(payload); } };
@@ -113,11 +89,10 @@ describe('effects outbox', () => {
     const [row] = await db.select().from(toolEffects);
     expect(row.status).toBe('dispatched');
     expect(row.dispatchedAt).not.toBeNull();
-    await c();
   });
 
   it('retries a failing sink up to maxAttempts, then marks failed', async () => {
-    const { client, close: c } = await makeTestClient(factory);
+    const client = await connectSender();
     await client.callTool({ name: 'send_roster', arguments: { payer: 'aetna' } });
     const sinks: SinkRegistry = { slack: async () => { throw new Error('slack down'); } };
     const r1 = await dispatchStagedEffects(db, sinks, { key: deps.encryptionKey, maxAttempts: 2 });
@@ -128,11 +103,10 @@ describe('effects outbox', () => {
     expect(r2).toMatchObject({ retried: 0, failed: 1 });
     [row] = await db.select().from(toolEffects);
     expect(row).toMatchObject({ status: 'failed', attempts: 2 });
-    await c();
   });
 
   it('stores what the sink returned on the dispatched row', async () => {
-    const { client, close: c } = await makeTestClient(factory);
+    const client = await connectSender();
     await client.callTool({ name: 'send_roster', arguments: { payer: 'aetna' } });
     const seen: Array<{ tool: string; attempts: number; summary: string }> = [];
     const sinks: SinkRegistry = {
@@ -146,23 +120,21 @@ describe('effects outbox', () => {
     expect(seen).toEqual([{ tool: 'send_roster', attempts: 1, summary: 'Send aetna roster to Slack' }]);
     const [row] = await db.select().from(toolEffects);
     expect(row.result).toEqual({ slack_ts: '1.2' });
-    await c();
   });
 
   it('leaves the result null when the sink returns nothing', async () => {
-    const { client, close: c } = await makeTestClient(factory);
+    const client = await connectSender();
     await client.callTool({ name: 'send_roster', arguments: { payer: 'aetna' } });
     const r = await dispatchStagedEffects(db, { slack: async () => {} }, { key: deps.encryptionKey });
     expect(r.dispatched).toBe(1);
     const [row] = await db.select().from(toolEffects);
     expect(row.result).toBeNull();
-    await c();
   });
 
   it('leaves a row alone when it changed state during dispatch, counting it conflicted', async () => {
-    const { client, close: c } = await makeTestClient(factory);
+    const client = await connectSender();
     const res = await client.callTool({ name: 'send_roster', arguments: { payer: 'aetna' } });
-    const out = (res.structuredContent as { result: { effect_id: string } }).result;
+    const out = resultOf<StageResult>(res);
     const sinks: SinkRegistry = {
       slack: async () => {
         await db.update(toolEffects).set({ status: 'cancelled' }).where(eq(toolEffects.id, out.effect_id));
@@ -174,16 +146,14 @@ describe('effects outbox', () => {
     const [row] = await db.select().from(toolEffects).where(eq(toolEffects.id, out.effect_id));
     expect(row.status).toBe('cancelled');
     expect(row.attempts).toBe(1);
-    await c();
   });
 
   it('skips effects whose sink is not registered and leaves them staged', async () => {
-    const { client, close: c } = await makeTestClient(factory);
+    const client = await connectSender();
     await client.callTool({ name: 'send_roster', arguments: { payer: 'aetna' } });
     const r = await dispatchStagedEffects(db, {}, { key: deps.encryptionKey });
     expect(r).toMatchObject({ skipped: 1, dispatched: 0 });
     const [row] = await db.select().from(toolEffects);
     expect(row.status).toBe('staged');
-    await c();
   });
 });
