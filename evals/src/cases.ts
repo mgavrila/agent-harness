@@ -60,20 +60,27 @@ export const INTAKE_DECLARED_TOOLS = [
   'providers_upsert',
 ] as const;
 
-export async function loadJsonl<T = unknown>(file: string): Promise<T[]> {
+/** A parsed row, carrying the 1-based file line it came from so a later
+ * validation error points at the same place a JSON error would. */
+interface JsonlRow<T> {
+  value: T;
+  line: number;
+}
+
+async function readJsonlRows<T>(file: string): Promise<JsonlRow<T>[]> {
   let text: string;
   try {
     text = await readFile(file, 'utf8');
   } catch {
     throw new Error(`cannot read case file ${file}`);
   }
-  const rows: T[] = [];
+  const rows: JsonlRow<T>[] = [];
   const lines = text.split('\n');
   for (let i = 0; i < lines.length; i += 1) {
     const line = lines[i].trim();
     if (line === '') continue;
     try {
-      rows.push(JSON.parse(line) as T);
+      rows.push({ value: JSON.parse(line) as T, line: i + 1 });
     } catch {
       throw new Error(`${path.basename(file)} line ${i + 1} is not valid JSON`);
     }
@@ -81,12 +88,18 @@ export async function loadJsonl<T = unknown>(file: string): Promise<T[]> {
   return rows;
 }
 
+export async function loadJsonl<T = unknown>(file: string): Promise<T[]> {
+  return (await readJsonlRows<T>(file)).map((r) => r.value);
+}
+
 const SPLITS = new Set(['text_layer', 'scan']);
 
 export async function loadExtractionCases(file: string): Promise<ExtractionCase[]> {
-  const rows = await loadJsonl<Partial<ExtractionCase>>(file);
-  return rows.map((row, i) => {
-    const where = `${path.basename(file)} row ${i + 1}`;
+  const rows = await readJsonlRows<Partial<ExtractionCase>>(file);
+  // The true file line, not a count of non-blank rows: a validation error and
+  // a JSON error in the same file must point a person at the same line.
+  return rows.map(({ value: row, line }) => {
+    const where = `${path.basename(file)} line ${line}`;
     if (typeof row.id !== 'string') throw new Error(`${where}: missing id`);
     if (typeof row.path !== 'string') throw new Error(`${where}: missing path`);
     if (typeof row.split !== 'string' || !SPLITS.has(row.split)) {
@@ -110,9 +123,9 @@ export async function loadExtractionCases(file: string): Promise<ExtractionCase[
 }
 
 export async function loadInjectionCases(file: string): Promise<InjectionCase[]> {
-  const rows = await loadJsonl<Partial<InjectionCase>>(file);
-  return rows.map((row, i) => {
-    const where = `${path.basename(file)} row ${i + 1}`;
+  const rows = await readJsonlRows<Partial<InjectionCase>>(file);
+  return rows.map(({ value: row, line }) => {
+    const where = `${path.basename(file)} line ${line}`;
     if (typeof row.id !== 'string') throw new Error(`${where}: missing id`);
     if (row.path !== undefined && typeof row.path !== 'string') throw new Error(`${where}: path must be a string`);
     return {

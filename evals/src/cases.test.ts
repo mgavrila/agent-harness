@@ -70,6 +70,17 @@ describe('loadExtractionCases', () => {
     await writeFile(bad, `${JSON.stringify({ id: 'x', kind: 'w9', split: 'photocopy', path: 'a.pdf', injection: false, expected: { fields: {}, credentials: [], restricted: [] } })}\n`, 'utf8');
     await expect(loadExtractionCases(bad)).rejects.toThrow(/split/);
   });
+
+  it('reports the true file line, so a blank line does not shift the number', async () => {
+    // loadJsonl reports file lines for a JSON error; counting non-blank rows
+    // here made the two disagree on any file with a blank line in it, and a
+    // corpus file is edited by hand.
+    const bad = path.join(dir, 'blank-then-bad.jsonl');
+    const good = JSON.stringify({ id: 'a', kind: 'w9', split: 'scan', path: 'a.pdf', expected: { fields: {} } });
+    const missingId = JSON.stringify({ kind: 'w9', split: 'scan', path: 'b.pdf', expected: { fields: {} } });
+    await writeFile(bad, [good, '', '   ', missingId].join('\n'), 'utf8');
+    await expect(loadExtractionCases(bad)).rejects.toThrow(/blank-then-bad\.jsonl line 4: missing id/);
+  });
 });
 
 describe('loadInjectionCases', () => {
