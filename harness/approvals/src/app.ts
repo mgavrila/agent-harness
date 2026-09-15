@@ -118,32 +118,37 @@ function report(approvalId: string, result: Awaited<ReturnType<typeof decideAppr
   }
 }
 
+/**
+ * Approve and Decline differ only in the decision they record, so they are
+ * registered from one definition: the authorization check, the id check and the
+ * swallow-and-log are the part that must not drift between the two buttons.
+ */
+function registerDecisionButton(
+  registry: HandlerRegistry,
+  deps: AppDeps,
+  actionId: string,
+  decision: 'approved' | 'declined',
+  label: string,
+): void {
+  registry.action(actionId, async ({ ack, userId, channel, value }) => {
+    await ackFirst(ack);
+    try {
+      if (!(await authorize(deps, channel, userId, value))) return;
+      if (!(await validId(deps, channel, userId, value))) return;
+      report(value, await decideApproval(deps, { approvalId: value, decision, decidedBy: userId }));
+    } catch (err) {
+      console.error(`approvals: ${label} handler failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  });
+}
+
 export function registerApprovalHandlers(registry: HandlerRegistry, deps: AppDeps): void {
   if (deps.allowedUsers.size === 0) {
     console.error('approvals: SLACK_ALLOWED_USERS is empty; all decisions are refused');
   }
 
-  registry.action(APPROVE_ACTION_ID, async ({ ack, userId, channel, value }) => {
-    await ackFirst(ack);
-    try {
-      if (!(await authorize(deps, channel, userId, value))) return;
-      if (!(await validId(deps, channel, userId, value))) return;
-      report(value, await decideApproval(deps, { approvalId: value, decision: 'approved', decidedBy: userId }));
-    } catch (err) {
-      console.error(`approvals: Approve handler failed: ${err instanceof Error ? err.message : String(err)}`);
-    }
-  });
-
-  registry.action(DECLINE_ACTION_ID, async ({ ack, userId, channel, value }) => {
-    await ackFirst(ack);
-    try {
-      if (!(await authorize(deps, channel, userId, value))) return;
-      if (!(await validId(deps, channel, userId, value))) return;
-      report(value, await decideApproval(deps, { approvalId: value, decision: 'declined', decidedBy: userId }));
-    } catch (err) {
-      console.error(`approvals: Decline handler failed: ${err instanceof Error ? err.message : String(err)}`);
-    }
-  });
+  registerDecisionButton(registry, deps, APPROVE_ACTION_ID, 'approved', 'Approve');
+  registerDecisionButton(registry, deps, DECLINE_ACTION_ID, 'declined', 'Decline');
 
   // Edit never releases anything: it opens a note box, and submitting it
   // declines with that note so the agent redoes the action and asks again.

@@ -7,7 +7,7 @@ import { outRoot } from '@harness/core-tools/storage';
 import { slackSinks } from './sinks.js';
 import { webClientApi } from './slack.js';
 import { createMcpCoreToolsClient } from './execute.js';
-import { coreToolsChildEnv } from './child-env.js';
+import { coreToolsChildEnv, requiredFrom } from './child-env.js';
 import { registerApprovalHandlers, parseAllowedUsers, type ActionArgs, type HandlerRegistry, type ViewArgs } from './app.js';
 import {
   EDIT_MODAL_CALLBACK_ID,
@@ -25,34 +25,35 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../
 loadEnv({ path: path.join(repoRoot, '.env'), quiet: true });
 
 function required(name: string): string {
-  const value = process.env[name];
-  if (!value || value.trim() === '') {
-    const hint = name.startsWith('APPROVALS_SLACK_') ? ' (the approvals app needs its own Slack app; see docs/runbook.md)' : '';
-    throw new Error(`${name} is not set${hint}`);
+  const hint = name.startsWith('APPROVALS_SLACK_') ? ' (the approvals app needs its own Slack app; see docs/runbook.md)' : '';
+  return requiredFrom(process.env, name, hint);
+}
+
+/**
+ * Read a numeric variable, falling back when it is unset or empty. A present
+ * but unparseable or out-of-range value is a configuration error and fails
+ * startup rather than silently becoming `NaN` — an unvalidated typo in a port
+ * makes `listen(NaN)` pick an arbitrary free port, and the process then looks
+ * healthy while nothing can reach it.
+ *
+ * One reader for every number this file takes from the environment, so no
+ * variable can be range-checked more loosely than its neighbour.
+ */
+function numberFromEnv(name: string, fallback: number, spec: { min: number; max: number; integer?: boolean; unit?: string }): number {
+  const raw = process.env[name];
+  if (!raw || raw.trim() === '') return fallback;
+  const value = Number(raw);
+  const wellFormed = spec.integer ? Number.isInteger(value) : Number.isFinite(value);
+  if (!wellFormed || value < spec.min || value > spec.max) {
+    const kind = spec.integer ? 'an integer ' : '';
+    throw new Error(`${name} must be ${kind}between ${spec.min} and ${spec.max}${spec.unit ? ` ${spec.unit}` : ''}`);
   }
   return value;
 }
 
-function seconds(name: string, fallback: number): number {
-  const raw = process.env[name];
-  if (!raw || raw.trim() === '') return fallback;
-  const value = Number(raw);
-  if (!Number.isFinite(value) || value < 1 || value > 86_400) throw new Error(`${name} must be between 1 and 86400 seconds`);
-  return value;
-}
+const seconds = (name: string, fallback: number): number => numberFromEnv(name, fallback, { min: 1, max: 86_400, unit: 'seconds' });
 
-/**
- * A TCP port, range-checked like every other numeric variable here. An
- * unvalidated typo becomes `NaN`, `listen(NaN)` picks an arbitrary free port,
- * and the process looks healthy while nothing can reach it.
- */
-function port(name: string, fallback: number): number {
-  const raw = process.env[name];
-  if (!raw || raw.trim() === '') return fallback;
-  const value = Number(raw);
-  if (!Number.isInteger(value) || value < 1 || value > 65_535) throw new Error(`${name} must be an integer between 1 and 65535`);
-  return value;
-}
+const port = (name: string, fallback: number): number => numberFromEnv(name, fallback, { min: 1, max: 65_535, integer: true });
 
 const client = process.env.HARNESS_CLIENT ?? 'default';
 const channel = required('SLACK_APPROVALS_CHANNEL');

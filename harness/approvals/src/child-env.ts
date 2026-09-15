@@ -14,7 +14,13 @@ export interface ChildEnvInput {
   storageRoot: string;
 }
 
-function requiredFrom(env: NodeJS.ProcessEnv, name: string, hint = ''): string {
+/**
+ * Read a variable that has no sensible default, or fail startup naming it.
+ * Shared with `main.ts`, which reads its own required variables the same way:
+ * an empty string has to count as unset in both, or a half-filled `.env` starts
+ * a process that fails later and further from the cause.
+ */
+export function requiredFrom(env: NodeJS.ProcessEnv, name: string, hint = ''): string {
   const value = env[name];
   if (!value || value.trim() === '') throw new Error(`${name} is not set${hint}`);
   return value;
