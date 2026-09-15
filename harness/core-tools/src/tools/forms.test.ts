@@ -3,10 +3,12 @@ import { mkdtemp, rm, writeFile, access, readFile, copyFile } from 'node:fs/prom
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { and, eq } from 'drizzle-orm';
-import { auditLog, credentials, fields, providers } from '@harness/db';
-import { useTestDb, makeTestDeps, connectTools, resultOf } from '../testing.js';
+import { auditLog, credentials, fields, providers, approvals, toolEffects } from '@harness/db';
+import { useTestDb, makeTestDeps, connectTools, resultOf, approvalIdOf } from '../testing.js';
 import { defaultFormsDir } from '../forms/templates.js';
 import { formTools } from './forms.js';
+import { approvalTools } from './approvals.js';
+import { ROSTER_COLUMNS } from '../forms/roster.js';
 import type { ToolDeps } from '../registry.js';
 
 const eqField = (providerId: string, name: string) => and(eq(fields.providerId, providerId), eq(fields.name, name));
@@ -228,5 +230,101 @@ describe('forms_fill', () => {
     expect(textOf(res)).toContain('field:dea_number');
     expect(textOf(res)).toContain('restricted');
     await rm(badDir, { recursive: true, force: true });
+  });
+});
+
+describe('forms_roster', () => {
+  it('writes a CSV with the documented columns and one row per provider', async () => {
+    const first = await seedCompleteProvider();
+    const [second] = await db.insert(providers).values({ client: 'test', name: 'Dr. Bo Lin', npi: '1987654320' }).returning();
+    const client = await connectTools('forms-test', formTools, deps);
+    const out = resultOf<{ file_id: string; rows: number; columns: string[] }>(
+      await client.callTool({ name: 'forms_roster', arguments: { payer_id: 'aetna', provider_ids: [first, second.id] } }),
+    );
+    expect(out.rows).toBe(2);
+    expect(out.columns).toEqual([...ROSTER_COLUMNS]);
+    expect(out.file_id).toMatch(/^roster\/aetna-[0-9a-f]{12}\.csv$/);
+    const csv = await readFile(path.join(storageDir, 'out', out.file_id), 'utf8');
+    expect(csv.split('\n')[0]).toBe(ROSTER_COLUMNS.join(','));
+    expect(csv).toContain('Dr. Ada Reyes');
+    expect(csv).toContain('Dr. Bo Lin');
+  });
+
+  it('reports a licence as on file without exporting the number', async () => {
+    const providerId = await seedCompleteProvider();
+    const client = await connectTools('forms-test', formTools, deps);
+    const out = resultOf<{ file_id: string }>(
+      await client.callTool({ name: 'forms_roster', arguments: { payer_id: 'aetna', provider_ids: [providerId] } }),
+    );
+    const csv = await readFile(path.join(storageDir, 'out', out.file_id), 'utf8');
+    expect(csv).toContain(',yes,no,');
+    expect(csv).not.toContain('enc');
+  });
+
+  it('refuses a provider that belongs to another client and writes nothing', async () => {
+    const mine = await seedCompleteProvider();
+    const [theirs] = await db.insert(providers).values({ client: 'other-clinic', name: 'Dr. Elsewhere' }).returning();
+    const client = await connectTools('forms-test', formTools, deps);
+    const res = await client.callTool({
+      name: 'forms_roster',
+      arguments: { payer_id: 'aetna', provider_ids: [mine, theirs.id] },
+    });
+    expect(res.isError).toBe(true);
+    await expect(access(path.join(storageDir, 'out', 'roster'))).rejects.toThrow();
+  });
+});
+
+describe('forms_release', () => {
+  it('parks an approval instead of sending, and stages nothing yet', async () => {
+    const providerId = await seedCompleteProvider();
+    const client = await connectTools('forms-test', [...formTools, ...approvalTools], deps);
+    const filled = resultOf<{ file_id: string }>(
+      await client.callTool({
+        name: 'forms_fill',
+        arguments: { template_id: 'state-license-renewal-cover', provider_id: providerId },
+      }),
+    );
+    const res = await client.callTool({ name: 'forms_release', arguments: { file_id: filled.file_id } });
+    const approvalId = approvalIdOf(res);
+    expect(approvalId).toBeTruthy();
+    expect(await db.select().from(toolEffects)).toHaveLength(0);
+    const [row] = await db.select().from(approvals);
+    expect(row.action).toBe('forms_release');
+    expect(row.status).toBe('pending');
+  });
+
+  it('stages exactly one slack_file effect when the approval is executed', async () => {
+    const providerId = await seedCompleteProvider();
+    const client = await connectTools('forms-test', [...formTools, ...approvalTools], deps);
+    const filled = resultOf<{ file_id: string }>(
+      await client.callTool({
+        name: 'forms_fill',
+        arguments: { template_id: 'state-license-renewal-cover', provider_id: providerId },
+      }),
+    );
+    const approvalId = approvalIdOf(await client.callTool({ name: 'forms_release', arguments: { file_id: filled.file_id } }));
+    await db.update(approvals).set({ status: 'approved', decidedBy: 'U1', decidedAt: deps.now() }).where(eq(approvals.id, approvalId));
+
+    await client.callTool({ name: 'approvals_execute', arguments: { approval_id: approvalId } });
+    const effects = await db.select().from(toolEffects);
+    expect(effects).toHaveLength(1);
+    expect(effects[0]).toMatchObject({ sink: 'slack_file', tool: 'forms_release', status: 'staged', client: 'test' });
+    expect(effects[0].idempotencyKey).toBe(`test:forms_release:${filled.file_id}`);
+    expect(effects[0].summary).not.toContain(storageDir);
+  });
+
+  it('refuses a file id that escapes the output directory', async () => {
+    const strict = makeTestDeps(db, { storageDir, formsDir: defaultFormsDir(), policy: { ...deps.policy, external: 'auto' } });
+    const client = await connectTools('forms-test', [...formTools, ...approvalTools], strict);
+    const res = await client.callTool({ name: 'forms_release', arguments: { file_id: '../../etc/passwd' } });
+    expect(res.isError).toBe(true);
+    expect(await db.select().from(approvals)).toHaveLength(0);
+  });
+
+  it('refuses a file id that does not exist', async () => {
+    const strict = makeTestDeps(db, { storageDir, formsDir: defaultFormsDir(), policy: { ...deps.policy, external: 'auto' } });
+    const client = await connectTools('forms-test', [...formTools, ...approvalTools], strict);
+    const res = await client.callTool({ name: 'forms_release', arguments: { file_id: 'forms/never-written-000000000000.pdf' } });
+    expect(res.isError).toBe(true);
   });
 });

@@ -5,7 +5,9 @@
   "type": "module",
   "exports": {
     ".": "./src/server.ts",
-    "./testing": "./src/testing.ts"
+    "./testing": "./src/testing.ts",
+    "./effects": "./src/effects.ts",
+    "./reconcile": "./src/reconcile.ts"
   },
   "scripts": {
     "test": "vitest run",
