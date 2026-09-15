@@ -108,6 +108,18 @@ describe('judgeFreeText', () => {
     expect(gateway.calls).toHaveLength(before);
   });
 
+  it('refuses to call the judge when a value carries an unredacted identifier', async () => {
+    // The last gate, run over the exact messages about to go out. Nothing is
+    // expected to reach it — no restricted field survives the filter above —
+    // but a value that arrived from somewhere the filter does not cover must
+    // stop the call, not be downgraded to "judge unavailable" and swallowed.
+    const before = gateway.calls.length;
+    await expect(
+      judgeFreeText(deps, [item({ field: 'practice_name', actual: 'Riverside, SSN 123-45-6789' })]),
+    ).rejects.toThrow(/not redacted/);
+    expect(gateway.calls).toHaveLength(before);
+  });
+
   it('counts a pair the model skipped as a miss rather than a match', async () => {
     gateway.setResponder(() => ({ content: JSON.stringify({ verdicts: [VERDICT(0, true)] }) }));
     const result = await judgeFreeText(deps, [item(), item({ split: 'scan' })]);

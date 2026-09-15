@@ -114,3 +114,4 @@ export {
   type Responder,
 } from './fake-gateway.js';
 export { MASKED, isRestrictedName } from './tools/providers.js';
+export { assertRedacted } from './documents/redact.js';

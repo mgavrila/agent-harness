@@ -1,5 +1,5 @@
 import * as z from 'zod/v4';
-import { callModelJson, isRestrictedName, type ToolDeps } from '@harness/core-tools';
+import { assertRedacted, callModelJson, isRestrictedName, type ToolDeps } from '@harness/core-tools';
 
 /**
  * Fields where a string comparison is the wrong instrument. "Riverside Family
@@ -122,15 +122,25 @@ export async function judgeFreeText(deps: ToolDeps, items: JudgeItem[]): Promise
     .map((it, i) => `${i}. field=${it.field}\n   expected: ${JSON.stringify(it.expected)}\n   actual:   ${JSON.stringify(it.actual)}`)
     .join('\n');
 
+  const messages = [
+    { role: 'system' as const, content: SYSTEM },
+    { role: 'user' as const, content: `Judge these ${safe.length} pairs.\n\n${listing}` },
+  ];
+  // The same last gate every other prompt builder on the branch runs, over the
+  // exact messages about to go out. Nothing here is expected to trip it —
+  // FREE_TEXT_FIELDS holds no restricted name, a masked value arrives as null,
+  // and isRestrictedName filtered the batch above — but the invariant is
+  // stated unconditionally, so it is checked rather than reasoned about. It
+  // throws a plain Error, not a ToolError: a hole in redaction is not
+  // something to report to a model.
+  for (const m of messages) assertRedacted(m.content);
+
   let raw: { index: number; same: boolean; why: string }[];
   try {
     const { json } = await callModelJson(deps, {
       route: 'judge',
       temperature: 0,
-      messages: [
-        { role: 'system', content: SYSTEM },
-        { role: 'user', content: `Judge these ${safe.length} pairs.\n\n${listing}` },
-      ],
+      messages,
       jsonSchema: { name: 'extraction_verdicts', schema: JUDGE_SCHEMA },
       validate: JudgeReply,
     });
