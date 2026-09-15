@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import { eq, sql } from 'drizzle-orm';
 import { createDb, type Db } from './client.js';
-import { providers, auditLog } from './schema.js';
+import { providers, auditLog, toolEffects } from './schema.js';
 import { TEST_DATABASE_URL, resetDatabase } from './testing.js';
 
 let db: Db;
@@ -49,5 +49,20 @@ describe('schema', () => {
     const err: any = await db.execute(sql`TRUNCATE TABLE audit_log`).catch((e) => e);
     expect(String(err?.cause?.message ?? err?.message ?? err)).toMatch(/append-only/);
     expect(await db.select().from(auditLog)).toHaveLength(1);
+  });
+
+  it('stores a tool effect and an audit row with lineage fields', async () => {
+    const [effect] = await db.insert(toolEffects).values({
+      client: 'test', tool: 'send_file', sink: 'slack', idempotencyKey: 'k1',
+      payloadEncrypted: Buffer.from('x'), summary: 'send roster',
+    }).returning();
+    expect(effect.status).toBe('staged');
+    expect(effect.attempts).toBe(0);
+    const [row] = await db.insert(auditLog).values({
+      client: 'test', caller: 'c', tool: 't', actionClass: 'read', argsHash: 'h', decision: 'auto',
+      skill: 'credentialing-intake', skillVersion: '1.0.0', derivedFrom: [effect.id], inputTokens: 10, outputTokens: 5, costUsd: 0.001,
+    }).returning();
+    expect(row.derivedFrom).toEqual([effect.id]);
+    expect(row.skill).toBe('credentialing-intake');
   });
 });

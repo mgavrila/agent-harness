@@ -84,6 +84,7 @@ export const approvals = pgTable('approvals', {
   decidedBy: text('decided_by'),
   decidedAt: timestamp('decided_at', { withTimezone: true }),
   decisionNote: text('decision_note'),
+  executedAt: timestamp('executed_at', { withTimezone: true }),
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
   idempotencyKey: text('idempotency_key').notNull(),
   slackChannel: text('slack_channel'),
@@ -103,6 +104,32 @@ export const runs = pgTable('runs', {
   startedAt: timestamp('started_at', { withTimezone: true }).notNull().defaultNow(),
   endedAt: timestamp('ended_at', { withTimezone: true }),
 });
+
+/**
+ * Outbox for external side effects (Slack messages, file uploads, emails).
+ * A handler stages a row inside its transaction; a dispatcher sends it after
+ * commit, keyed by idempotency_key so a crash never double-sends. Rows that
+ * cannot be resolved automatically are parked as needs_review.
+ */
+export const toolEffects = pgTable('tool_effects', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  runId: uuid('run_id').references(() => runs.id),
+  client: text('client').notNull(),
+  tool: text('tool').notNull(),
+  sink: text('sink').notNull(),
+  idempotencyKey: text('idempotency_key').notNull(),
+  payloadEncrypted: bytea('payload_encrypted').notNull(),
+  summary: text('summary').notNull(),
+  status: text('status').notNull().default('staged'),
+  attempts: integer('attempts').notNull().default(0),
+  lastError: text('last_error'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  dispatchedAt: timestamp('dispatched_at', { withTimezone: true }),
+}, (t) => [
+  uniqueIndex('tool_effects_idempotency_uq').on(t.idempotencyKey),
+  index('tool_effects_status_created_idx').on(t.status, t.createdAt),
+]);
 
 export const modelCalls = pgTable('model_calls', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -128,6 +155,12 @@ export const auditLog = pgTable('audit_log', {
   decision: text('decision').notNull(),
   approvalId: uuid('approval_id').references(() => approvals.id),
   error: text('error'),
+  skill: text('skill'),
+  skillVersion: text('skill_version'),
+  inputTokens: integer('input_tokens'),
+  outputTokens: integer('output_tokens'),
+  costUsd: real('cost_usd'),
+  derivedFrom: jsonb('derived_from').$type<string[]>().notNull().default([]),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [
   index('audit_log_tool_created_idx').on(t.tool, t.createdAt),
