@@ -1,0 +1,32 @@
+{
+  "$comment": "Extraction manifest for the healthcare credentialing pack. This is NOT a JSON Schema: buildExtractionSchema() in harness/core-tools/src/documents/extract.ts expands it into the inlined JSON Schema sent to the model as response_format. A manifest is used because structured-output support across providers is unreliable with $ref and $defs, and because restricted fields must be dropped from the model-facing schema while staying part of the record.",
+  "version": "1.0.0",
+  "fields": [
+    { "name": "first_name", "type": "string", "description": "The provider's legal given name, as printed on the document." },
+    { "name": "middle_name", "type": "string", "description": "Middle name or initial, if printed." },
+    { "name": "last_name", "type": "string", "description": "The provider's legal family name." },
+    { "name": "suffix", "type": "string", "description": "Generational or degree suffix printed after the name, such as MD, DO or Jr." },
+    { "name": "npi", "type": "string", "description": "Ten-digit National Provider Identifier. Digits only, no spaces." },
+    { "name": "date_of_birth", "type": "string", "description": "Date of birth in YYYY-MM-DD form." },
+    { "name": "email", "type": "string", "description": "Contact email address." },
+    { "name": "phone", "type": "string", "description": "Contact telephone number as printed." },
+    { "name": "practice_name", "type": "string", "description": "Name of the practice, group or employer." },
+    { "name": "practice_address", "type": "string", "description": "Street address of the practice, on one line." },
+    { "name": "specialty", "type": "string", "description": "Primary clinical specialty." },
+    { "name": "medical_school", "type": "string", "description": "Degree-granting medical school." },
+    { "name": "graduation_year", "type": "string", "description": "Four-digit year of graduation." },
+    { "name": "malpractice_carrier", "type": "string", "description": "Name of the malpractice insurance carrier." },
+    { "name": "malpractice_coverage", "type": "string", "description": "Per-occurrence and aggregate coverage as printed, e.g. $1,000,000 / $3,000,000." },
+
+    { "name": "ssn", "type": "string", "restricted": true, "source": "redaction", "description": "Social Security Number. Never requested from a model; filled from the redaction pass." },
+    { "name": "ein", "type": "string", "restricted": true, "source": "redaction", "description": "Employer Identification Number. Never requested from a model; filled from the redaction pass." },
+    { "name": "dea_number", "type": "string", "restricted": true, "source": "redaction", "description": "DEA registration number. Never requested from a model; filled from the redaction pass." }
+  ],
+  "credentials": [
+    { "kind": "license", "description": "A state medical licence.", "number_restricted": true, "properties": ["state", "issuer", "issued_at", "expires_at"] },
+    { "kind": "dea", "description": "A DEA controlled-substance registration.", "number_restricted": true, "properties": ["state", "issuer", "issued_at", "expires_at"] },
+    { "kind": "malpractice", "description": "A malpractice insurance certificate.", "number_restricted": true, "properties": ["issuer", "issued_at", "expires_at"] },
+    { "kind": "board_cert", "description": "A specialty board certification.", "number_restricted": true, "properties": ["issuer", "issued_at", "expires_at"] }
+  ],
+  "document_kinds": ["state_license", "dea_certificate", "malpractice_certificate", "w9", "other"]
+}

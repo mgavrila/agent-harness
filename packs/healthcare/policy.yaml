@@ -1,0 +1,14 @@
+# Default action-class policy for a healthcare credentialing deployment.
+# A client overrides it with clients/<name>/policy.yaml; see
+# harness/core-tools/src/policy.ts for how the two are merged.
+classes:
+  # Reading records, deadlines, the audit log, and public registry lookups.
+  read: auto
+  # Writing to our own Postgres. Reversible and fully audited.
+  write.internal: auto
+  # Anything that leaves the building: a roster to a payer, a file to Slack.
+  external: approval
+  # Moving money. Not part of credentialing at all.
+  financial: blocked
+  # Deleting or overwriting a record beyond repair.
+  destructive: approval
