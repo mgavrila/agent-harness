@@ -23,7 +23,7 @@ harness/     model gateway config, core tools MCP server, approvals app, db, com
 packs/       healthcare/
 clients/     demo-practice/
 evals/       runner and judges
-scripts/     new-client.py
+scripts/     new-client.ts
 docs/        specs, ADRs, runbook
 ```
 
@@ -43,3 +43,15 @@ Inspect the tools interactively:
 ```bash
 npx @modelcontextprotocol/inspector pnpm --filter @harness/core-tools start
 ```
+
+## Run the demo practice
+
+```bash
+cp clients/demo-practice/.env.example .env     # then fill in the blanks
+pnpm install
+pnpm db:up && pnpm db:migrate
+pnpm demo:up
+```
+
+`docs/demo.md` is the five-minute script. `docs/runbook.md` covers the
+operational side: effects outbox, approvals app, playbooks, and storage.

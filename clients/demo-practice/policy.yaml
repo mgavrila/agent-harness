@@ -1,0 +1,14 @@
+# Action-class policy for demo-practice. Read by @harness/core-tools through
+# HARNESS_POLICY_FILE. Any class left out keeps the built-in default.
+#
+#   read           every query tool
+#   write.internal every record-store write, including forms_fill and forms_roster
+#   external       anything that leaves the harness: forms_release
+#   financial      nothing yet; blocked so a future tool cannot slip through
+#   destructive    nothing yet; parked for a human if one appears
+classes:
+  read: auto
+  write.internal: auto
+  external: approval
+  financial: blocked
+  destructive: approval
