@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import * as z from 'zod/v4';
 import { McpServer } from '@modelcontextprotocol/server';
 import { eq } from 'drizzle-orm';
-import { approvals, auditLog, decrypt, type Db } from '@harness/db';
+import { approvals, auditLog, decrypt, providers, type Db } from '@harness/db';
 import { defineTool, registerTools, ToolError } from './registry.js';
 import { makeTestDeps, makeTestClient, openTestDb } from './testing.js';
 
@@ -71,6 +71,30 @@ const boomToolError = defineTool({
   },
 });
 
+const writeThenThrow = defineTool({
+  name: 'write_then_throw',
+  description: 'Inserts a provider row then throws (auto class)',
+  actionClass: 'write.internal',
+  input: z.object({ name: z.string() }),
+  output: z.object({}),
+  handler: async ({ name }, deps) => {
+    await deps.db.insert(providers).values({ client: deps.client, name });
+    throw new ToolError('rolled back on purpose');
+  },
+});
+
+const writeOk = defineTool({
+  name: 'write_ok',
+  description: 'Inserts a provider row (auto class)',
+  actionClass: 'write.internal',
+  input: z.object({ name: z.string() }),
+  output: z.object({ ok: z.boolean() }),
+  handler: async ({ name }, deps) => {
+    await deps.db.insert(providers).values({ client: deps.client, name });
+    return { ok: true };
+  },
+});
+
 let db: Db;
 let close: () => Promise<void>;
 let reset: () => Promise<void>;
@@ -87,7 +111,7 @@ beforeEach(async () => {
 
 function factory() {
   const server = new McpServer({ name: 'registry-test', version: '0.0.0' });
-  registerTools(server, [echo, sendExternal, pay, boom, boomToolError], makeTestDeps(db));
+  registerTools(server, [echo, sendExternal, pay, boom, boomToolError, writeThenThrow, writeOk], makeTestDeps(db));
   return server;
 }
 
@@ -256,6 +280,29 @@ describe('registerTools', () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ tool: 'send_external', decision: 'error' });
     expect(rows[0].error).toContain('clock down');
+    await c();
+  });
+
+  it('rolls back handler writes when the handler throws, and still audits the error', async () => {
+    const { client, close: c } = await makeTestClient(factory);
+    const res = await client.callTool({ name: 'write_then_throw', arguments: { name: 'Dr. Rollback' } });
+    expect(res.isError).toBe(true);
+    expect(textOf(res)).toContain('rolled back on purpose');
+    expect(await db.select().from(providers)).toHaveLength(0);
+    const audits = await db.select().from(auditLog);
+    expect(audits).toHaveLength(1);
+    expect(audits[0]).toMatchObject({ tool: 'write_then_throw', decision: 'error', error: 'rolled back on purpose' });
+    await c();
+  });
+
+  it('commits handler writes together with the audit row', async () => {
+    const { client, close: c } = await makeTestClient(factory);
+    const res = await client.callTool({ name: 'write_ok', arguments: { name: 'Dr. Commit' } });
+    expect(res.structuredContent).toEqual({ status: 'ok', result: { ok: true } });
+    expect(await db.select().from(providers)).toHaveLength(1);
+    const audits = await db.select().from(auditLog);
+    expect(audits).toHaveLength(1);
+    expect(audits[0]).toMatchObject({ tool: 'write_ok', decision: 'auto' });
     await c();
   });
 });

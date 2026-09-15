@@ -1,7 +1,7 @@
 import * as z from 'zod/v4';
 import type { McpServer } from '@modelcontextprotocol/server';
 import { and, eq, sql } from 'drizzle-orm';
-import { approvals, encrypt, type Db } from '@harness/db';
+import { approvals, encrypt, withTransaction, type Db } from '@harness/db';
 import { decide, type ActionClass, type Policy } from './policy.js';
 import { hashArgs, writeAudit, type AuditEntry } from './audit.js';
 
@@ -146,8 +146,11 @@ export function registerTools(server: McpServer, tools: AnyToolDef[], deps: Tool
 
         if (behavior === 'approval') {
           try {
-            const row = await createOrReuseApproval(deps.db, deps, tool, args, argsHash);
-            await writeAudit(deps.db, { ...base, decision: 'approval', approvalId: row.id });
+            const row = await withTransaction(deps.db, async (tx) => {
+              const parked = await createOrReuseApproval(tx, deps, tool, args, argsHash);
+              await writeAudit(tx, { ...base, decision: 'approval', approvalId: parked.id });
+              return parked;
+            });
             const structured = { status: 'pending' as const, approval_id: row.id };
             return { ...textResult(structured), structuredContent: structured };
           } catch (err) {
@@ -156,8 +159,12 @@ export function registerTools(server: McpServer, tools: AnyToolDef[], deps: Tool
         }
 
         try {
-          const result = await tool.handler(args, deps);
-          await writeAudit(deps.db, { ...base, decision: 'auto', recordIds: tool.recordIds?.(args, result) ?? [] });
+          const result = await withTransaction(deps.db, async (tx) => {
+            const txDeps: ToolDeps = { ...deps, db: tx };
+            const out = await tool.handler(args, txDeps);
+            await writeAudit(tx, { ...base, decision: 'auto', recordIds: tool.recordIds?.(args, out) ?? [] });
+            return out;
+          });
           const structured = { status: 'ok' as const, result };
           return { ...textResult(structured), structuredContent: structured };
         } catch (err) {
@@ -165,8 +172,6 @@ export function registerTools(server: McpServer, tools: AnyToolDef[], deps: Tool
           try {
             await writeAudit(deps.db, { ...base, decision: 'error', error: message });
           } catch (auditErr) {
-            // The handler failed and we could not record why. Fall back to the
-            // guarded path so the callback still returns instead of throwing.
             return await handleUnexpectedError(deps.db, tool, base, auditErr);
           }
           const text =
