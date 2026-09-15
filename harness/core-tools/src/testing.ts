@@ -16,6 +16,8 @@ export function makeTestDeps(db: Db, overrides: Partial<ToolDeps> = {}): ToolDep
     now: () => new Date('2026-09-15T12:00:00Z'),
     approvalTtlHours: 24,
     confidenceThreshold: 0.85,
+    sinks: {},
+    context: {},
     ...overrides,
   };
 }

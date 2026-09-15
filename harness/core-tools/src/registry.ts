@@ -4,12 +4,21 @@ import { and, eq, sql } from 'drizzle-orm';
 import { approvals, encrypt, withTransaction, type Db } from '@harness/db';
 import { decide, type ActionClass, type Policy } from './policy.js';
 import { hashArgs, writeAudit, type AuditEntry } from './audit.js';
+import type { SinkRegistry } from './effects.js';
 
 export class ToolError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'ToolError';
   }
+}
+
+export interface SessionContext {
+  runId?: string;
+  skill?: string;
+  skillVersion?: string;
+  /** Name of the tool currently executing; set by the registry before calling a handler. */
+  tool?: string;
 }
 
 export interface ToolDeps {
@@ -21,6 +30,9 @@ export interface ToolDeps {
   now: () => Date;
   approvalTtlHours: number;
   confidenceThreshold: number;
+  /** External-effect senders keyed by sink name (e.g. 'slack'). Empty in Plan 1.1; Plan 3 registers real ones. */
+  sinks: SinkRegistry;
+  context: SessionContext;
 }
 
 export interface ToolDef<I extends z.ZodObject, O extends z.ZodObject> {
@@ -160,7 +172,7 @@ export function registerTools(server: McpServer, tools: AnyToolDef[], deps: Tool
 
         try {
           const result = await withTransaction(deps.db, async (tx) => {
-            const txDeps: ToolDeps = { ...deps, db: tx };
+            const txDeps: ToolDeps = { ...deps, db: tx, context: { ...deps.context, tool: tool.name } };
             const out = await tool.handler(args, txDeps);
             await writeAudit(tx, { ...base, decision: 'auto', recordIds: tool.recordIds?.(args, out) ?? [] });
             return out;

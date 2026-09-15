@@ -40,6 +40,8 @@ export async function buildDepsFromEnv(): Promise<{ deps: ToolDeps; close: () =>
     now: () => new Date(),
     approvalTtlHours: numberFromEnv('APPROVAL_TTL_HOURS', 24, { min: 1, max: 720 }),
     confidenceThreshold: numberFromEnv('CONFIDENCE_THRESHOLD', 0.85, { min: 0, max: 1 }),
+    sinks: {},
+    context: {},
   };
   return { deps, close };
 }
