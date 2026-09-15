@@ -1,3 +1,10 @@
+# The harness stack.
+#
+# `postgres` has no profile, so it starts with a bare `docker compose up`.
+# Everything else is in the `demo` profile: `pnpm demo:up` brings up the whole
+# client instance. The LiteLLM `gateway` service is defined by the model-gateway
+# plan; until it lands, Hermes starts and every model call fails, which is
+# visible in the gateway logs rather than silent.
 services:
   postgres:
     image: postgres:16
@@ -16,5 +23,113 @@ services:
       timeout: 3s
       retries: 10
 
+  # Seeds the Hermes data volume from the client folder. SOUL.md and config.yaml
+  # are ours and are rewritten on every start; the cron directory is Hermes's
+  # own and is only ever added to, so its job records survive a redeploy.
+  hermes-init:
+    image: busybox:1.37
+    profiles: ["demo"]
+    user: "0:0"
+    volumes:
+      - hermesdata:/data
+      - ../../clients/demo-practice:/srv/client:ro
+      - ../../.env:/srv/env/.env:ro
+    environment:
+      HERMES_UID: "${HERMES_UID:-1000}"
+      HERMES_GID: "${HERMES_GID:-1000}"
+    command:
+      - sh
+      - -c
+      - |
+        set -eu
+        mkdir -p /data/cron /data/scripts
+        cp /srv/client/SOUL.md /data/SOUL.md
+        cp /srv/client/hermes.config.yaml /data/config.yaml
+        cp /srv/client/cron/playbooks.sh /data/cron/playbooks.sh
+        cp /srv/client/scripts/*.sh /data/scripts/
+        chmod +x /data/cron/playbooks.sh /data/scripts/*.sh
+        # Hermes reads secrets from $$HERMES_HOME/.env; the process environment
+        # carries them too, and whichever it prefers, both agree.
+        cp /srv/env/.env /data/.env
+        chmod 600 /data/.env
+        # jobs.json is deliberately NOT seeded: its record shape is not
+        # documented, and Hermes creates it on the first `hermes cron create`.
+        # $$-escaped: these must reach the container's own shell unexpanded,
+        # not be interpolated by Compose itself when it parses this file (that
+        # would use the host/.env value instead of this service's own
+        # environment: block below, and blank out to "chown -R \":\"" when
+        # HERMES_UID/HERMES_GID are not set on the host).
+        chown -R "$${HERMES_UID}:$${HERMES_GID}" /data
+        echo "hermes-init: seeded SOUL.md, config.yaml, cron/playbooks.sh and scripts/"
+
+  hermes:
+    build:
+      context: ../..
+      dockerfile: harness/compose/hermes.Dockerfile
+    image: harness-hermes
+    profiles: ["demo"]
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      hermes-init:
+        condition: service_completed_successfully
+    env_file:
+      - ../../.env
+    environment:
+      # These override the .env values, which point at the host from a shell.
+      HERMES_UID: "${HERMES_UID:-1000}"
+      HERMES_GID: "${HERMES_GID:-1000}"
+      DATABASE_URL: "postgres://harness:harness@postgres:5432/harness"
+      HARNESS_STORAGE_DIR: "/srv/harness-storage"
+      HARNESS_FORMS_DIR: "/srv/agent-harness/packs/healthcare/forms"
+      HARNESS_POLICY_FILE: "/srv/agent-harness/clients/demo-practice/policy.yaml"
+    volumes:
+      - hermesdata:/opt/data
+      - storage:/srv/harness-storage
+      # Content is editable without a rebuild; code is not.
+      - ../../packs:/srv/agent-harness/packs:ro
+      - ../../clients:/srv/agent-harness/clients:ro
+      # terminal.backend is docker, so Hermes needs a Docker endpoint. This is
+      # root-equivalent access to the host: the Slack toolset has no terminal
+      # (see platform_toolsets in hermes.config.yaml), so only an operator on
+      # the CLI surface can reach it. Remove this mount and set
+      # terminal.backend to "local" if that trade is not acceptable.
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: ["gateway", "run"]
+
+  approvals:
+    build:
+      context: ../..
+      dockerfile: harness/compose/node.Dockerfile
+    image: harness-approvals
+    profiles: ["demo"]
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - ../../.env
+    environment:
+      DATABASE_URL: "postgres://harness:harness@postgres:5432/harness"
+      HARNESS_STORAGE_DIR: "/srv/harness-storage"
+      HARNESS_FORMS_DIR: "/srv/agent-harness/packs/healthcare/forms"
+      HARNESS_POLICY_FILE: "/srv/agent-harness/clients/demo-practice/policy.yaml"
+      APPROVALS_HEALTH_PORT: "8787"
+    ports:
+      # Localhost only: the health endpoint is for the watchdogs, not the LAN.
+      # The host side is configurable because 8787 is not always free on the
+      # operator's machine; the container always listens on 8787.
+      - "127.0.0.1:${APPROVALS_HEALTH_HOST_PORT:-8787}:8787"
+    volumes:
+      # The same named volume as hermes: core-tools writes the file there and
+      # the Slack sink reads it back. Drifting mounts are the usual cause of an
+      # upload failing with ENOENT.
+      - storage:/srv/harness-storage
+      - ../../packs:/srv/agent-harness/packs:ro
+      - ../../clients:/srv/agent-harness/clients:ro
+
 volumes:
   pgdata: {}
+  hermesdata: {}
+  storage: {}
