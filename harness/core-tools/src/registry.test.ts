@@ -1,8 +1,9 @@
+import { randomUUID } from 'node:crypto';
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import * as z from 'zod/v4';
 import { McpServer } from '@modelcontextprotocol/server';
 import { eq } from 'drizzle-orm';
-import { approvals, auditLog, decrypt, providers, type Db } from '@harness/db';
+import { approvals, auditLog, decrypt, providers, runs, type Db } from '@harness/db';
 import { defineTool, registerTools, ToolError } from './registry.js';
 import { makeTestDeps, makeTestClient, openTestDb } from './testing.js';
 
@@ -80,6 +81,21 @@ const writeThenThrow = defineTool({
   handler: async ({ name }, deps) => {
     await deps.db.insert(providers).values({ client: deps.client, name });
     throw new ToolError('rolled back on purpose');
+  },
+});
+
+const mutateContextThenThrow = defineTool({
+  name: 'mutate_context_then_throw',
+  description: 'Mutates session context then throws to force a rollback',
+  actionClass: 'write.internal',
+  input: z.object({}),
+  output: z.object({}),
+  handler: async (_args, d) => {
+    const runId = randomUUID();
+    d.context.runId = runId;
+    d.context.skill = 'ghost-skill';
+    await d.db.insert(runs).values({ id: runId, client: d.client, caller: d.caller });
+    throw new ToolError('rolled back after mutating context');
   },
 });
 
@@ -303,6 +319,28 @@ describe('registerTools', () => {
     const audits = await db.select().from(auditLog);
     expect(audits).toHaveLength(1);
     expect(audits[0]).toMatchObject({ tool: 'write_ok', decision: 'auto' });
+    await c();
+  });
+
+  it('restores session context when a tool transaction rolls back', async () => {
+    const deps = makeTestDeps(db);
+    const { client, close: c } = await makeTestClient(() => {
+      const server = new McpServer({ name: 'registry-test-context-rollback', version: '0.0.0' });
+      registerTools(server, [mutateContextThenThrow, echo], deps);
+      return server;
+    });
+
+    const res = await client.callTool({ name: 'mutate_context_then_throw', arguments: {} });
+    expect(res.isError).toBe(true);
+    expect(deps.context.runId).toBeUndefined();
+    expect(deps.context.skill).toBeUndefined();
+    expect(await db.select().from(runs)).toHaveLength(0);
+
+    const echoRes = await client.callTool({ name: 'echo_read', arguments: { text: 'hi' } });
+    expect(echoRes.isError).toBeFalsy();
+    const rows = await db.select().from(auditLog);
+    const echoAudit = rows.find((r) => r.tool === 'echo_read')!;
+    expect(echoAudit.runId).toBeNull();
     await c();
   });
 });

@@ -142,6 +142,22 @@ async function handleUnexpectedError(db: Db, tool: AnyToolDef, base: AuditBase, 
   return textResult(`Tool ${tool.name} could not be processed (internal error; see audit log).`, true);
 }
 
+/**
+ * Undo in-place mutations a handler made to the shared session context when
+ * its transaction did not commit. A handler (e.g. `harness_set_context`) may
+ * set `deps.context.runId` and insert the matching `runs` row in the same
+ * transaction; if that transaction rolls back (a later write throws, the
+ * audit write fails, etc.) the in-memory context must not keep pointing at a
+ * row that was never persisted, or every later audit write would fail the
+ * `audit_log.run_id` foreign key.
+ */
+function restoreContext(target: SessionContext, snapshot: SessionContext): void {
+  for (const key of Object.keys(target) as (keyof SessionContext)[]) {
+    if (!(key in snapshot)) delete target[key];
+  }
+  Object.assign(target, snapshot);
+}
+
 export function registerTools(server: McpServer, tools: AnyToolDef[], deps: ToolDeps): void {
   for (const tool of tools) deps.tools.set(tool.name, tool);
   for (const tool of tools) {
@@ -182,6 +198,7 @@ export function registerTools(server: McpServer, tools: AnyToolDef[], deps: Tool
         }
 
         if (behavior === 'approval') {
+          const contextSnapshot: SessionContext = { ...deps.context };
           try {
             const row = await withTransaction(deps.db, async (tx) => {
               const parked = await createOrReuseApproval(tx, deps, tool, handlerArgs, argsHash);
@@ -191,10 +208,12 @@ export function registerTools(server: McpServer, tools: AnyToolDef[], deps: Tool
             const structured = { status: 'pending' as const, approval_id: row.id };
             return { ...textResult(structured), structuredContent: structured };
           } catch (err) {
+            restoreContext(deps.context, contextSnapshot);
             return await handleUnexpectedError(deps.db, tool, base, err);
           }
         }
 
+        const contextSnapshot: SessionContext = { ...deps.context };
         try {
           const result = await withTransaction(deps.db, async (tx) => {
             const txDeps: ToolDeps = { ...deps, db: tx, context: deps.context };
@@ -211,6 +230,7 @@ export function registerTools(server: McpServer, tools: AnyToolDef[], deps: Tool
           const structured = { status: 'ok' as const, result };
           return { ...textResult(structured), structuredContent: structured };
         } catch (err) {
+          restoreContext(deps.context, contextSnapshot);
           const message = err instanceof Error ? err.message : String(err);
           try {
             await writeAudit(deps.db, { ...base, decision: 'error', error: message });
