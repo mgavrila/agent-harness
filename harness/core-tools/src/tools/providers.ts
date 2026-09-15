@@ -164,6 +164,43 @@ async function upsertCredential(deps: ToolDeps, providerId: string, c: Credentia
   }
 }
 
+export interface UpsertProviderInput {
+  name: string;
+  npi?: string;
+  fields: FieldInput[];
+  credentials: CredentialInput[];
+}
+
+export interface UpsertProviderResult {
+  provider_id: string;
+  fields_pending: number;
+  fields_extracted: number;
+  credentials: number;
+}
+
+/**
+ * The write behind `providers_upsert`, callable from another tool handler.
+ * `documents_extract` uses it so the extraction path and the direct tool obey
+ * exactly one set of rules about restricted names, confidence thresholds and
+ * verified-field protection.
+ */
+export async function upsertProviderRecord(deps: ToolDeps, args: UpsertProviderInput): Promise<UpsertProviderResult> {
+  const provider = await findOrCreateProvider(deps, args.name, args.npi);
+  let pending = 0;
+  let extracted = 0;
+  for (const f of args.fields) {
+    // A field already verified by a human keeps its value and counts as neither.
+    const status = await upsertField(deps, provider.id, f);
+    if (status === 'pending') pending += 1;
+    else if (status === 'extracted') extracted += 1;
+  }
+  for (const c of args.credentials) {
+    await upsertCredential(deps, provider.id, c);
+  }
+  const credCount = await deps.db.$count(credentials, eq(credentials.providerId, provider.id));
+  return { provider_id: provider.id, fields_pending: pending, fields_extracted: extracted, credentials: credCount };
+}
+
 const providersUpsert = defineTool({
   name: 'providers_upsert',
   description:
@@ -183,22 +220,7 @@ const providersUpsert = defineTool({
     fields_extracted: z.number(),
     credentials: z.number(),
   }),
-  handler: async (args, deps) => {
-    const provider = await findOrCreateProvider(deps, args.name, args.npi);
-    let pending = 0;
-    let extracted = 0;
-    for (const f of args.fields) {
-      // A field already verified by a human keeps its value and counts as neither.
-      const status = await upsertField(deps, provider.id, f);
-      if (status === 'pending') pending += 1;
-      else if (status === 'extracted') extracted += 1;
-    }
-    for (const c of args.credentials) {
-      await upsertCredential(deps, provider.id, c);
-    }
-    const credCount = await deps.db.$count(credentials, eq(credentials.providerId, provider.id));
-    return { provider_id: provider.id, fields_pending: pending, fields_extracted: extracted, credentials: credCount };
-  },
+  handler: async (args, deps) => upsertProviderRecord(deps, args),
   recordIds: (_args, result) => [result.provider_id],
   // A parked approval stores its payload as plaintext jsonb, so restricted
   // field values and credential numbers are masked out of it here. The full

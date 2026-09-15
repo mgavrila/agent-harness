@@ -1,8 +1,9 @@
 import * as z from 'zod/v4';
 import { and, eq } from 'drizzle-orm';
+import { unlink, writeFile } from 'node:fs/promises';
 import { documents } from '@harness/db';
 import { defineTool, ToolError, type AnyToolDef, type ToolDeps } from '../registry.js';
-import { requireProvider } from './providers.js';
+import { requireProvider, upsertProviderRecord, type CredentialInput, type FieldInput } from './providers.js';
 import {
   DOCUMENT_KINDS,
   documentTextPath,
@@ -11,7 +12,17 @@ import {
   sha256File,
   toStorageRelative,
 } from '../documents/storage.js';
-import { pdfPageCount } from '../documents/text.js';
+import { pdfPageCount, extractDocumentText } from '../documents/text.js';
+import { assertRedacted, redactPages } from '../documents/redact.js';
+import { callModelJson } from '../models.js';
+import {
+  buildClassificationMessages,
+  buildClassificationSchema,
+  buildExtractionMessages,
+  buildExtractionSchema,
+  loadHealthcareManifest,
+  parseExtraction,
+} from '../documents/extract.js';
 
 export { DOCUMENT_KINDS, documentTextPath };
 
@@ -144,5 +155,198 @@ const documentsList = defineTool({
   recordIds: ({ provider_id }) => (provider_id ? [provider_id] : []),
 });
 
-/** Task 7 appends documents_classify and documents_extract to this array. */
-export const documentTools: AnyToolDef[] = [documentsIngest, documentsGet, documentsList];
+/**
+ * Reply shape from the classification route. Loose enough that a model
+ * returning an unrecognised `document_kind` string does not fail validation —
+ * the handler falls back to `other` itself — but strict enough that a
+ * non-object reply, or one missing either top-level part, is rejected before
+ * it can reach anything downstream.
+ */
+const ClassificationReply = z.object({
+  document_kind: z.string(),
+  confidence: z.number(),
+});
+
+/**
+ * Reply shape from the extraction route. Deliberately loose on the *contents*
+ * of `fields` and `credentials` — `parseExtraction` is what clamps confidence,
+ * drops empty values, and drops anything the manifest does not allow (a
+ * restricted field the model volunteers included) — but this still requires
+ * an object with all three top-level parts, so a reply that is not shaped
+ * like an extraction at all throws here rather than deeper in the pipeline.
+ */
+const ExtractionReply = z.object({
+  document_kind: z.string(),
+  fields: z.record(z.string(), z.unknown()),
+  credentials: z.array(z.unknown()),
+});
+
+/**
+ * Read a document's text once: layer or OCR, then redaction. Returns both the
+ * text that may be prompted and the restricted hits that may not. Every caller
+ * that is about to build a prompt goes through here.
+ */
+async function readForModel(deps: ToolDeps, row: typeof documents.$inferSelect) {
+  const abs = await resolveStoragePath(deps.storageDir, row.storagePath);
+  const { pages, ocrUsed } = await extractDocumentText(abs);
+  const { pages: redacted, hits } = redactPages(pages);
+  // The flag exists so a client with a BAA can opt in; it is off by default and
+  // turning it on is a documented decision (spec 4.4).
+  const promptPages = deps.restrictedToModel ? pages : redacted;
+  if (!deps.restrictedToModel) assertRedacted(promptPages.map((p) => p.text).join('\n'));
+  return { abs, pages, redacted, promptPages, hits, ocrUsed };
+}
+
+const documentsClassify = defineTool({
+  name: 'documents_classify',
+  description:
+    'Decide what kind of credentialing document this is (state licence, DEA certificate, malpractice certificate, W-9 or other) and record it. ' +
+    'Reads the document text, redacting restricted identifiers first.',
+  actionClass: 'write.internal',
+  input: z.object({ document_id: z.string().uuid() }),
+  output: z.object({ document_id: z.string(), document_kind: z.string(), confidence: z.number() }),
+  handler: async ({ document_id }, deps) => {
+    const row = await requireDocument(deps, document_id);
+    const manifest = loadHealthcareManifest();
+    const { promptPages } = await readForModel(deps, row);
+    const { json } = await callModelJson(deps, {
+      route: 'extract',
+      messages: buildClassificationMessages(promptPages),
+      jsonSchema: buildClassificationSchema(manifest),
+      validate: ClassificationReply,
+      temperature: 0,
+    });
+    const kind = (manifest.document_kinds as string[]).includes(json.document_kind) ? json.document_kind : 'other';
+    const confidence = Math.min(1, Math.max(0, json.confidence));
+    await deps.db.update(documents).set({ kind }).where(eq(documents.id, document_id));
+    return { document_id, document_kind: kind, confidence };
+  },
+  recordIds: ({ document_id }) => [document_id],
+});
+
+const documentsExtract = defineTool({
+  name: 'documents_extract',
+  description:
+    'Read a document end to end: text layer or OCR, redact SSN/EIN/DEA, ask the extract route for the provider fields and credentials, ' +
+    'then write them to the provider record. Fields below the confidence threshold are stored as pending for a human to confirm. ' +
+    'Restricted identifiers are stored encrypted straight from the redaction pass and are never sent to a model.',
+  actionClass: 'write.internal',
+  input: z.object({
+    document_id: z.string().uuid(),
+    provider_id: z.string().uuid().optional().describe('Attach to this provider instead of matching on the extracted name'),
+  }),
+  output: z.object({
+    document_id: z.string(),
+    provider_id: z.string(),
+    document_kind: z.string(),
+    ocr_used: z.boolean(),
+    pages: z.number(),
+    fields_pending: z.number(),
+    fields_extracted: z.number(),
+    credentials: z.number(),
+    restricted_fields: z.array(z.string()).describe('Names only. The values are encrypted on the provider record.'),
+  }),
+  handler: async ({ document_id, provider_id }, deps) => {
+    const row = await requireDocument(deps, document_id);
+    const named = provider_id ? await requireProvider(deps, provider_id) : undefined;
+    const manifest = loadHealthcareManifest();
+    const { abs, promptPages, redacted, hits, ocrUsed } = await readForModel(deps, row);
+
+    const { json } = await callModelJson(deps, {
+      route: 'extract',
+      messages: buildExtractionMessages(promptPages, manifest),
+      jsonSchema: buildExtractionSchema(manifest),
+      validate: ExtractionReply,
+      temperature: 0,
+    });
+    const parsed = parseExtraction(json, manifest);
+
+    const byName = new Map(parsed.fields.map((f) => [f.name, f]));
+    const name =
+      named?.name ??
+      [byName.get('first_name')?.value, byName.get('middle_name')?.value, byName.get('last_name')?.value]
+        .filter((part) => part !== undefined && part !== '')
+        .join(' ');
+    if (!name) {
+      throw new ToolError('extraction found no provider name; pass provider_id to attach this document to a known provider');
+    }
+    const npiValue = byName.get('npi')?.value?.replace(/\D/g, '');
+    const npi = named?.npi ?? (npiValue && npiValue.length === 10 ? npiValue : undefined);
+
+    const modelFields: FieldInput[] = parsed.fields.map((f) => ({
+      name: f.name,
+      value: f.value,
+      confidence: f.confidence,
+      source_doc_id: document_id,
+      source_page: f.source_page,
+    }));
+    // Restricted values come from the regex pass, not the model, and carry
+    // full confidence: a regex match is not a guess. `restricted: true` is
+    // belt and braces; the names also satisfy isRestrictedName.
+    const restrictedFields: FieldInput[] = hits.map((h) => ({
+      name: h.fieldName,
+      value: h.value,
+      confidence: 1,
+      restricted: true,
+      source_doc_id: document_id,
+      source_page: h.page,
+    }));
+    const credentialInputs: CredentialInput[] = parsed.credentials.map((c) => ({
+      kind: c.kind,
+      issuer: c.issuer,
+      state: c.state,
+      issued_at: c.issued_at,
+      expires_at: c.expires_at,
+      source_doc_id: document_id,
+    }));
+
+    const upserted = await upsertProviderRecord(deps, {
+      name,
+      npi,
+      fields: [...modelFields, ...restrictedFields],
+      credentials: credentialInputs,
+    });
+
+    // Only redacted text is ever written to disk, whatever restricted_to_model says.
+    const textAbs = documentTextPath(abs);
+    await writeFile(textAbs, redacted.map((p) => `<<<PAGE ${p.num}>>>\n${p.text}`).join('\n\n'), 'utf8');
+    try {
+      await deps.db
+        .update(documents)
+        .set({
+          providerId: upserted.provider_id,
+          kind: row.kind ?? parsed.documentKind,
+          ocrUsed,
+          textPath: toStorageRelative(deps.storageDir, textAbs),
+        })
+        .where(eq(documents.id, document_id));
+    } catch (err) {
+      // The transaction this handler runs in is about to roll back every DB
+      // write, but a file on disk does not roll back with it: remove it so a
+      // failed extraction never leaves orphaned text beside the document.
+      await unlink(textAbs).catch(() => {});
+      throw err;
+    }
+
+    return {
+      document_id,
+      provider_id: upserted.provider_id,
+      document_kind: row.kind ?? parsed.documentKind,
+      ocr_used: ocrUsed,
+      pages: promptPages.length,
+      fields_pending: upserted.fields_pending,
+      fields_extracted: upserted.fields_extracted,
+      credentials: upserted.credentials,
+      restricted_fields: hits.map((h) => h.fieldName),
+    };
+  },
+  recordIds: (args, result) => [args.document_id, result.provider_id],
+});
+
+export const documentTools: AnyToolDef[] = [
+  documentsIngest,
+  documentsClassify,
+  documentsExtract,
+  documentsGet,
+  documentsList,
+];
