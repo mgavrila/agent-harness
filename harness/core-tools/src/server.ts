@@ -9,8 +9,16 @@ import { deadlineTools } from './tools/deadlines.js';
 import { auditTools } from './tools/audit.js';
 import { approvalTools } from './tools/approvals.js';
 import { harnessTools } from './tools/harness.js';
+import { documentTools } from './tools/documents.js';
 
-export const ALL_TOOLS = [...providerTools, ...deadlineTools, ...auditTools, ...approvalTools, ...harnessTools];
+export const ALL_TOOLS = [
+  ...providerTools,
+  ...deadlineTools,
+  ...auditTools,
+  ...approvalTools,
+  ...harnessTools,
+  ...documentTools,
+];
 
 export function createCoreToolsServer(deps: ToolDeps): McpServer {
   const server = new McpServer({ name: 'core-tools', version: '0.1.0' });

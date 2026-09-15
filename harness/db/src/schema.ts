@@ -31,6 +31,12 @@ export const documents = pgTable('documents', {
   sha256: text('sha256').notNull(),
   pages: integer('pages'),
   ocrUsed: boolean('ocr_used').notNull().default(false),
+  /**
+   * Path of the redacted plain text extracted from this document, relative to
+   * HARNESS_STORAGE_DIR. Null until `documents_extract` has run. The file holds
+   * redacted text only: restricted identifiers are already replaced by tokens.
+   */
+  textPath: text('text_path'),
   ingestedAt: timestamp('ingested_at', { withTimezone: true }).notNull().defaultNow(),
 });
 

@@ -36,6 +36,13 @@
       "when": 1789481094028,
       "tag": "0004_effects_result",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1789491004196,
+      "tag": "0005_document_text_path",
+      "breakpoints": true
     }
   ]
 }
