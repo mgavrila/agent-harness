@@ -198,3 +198,108 @@ migration file without advancing the snapshot, so drizzle-kit does not know
 the schema changed. Migration `0003` needed its snapshot patched by hand
 because of exactly this mistake. `--custom` is only for a migration with no
 corresponding `schema.ts` change (e.g. a one-off data backfill).
+
+## Storage
+
+`HARNESS_STORAGE_DIR` is the root of the file store. Generated output — filled
+forms and rosters — lives under `<dir>/out`, and nothing else writes there.
+File ids are relative paths inside that tree and are content-addressed: the
+same bytes always produce the same id, which is what makes `forms_release`
+idempotent.
+
+`resolveOutFile` refuses an absolute path or any id containing `..`, so a file
+id that reaches the tools from a model cannot name a file outside the tree.
+
+In Compose, the same named volume is mounted into the `hermes` container (where
+the core-tools child writes the file) and the `approvals` container (where the
+Slack sink reads it). If a file upload fails with ENOENT, the two mounts have
+drifted apart — check both services' `volumes:` entries before anything else.
+
+Storage isolation is per process, not per request: a core-tools process is
+started with one `HARNESS_STORAGE_DIR` and one `HARNESS_CLIENT`, and that scopes
+every file it reads or writes for as long as it runs. One core-tools process
+never serves two clients, so there is no per-call tenant check on file paths —
+the isolation comes entirely from which process, and which storage root, a
+given client's traffic is routed to.
+
+## The Slack approvals app
+
+`@harness/approvals` is the only writer of approval decisions and the only
+caller of `approvals_execute`. It runs three loops:
+
+| Loop | Default | What it does |
+|---|---|---|
+| poll | 5s | posts a Block Kit card for every `pending` approval with no `slack_ts` |
+| dispatch | 5s | drains `tool_effects` through the `slack_message` and `slack_file` sinks |
+| reconcile | 300s | calls `harness_reconcile` through the core-tools MCP server |
+
+Reconciliation goes through MCP rather than calling the helper directly, so the
+repair is scoped to the client and lands in `audit_log` like any other call.
+The app has no privileged route into the data.
+
+**Run one approvals app per client.** The poller posts before it claims the row
+— a Slack timestamp only exists after the post — and the claim is guarded, so a
+second poller would post a duplicate card in that window. A card that reaches
+Slack after its row moved on is logged as `orphaned`.
+
+`SLACK_ALLOWED_USERS` is required and fail-closed: with it unset or empty, the
+app refuses every decision. There is no default allowlist and no bypass —
+missing or empty means no Slack user can approve, reject, or edit anything,
+not that everyone can.
+
+Health is on `http://<host>:${APPROVALS_HEALTH_PORT}/healthz`. It returns counts
+and loop timestamps only, never a summary or a payload, because anything
+reachable over HTTP is outside the audit trail. It answers 503 when an effect
+has failed or is parked, or when a loop recorded an error.
+
+The server binds `127.0.0.1` inside its own container, so it is never reachable
+from outside that container directly. From another Compose service it is
+reachable at `http://approvals:8787/healthz` only if the `approvals` service's
+Compose entry publishes or binds the port for the Compose network to see it —
+binding to `127.0.0.1` inside the container does not do that by itself. Both
+watchdog scripts default to `http://approvals:8787/healthz` and read
+`APPROVALS_HEALTH_URL` to override it, which is how they are pointed at
+`http://127.0.0.1:8787/healthz` for a manual check outside Compose.
+
+Restricted values are kept out of Slack in three places, on purpose:
+
+1. Tools redact `approvals.payload` when they park a request.
+2. `payloadPreview` re-checks the rendered payload against the SSN, EIN and DEA
+   patterns and withholds the whole block on a match.
+3. `harness_notify` refuses a message that trips the same patterns before it
+   ever reaches the outbox.
+
+A withheld payload in a card is not a bug to route around. It means something
+wrote a restricted-looking value where it should not be; read the audit row.
+
+## Playbooks
+
+Three jobs run in the Hermes cron fleet. Install or repair them with:
+
+```bash
+docker compose -f harness/compose/docker-compose.yml exec hermes \
+  bash /opt/data/cron/playbooks.sh
+```
+
+The script is idempotent: a job whose name already exists is left alone.
+
+| Job | Schedule | Mode | Silence |
+|---|---|---|---|
+| `credentialing-expirations` | `0 7 * * *` | agent, skill-backed | replies `{"wakeAgent": false}` when nothing is due |
+| `harness-outbox-watchdog` | `*/15 * * * *` | `no_agent` script | empty stdout |
+| `harness-reconcile-watchdog` | `17 */6 * * *` | `no_agent` script | empty stdout |
+
+The expirations job delivers `local`: the skill stages its own message with
+`harness_notify`, so the digest is audited, carries `derived_from` back to the
+`deadlines_upcoming` query, and is sent exactly once per continuity key. A
+digest for the same bucket and count as last night is staged again, hits the
+unique index on `tool_effects.idempotency_key`, and sends nothing.
+
+The record format of `~/.hermes/cron/jobs.json` is not documented, so jobs are
+only ever created through `hermes cron create`. The init container seeds that
+file when it is absent and never overwrites it, so Hermes's own writes to it
+(next run times, run history) survive a redeploy.
+
+Diagnose a fleet that has gone quiet with `hermes cron doctor` inside the
+container: it flags a missing script, a job parked in the past, and a delivery
+that failed after the job succeeded.
