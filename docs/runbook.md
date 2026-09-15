@@ -247,6 +247,12 @@ app refuses every decision. There is no default allowlist and no bypass —
 missing or empty means no Slack user can approve, reject, or edit anything,
 not that everyone can.
 
+**Slack credentials.** The demo uses one Slack app for both Hermes and the
+approvals app, so both containers read the same `SLACK_BOT_TOKEN` and
+`SLACK_APP_TOKEN`. In production, split them into two Slack apps so Hermes
+never holds the approver app's token. Approval decisions are gated by
+`SLACK_ALLOWED_USERS` regardless of which token is present.
+
 Health is on `http://<host>:${APPROVALS_HEALTH_PORT}/healthz`. It returns counts
 and loop timestamps only, never a summary or a payload, because anything
 reachable over HTTP is outside the audit trail. It answers 503 when an effect

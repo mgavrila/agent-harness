@@ -14,6 +14,8 @@ COPY harness ./harness
 COPY packs ./packs
 COPY clients ./clients
 COPY scripts ./scripts
-RUN pnpm install --frozen-lockfile
+RUN pnpm install --frozen-lockfile && chmod -R a+rX /srv/agent-harness
 
+# Runs as the base image's uid-1000 "node" user rather than root.
+USER node
 CMD ["pnpm", "--filter", "@harness/approvals", "start"]
