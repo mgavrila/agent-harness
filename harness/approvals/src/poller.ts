@@ -41,6 +41,11 @@ const STALE_CLAIM_MS = 2 * 60 * 1000;
  * releases the claim (`slack_channel` back to null) so the row stays postable
  * on the next run instead of being stranded.
  *
+ * Only a *failed post* releases the claim. If the post succeeds and writing
+ * `slack_ts` is what fails, the claim stays: the card is already in the
+ * channel, and releasing it would post a second one on the very next tick.
+ * That row is then recovered by the stale sweep below rather than at once.
+ *
  * Because there is no separate "claim expired but the process died before it
  * could release" signal, this run first releases any claim older than
  * `STALE_CLAIM_MS` that never got a `slack_ts`, using `created_at` as the
@@ -91,21 +96,41 @@ export async function postPendingApprovals(deps: PollDeps, limit = 20): Promise<
       continue;
     }
 
+    // Two separate try blocks, because the right recovery differs on each
+    // side of the post. Before it, nothing reached Slack, so the claim is
+    // released and the next tick retries immediately. After it, a card is
+    // live in the channel: releasing the claim there would put a second card
+    // with a second set of working buttons next to it on the next tick.
+    let postResult: Awaited<ReturnType<typeof deps.api.chat.postMessage>>;
     try {
-      const res = await deps.api.chat.postMessage({
+      postResult = await deps.api.chat.postMessage({
         channel: deps.channel,
         text: approvalFallbackText(row),
         blocks: approvalBlocks(row),
       });
-      if (!res.ts) throw new Error('Slack accepted the message without a timestamp');
-      await deps.db.update(approvals).set({ slackTs: res.ts }).where(eq(approvals.id, row.id));
-      result.posted += 1;
     } catch (err) {
       console.error(`approvals: could not post the card for ${row.id}: ${err instanceof Error ? err.message : String(err)}`);
       await deps.db
         .update(approvals)
         .set({ slackChannel: null })
         .where(and(eq(approvals.id, row.id), isNull(approvals.slackTs)));
+      continue;
+    }
+
+    try {
+      // A missing timestamp belongs on this side of the split: Slack answered,
+      // so the card is in the channel even though we cannot record where.
+      if (!postResult.ts) throw new Error('Slack accepted the message without a timestamp');
+      await deps.db.update(approvals).set({ slackTs: postResult.ts }).where(eq(approvals.id, row.id));
+      result.posted += 1;
+    } catch (err) {
+      // Deliberately no release. The row stays claimed with no slack_ts, and
+      // the stale-claim sweep above picks it up after STALE_CLAIM_MS — late
+      // enough for a transient database failure to have been noticed.
+      console.error(
+        `approvals: posted the card for ${row.id} but could not record its timestamp; ` +
+          `leaving the claim in place so no duplicate is posted: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
   }
   return result;
