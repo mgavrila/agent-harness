@@ -3,6 +3,7 @@ import { eq } from 'drizzle-orm';
 import { runs } from '@harness/db';
 import { defineTool, ToolError, type AnyToolDef } from '../registry.js';
 import { reconcile } from '../reconcile.js';
+import { stageEffect } from '../effects.js';
 
 const harnessReconcile = defineTool({
   name: 'harness_reconcile',
@@ -53,4 +54,44 @@ const harnessSetContext = defineTool({
   },
 });
 
-export const harnessTools: AnyToolDef[] = [harnessSetContext, harnessReconcile];
+/**
+ * Shapes a restricted identifier takes in free text. The approvals app applies
+ * the same check to a Slack card; this one stops a message at the source, so a
+ * bad digest never reaches the outbox at all.
+ */
+const RESTRICTED_TEXT_PATTERNS: RegExp[] = [
+  /\b\d{3}-\d{2}-\d{4}\b/, // US social security number
+  /\b\d{2}-\d{7}\b/, // employer identification number
+  /\b[A-Za-z]{2}\d{7}\b/, // DEA registration
+];
+
+const harnessNotify = defineTool({
+  name: 'harness_notify',
+  description:
+    'Stage one Slack message in this client channel, sent by the dispatcher after the call commits. ' +
+    'Use it from a scheduled playbook so the message is audited and sent exactly once per idempotency key: ' +
+    'staging the same key twice is a no-op. Refuses text that looks like it carries a restricted identifier.',
+  actionClass: 'write.internal',
+  input: z.object({
+    text: z.string().min(1).max(3000),
+    /** Scoped to the client by stageEffect. Make it identify the content, e.g. `expirations:2026-09-15:overdue`. */
+    idempotency_key: z.string().regex(/^[a-z0-9][a-z0-9:_-]{0,199}$/, 'idempotency_key must be a lowercase slug'),
+    channel: z.string().regex(/^[CGD][A-Z0-9]{2,}$/, 'channel must be a Slack channel id').optional(),
+  }),
+  output: z.object({ effect_id: z.string(), staged: z.boolean() }),
+  handler: async ({ text, idempotency_key, channel }, deps) => {
+    if (RESTRICTED_TEXT_PATTERNS.some((re) => re.test(text))) {
+      throw new ToolError('message refused: it looks like it contains a restricted identifier; restricted values never go to Slack');
+    }
+    // The text is the payload and is stored encrypted. The summary is a label
+    // only: tool_effects.summary is plaintext and operators read it freely.
+    return stageEffect(deps, {
+      sink: 'slack_message',
+      idempotencyKey: idempotency_key,
+      payload: { text, channel: channel ?? null },
+      summary: `Slack message (${text.length} characters)`,
+    });
+  },
+});
+
+export const harnessTools: AnyToolDef[] = [harnessSetContext, harnessReconcile, harnessNotify];

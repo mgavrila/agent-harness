@@ -88,6 +88,7 @@ describe('audit_query', () => {
       'forms_list_templates',
       'forms_release',
       'forms_roster',
+      'harness_notify',
       'harness_reconcile',
       'harness_set_context',
       'providers_confirm_field',
