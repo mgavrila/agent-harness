@@ -1,10 +1,14 @@
 import { randomBytes } from 'node:crypto';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { afterAll, beforeEach, onTestFinished } from 'vitest';
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
 import { createMcpHandler, McpServer } from '@modelcontextprotocol/server';
 import { createDb, type Db } from '@harness/db';
 import { TEST_DATABASE_URL, resetDatabase } from '@harness/db/testing';
 import { DEFAULT_POLICY } from './policy.js';
+import { defaultFormsDir } from './forms/templates.js';
 import { registerTools, type AnyToolDef, type ToolDeps } from './registry.js';
 
 export function makeTestDeps(db: Db, overrides: Partial<ToolDeps> = {}): ToolDeps {
@@ -20,6 +24,10 @@ export function makeTestDeps(db: Db, overrides: Partial<ToolDeps> = {}): ToolDep
     sinks: {},
     context: {},
     tools: new Map(),
+    // A throwaway directory per call, so a test that forgets to override it
+    // still cannot write into the repository.
+    storageDir: mkdtempSync(path.join(tmpdir(), 'harness-test-storage-')),
+    formsDir: defaultFormsDir(),
     ...overrides,
   };
 }

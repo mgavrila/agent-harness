@@ -30,6 +30,10 @@ export interface ToolDeps {
   now: () => Date;
   approvalTtlHours: number;
   confidenceThreshold: number;
+  /** Root of the file store. Generated output goes under `<storageDir>/out`. */
+  storageDir: string;
+  /** Directory holding the active pack's `templates.json` and its PDFs. */
+  formsDir: string;
   /** External-effect senders keyed by sink name (e.g. 'slack'). Empty in Plan 1.1; Plan 3 registers real ones. */
   sinks: SinkRegistry;
   context: SessionContext;
