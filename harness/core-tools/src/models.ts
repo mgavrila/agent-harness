@@ -1,5 +1,5 @@
 import * as z from 'zod/v4';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { modelCalls } from '@harness/db';
 import { ROUTES, type Route } from '@harness/gateway/routing';
 import { ToolError, type ToolDeps } from './registry.js';
@@ -93,7 +93,7 @@ export async function callModel(deps: ToolDeps, opts: ModelCallOptions): Promise
   // gateway's daily budget.
   const runId = deps.context.runId;
   if (runId) {
-    const spent = await deps.db.$count(modelCalls, eq(modelCalls.runId, runId));
+    const spent = await deps.db.$count(modelCalls, and(eq(modelCalls.runId, runId), eq(modelCalls.client, deps.client)));
     if (spent >= deps.gateway.maxCallsPerRun) {
       throw new ToolError(
         `run has already made ${spent} model calls, which is its limit; stop and report rather than retrying`,

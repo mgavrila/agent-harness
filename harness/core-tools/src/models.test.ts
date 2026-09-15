@@ -113,6 +113,33 @@ describe('callModel', () => {
     expect(await db.select().from(modelCalls).where(eq(modelCalls.runId, run.id))).toHaveLength(2);
   });
 
+  it('counts only this client\'s calls against the breaker', async () => {
+    // Every query carries the client. Run ids are uuids so a collision is not
+    // the worry; the rule is that no client's counter can be moved by another
+    // client's rows, and this was the one new query that omitted the column.
+    const [run] = await db.insert(runs).values({ client: 'test', caller: 'test-caller' }).returning();
+    gateway.setResponder(() => ({ content: 'x' }));
+
+    const other = deps({
+      client: 'other-client',
+      context: { runId: run.id },
+      gateway: { baseUrl: gateway.url, apiKey: 'sk-test-key', timeoutMs: 5_000, maxCallsPerRun: 2 },
+    });
+    await callModel(other, { route: 'chat', messages: [{ role: 'user', content: '1' }] });
+    await callModel(other, { route: 'chat', messages: [{ role: 'user', content: '2' }] });
+
+    // The other client has now spent the whole allowance on this run id.
+    await expect(callModel(other, { route: 'chat', messages: [{ role: 'user', content: '3' }] })).rejects.toThrow(
+      /already made 2 model calls/,
+    );
+    const mine = deps({
+      client: 'test',
+      context: { runId: run.id },
+      gateway: { baseUrl: gateway.url, apiKey: 'sk-test-key', timeoutMs: 5_000, maxCallsPerRun: 2 },
+    });
+    await expect(callModel(mine, { route: 'chat', messages: [{ role: 'user', content: '1' }] })).resolves.toBeTruthy();
+  });
+
   it('does not count calls made with no run against the breaker', async () => {
     gateway.setResponder(() => ({ content: 'x' }));
     const d = deps({ gateway: { baseUrl: gateway.url, apiKey: 'sk-test-key', timeoutMs: 5_000, maxCallsPerRun: 1 } });
