@@ -24,6 +24,15 @@ export type ManifestField = z.infer<typeof ManifestField>;
 const ManifestCredential = z.object({
   kind: z.enum(CREDENTIAL_KINDS),
   description: z.string().min(1),
+  /**
+   * Reserved, and read by nothing today. No code path populates
+   * `CredentialInput.number` from a document — the pipeline does not extract
+   * credential numbers at all — so `credentials.number_encrypted` is always
+   * null from extraction and there is no value for this flag to govern. It
+   * stays in the manifest so the declaration is already in place if numbers
+   * are ever read; see the `$comment_credential_numbers` note in
+   * packs/healthcare/schema/provider.json.
+   */
   number_restricted: z.boolean(),
   properties: z.array(z.enum(CREDENTIAL_PROPERTIES)).min(1),
 });
@@ -137,7 +146,7 @@ export function buildExtractionSchema(manifest: ProviderManifest): { name: strin
         credentials: {
           type: 'array',
           description:
-            'Credentials this document evidences. The registration or policy number is deliberately NOT part of this schema; it is read separately and never sent to a model.',
+            'Credentials this document evidences. The registration, licence or policy number is deliberately NOT part of this schema and is not extracted at all: report only the kind, issuer, state and dates.',
           items: {
             type: 'object',
             additionalProperties: false,
@@ -222,7 +231,7 @@ export function buildExtractionMessages(pages: PageText[], manifest: ProviderMan
         '',
         'Also list every credential the document evidences (state licence, DEA registration,',
         'malpractice policy, board certification) with its issuer, state and dates.',
-        'Do not report any registration, policy or licence NUMBER: those are handled separately.',
+        'Do not report any registration, policy or licence NUMBER: this pipeline does not extract them.',
         '',
         wrapDocument(pages),
       ].join('\n'),
