@@ -25,7 +25,7 @@ The harness is the product. The runtime and the model are replaceable parts.
 | First client | Medical practice, credentialing workflow only |
 | Surface | Slack |
 | Data posture | Restricted fields (SSN, EIN, DEA) never reach a model by default; encrypted at rest; immutable audit log |
-| Language | Python throughout |
+| Language | TypeScript (Node 22+, pnpm workspaces). Hermes and LiteLLM run as containers we configure, not code we write. |
 | Store | Postgres |
 | Repository | github.com/mgavrila/agent-harness |
 
@@ -97,8 +97,10 @@ Hermes and core-tools call models only through:
 
 ### 4.3 Core tools (MCP server)
 
-One Python process exposing seven toolsets over MCP (stdio for Hermes,
-streamable HTTP for tests). Every tool declares:
+One Node process exposing seven toolsets over MCP (stdio for Hermes,
+in-process Streamable HTTP handler for tests). Built on
+`@modelcontextprotocol/server` v2 with zod v4 schemas. Tool names use
+underscores (`providers_upsert`) because some hosts reject dots. Every tool declares:
 
 - `action_class`: `read`, `write.internal`, `external`, `financial`,
   `destructive`.
@@ -149,23 +151,26 @@ ingest -> text layer or OCR (tesseract) -> redact -> extract -> upsert
 
 - **Redact** is deterministic: regex for SSN, EIN, and DEA number formats.
   Matches are stored encrypted on the provider record directly from the
-  regex hit, and replaced in the text with tokens like `{{ssn:1}}`.
+  regex hit, and replaced in the text with tokens like `{{ssn:1}}`. Scanned
+  images go through the `tesseract` binary (spawned from Node) before
+  redaction, so restricted data is redacted from scans too.
 - Only redacted text reaches the `extract` route. The model returns a JSON
   object validated against the pack's provider schema, with a confidence
   and a source page per field.
 - Per-client flag `restricted_to_model: false` (default). Setting it true
   is a documented decision that requires a BAA with the model provider.
-- Fields below `confidence_threshold` (default 0.85) are stored as
-  `pending`. Hermes asks one question per pending field in Slack.
-  `providers.confirm_field` marks a field `verified` with the confirming
-  user and time.
+- Fields at or above `confidence_threshold` (default 0.85) are stored as
+  `extracted`; below it they are `pending`. Hermes asks one question per
+  pending field in Slack. `providers_confirm_field` marks a field
+  `verified` with the confirming user and time. Only `verified` and
+  `extracted` fields are used to fill forms; `pending` fields block a form.
 
 ### 4.5 Approval engine
 
 - `approvals` table: id, client, action, payload, summary, requested_by,
   status (`pending`, `approved`, `declined`, `expired`), decided_by,
   decided_at, ttl, idempotency_key, slack_channel, slack_ts.
-- The approvals app (Slack Bolt, Python) posts a message with the summary
+- The approvals app (Slack Bolt for JavaScript) posts a message with the summary
   and Approve, Edit, Decline buttons. Decision writes the row, edits the
   message, and posts a thread reply that Hermes receives as a new turn:
   `Approval <id> approved by <user>`.
@@ -190,7 +195,8 @@ Tables: `providers`, `documents`, `fields`, `credentials`, `deadlines`,
   ingested_at, ocr_used.
 - `fields`: id, provider_id, name, value, value_encrypted (bytea),
   restricted (bool), confidence, source_doc_id, source_page, status
-  (`pending`, `verified`, `rejected`), confirmed_by, confirmed_at.
+  (`pending`, `extracted`, `verified`, `rejected`), confirmed_by,
+  confirmed_at.
 - `credentials`: id, provider_id, kind (`license`, `dea`, `malpractice`,
   `board_cert`), issuer, number_encrypted, state, issued_at, expires_at,
   source_doc_id.
@@ -212,7 +218,7 @@ packs/healthcare/
     credentialing-roster/SKILL.md
   schema/provider.json
   forms/  (fillable PDF templates, roster CSV spec)
-  synthetic/generate.py
+  synthetic/generate.ts
   evals/  (extraction.jsonl, injection.jsonl, deadlines.jsonl)
   policy.yaml (default action-class table)
 ```
@@ -234,7 +240,7 @@ clients/demo-practice/
   .env.example
 ```
 
-`scripts/new-client.py --pack healthcare --name <slug>` copies the pack's
+`pnpm new-client --pack healthcare --name <slug>` copies the pack's
 defaults and prompts for Slack and model keys.
 
 ## 5. Flows
@@ -288,7 +294,7 @@ config change. The demo shows the swap live.
 
 ## 8. Testing and evals
 
-- **Synthetic data**: `generate.py` produces twenty providers, each with a
+- **Synthetic data**: `generate.ts` produces twenty providers, each with a
   state license, DEA certificate, malpractice certificate, and W-9, as both
   text-layer PDFs and rasterised scans. Ground truth JSON per provider.
 - **Extraction eval**: field accuracy per document kind, confidence
@@ -337,10 +343,21 @@ agent-harness/
   README.md
 ```
 
-## 11. Open items
+## 11. Resolved items (2026-09-15)
 
-- Which free-tier model providers are available; needed for `routing.yaml`.
-- Slack workspace for the demo.
-- Whether NPPES lookup runs live in the demo or is stubbed.
+- **Model providers for the demo**: Gemini 3 Flash free tier for `extract`
+  and `chat` (1,500 requests/day, native PDF and image input), Groq free
+  tier (GPT-OSS 120B or Llama 3.3 70B) for `judge` and as `chat` fallback,
+  OpenRouter `:free` models as the live swap target in the demo. No credit
+  card needed for any of them. Free tiers may use prompts for training, so
+  the demo client's routing table is never reused for a client with real
+  data.
+- **Slack**: an existing workspace. The plan includes creating the Slack
+  app and collecting the bot and app tokens.
+- **NPPES**: live against the public API. Synthetic NPIs will not resolve,
+  and the demo shows the mismatch flag on purpose.
+
+## 12. Open items
+
 - Ownership terms if the core is reused for Alliance: core licensed, client
   folder owned by the client.
