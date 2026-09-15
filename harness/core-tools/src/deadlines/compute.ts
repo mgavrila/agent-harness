@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 export const CREDENTIAL_KINDS = ['license', 'dea', 'malpractice', 'board_cert'] as const;
 export type CredentialKind = (typeof CREDENTIAL_KINDS)[number];
 
@@ -49,4 +51,41 @@ export function computeDeadlines(creds: CredentialLike[]): ComputedDeadline[] {
     out.push({ credentialId: c.id, kind: 'renewal_start', dueAt: addDays(c.expiresAt, -lead) });
   }
   return out;
+}
+
+export const URGENCY_BUCKETS = ['overdue', 'due_7d', 'due_30d', 'due_60d', 'due_90d'] as const;
+export type UrgencyBucket = (typeof URGENCY_BUCKETS)[number];
+
+/**
+ * The urgency bucket a deadline falls in, by days remaining. Kept as a pure
+ * function so a skill never re-derives it in prose: the boundary belongs to
+ * the tool, once, and every caller reads the same answer.
+ */
+export function bucketFor(daysLeft: number): UrgencyBucket {
+  if (daysLeft < 0) return 'overdue';
+  if (daysLeft <= 7) return 'due_7d';
+  if (daysLeft <= 30) return 'due_30d';
+  if (daysLeft <= 60) return 'due_60d';
+  return 'due_90d';
+}
+
+export interface DigestKeyItem {
+  credentialId: string;
+  kind: string;
+  bucket: UrgencyBucket;
+}
+
+/**
+ * A key that identifies the exact set of (credential, deadline kind, bucket)
+ * triples behind a digest, independent of the order the items were listed in.
+ * Unchanged inputs reproduce the same key, so `harness_notify` treats a
+ * re-run as the same digest; an item moving into a different bucket changes
+ * at least one triple and so changes the key, which is exactly the signal a
+ * playbook needs to speak again.
+ */
+export function digestKeyFor(items: DigestKeyItem[]): string {
+  if (items.length === 0) return 'expirations:none';
+  const lines = items.map((i) => `${i.credentialId}:${i.kind}:${i.bucket}`).sort();
+  const hash = createHash('sha256').update(lines.join('\n')).digest('hex').slice(0, 12);
+  return `expirations:${hash}`;
 }

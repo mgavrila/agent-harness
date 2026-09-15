@@ -24,6 +24,7 @@ interface UpcomingItem {
   due_at: string;
   days_left: number;
   overdue: boolean;
+  bucket: string;
 }
 
 /** Create a provider with three credentials, and return its id. */
@@ -75,6 +76,28 @@ describe('deadlines tools', () => {
     ]);
     expect(items[0].overdue).toBe(true);
     expect(items[3]).toMatchObject({ days_left: 30, overdue: false, provider_name: 'Dr. Grace Hopper' });
+    expect(items.map((i) => i.bucket)).toEqual(['overdue', 'overdue', 'overdue', 'due_30d']);
+  });
+
+  it('upcoming includes a digest key that is stable across identical calls', async () => {
+    const client = await connectDeadlines();
+    const id = await seed(client);
+    await client.callTool({ name: 'deadlines_compute', arguments: { provider_id: id } });
+
+    const first = await client.callTool({ name: 'deadlines_upcoming', arguments: { window_days: 90 } });
+    const { digest_key: firstKey } = resultOf<{ digest_key: string }>(first);
+    expect(firstKey).toMatch(/^expirations:[0-9a-f]{12}$/);
+
+    const second = await client.callTool({ name: 'deadlines_upcoming', arguments: { window_days: 90 } });
+    expect(resultOf<{ digest_key: string }>(second).digest_key).toBe(firstKey);
+  });
+
+  it('upcoming returns expirations:none as the digest key when nothing is due', async () => {
+    const client = await connectDeadlines();
+    const res = await client.callTool({ name: 'deadlines_upcoming', arguments: { window_days: 90 } });
+    const { items, digest_key } = resultOf<{ items: UpcomingItem[]; digest_key: string }>(res);
+    expect(items).toHaveLength(0);
+    expect(digest_key).toBe('expirations:none');
   });
 
   it('compute retires stale deadlines when a credential loses its expiry, preserving notifiedAt on survivors', async () => {

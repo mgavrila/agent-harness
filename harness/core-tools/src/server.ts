@@ -1,14 +1,18 @@
+import path from 'node:path';
 import { McpServer } from '@modelcontextprotocol/server';
 import { createDb, loadKey } from '@harness/db';
 import { registerTools, type ToolDeps } from './registry.js';
 import { loadPolicy } from './policy.js';
+import { storageRoot } from './storage.js';
+import { defaultFormsDir } from './forms/templates.js';
 import { providerTools } from './tools/providers.js';
 import { deadlineTools } from './tools/deadlines.js';
 import { auditTools } from './tools/audit.js';
 import { approvalTools } from './tools/approvals.js';
 import { harnessTools } from './tools/harness.js';
+import { formTools } from './tools/forms.js';
 
-export const ALL_TOOLS = [...providerTools, ...deadlineTools, ...auditTools, ...approvalTools, ...harnessTools];
+export const ALL_TOOLS = [...providerTools, ...deadlineTools, ...auditTools, ...approvalTools, ...harnessTools, ...formTools];
 
 export function createCoreToolsServer(deps: ToolDeps): McpServer {
   const server = new McpServer({ name: 'core-tools', version: '0.1.0' });
@@ -42,6 +46,8 @@ export async function buildDepsFromEnv(): Promise<{ deps: ToolDeps; close: () =>
     now: () => new Date(),
     approvalTtlHours: numberFromEnv('APPROVAL_TTL_HOURS', 24, { min: 1, max: 720 }),
     confidenceThreshold: numberFromEnv('CONFIDENCE_THRESHOLD', 0.85, { min: 0, max: 1 }),
+    storageDir: storageRoot(),
+    formsDir: process.env.HARNESS_FORMS_DIR?.trim() ? path.resolve(process.env.HARNESS_FORMS_DIR) : defaultFormsDir(),
     sinks: {},
     // One context object per process, shared by every connection this process
     // serves. That is correct for the stdio deployment, where Hermes starts one

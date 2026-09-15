@@ -198,3 +198,175 @@ migration file without advancing the snapshot, so drizzle-kit does not know
 the schema changed. Migration `0003` needed its snapshot patched by hand
 because of exactly this mistake. `--custom` is only for a migration with no
 corresponding `schema.ts` change (e.g. a one-off data backfill).
+
+## Storage
+
+`HARNESS_STORAGE_DIR` is the root of the file store. Generated output — filled
+forms and rosters — lives under `<dir>/out`, and nothing else writes there.
+File ids are relative paths inside that tree and are content-addressed: the
+same bytes always produce the same id, which is what makes `forms_release`
+idempotent.
+
+`resolveOutFile` refuses an absolute path or any id containing `..`, so a file
+id that reaches the tools from a model cannot name a file outside the tree.
+
+In Compose, the same named volume is mounted into the `hermes` container (where
+the core-tools child writes the file) and the `approvals` container (where the
+Slack sink reads it). If a file upload fails with ENOENT, the two mounts have
+drifted apart — check both services' `volumes:` entries before anything else.
+
+Storage isolation is per process, not per request: a core-tools process is
+started with one `HARNESS_STORAGE_DIR` and one `HARNESS_CLIENT`, and that scopes
+every file it reads or writes for as long as it runs. One core-tools process
+never serves two clients, so there is no per-call tenant check on file paths —
+the isolation comes entirely from which process, and which storage root, a
+given client's traffic is routed to.
+
+## The Slack approvals app
+
+`@harness/approvals` is the only writer of approval decisions and the only
+caller of `approvals_execute`. It runs three loops:
+
+| Loop | Default | What it does |
+|---|---|---|
+| poll | 5s | posts a Block Kit card for every `pending` approval with no `slack_ts` |
+| dispatch | 5s | drains `tool_effects` through the `slack_message` and `slack_file` sinks |
+| reconcile | 300s | calls `harness_reconcile` through the core-tools MCP server |
+
+Reconciliation goes through MCP rather than calling the helper directly, so the
+repair is scoped to the client and lands in `audit_log` like any other call.
+The app has no privileged route into the data.
+
+**Run one approvals app per client.** The poller claims each row before it
+posts, by setting `slack_channel` under a guard on the row still being
+`pending` with `slack_channel IS NULL`. Only one claim can win that guard, so
+two pollers never both post a card for the same approval; the loser's update
+affects zero rows and it logs the row as `orphaned`.
+
+A claim can outlive the process that took it, so a claim older than two
+minutes that never got a `slack_ts` is released at the top of the next run and
+the row is posted again. There is no `claimed_at` column; `created_at` stands
+in for it.
+
+Two failure points sit either side of the post and are handled differently.
+A post that fails releases the claim, so the next run retries immediately. A
+post that succeeds but whose `slack_ts` write fails keeps the claim, because
+the card is already in the channel and releasing it would put a second one
+beside it; that row waits for the two-minute sweep. A line in the log reading
+"posted the card … but could not record its timestamp" is that case.
+
+`SLACK_ALLOWED_USERS` is required and fail-closed: with it unset or empty, the
+app refuses every decision. There is no default allowlist and no bypass —
+missing or empty means no Slack user can approve, reject, or edit anything,
+not that everyone can.
+
+**Slack credentials: two apps are required.** Not a hardening recommendation —
+one app does not work. Slack delivers each Socket Mode event to exactly one of
+an app's open connections, which is what makes rolling restarts possible. With
+the Hermes gateway and the approvals app both connected on one
+`SLACK_APP_TOKEN`, roughly half of every `block_actions` and `view_submission`
+payload goes to Hermes, which has no handler for the approval buttons or the
+note modal. Those clicks do nothing at all: the approval stays `pending` and
+the approver has no signal other than pressing again.
+
+| App | Variables | Bot scopes | Other settings |
+|---|---|---|---|
+| Hermes gateway | `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN` | `chat:write`, `app_mentions:read`, `channels:history`, `groups:history`, `im:history`, `im:read`, `im:write`, `mpim:history`, `users:read`, `files:read`, `files:write` | Socket Mode on |
+| Approvals app | `APPROVALS_SLACK_BOT_TOKEN`, `APPROVALS_SLACK_APP_TOKEN` | `chat:write`, `users:read`, `files:write` | Socket Mode on, Interactivity on |
+
+The approvals app has no fallback to the Hermes variables. A fallback would
+make the broken configuration the default again and fail intermittently
+instead of at startup, so both `APPROVALS_SLACK_*` variables are required and
+the process refuses to start without them.
+
+Compose keeps the two sets apart. The `approvals` service has no `env_file`:
+it gets an explicit `environment:` allowlist interpolated from `.env`, so
+Hermes's tokens never enter that container. In the other direction the
+`hermes` service blanks `APPROVALS_SLACK_*` over what `env_file` brought in,
+and `hermes-init` strips those lines out of the `.env` it copies to
+`$HERMES_HOME/.env`. Approval decisions are gated by `SLACK_ALLOWED_USERS`
+regardless of which token is present.
+
+Health is on `http://127.0.0.1:${APPROVALS_HEALTH_HOST_PORT:-8787}/healthz` on the host (container port 8787, `APPROVALS_HEALTH_PORT`). It returns counts
+and loop timestamps only, never a summary or a payload, because anything
+reachable over HTTP is outside the audit trail. It answers 503 when an effect
+has failed or is parked, or when a loop recorded an error.
+
+Inside the container the server binds every interface (`APPROVALS_HEALTH_BIND`,
+default `0.0.0.0`). That is not the exposure boundary: the Compose port mapping
+is, and it is pinned to `127.0.0.1:${APPROVALS_HEALTH_HOST_PORT:-8787}:8787`, so
+the endpoint is reachable from the operator's own machine and from the Compose
+network, and from nowhere else. A container-loopback bind would answer neither —
+Docker's port publish DNATs to the container's bridge address, and Hermes
+reaches the same address at `http://approvals:8787/healthz`. Set
+`APPROVALS_HEALTH_BIND=127.0.0.1` only for a bare-metal run, where the process
+itself is the boundary. Both watchdog scripts default to
+`http://approvals:8787/healthz` and read `APPROVALS_HEALTH_URL` to override it,
+which is how they are pointed at `http://127.0.0.1:8787/healthz` for a manual
+check outside Compose.
+
+Restricted values are kept out of Slack in three places, on purpose:
+
+1. Tools redact `approvals.payload` when they park a request.
+2. `payloadPreview` re-checks the rendered payload against the SSN, EIN and DEA
+   patterns and withholds the whole block on a match.
+3. `harness_notify` refuses a message that trips the same patterns before it
+   ever reaches the outbox.
+
+A withheld payload in a card is not a bug to route around. It means something
+wrote a restricted-looking value where it should not be; read the audit row.
+
+## Onboarding a client
+
+`pnpm new-client --pack <pack> --name <slug>` scaffolds `clients/<slug>/`. It
+does not make that client runnable on its own — the Compose file still names
+`demo-practice` — so finish by hand:
+
+1. `cp clients/<slug>/.env.example .env` and fill it in, with
+   `HARNESS_CLIENT=<slug>` and a storage directory this client does not share.
+2. Create the two Slack apps described under **Slack credentials** above and
+   paste both pairs of tokens.
+3. Review `clients/<slug>/SOUL.md` and `policy.yaml` before the first run.
+4. Point Compose at the client: in `harness/compose/docker-compose.yml`, the
+   `hermes-init` bind mount `../../clients/demo-practice:/srv/client:ro`, and
+   the `HARNESS_POLICY_FILE` value on both the `hermes` and the `approvals`
+   service. Three occurrences of `demo-practice` in total.
+5. Start it under its own Compose project so it does not collide with another
+   client's containers and volumes:
+   `COMPOSE_PROJECT_NAME=<slug> docker compose -f harness/compose/docker-compose.yml --profile demo up -d --build`.
+
+Do **not** use `pnpm demo:up` for a new client. It runs the default Compose
+project with the `demo-practice` paths above, so it starts demo-practice
+whatever `HARNESS_CLIENT` says.
+
+## Playbooks
+
+Three jobs run in the Hermes cron fleet. Install or repair them with:
+
+```bash
+docker compose -f harness/compose/docker-compose.yml exec hermes \
+  bash /opt/data/cron/playbooks.sh
+```
+
+The script is idempotent: a job whose name already exists is left alone.
+
+| Job | Schedule | Mode | Silence |
+|---|---|---|---|
+| `credentialing-expirations` | `0 7 * * *` | agent, skill-backed | replies `{"wakeAgent": false}` when nothing is due |
+| `harness-outbox-watchdog` | `*/15 * * * *` | `no_agent` script | empty stdout |
+| `harness-reconcile-watchdog` | `17 */6 * * *` | `no_agent` script | empty stdout |
+
+The expirations job delivers `local`: the skill stages its own message with
+`harness_notify`, so the digest is audited, carries `derived_from` back to the
+`deadlines_upcoming` query, and is sent exactly once per continuity key. A
+digest for the same bucket and count as last night is staged again, hits the
+unique index on `tool_effects.idempotency_key`, and sends nothing.
+
+The record format of `~/.hermes/cron/jobs.json` is not documented, so jobs are
+only ever created through `hermes cron create`. The init container seeds that
+file when it is absent and never overwrites it, so Hermes's own writes to it
+(next run times, run history) survive a redeploy.
+
+Diagnose a fleet that has gone quiet with `hermes cron doctor` inside the
+container: it flags a missing script, a job parked in the past, and a delivery
+that failed after the job succeeded.

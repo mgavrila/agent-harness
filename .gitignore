@@ -16,6 +16,7 @@ venv/
 # data and generated files
 data/
 storage/
+.harness-storage/
 *.sqlite
 packs/*/synthetic/out/
 evals/results/
