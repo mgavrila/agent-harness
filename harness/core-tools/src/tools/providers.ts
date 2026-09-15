@@ -169,6 +169,17 @@ export interface UpsertProviderInput {
   npi?: string;
   fields: FieldInput[];
   credentials: CredentialInput[];
+  /**
+   * Write to this provider row directly, skipping name/NPI matching entirely.
+   * The caller has already resolved and client-scoped this id (typically via
+   * `requireProvider`); re-deriving a match from `name`/`npi` here could
+   * silently attach to, rename, or duplicate a *different* provider of the
+   * same client — e.g. when the caller's provider has no NPI on file and the
+   * extracted NPI happens to belong to someone else. When set, `name` and
+   * `npi` are otherwise unused: the provider's own name and NPI are left
+   * untouched.
+   */
+  providerId?: string;
 }
 
 export interface UpsertProviderResult {
@@ -185,20 +196,20 @@ export interface UpsertProviderResult {
  * verified-field protection.
  */
 export async function upsertProviderRecord(deps: ToolDeps, args: UpsertProviderInput): Promise<UpsertProviderResult> {
-  const provider = await findOrCreateProvider(deps, args.name, args.npi);
+  const providerId = args.providerId ?? (await findOrCreateProvider(deps, args.name, args.npi)).id;
   let pending = 0;
   let extracted = 0;
   for (const f of args.fields) {
     // A field already verified by a human keeps its value and counts as neither.
-    const status = await upsertField(deps, provider.id, f);
+    const status = await upsertField(deps, providerId, f);
     if (status === 'pending') pending += 1;
     else if (status === 'extracted') extracted += 1;
   }
   for (const c of args.credentials) {
-    await upsertCredential(deps, provider.id, c);
+    await upsertCredential(deps, providerId, c);
   }
-  const credCount = await deps.db.$count(credentials, eq(credentials.providerId, provider.id));
-  return { provider_id: provider.id, fields_pending: pending, fields_extracted: extracted, credentials: credCount };
+  const credCount = await deps.db.$count(credentials, eq(credentials.providerId, providerId));
+  return { provider_id: providerId, fields_pending: pending, fields_extracted: extracted, credentials: credCount };
 }
 
 const providersUpsert = defineTool({

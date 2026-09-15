@@ -14,7 +14,7 @@ import {
 } from '../documents/storage.js';
 import { pdfPageCount, extractDocumentText } from '../documents/text.js';
 import { assertRedacted, redactPages } from '../documents/redact.js';
-import { callModelJson } from '../models.js';
+import { callModelJson, type ModelMessage } from '../models.js';
 import {
   buildClassificationMessages,
   buildClassificationSchema,
@@ -193,8 +193,22 @@ async function readForModel(deps: ToolDeps, row: typeof documents.$inferSelect) 
   // The flag exists so a client with a BAA can opt in; it is off by default and
   // turning it on is a documented decision (spec 4.4).
   const promptPages = deps.restrictedToModel ? pages : redacted;
-  if (!deps.restrictedToModel) assertRedacted(promptPages.map((p) => p.text).join('\n'));
   return { abs, pages, redacted, promptPages, hits, ocrUsed };
+}
+
+/**
+ * The last gate before anything leaves the process: checked against the exact
+ * content of every message about to be sent, not the page text that fed into
+ * building them. Building the messages is a separate step from redacting the
+ * pages (a prompt adds its own instructions and field descriptions around the
+ * document), so this re-checks what is actually serialized onto the wire
+ * rather than trusting that step to have carried the redaction through
+ * untouched. A no-op when `restrictedToModel` is on: that path sends the raw
+ * pages on purpose.
+ */
+function assertPromptRedacted(deps: ToolDeps, messages: ModelMessage[]): void {
+  if (deps.restrictedToModel) return;
+  for (const m of messages) assertRedacted(m.content);
 }
 
 const documentsClassify = defineTool({
@@ -209,9 +223,11 @@ const documentsClassify = defineTool({
     const row = await requireDocument(deps, document_id);
     const manifest = loadHealthcareManifest();
     const { promptPages } = await readForModel(deps, row);
+    const messages = buildClassificationMessages(promptPages);
+    assertPromptRedacted(deps, messages);
     const { json } = await callModelJson(deps, {
       route: 'extract',
-      messages: buildClassificationMessages(promptPages),
+      messages,
       jsonSchema: buildClassificationSchema(manifest),
       validate: ClassificationReply,
       temperature: 0,
@@ -248,13 +264,18 @@ const documentsExtract = defineTool({
   }),
   handler: async ({ document_id, provider_id }, deps) => {
     const row = await requireDocument(deps, document_id);
+    // Already client-scoped by requireProvider. When given, this is the write
+    // target: no name/NPI re-matching, so the extraction cannot silently
+    // attach to, rename, or duplicate a different provider of this client.
     const named = provider_id ? await requireProvider(deps, provider_id) : undefined;
     const manifest = loadHealthcareManifest();
     const { abs, promptPages, redacted, hits, ocrUsed } = await readForModel(deps, row);
 
+    const messages = buildExtractionMessages(promptPages, manifest);
+    assertPromptRedacted(deps, messages);
     const { json } = await callModelJson(deps, {
       route: 'extract',
-      messages: buildExtractionMessages(promptPages, manifest),
+      messages,
       jsonSchema: buildExtractionSchema(manifest),
       validate: ExtractionReply,
       temperature: 0,
@@ -303,27 +324,30 @@ const documentsExtract = defineTool({
     const upserted = await upsertProviderRecord(deps, {
       name,
       npi,
+      providerId: named?.id,
       fields: [...modelFields, ...restrictedFields],
       credentials: credentialInputs,
     });
 
-    // Only redacted text is ever written to disk, whatever restricted_to_model says.
     const textAbs = documentTextPath(abs);
-    await writeFile(textAbs, redacted.map((p) => `<<<PAGE ${p.num}>>>\n${p.text}`).join('\n\n'), 'utf8');
+    await deps.db
+      .update(documents)
+      .set({
+        providerId: upserted.provider_id,
+        kind: row.kind ?? parsed.documentKind,
+        ocrUsed,
+        textPath: toStorageRelative(deps.storageDir, textAbs),
+      })
+      .where(eq(documents.id, document_id));
+
+    // Only redacted text is ever written to disk, whatever restricted_to_model
+    // says, and only now that every database write above has succeeded: if
+    // anything above had thrown, the transaction rolls back and this file
+    // must never have existed. If the write itself fails partway, remove
+    // whatever landed so a rolled-back extraction never leaves orphaned text.
     try {
-      await deps.db
-        .update(documents)
-        .set({
-          providerId: upserted.provider_id,
-          kind: row.kind ?? parsed.documentKind,
-          ocrUsed,
-          textPath: toStorageRelative(deps.storageDir, textAbs),
-        })
-        .where(eq(documents.id, document_id));
+      await writeFile(textAbs, redacted.map((p) => `<<<PAGE ${p.num}>>>\n${p.text}`).join('\n\n'), 'utf8');
     } catch (err) {
-      // The transaction this handler runs in is about to roll back every DB
-      // write, but a file on disk does not roll back with it: remove it so a
-      // failed extraction never leaves orphaned text beside the document.
       await unlink(textAbs).catch(() => {});
       throw err;
     }

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
-import { mkdtemp, mkdir, writeFile, rm, symlink, readFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, rm, symlink, readFile, access } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { eq } from 'drizzle-orm';
@@ -8,7 +8,7 @@ import { documents, providers, fields as fieldsTable, credentials as credentials
 import type { ToolDeps } from '../registry.js';
 import { connectTools, makeTestDeps, resultOf, useTestDb, startFakeGateway, type FakeGateway } from '../testing.js';
 import { providerTools } from './providers.js';
-import { documentTools } from './documents.js';
+import { documentTools, documentTextPath } from './documents.js';
 
 const db = useTestDb();
 let storageDir: string;
@@ -362,10 +362,19 @@ describe('documents_classify and documents_extract', () => {
     }
   });
 
-  it('attaches to an existing provider when one is named', async () => {
+  it('attaches to an existing provider when one is named, without renaming it or touching its NPI', async () => {
     gateway.setResponder(() => ({ content: EXTRACTION_REPLY }));
     const client = await connectWithGateway();
-    const providerId = await seedProvider(client);
+    // A different NPI than EXTRACTION_REPLY's, and a name distinct from the
+    // extracted "Ada Lovelace": if documents_extract ever fell back to
+    // matching by name/NPI instead of writing to this exact row, either would
+    // cause it to attach to (or create) a different provider.
+    const seeded = resultOf<{ provider_id: string }>(
+      await client.callTool({ name: 'providers_upsert', arguments: { name: 'Dr. Grace Hopper', npi: '9999999999' } }),
+    );
+    const providerId = seeded.provider_id;
+    const before = (await db.select().from(providers)).length;
+
     const ing = resultOf<IngestOut>(await client.callTool({ name: 'documents_ingest', arguments: { path: 'incoming/license.pdf' } }));
     const out = resultOf<{ provider_id: string }>(
       await client.callTool({ name: 'documents_extract', arguments: { document_id: ing.document_id, provider_id: providerId } }),
@@ -373,6 +382,14 @@ describe('documents_classify and documents_extract', () => {
     expect(out.provider_id).toBe(providerId);
     const doc = (await db.select().from(documents)).find((d) => d.id === ing.document_id)!;
     expect(doc.providerId).toBe(providerId);
+
+    const providerRow = (await db.select().from(providers)).find((p) => p.id === providerId)!;
+    expect(providerRow.name).toBe('Dr. Grace Hopper');
+    expect(providerRow.npi).toBe('9999999999');
+    expect(await db.select().from(providers)).toHaveLength(before);
+
+    const stored = await db.select().from(fieldsTable).where(eq(fieldsTable.providerId, providerId));
+    expect(stored.find((f) => f.name === 'npi')?.value).toBe('1234567890');
   });
 
   it('refuses when the model returns no name and no provider was given', async () => {
@@ -385,15 +402,24 @@ describe('documents_classify and documents_extract', () => {
   });
 
   it('leaves nothing behind when the gateway fails', async () => {
+    // A document unique to this test: other tests in this suite reuse
+    // incoming/license.pdf and succeed, leaving its .redacted.txt on disk
+    // (the storage dir is not reset between tests), which would make a
+    // leftover file from an earlier test look like one this run created.
+    await writePdf('incoming/gateway-fail.pdf', [
+      'State of California Medical Board\nPhysician and Surgeon License\nName: Ada Lovelace MD',
+    ]);
     gateway.setResponder(() => ({ status: 500, errorBody: {} }));
     const client = await connectWithGateway();
-    const ing = resultOf<IngestOut>(await client.callTool({ name: 'documents_ingest', arguments: { path: 'incoming/license.pdf' } }));
+    const ing = resultOf<IngestOut>(await client.callTool({ name: 'documents_ingest', arguments: { path: 'incoming/gateway-fail.pdf' } }));
     const before = (await db.select().from(providers)).length;
     const res = await client.callTool({ name: 'documents_extract', arguments: { document_id: ing.document_id } });
     expect(res.isError).toBe(true);
     expect(await db.select().from(providers)).toHaveLength(before);
     const doc = (await db.select().from(documents)).find((d) => d.id === ing.document_id)!;
     expect(doc.textPath).toBeNull();
+    const textAbs = documentTextPath(path.join(storageDir, doc.storagePath));
+    await expect(access(textAbs)).rejects.toThrow();
   });
 
   it('records the credential with its dates so deadlines can be computed', async () => {
