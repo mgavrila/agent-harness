@@ -2,7 +2,7 @@ import * as z from 'zod/v4';
 import { and, asc, eq, inArray, lte, sql } from 'drizzle-orm';
 import { credentials, deadlines, providers } from '@harness/db';
 import { defineTool, type AnyToolDef } from '../registry.js';
-import { computeDeadlines, daysUntil, addDays } from '../deadlines/compute.js';
+import { computeDeadlines, daysUntil, addDays, bucketFor, digestKeyFor, URGENCY_BUCKETS } from '../deadlines/compute.js';
 import { requireProvider } from './providers.js';
 
 /** Identifies a deadline row within a provider, matching `deadlines_credential_kind_uq`. */
@@ -73,8 +73,18 @@ const deadlinesUpcoming = defineTool({
         due_at: z.string(),
         days_left: z.number(),
         overdue: z.boolean(),
+        bucket: z.enum([...URGENCY_BUCKETS]),
       }),
     ),
+    /**
+     * Fingerprint of this exact set of (credential, deadline kind, bucket)
+     * triples, independent of item order. A playbook passes this straight
+     * through as `harness_notify`'s idempotency key: the same set of items in
+     * the same buckets produces the same key, so a re-run digest is a no-op,
+     * and an item moving to a tighter bucket changes the key so the next run
+     * speaks again. `expirations:none` when there are no items.
+     */
+    digest_key: z.string(),
   }),
   handler: async ({ window_days, today, limit }, deps) => {
     const todayDate = today ? new Date(`${today}T00:00:00Z`) : deps.now();
@@ -95,21 +105,22 @@ const deadlinesUpcoming = defineTool({
       .where(and(eq(providers.client, deps.client), lte(deadlines.dueAt, horizon)))
       .orderBy(asc(deadlines.dueAt))
       .limit(limit);
-    return {
-      items: rows.map((r) => {
-        const daysLeft = daysUntil(r.dueAt, todayDate);
-        return {
-          provider_id: r.providerId,
-          provider_name: r.providerName,
-          credential_id: r.credentialId,
-          credential_kind: r.credentialKind,
-          kind: r.kind,
-          due_at: r.dueAt,
-          days_left: daysLeft,
-          overdue: daysLeft < 0,
-        };
-      }),
-    };
+    const items = rows.map((r) => {
+      const daysLeft = daysUntil(r.dueAt, todayDate);
+      return {
+        provider_id: r.providerId,
+        provider_name: r.providerName,
+        credential_id: r.credentialId,
+        credential_kind: r.credentialKind,
+        kind: r.kind,
+        due_at: r.dueAt,
+        days_left: daysLeft,
+        overdue: daysLeft < 0,
+        bucket: bucketFor(daysLeft),
+      };
+    });
+    const digest_key = digestKeyFor(items.map((i) => ({ credentialId: i.credential_id, kind: i.kind, bucket: i.bucket })));
+    return { items, digest_key };
   },
 });
 

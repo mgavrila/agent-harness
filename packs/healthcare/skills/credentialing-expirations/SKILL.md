@@ -48,21 +48,16 @@ Call `harness_set_context` with `skill: "credentialing-expirations"`,
 3. Otherwise, get the lineage: call `audit_query` with
    `tool: "deadlines_upcoming"` and `limit: 1`, and keep the `id` of the first
    entry. That is the audit row of the query you just ran.
-4. Put each item in exactly one urgency bucket by `days_left`:
-
-   | Bucket | `days_left` |
-   |---|---|
-   | `overdue` | below 0 |
-   | `14` | 0 to 14 |
-   | `30` | 15 to 30 |
-   | `60` | 31 to 60 |
-   | `90` | 61 to 90 |
-
-5. Build the continuity key. It is `expirations:` followed by the most urgent
-   bucket present, a colon, and the count of items in that bucket — for
-   example `expirations:14:2`. The same set of items in the same bucket
-   produces the same key on the next run, so the message is sent once; an item
-   moving into a tighter bucket changes the key, so the next run speaks again.
+4. Group the items by the `bucket` each one already carries — `overdue`,
+   `due_7d`, `due_30d`, `due_60d`, or `due_90d`. Do not classify items
+   yourself from `days_left`; the tool has already done it, and its boundaries
+   are the ones that count.
+5. Take `digest_key` from the same `deadlines_upcoming` response and pass it
+   through, verbatim, as `harness_notify`'s `idempotency_key`. Do not build or
+   guess a key of your own. The same set of items in the same buckets
+   reproduces the same `digest_key` on the next run, so the message is sent
+   once; an item moving into a tighter bucket changes it, so the next run
+   speaks again.
 6. Call `harness_notify` with that `idempotency_key`, the message below as
    `text`, and `derived_from` set to `[<the audit id from step 3>]`.
 7. Produce no chat output of your own. Reply with `{"wakeAgent": false}` on its
@@ -70,7 +65,8 @@ Call `harness_set_context` with `skill: "credentialing-expirations"`,
 
 ## The message
 
-One message. Most urgent first. One line per item:
+One message. Most urgent bucket first, in this order: `overdue`, `due_7d`,
+`due_30d`, `due_60d`, `due_90d`. One line per item:
 
 ```
 Renewals inside 90 days
@@ -78,8 +74,8 @@ Renewals inside 90 days
 Overdue
 - Dr. Ada Reyes — state licence (TX) — expired 2026-09-01, 14 days ago
 
-Within 14 days
-- Dr. Bo Lin — malpractice — due 2026-09-24, 9 days left
+Within 7 days
+- Dr. Bo Lin — malpractice — due 2026-09-20, 5 days left
 
 Within 60 days
 - Dr. Cai Okafor — board certification — due 2026-11-02, 48 days left
