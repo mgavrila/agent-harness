@@ -1,0 +1,126 @@
+import {
+  pgTable, uuid, text, timestamp, boolean, real, integer, jsonb, date,
+  customType, uniqueIndex, index,
+} from 'drizzle-orm/pg-core';
+
+export const bytea = customType<{ data: Buffer; driverData: Buffer }>({
+  dataType() {
+    return 'bytea';
+  },
+});
+
+export const providers = pgTable('providers', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  client: text('client').notNull(),
+  name: text('name').notNull(),
+  npi: text('npi'),
+  status: text('status').notNull().default('active'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  index('providers_client_name_idx').on(t.client, t.name),
+  uniqueIndex('providers_client_npi_uq').on(t.client, t.npi),
+]);
+
+export const documents = pgTable('documents', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  providerId: uuid('provider_id').references(() => providers.id),
+  kind: text('kind'),
+  storagePath: text('storage_path').notNull(),
+  sha256: text('sha256').notNull(),
+  pages: integer('pages'),
+  ocrUsed: boolean('ocr_used').notNull().default(false),
+  ingestedAt: timestamp('ingested_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const fields = pgTable('fields', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  providerId: uuid('provider_id').notNull().references(() => providers.id),
+  name: text('name').notNull(),
+  value: text('value'),
+  valueEncrypted: bytea('value_encrypted'),
+  restricted: boolean('restricted').notNull().default(false),
+  confidence: real('confidence'),
+  sourceDocId: uuid('source_doc_id').references(() => documents.id),
+  sourcePage: integer('source_page'),
+  status: text('status').notNull().default('pending'),
+  confirmedBy: text('confirmed_by'),
+  confirmedAt: timestamp('confirmed_at', { withTimezone: true }),
+}, (t) => [uniqueIndex('fields_provider_name_uq').on(t.providerId, t.name)]);
+
+export const credentials = pgTable('credentials', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  providerId: uuid('provider_id').notNull().references(() => providers.id),
+  kind: text('kind').notNull(),
+  issuer: text('issuer'),
+  numberEncrypted: bytea('number_encrypted'),
+  state: text('state'),
+  issuedAt: date('issued_at', { mode: 'string' }),
+  expiresAt: date('expires_at', { mode: 'string' }),
+  sourceDocId: uuid('source_doc_id').references(() => documents.id),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [index('credentials_provider_idx').on(t.providerId)]);
+
+export const deadlines = pgTable('deadlines', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  providerId: uuid('provider_id').notNull().references(() => providers.id),
+  credentialId: uuid('credential_id').notNull().references(() => credentials.id),
+  kind: text('kind').notNull(),
+  dueAt: date('due_at', { mode: 'string' }).notNull(),
+  windowDays: integer('window_days').notNull().default(90),
+  notifiedAt: timestamp('notified_at', { withTimezone: true }),
+}, (t) => [uniqueIndex('deadlines_credential_kind_uq').on(t.credentialId, t.kind)]);
+
+export const approvals = pgTable('approvals', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  client: text('client').notNull(),
+  action: text('action').notNull(),
+  payload: jsonb('payload').notNull(),
+  summary: text('summary').notNull(),
+  requestedBy: text('requested_by').notNull(),
+  status: text('status').notNull().default('pending'),
+  decidedBy: text('decided_by'),
+  decidedAt: timestamp('decided_at', { withTimezone: true }),
+  decisionNote: text('decision_note'),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  idempotencyKey: text('idempotency_key').notNull(),
+  slackChannel: text('slack_channel'),
+  slackTs: text('slack_ts'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [uniqueIndex('approvals_idempotency_uq').on(t.idempotencyKey)]);
+
+export const runs = pgTable('runs', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  client: text('client').notNull(),
+  caller: text('caller').notNull(),
+  channel: text('channel'),
+  startedAt: timestamp('started_at', { withTimezone: true }).notNull().defaultNow(),
+  endedAt: timestamp('ended_at', { withTimezone: true }),
+});
+
+export const modelCalls = pgTable('model_calls', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  runId: uuid('run_id').references(() => runs.id),
+  client: text('client').notNull(),
+  route: text('route').notNull(),
+  model: text('model').notNull(),
+  inputTokens: integer('input_tokens').notNull().default(0),
+  outputTokens: integer('output_tokens').notNull().default(0),
+  costUsd: real('cost_usd').notNull().default(0),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const auditLog = pgTable('audit_log', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  runId: uuid('run_id').references(() => runs.id),
+  client: text('client').notNull(),
+  caller: text('caller').notNull(),
+  tool: text('tool').notNull(),
+  actionClass: text('action_class').notNull(),
+  argsHash: text('args_hash').notNull(),
+  recordIds: jsonb('record_ids').notNull().default([]),
+  decision: text('decision').notNull(),
+  approvalId: uuid('approval_id').references(() => approvals.id),
+  error: text('error'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [index('audit_log_tool_created_idx').on(t.tool, t.createdAt)]);

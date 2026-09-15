@@ -1,3 +1,5 @@
 packages:
   - 'harness/*'
   - 'evals'
+allowBuilds:
+  esbuild: true
