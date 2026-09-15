@@ -19,3 +19,16 @@ export {
   type HandlerRegistry,
   type ViewArgs,
 } from './app.js';
+export {
+  startRunner,
+  runPollTick,
+  runDispatchTick,
+  runReconcileTick,
+  collectHealth,
+  type RunnerDeps,
+  type RunnerHandle,
+  type RunnerIntervals,
+  type RunnerStatus,
+  type HealthSnapshot,
+} from './runner.js';
+export { startHealthServer } from './health.js';

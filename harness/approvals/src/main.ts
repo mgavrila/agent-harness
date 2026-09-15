@@ -1,0 +1,151 @@
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { config as loadEnv } from 'dotenv';
+import { App, LogLevel } from '@slack/bolt';
+import { createDb, loadKey } from '@harness/db';
+import { slackSinks } from './sinks.js';
+import { webClientApi } from './slack.js';
+import { createMcpCoreToolsClient } from './execute.js';
+import { registerApprovalHandlers, parseAllowedUsers, type ActionArgs, type HandlerRegistry, type ViewArgs } from './app.js';
+import { EDIT_MODAL_CALLBACK_ID, EDIT_NOTE_ACTION_ID, EDIT_NOTE_BLOCK_ID, APPROVE_ACTION_ID, DECLINE_ACTION_ID, EDIT_ACTION_ID } from './render.js';
+import { collectHealth, startRunner } from './runner.js';
+import { startHealthServer } from './health.js';
+
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
+loadEnv({ path: path.join(repoRoot, '.env'), quiet: true });
+
+function required(name: string): string {
+  const value = process.env[name];
+  if (!value || value.trim() === '') throw new Error(`${name} is not set`);
+  return value;
+}
+
+function seconds(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (!raw || raw.trim() === '') return fallback;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < 1 || value > 86_400) throw new Error(`${name} must be between 1 and 86400 seconds`);
+  return value;
+}
+
+const client = process.env.HARNESS_CLIENT ?? 'default';
+const channel = required('SLACK_APPROVALS_CHANNEL');
+const allowedUsers = parseAllowedUsers(process.env.SLACK_ALLOWED_USERS);
+const storageRoot = required('HARNESS_STORAGE_DIR');
+
+const bolt = new App({
+  token: required('SLACK_BOT_TOKEN'),
+  appToken: required('SLACK_APP_TOKEN'),
+  socketMode: true,
+  logLevel: LogLevel.INFO,
+});
+
+/**
+ * Narrow Bolt's payloads onto the fields the handlers need. Everything
+ * Bolt-specific lives here, so `app.ts` and its tests stay free of Bolt types.
+ *
+ * `channel` for a block action comes from `body.channel.id`, the channel the
+ * interactive message lives in. A view submission carries no such field in
+ * general (a modal is not itself posted to a channel); Bolt's `ViewOutput`
+ * does define an optional `channel`, so that is used when Slack populates it,
+ * with an empty string otherwise. An unauthorized modal submission then loses
+ * only the ephemeral notice, never the authorization check itself.
+ */
+const registry: HandlerRegistry = {
+  action(actionId, handler) {
+    bolt.action(actionId, async ({ ack, body, action }) => {
+      const args: ActionArgs = {
+        ack: async () => {
+          await ack();
+        },
+        userId: (body as { user?: { id?: string } }).user?.id ?? 'unknown',
+        channel: (body as { channel?: { id?: string } }).channel?.id ?? '',
+        value: (action as { value?: string }).value ?? '',
+        triggerId: (body as { trigger_id?: string }).trigger_id,
+      };
+      await handler(args);
+    });
+  },
+  view(callbackId, handler) {
+    bolt.view(callbackId, async ({ ack, body, view }) => {
+      const state = view.state as { values?: Record<string, Record<string, { value?: string | null }>> };
+      const args: ViewArgs = {
+        ack: async () => {
+          await ack();
+        },
+        userId: (body as { user?: { id?: string } }).user?.id ?? 'unknown',
+        channel: (view as { channel?: string }).channel ?? '',
+        privateMetadata: view.private_metadata ?? '',
+        note: state.values?.[EDIT_NOTE_BLOCK_ID]?.[EDIT_NOTE_ACTION_ID]?.value ?? '',
+      };
+      await handler(args);
+    });
+  },
+};
+
+const { db, close: closeDb } = createDb();
+const api = webClientApi(bolt.client);
+const core = createMcpCoreToolsClient({
+  command: 'pnpm',
+  args: ['--dir', repoRoot, '--filter', '@harness/core-tools', 'start'],
+  // The child needs the harness variables; it must not inherit the Slack tokens.
+  env: {
+    PATH: process.env.PATH ?? '',
+    HOME: process.env.HOME ?? '',
+    DATABASE_URL: required('DATABASE_URL'),
+    HARNESS_ENCRYPTION_KEY: required('HARNESS_ENCRYPTION_KEY'),
+    HARNESS_CLIENT: client,
+    CORE_TOOLS_CALLER: 'approvals-app',
+    HARNESS_STORAGE_DIR: storageRoot,
+    ...(process.env.HARNESS_POLICY_FILE ? { HARNESS_POLICY_FILE: process.env.HARNESS_POLICY_FILE } : {}),
+    ...(process.env.HARNESS_FORMS_DIR ? { HARNESS_FORMS_DIR: process.env.HARNESS_FORMS_DIR } : {}),
+  },
+});
+
+const deps = {
+  db,
+  api,
+  core,
+  sinks: slackSinks(api, { defaultChannel: channel, storageRoot }),
+  client,
+  channel,
+  encryptionKey: loadKey(),
+  now: () => new Date(),
+  allowedUsers,
+};
+
+registerApprovalHandlers(registry, deps);
+
+const runner = startRunner(deps, {
+  pollMs: seconds('APPROVALS_POLL_SECONDS', 5) * 1000,
+  dispatchMs: seconds('EFFECTS_DISPATCH_SECONDS', 5) * 1000,
+  reconcileMs: seconds('RECONCILE_SECONDS', 300) * 1000,
+  staleAfterMinutes: 10,
+});
+
+const health = startHealthServer({
+  port: Number(process.env.APPROVALS_HEALTH_PORT ?? 8787),
+  snapshot: () => collectHealth(db, client, runner, deps.now),
+});
+
+await bolt.start();
+console.error(
+  `approvals: listening (client=${client}, channel=${channel}, buttons=${[APPROVE_ACTION_ID, EDIT_ACTION_ID, DECLINE_ACTION_ID].join(',')}, modal=${EDIT_MODAL_CALLBACK_ID})`,
+);
+
+async function shutdown(signal: string): Promise<void> {
+  console.error(`approvals: ${signal} received, stopping`);
+  try {
+    await runner.stop();
+    await health.close();
+    await bolt.stop();
+    await core.close();
+    await closeDb();
+    process.exit(0);
+  } catch (err) {
+    console.error(`approvals: shutdown failed: ${err instanceof Error ? err.message : String(err)}`);
+    process.exit(1);
+  }
+}
+process.on('SIGINT', () => void shutdown('SIGINT'));
+process.on('SIGTERM', () => void shutdown('SIGTERM'));

@@ -12,7 +12,8 @@
     "db:up": "docker compose -f harness/compose/docker-compose.yml up -d postgres",
     "db:down": "docker compose -f harness/compose/docker-compose.yml down",
     "db:migrate": "pnpm --filter @harness/db migrate",
-    "forms:generate": "pnpm --filter @harness/core-tools exec tsx ../../packs/healthcare/forms/generate-templates.ts"
+    "forms:generate": "pnpm --filter @harness/core-tools exec tsx ../../packs/healthcare/forms/generate-templates.ts",
+    "approvals": "pnpm --filter @harness/approvals start"
   },
   "dependencies": {
     "pdf-lib": "1.17.1"
