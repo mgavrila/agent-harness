@@ -40,6 +40,22 @@ describe('csvCell', () => {
     expect(csvCell('-TX')).toBe(`'-TX`);
     expect(csvCell('@here')).toBe(`'@here`);
   });
+
+  it('defuses a formula hidden behind leading whitespace a spreadsheet strips', () => {
+    // Excel removes a leading tab, CR or space before deciding whether the
+    // cell is a formula, so the leader has to be read after them.
+    expect(csvCell('\t=cmd|calc')).toBe(`"'\t=cmd|calc"`);
+    expect(csvCell('\r=cmd|calc')).toBe(`"'\r=cmd|calc"`);
+    expect(csvCell(' =cmd|calc')).toBe(`"' =cmd|calc"`);
+    expect(csvCell('\t+1 555 0100')).toBe(`"'\t+1 555 0100"`);
+    expect(csvCell('\t-TX')).toBe(`'\t-TX`);
+    expect(csvCell('\t@here')).toBe(`'\t@here`);
+  });
+
+  it('leaves a value that only looks like whitespace alone', () => {
+    expect(csvCell('\tTX')).toBe('\tTX');
+    expect(csvCell('   ')).toBe('   ');
+  });
 });
 
 describe('buildRosterCsv', () => {
