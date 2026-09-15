@@ -32,6 +32,12 @@ services:
     user: "0:0"
     volumes:
       - hermesdata:/data
+      # The shared file store, mounted here only to create and chown it.
+      # Docker creates a named volume root-owned and 0755, and neither image
+      # has content at this path to seed ownership from, so without this the
+      # first forms_fill fails with EACCES: the writer is the core-tools child
+      # inside the hermes container, which runs as HERMES_UID, not root.
+      - storage:/srv/harness-storage
       - ../../clients/demo-practice:/srv/client:ro
       - ../../.env:/srv/env/.env:ro
     environment:
@@ -65,7 +71,14 @@ services:
         # environment: block below, and blank out to "chown -R \":\"" when
         # HERMES_UID/HERMES_GID are not set on the host).
         chown -R "$${HERMES_UID}:$${HERMES_GID}" /data
-        echo "hermes-init: seeded SOUL.md, config.yaml, cron/playbooks.sh and scripts/"
+        # The shared store, same $$-escaping rule. `out/` is created here
+        # rather than left to the first forms_fill, because that mkdir runs as
+        # HERMES_UID inside the hermes container and the fresh volume root is
+        # owned by root. The approvals container reads this tree as its own
+        # uid-1000 `node` user, which matches the default HERMES_UID.
+        mkdir -p /srv/harness-storage/out
+        chown -R "$${HERMES_UID}:$${HERMES_GID}" /srv/harness-storage
+        echo "hermes-init: seeded SOUL.md, config.yaml, cron/playbooks.sh, scripts/ and the storage root"
 
   hermes:
     build:
