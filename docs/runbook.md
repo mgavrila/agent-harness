@@ -237,10 +237,23 @@ Reconciliation goes through MCP rather than calling the helper directly, so the
 repair is scoped to the client and lands in `audit_log` like any other call.
 The app has no privileged route into the data.
 
-**Run one approvals app per client.** The poller posts before it claims the row
-— a Slack timestamp only exists after the post — and the claim is guarded, so a
-second poller would post a duplicate card in that window. A card that reaches
-Slack after its row moved on is logged as `orphaned`.
+**Run one approvals app per client.** The poller claims each row before it
+posts, by setting `slack_channel` under a guard on the row still being
+`pending` with `slack_channel IS NULL`. Only one claim can win that guard, so
+two pollers never both post a card for the same approval; the loser's update
+affects zero rows and it logs the row as `orphaned`.
+
+A claim can outlive the process that took it, so a claim older than two
+minutes that never got a `slack_ts` is released at the top of the next run and
+the row is posted again. There is no `claimed_at` column; `created_at` stands
+in for it.
+
+Two failure points sit either side of the post and are handled differently.
+A post that fails releases the claim, so the next run retries immediately. A
+post that succeeds but whose `slack_ts` write fails keeps the claim, because
+the card is already in the channel and releasing it would put a second one
+beside it; that row waits for the two-minute sweep. A line in the log reading
+"posted the card … but could not record its timestamp" is that case.
 
 `SLACK_ALLOWED_USERS` is required and fail-closed: with it unset or empty, the
 app refuses every decision. There is no default allowlist and no bypass —
