@@ -52,7 +52,7 @@ export async function requireProvider(deps: ToolDeps, providerId: string) {
 }
 
 /** Stands in for any value a caller is not allowed to read back. */
-const MASKED = '[restricted]';
+export const MASKED = '[restricted]';
 
 /**
  * A field value belongs in exactly one column: plaintext when it may be read

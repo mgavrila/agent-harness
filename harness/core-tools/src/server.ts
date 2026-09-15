@@ -95,3 +95,4 @@ export {
   type FakeReply,
   type Responder,
 } from './fake-gateway.js';
+export { MASKED } from './tools/providers.js';

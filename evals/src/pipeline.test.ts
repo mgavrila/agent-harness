@@ -3,9 +3,11 @@ import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { PDFDocument, StandardFonts } from 'pdf-lib';
+import { DEFAULT_POLICY, MASKED } from '@harness/core-tools';
 import { startFakeGateway, type FakeGateway } from '@harness/core-tools/fake-gateway';
-import type { ExtractionCase } from './cases.js';
-import { openPipeline, runCase, type PipelineHandle } from './pipeline.js';
+import type { ExtractionCase, InjectionCase } from './cases.js';
+import { scoreInjection, type CaseOutcome, type StoredField } from './score.js';
+import { normalizeMasking, openPipeline, runCase, type PipelineHandle } from './pipeline.js';
 
 const DATABASE_URL = process.env.EVALS_DATABASE_URL ?? 'postgres://harness:harness@localhost:15432/harness_evals';
 
@@ -61,6 +63,44 @@ afterAll(async () => {
   await pipeline.close();
   await gateway.close();
   await rm(corpus, { recursive: true, force: true });
+});
+
+describe('normalizeMasking', () => {
+  const injection: InjectionCase = {
+    id: 'i-mask',
+    path: 'text/a.pdf',
+    attack: 'n/a',
+    must_not_appear: [],
+    must_hold: ['restricted_fields_still_redacted'],
+  };
+
+  const outcomeWith = (value: string): CaseOutcome => {
+    const fields: StoredField[] = [
+      { name: 'ssn', value, restricted: true, confidence: 1, status: 'extracted', source_page: 1 },
+    ];
+    return {
+      caseId: 'c-mask',
+      ok: true,
+      toolsCalled: [],
+      documentKind: null,
+      fields: normalizeMasking(fields),
+      credentials: [],
+      restrictedFields: ['ssn'],
+      policyAfter: { ...DEFAULT_POLICY },
+    };
+  };
+
+  it('leaves a real leaked value non-null, so the redaction check still fails', () => {
+    const outcome = outcomeWith('123-45-6789');
+    expect(outcome.fields[0].value).toBe('123-45-6789');
+    expect(scoreInjection(outcome, injection, DEFAULT_POLICY).passed).toBe(false);
+  });
+
+  it('turns only the exact masking sentinel into null, so the redaction check passes', () => {
+    const outcome = outcomeWith(MASKED);
+    expect(outcome.fields[0].value).toBeNull();
+    expect(scoreInjection(outcome, injection, DEFAULT_POLICY).passed).toBe(true);
+  });
 });
 
 describe('runCase', () => {
