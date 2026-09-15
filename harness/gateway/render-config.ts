@@ -117,7 +117,15 @@ export async function renderClientConfig(client: string): Promise<string> {
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const client = process.env.HARNESS_CLIENT ?? 'demo-practice';
-  renderClientConfig(client).then((target) => {
-    console.log(`rendered ${client} routing to ${target}`);
-  });
+  renderClientConfig(client)
+    .then((target) => {
+      console.log(`rendered ${client} routing to ${target}`);
+    })
+    .catch((err: unknown) => {
+      // parseRouting exists to turn an invalid routing.yaml into a readable
+      // z.prettifyError listing. Without this, the rejection went unhandled
+      // and the operator got a stack trace with that listing buried in it.
+      process.stderr.write(`${err instanceof Error ? err.message : String(err)}\n`);
+      process.exitCode = 1;
+    });
 }

@@ -1,8 +1,8 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
+import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { deaNumber, generate, luhnNpi, type GroundTruth } from './generate.js';
+import { assertSafeToClear, deaNumber, generate, luhnNpi, type GroundTruth } from './generate.js';
 
 let outDir: string;
 let truth: GroundTruth;
@@ -136,5 +136,44 @@ describe('generate', () => {
     const lines = (await readFile(path.join(outDir, 'cases.jsonl'), 'utf8')).trim().split('\n');
     expect(lines).toHaveLength(truth.documents.length);
     expect(JSON.parse(lines[0])).toHaveProperty('expected');
+  });
+});
+
+describe('clearing the output directory', () => {
+  let dir: string;
+
+  beforeEach(async () => {
+    dir = await mkdtemp(path.join(tmpdir(), 'harness-synth-guard-'));
+  });
+
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('allows an empty directory', async () => {
+    await expect(assertSafeToClear(dir)).resolves.toBeUndefined();
+  });
+
+  it('allows a directory that does not exist yet', async () => {
+    await expect(assertSafeToClear(path.join(dir, 'nested', 'out'))).resolves.toBeUndefined();
+  });
+
+  it('allows a directory that already holds a generated corpus', async () => {
+    await writeFile(path.join(dir, 'ground-truth.json'), '{}', 'utf8');
+    await writeFile(path.join(dir, 'cases.jsonl'), '', 'utf8');
+    await expect(assertSafeToClear(dir)).resolves.toBeUndefined();
+  });
+
+  it('refuses a directory holding anything else', async () => {
+    // `generate` opens with a recursive delete of this directory and the path
+    // comes straight off a command line, so `pnpm synth -- --out=.` used to
+    // wipe the repository.
+    await writeFile(path.join(dir, 'notes.txt'), 'someone else lives here', 'utf8');
+    await expect(assertSafeToClear(dir)).rejects.toThrow(/refusing to clear/);
+    await expect(generate({ outDir: dir, count: 1, seed: 1, scans: false, injection: false })).rejects.toThrow(
+      /refusing to clear/,
+    );
+    // And the stray file is still there.
+    await expect(stat(path.join(dir, 'notes.txt'))).resolves.toBeTruthy();
   });
 });

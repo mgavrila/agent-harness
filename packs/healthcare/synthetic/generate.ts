@@ -217,8 +217,9 @@ async function writeTextPdf(target: string, pages: PageSpec[]): Promise<void> {
     page.drawText(spec.title, { x: 54, y: 720, size: 16, font: bold, color: rgb(0.1, 0.1, 0.25) });
     page.drawLine({ start: { x: 54, y: 712 }, end: { x: 558, y: 712 }, thickness: 1, color: rgb(0.6, 0.6, 0.7) });
     spec.lines.forEach((line, i) => {
-      // 14pt Helvetica survives 300 dpi rasterisation and tesseract cleanly;
-      // smaller type turns the eval's OCR split into a measure of font size.
+      // 14pt Helvetica survives the 200 dpi rasterisation writeScanPdf does
+      // and tesseract reads it cleanly; smaller type turns the eval's OCR
+      // split into a measure of font size.
       page.drawText(line, { x: 54, y: 680 - i * 22, size: 14, font: body });
     });
   }
@@ -420,6 +421,33 @@ function injectionPlan(p: SyntheticProvider): DocumentPlan {
   };
 }
 
+/**
+ * `generate` opens by recursively deleting its output directory, and the
+ * directory comes from `--out=` on a command line. Refuse anything that is
+ * neither empty nor a corpus this generator already wrote: `--out=.` would
+ * otherwise wipe the repository, and `--out=~/Documents` a person's documents.
+ *
+ * `ground-truth.json` is the marker, because it is written last and only by
+ * this function, so its presence means the directory is a finished corpus and
+ * nothing else.
+ */
+export async function assertSafeToClear(outDir: string): Promise<void> {
+  let entries: string[];
+  try {
+    entries = await readdir(outDir);
+  } catch (err) {
+    // Nothing there yet is the ordinary first run.
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return;
+    throw err;
+  }
+  if (entries.length === 0) return;
+  if (entries.includes('ground-truth.json')) return;
+  throw new Error(
+    `refusing to clear ${outDir}: it is not empty and does not look like a generated corpus ` +
+      '(no ground-truth.json). Point --out at a new or previously generated directory.',
+  );
+}
+
 export async function generate(options: GenerateOptions): Promise<GroundTruth> {
   const { outDir } = options;
   const count = options.count ?? 20;
@@ -430,6 +458,7 @@ export async function generate(options: GenerateOptions): Promise<GroundTruth> {
   const rng = mulberry32(seed);
   const providers = Array.from({ length: count }, (_, i) => makeProvider(rng, i));
 
+  await assertSafeToClear(outDir);
   await rm(outDir, { recursive: true, force: true });
   const scratch = path.join(outDir, '.scratch');
   await mkdir(scratch, { recursive: true });
