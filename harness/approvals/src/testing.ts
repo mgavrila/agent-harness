@@ -9,6 +9,7 @@ import type {
   SlackUploadArgs,
   SlackViewOpenArgs,
 } from './slack.js';
+import type { CoreToolsClient, ExecuteOutcome } from './execute.js';
 
 /**
  * The database for one test file: emptied before each test and closed when the
@@ -72,4 +73,30 @@ export class FakeSlack implements SlackApi {
       return { ok: true };
     },
   };
+}
+
+/** A core-tools client that records calls instead of spawning an MCP server. */
+export class FakeCoreToolsClient implements CoreToolsClient {
+  executed: string[] = [];
+  reconciled: number[] = [];
+  /** When set, `execute` reports this failure instead of succeeding. */
+  failExecuteWith?: string;
+  /** The tool name a successful execution reports. */
+  executedTool = 'forms_release';
+  closed = false;
+
+  async execute(approvalId: string): Promise<ExecuteOutcome> {
+    if (this.failExecuteWith) return { status: 'failed', error: this.failExecuteWith };
+    this.executed.push(approvalId);
+    return { status: 'executed', tool: this.executedTool };
+  }
+
+  async reconcile(staleAfterMinutes: number): Promise<{ approvals_expired: number; dispatches_parked: number }> {
+    this.reconciled.push(staleAfterMinutes);
+    return { approvals_expired: 0, dispatches_parked: 0 };
+  }
+
+  async close(): Promise<void> {
+    this.closed = true;
+  }
 }
