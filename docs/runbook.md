@@ -198,3 +198,39 @@ migration file without advancing the snapshot, so drizzle-kit does not know
 the schema changed. Migration `0003` needed its snapshot patched by hand
 because of exactly this mistake. `--custom` is only for a migration with no
 corresponding `schema.ts` change (e.g. a one-off data backfill).
+
+## Model calls
+
+Every gateway call inserts a `model_calls` row: run id, client, route, model,
+token counts, and the USD cost LiteLLM reports in the `x-litellm-response-cost`
+header. Use it to attribute spend to a run, a client or a route:
+
+```sql
+select route, model, count(*), sum(cost_usd)
+from model_calls
+where created_at > now() - interval '1 day'
+group by 1, 2 order by 4 desc;
+```
+
+**This table is not the budget authority.** Two things make it undercount:
+
+- The insert runs on the handle the tool handler was given, which is the
+  handler's transaction. A handler that throws after a successful model call
+  rolls the row back — the money was spent, the row is gone.
+- A call made outside a tool handler (the eval runner's judge) writes a row
+  with a null run id, and a call made by Hermes itself never reaches this
+  process at all.
+
+LiteLLM's own spend tables in the `litellm` database are what enforce
+`max_budget`, and they are authoritative. When the two disagree, LiteLLM is
+right. Reconcile with:
+
+```sql
+-- in the litellm database
+select model, sum(spend) from "LiteLLM_SpendLogs"
+where "startTime" > now() - interval '1 day' group by 1;
+```
+
+A `model route "extract" is over its daily budget` error means LiteLLM refused
+the call, not that the harness declined to make it. Raise `daily_budget_usd` in
+`clients/<name>/routing.yaml` and re-run `pnpm gateway:config && pnpm gateway:up`.

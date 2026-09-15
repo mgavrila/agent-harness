@@ -1,7 +1,9 @@
+import path from 'node:path';
 import { McpServer } from '@modelcontextprotocol/server';
 import { createDb, loadKey } from '@harness/db';
 import { registerTools, type ToolDeps } from './registry.js';
 import { loadPolicy } from './policy.js';
+import { gatewayFromEnv } from './models.js';
 import { providerTools } from './tools/providers.js';
 import { deadlineTools } from './tools/deadlines.js';
 import { auditTools } from './tools/audit.js';
@@ -42,6 +44,9 @@ export async function buildDepsFromEnv(): Promise<{ deps: ToolDeps; close: () =>
     now: () => new Date(),
     approvalTtlHours: numberFromEnv('APPROVAL_TTL_HOURS', 24, { min: 1, max: 720 }),
     confidenceThreshold: numberFromEnv('CONFIDENCE_THRESHOLD', 0.85, { min: 0, max: 1 }),
+    gateway: gatewayFromEnv(),
+    storageDir: path.resolve(process.env.HARNESS_STORAGE_DIR ?? './storage'),
+    restrictedToModel: process.env.HARNESS_RESTRICTED_TO_MODEL === 'true',
     sinks: {},
     // One context object per process, shared by every connection this process
     // serves. That is correct for the stdio deployment, where Hermes starts one
@@ -55,3 +60,4 @@ export async function buildDepsFromEnv(): Promise<{ deps: ToolDeps; close: () =>
 }
 
 export { registerTools, defineTool, ToolError, type ToolDeps, type AnyToolDef } from './registry.js';
+export { callModel, callModelJson, gatewayFromEnv, ROUTES, type Route, type GatewayConfig, type ModelCallResult } from './models.js';

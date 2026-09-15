@@ -5,7 +5,10 @@
   "type": "module",
   "exports": {
     ".": "./src/server.ts",
-    "./testing": "./src/testing.ts"
+    "./testing": "./src/testing.ts",
+    "./fake-gateway": "./src/fake-gateway.ts",
+    "./in-process": "./src/in-process.ts",
+    "./models": "./src/models.ts"
   },
   "scripts": {
     "test": "vitest run",
@@ -14,6 +17,7 @@
   },
   "dependencies": {
     "@harness/db": "workspace:*",
+    "@harness/gateway": "workspace:*",
     "@modelcontextprotocol/server": "^2.0.0",
     "dotenv": "^17.4.2",
     "drizzle-orm": "^0.45.2",

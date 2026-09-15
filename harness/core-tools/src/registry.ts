@@ -5,6 +5,7 @@ import { approvals, encrypt, withTransaction, type Db } from '@harness/db';
 import { decide, type ActionClass, type Policy } from './policy.js';
 import { hashArgs, writeAudit, type AuditEntry } from './audit.js';
 import type { SinkRegistry } from './effects.js';
+import type { GatewayConfig } from './models.js';
 
 export class ToolError extends Error {
   constructor(message: string) {
@@ -30,6 +31,16 @@ export interface ToolDeps {
   now: () => Date;
   approvalTtlHours: number;
   confidenceThreshold: number;
+  /** How to reach the model gateway. Every model call goes through it. */
+  gateway: GatewayConfig;
+  /** Absolute directory documents are read from and written under. Nothing outside it is readable. */
+  storageDir: string;
+  /**
+   * Whether restricted identifiers (SSN, EIN, DEA) may be sent to a model.
+   * False for every client by default. Turning it on is a documented decision
+   * that requires a BAA with the model provider (spec section 4.4).
+   */
+  restrictedToModel: boolean;
   /** External-effect senders keyed by sink name (e.g. 'slack'). Empty in Plan 1.1; Plan 3 registers real ones. */
   sinks: SinkRegistry;
   context: SessionContext;
