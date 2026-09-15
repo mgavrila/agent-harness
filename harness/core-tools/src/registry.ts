@@ -1,9 +1,16 @@
 import * as z from 'zod/v4';
 import type { McpServer } from '@modelcontextprotocol/server';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { approvals, type Db } from '@harness/db';
 import { decide, type ActionClass, type Policy } from './policy.js';
-import { hashArgs, writeAudit } from './audit.js';
+import { hashArgs, writeAudit, type AuditEntry } from './audit.js';
+
+export class ToolError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ToolError';
+  }
+}
 
 export interface ToolDeps {
   db: Db;
@@ -46,7 +53,7 @@ function textResult(payload: unknown, isError = false) {
 }
 
 async function createOrReuseApproval(db: Db, deps: ToolDeps, tool: AnyToolDef, args: unknown, argsHash: string) {
-  const idempotencyKey = `${tool.name}:${argsHash}`;
+  const idempotencyKey = `${deps.client}:${tool.name}:${argsHash}`;
   const summary = `${tool.name} (${tool.actionClass}) requested by ${deps.caller}`;
   const expiresAt = new Date(deps.now().getTime() + deps.approvalTtlHours * 3600 * 1000);
   await db
@@ -61,9 +68,30 @@ async function createOrReuseApproval(db: Db, deps: ToolDeps, tool: AnyToolDef, a
       idempotencyKey,
     })
     .onConflictDoNothing({ target: approvals.idempotencyKey });
-  const row = await db.query.approvals.findFirst({ where: eq(approvals.idempotencyKey, idempotencyKey) });
+  const row = await db.query.approvals.findFirst({
+    where: and(eq(approvals.idempotencyKey, idempotencyKey), eq(approvals.client, deps.client)),
+  });
   if (!row) throw new Error('approval row missing after insert');
   return row;
+}
+
+type AuditBase = Pick<AuditEntry, 'client' | 'caller' | 'tool' | 'actionClass' | 'argsHash'>;
+
+/**
+ * Last-resort handler for failures on the blocked/approval paths (e.g. a
+ * throwing `now()`, or a DB error while parking an approval). Never throws:
+ * the audit write is itself wrapped so a secondary failure cannot escape.
+ * The caller (blocked/approval branch) never runs its own handler here, so
+ * this only ever reports an internal error, never a handler failure.
+ */
+async function handleUnexpectedError(db: Db, tool: AnyToolDef, base: AuditBase, err: unknown) {
+  const message = err instanceof Error ? err.message : String(err);
+  try {
+    await writeAudit(db, { ...base, decision: 'error', error: message });
+  } catch {
+    // best-effort audit write; swallow secondary failure so the callback never throws
+  }
+  return textResult(`Tool ${tool.name} could not be processed (internal error; see audit log).`, true);
 }
 
 export function registerTools(server: McpServer, tools: AnyToolDef[], deps: ToolDeps): void {
@@ -77,15 +105,23 @@ export function registerTools(server: McpServer, tools: AnyToolDef[], deps: Tool
         const base = { client: deps.client, caller: deps.caller, tool: tool.name, actionClass: tool.actionClass, argsHash };
 
         if (behavior === 'blocked') {
-          await writeAudit(deps.db, { ...base, decision: 'blocked' });
-          return textResult(`Tool ${tool.name} is blocked by policy (action class ${tool.actionClass}).`, true);
+          try {
+            await writeAudit(deps.db, { ...base, decision: 'blocked' });
+            return textResult(`Tool ${tool.name} is blocked by policy (action class ${tool.actionClass}).`, true);
+          } catch (err) {
+            return await handleUnexpectedError(deps.db, tool, base, err);
+          }
         }
 
         if (behavior === 'approval') {
-          const row = await createOrReuseApproval(deps.db, deps, tool, args, argsHash);
-          await writeAudit(deps.db, { ...base, decision: 'approval', approvalId: row.id });
-          const structured = { status: 'pending' as const, approval_id: row.id };
-          return { ...textResult(structured), structuredContent: structured };
+          try {
+            const row = await createOrReuseApproval(deps.db, deps, tool, args, argsHash);
+            await writeAudit(deps.db, { ...base, decision: 'approval', approvalId: row.id });
+            const structured = { status: 'pending' as const, approval_id: row.id };
+            return { ...textResult(structured), structuredContent: structured };
+          } catch (err) {
+            return await handleUnexpectedError(deps.db, tool, base, err);
+          }
         }
 
         try {
@@ -96,7 +132,11 @@ export function registerTools(server: McpServer, tools: AnyToolDef[], deps: Tool
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
           await writeAudit(deps.db, { ...base, decision: 'error', error: message });
-          return textResult(`Tool ${tool.name} failed: ${message}`, true);
+          const text =
+            err instanceof ToolError
+              ? `Tool ${tool.name} failed: ${message}`
+              : `Tool ${tool.name} failed (internal error; see audit log).`;
+          return textResult(text, true);
         }
       },
     );
