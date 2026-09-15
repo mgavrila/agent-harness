@@ -28,3 +28,7 @@ evals/results/
 # superpowers scratch and worktrees
 .superpowers/
 .claude/worktrees/
+
+# node
+node_modules/
+dist/
