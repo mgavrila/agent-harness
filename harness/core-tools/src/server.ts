@@ -86,3 +86,12 @@ export {
   type GatewayConfig,
   type ModelCallResult,
 } from './models.js';
+export { DEFAULT_POLICY, decide, type Policy, type ActionClass, type Behavior } from './policy.js';
+export { connectInProcess } from './in-process.js';
+export {
+  startFakeGateway,
+  type FakeGateway,
+  type FakeGatewayCall,
+  type FakeReply,
+  type Responder,
+} from './fake-gateway.js';
