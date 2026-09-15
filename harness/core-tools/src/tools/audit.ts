@@ -7,7 +7,8 @@ const auditQuery = defineTool({
   name: 'audit_query',
   description:
     'Query the append-only audit log of tool calls for this client. Newest first. ' +
-    '`since` is an ISO 8601 datetime (UTC `Z` or numeric offset).',
+    '`since` is an ISO 8601 datetime (UTC `Z` or numeric offset). ' +
+    'Failures are reported as `has_error` only; the error text is not returned.',
   actionClass: 'read',
   input: z.object({
     tool: z.string().optional(),
@@ -25,7 +26,7 @@ const auditQuery = defineTool({
         caller: z.string(),
         record_ids: z.array(z.string()),
         approval_id: z.string().nullable(),
-        error: z.string().nullable(),
+        has_error: z.boolean(),
         created_at: z.string(),
       }),
     ),
@@ -39,7 +40,7 @@ const auditQuery = defineTool({
       .select()
       .from(auditLog)
       .where(and(...conditions))
-      .orderBy(desc(auditLog.createdAt))
+      .orderBy(desc(auditLog.createdAt), desc(auditLog.id))
       .limit(limit);
     return {
       entries: rows.map((r) => ({
@@ -50,7 +51,9 @@ const auditQuery = defineTool({
         caller: r.caller,
         record_ids: (r.recordIds as string[]) ?? [],
         approval_id: r.approvalId,
-        error: r.error,
+        // The error text itself stays in the database: it can carry record
+        // identifiers or restricted values, so operators read it with psql.
+        has_error: r.error !== null,
         created_at: r.createdAt.toISOString(),
       })),
     };

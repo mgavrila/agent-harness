@@ -24,7 +24,26 @@ export const CredentialInput = z.object({
 });
 export type CredentialInput = z.infer<typeof CredentialInput>;
 
-const RESTRICTED_FIELD_NAMES = new Set(['ssn', 'ein', 'dea_number', 'tax_id']);
+/**
+ * Field-name stems that always identify a restricted identifier. A caller may
+ * mark any field restricted, but may never un-mark one of these: the check is
+ * authoritative, so `restricted: false` on an `ssn` is ignored.
+ */
+const RESTRICTED_NAME_KEYS = ['ssn', 'socialsecurity', 'ein', 'taxid', 'dea'] as const;
+/** Suffixes a key may carry: `dea`, `dea_number`, `DEA-No`, `dea_id`, ... */
+const RESTRICTED_NAME_SUFFIXES = ['', 'number', 'no', 'id', 'registration'] as const;
+
+/**
+ * True when `name` denotes a restricted identifier. Normalizes away case and
+ * separators, then matches a key exactly or a key plus a known suffix — so
+ * `deadline` and `npi` are not restricted while `DEA-Number` is.
+ */
+export function isRestrictedName(name: string): boolean {
+  const normalized = name.toLowerCase().replace(/[^a-z0-9]/g, '');
+  return RESTRICTED_NAME_KEYS.some((key) =>
+    RESTRICTED_NAME_SUFFIXES.some((suffix) => normalized === `${key}${suffix}`),
+  );
+}
 
 export async function requireProvider(deps: ToolDeps, providerId: string) {
   const p = await deps.db.query.providers.findFirst({ where: and(eq(providers.id, providerId), eq(providers.client, deps.client)) });
@@ -53,7 +72,7 @@ async function upsertField(db: Db, deps: ToolDeps, providerId: string, f: FieldI
   if (existing?.status === 'verified') {
     return 'verified' as const;
   }
-  const restricted = f.restricted ?? RESTRICTED_FIELD_NAMES.has(f.name);
+  const restricted = f.restricted === true || isRestrictedName(f.name);
   const confidence = f.confidence ?? 1;
   const status = confidence >= deps.confidenceThreshold ? 'extracted' : 'pending';
   const values = {
@@ -105,7 +124,9 @@ async function upsertCredential(db: Db, deps: ToolDeps, providerId: string, c: C
 const providersUpsert = defineTool({
   name: 'providers_upsert',
   description:
-    'Create or update a provider record with extracted fields and credentials. Matches an existing provider by NPI (or by name when no NPI). Restricted fields (ssn, ein, dea_number, tax_id) are encrypted and never returned in plaintext.',
+    'Create or update a provider record with extracted fields and credentials. Matches an existing provider by NPI (or by name when no NPI). ' +
+    'Fields named for a restricted identifier (ssn, social security number, ein, tax id, dea number) are always encrypted and never returned in plaintext, ' +
+    'whatever `restricted` says; set `restricted: true` to protect any other field.',
   actionClass: 'write.internal',
   input: z.object({
     name: z.string().min(1),
@@ -135,6 +156,16 @@ const providersUpsert = defineTool({
     return { provider_id: provider.id, fields_pending: pending, fields_extracted: extracted, credentials: credCount };
   },
   recordIds: (_args, result) => [result.provider_id],
+  // A parked approval stores its payload as plaintext jsonb, so restricted
+  // field values and credential numbers are masked out of it here. The full
+  // arguments remain available, encrypted, in approvals.payload_encrypted.
+  redact: (args) => ({
+    ...args,
+    fields: args.fields.map((f) =>
+      f.restricted === true || isRestrictedName(f.name) ? { ...f, value: '[restricted]' } : f,
+    ),
+    credentials: args.credentials.map((c) => (c.number === undefined ? c : { ...c, number: '[restricted]' })),
+  }),
 });
 
 const providersGet = defineTool({
@@ -222,7 +253,7 @@ const providersConfirmField = defineTool({
   handler: async ({ provider_id, field, value, confirmed_by }, deps) => {
     await requireProvider(deps, provider_id);
     const existing = await deps.db.query.fields.findFirst({ where: and(eq(fields.providerId, provider_id), eq(fields.name, field)) });
-    const restricted = existing?.restricted ?? RESTRICTED_FIELD_NAMES.has(field);
+    const restricted = existing?.restricted === true || isRestrictedName(field);
     const values = {
       providerId: provider_id,
       name: field,
@@ -241,6 +272,7 @@ const providersConfirmField = defineTool({
     return { provider_id, field, status: 'verified' as const };
   },
   recordIds: ({ provider_id }) => [provider_id],
+  redact: (args) => (isRestrictedName(args.field) ? { ...args, value: '[restricted]' } : args),
 });
 
 const providersListPending = defineTool({

@@ -1,6 +1,12 @@
-import 'dotenv/config';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { config as loadEnv } from 'dotenv';
 import { serveStdio } from '@modelcontextprotocol/server/stdio';
 import { buildDepsFromEnv, createCoreToolsServer } from './server.js';
+
+// The repository root .env, resolved from this file rather than from the
+// process working directory, which is whatever launched the MCP server.
+loadEnv({ path: path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../.env'), quiet: true });
 
 const { deps, close } = await buildDepsFromEnv();
 

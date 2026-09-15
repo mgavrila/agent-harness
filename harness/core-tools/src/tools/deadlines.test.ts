@@ -125,6 +125,35 @@ describe('deadlines tools', () => {
     const licenseExpiration = rows.find((r) => r.credentialId === licenseCred.id && r.kind === 'expiration');
     expect(licenseExpiration?.notifiedAt).toBeTruthy();
 
+    // Moving the due date invalidates the notification that was sent for the
+    // old one, so the marker must be cleared.
+    await client.callTool({
+      name: 'providers_upsert',
+      arguments: {
+        name: 'Dr. Grace Hopper',
+        npi: '1112223334',
+        credentials: [{ kind: 'license', state: 'NY', number: 'L1', expires_at: '2027-01-31' }],
+      },
+    });
+    await client.callTool({ name: 'deadlines_compute', arguments: { provider_id: id } });
+    const moved = (await db.select().from(deadlines).where(eq(deadlines.providerId, id))).find(
+      (r) => r.credentialId === licenseCred.id && r.kind === 'expiration',
+    );
+    expect(moved?.dueAt).toBe('2027-01-31');
+    expect(moved?.notifiedAt).toBeNull();
+
+    await c();
+  });
+
+  it('upcoming caps the number of rows at limit', async () => {
+    const { client, close: c } = await makeTestClient(factory);
+    const id = await seed(client);
+    await client.callTool({ name: 'deadlines_compute', arguments: { provider_id: id } });
+    const res = await client.callTool({ name: 'deadlines_upcoming', arguments: { window_days: 90, limit: 2 } });
+    const items = (res.structuredContent as { result: { items: { kind: string }[] } }).result.items;
+    expect(items).toHaveLength(2);
+    const rejected = await client.callTool({ name: 'deadlines_upcoming', arguments: { limit: 0 } });
+    expect(rejected.isError).toBe(true);
     await c();
   });
 

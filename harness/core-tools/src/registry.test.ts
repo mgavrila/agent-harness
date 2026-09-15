@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import * as z from 'zod/v4';
 import { McpServer } from '@modelcontextprotocol/server';
-import { approvals, auditLog, type Db } from '@harness/db';
+import { eq } from 'drizzle-orm';
+import { approvals, auditLog, decrypt, type Db } from '@harness/db';
 import { defineTool, registerTools, ToolError } from './registry.js';
 import { makeTestDeps, makeTestClient, openTestDb } from './testing.js';
 
@@ -27,6 +28,16 @@ const sendExternal = defineTool({
   input: z.object({ to: z.string() }),
   output: z.object({ sent: z.boolean() }),
   handler: async () => ({ sent: true }),
+});
+
+const sendExternalRedacted = defineTool({
+  name: 'send_external_redacted',
+  description: 'Send something outside, redacting the recipient in the stored payload',
+  actionClass: 'external',
+  input: z.object({ to: z.string(), note: z.string() }),
+  output: z.object({ sent: z.boolean() }),
+  handler: async () => ({ sent: true }),
+  redact: (a) => ({ ...a, to: '[restricted]' }),
 });
 
 const pay = defineTool({
@@ -154,6 +165,85 @@ describe('registerTools', () => {
     const res = await client.callTool({ name: 'echo_read', arguments: { text: 42 } });
     expect(res.isError).toBe(true);
     expect(await db.select().from(auditLog)).toHaveLength(0);
+    await c();
+  });
+
+  it('does not reuse a decided approval: a new request parks a fresh pending row', async () => {
+    const { client, close: c } = await makeTestClient(factory);
+    const first = await client.callTool({ name: 'send_external', arguments: { to: 'payer@example.com' } });
+    const firstId = (first.structuredContent as { approval_id: string }).approval_id;
+    await db.update(approvals).set({ status: 'declined', decidedBy: 'U1' }).where(eq(approvals.id, firstId));
+
+    const second = await client.callTool({ name: 'send_external', arguments: { to: 'payer@example.com' } });
+    const secondId = (second.structuredContent as { status: string; approval_id: string }).approval_id;
+    expect((second.structuredContent as { status: string }).status).toBe('pending');
+    expect(secondId).not.toBe(firstId);
+
+    const rows = await db.select().from(approvals);
+    expect(rows).toHaveLength(2);
+    expect(rows.find((r) => r.id === firstId)!.status).toBe('declined');
+    expect(rows.find((r) => r.id === secondId)!.status).toBe('pending');
+    await c();
+  });
+
+  it('expires a stale pending approval and parks a new one', async () => {
+    const shortTtl = makeTestDeps(db, { approvalTtlHours: 1 });
+    const { client, close: c } = await makeTestClient(() => {
+      const server = new McpServer({ name: 'registry-test-ttl', version: '0.0.0' });
+      registerTools(server, [sendExternal], shortTtl);
+      return server;
+    });
+    const first = await client.callTool({ name: 'send_external', arguments: { to: 'payer@example.com' } });
+    const firstId = (first.structuredContent as { approval_id: string }).approval_id;
+    await c();
+
+    const later = makeTestDeps(db, { approvalTtlHours: 1, now: () => new Date('2026-09-15T14:00:00Z') });
+    const { client: client2, close: c2 } = await makeTestClient(() => {
+      const server = new McpServer({ name: 'registry-test-ttl-later', version: '0.0.0' });
+      registerTools(server, [sendExternal], later);
+      return server;
+    });
+    const second = await client2.callTool({ name: 'send_external', arguments: { to: 'payer@example.com' } });
+    const secondId = (second.structuredContent as { approval_id: string }).approval_id;
+    expect(secondId).not.toBe(firstId);
+
+    const rows = await db.select().from(approvals);
+    expect(rows).toHaveLength(2);
+    const expired = rows.find((r) => r.id === firstId)!;
+    expect(expired.status).toBe('expired');
+    expect(expired.decidedAt).not.toBeNull();
+    expect(rows.find((r) => r.id === secondId)!.status).toBe('pending');
+    await c2();
+  });
+
+  it('reuses a live pending approval rather than parking a duplicate', async () => {
+    const { client, close: c } = await makeTestClient(factory);
+    const first = await client.callTool({ name: 'send_external', arguments: { to: 'payer@example.com' } });
+    const second = await client.callTool({ name: 'send_external', arguments: { to: 'payer@example.com' } });
+    expect(second.structuredContent).toEqual(first.structuredContent);
+    expect(await db.select().from(approvals)).toHaveLength(1);
+    await c();
+  });
+
+  it('stores a redacted approval payload and the full args encrypted', async () => {
+    const deps = makeTestDeps(db);
+    const { client, close: c } = await makeTestClient(() => {
+      const server = new McpServer({ name: 'registry-test-redact', version: '0.0.0' });
+      registerTools(server, [sendExternalRedacted], deps);
+      return server;
+    });
+    await client.callTool({ name: 'send_external_redacted', arguments: { to: 'ssn-999-88-7777', note: 'keep me' } });
+
+    const [row] = await db.select().from(approvals);
+    expect(row.payload).toEqual({
+      tool: 'send_external_redacted',
+      args: { to: '[restricted]', note: 'keep me' },
+    });
+    expect(row.payloadEncrypted).not.toBeNull();
+    expect(JSON.parse(decrypt(row.payloadEncrypted!, deps.encryptionKey))).toEqual({
+      tool: 'send_external_redacted',
+      args: { to: 'ssn-999-88-7777', note: 'keep me' },
+    });
     await c();
   });
 

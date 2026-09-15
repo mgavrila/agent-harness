@@ -1,5 +1,5 @@
 import * as z from 'zod/v4';
-import { and, asc, eq, inArray, lte } from 'drizzle-orm';
+import { and, asc, eq, inArray, lte, sql } from 'drizzle-orm';
 import { credentials, deadlines, providers } from '@harness/db';
 import { defineTool, type AnyToolDef } from '../registry.js';
 import { computeDeadlines, daysUntil, addDays } from '../deadlines/compute.js';
@@ -21,7 +21,16 @@ const deadlinesCompute = defineTool({
       await deps.db
         .insert(deadlines)
         .values({ providerId: provider_id, credentialId: d.credentialId, kind: d.kind, dueAt: d.dueAt })
-        .onConflictDoUpdate({ target: [deadlines.credentialId, deadlines.kind], set: { dueAt: d.dueAt } });
+        .onConflictDoUpdate({
+          target: [deadlines.credentialId, deadlines.kind],
+          // A moved due date invalidates any notification already sent for the
+          // old one, so clear the marker; an unchanged date keeps it, so the
+          // same reminder is not sent twice.
+          set: {
+            dueAt: d.dueAt,
+            notifiedAt: sql`CASE WHEN ${deadlines.dueAt} = ${d.dueAt} THEN ${deadlines.notifiedAt} ELSE NULL END`,
+          },
+        });
     }
     const validKeys = new Set(computed.map((d) => `${d.credentialId}:${d.kind}`));
     const existingRows = await deps.db
@@ -41,11 +50,14 @@ const deadlinesCompute = defineTool({
 
 const deadlinesUpcoming = defineTool({
   name: 'deadlines_upcoming',
-  description: 'List deadlines due within a window (default 90 days), including overdue ones, sorted by due date.',
+  description:
+    'List deadlines due within a window (default 90 days), including overdue ones, sorted by due date. ' +
+    'At most `limit` rows (default 200).',
   actionClass: 'read',
   input: z.object({
     window_days: z.number().int().min(1).max(730).default(90),
     today: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+    limit: z.number().int().min(1).max(1000).default(200),
   }),
   output: z.object({
     items: z.array(
@@ -61,7 +73,7 @@ const deadlinesUpcoming = defineTool({
       }),
     ),
   }),
-  handler: async ({ window_days, today }, deps) => {
+  handler: async ({ window_days, today, limit }, deps) => {
     const todayDate = today ? new Date(`${today}T00:00:00Z`) : deps.now();
     const todayStr = todayDate.toISOString().slice(0, 10);
     const horizon = addDays(todayStr, window_days);
@@ -78,7 +90,8 @@ const deadlinesUpcoming = defineTool({
       .innerJoin(credentials, eq(deadlines.credentialId, credentials.id))
       .innerJoin(providers, eq(deadlines.providerId, providers.id))
       .where(and(eq(providers.client, deps.client), lte(deadlines.dueAt, horizon)))
-      .orderBy(asc(deadlines.dueAt));
+      .orderBy(asc(deadlines.dueAt))
+      .limit(limit);
     return {
       items: rows.map((r) => {
         const daysLeft = daysUntil(r.dueAt, todayDate);

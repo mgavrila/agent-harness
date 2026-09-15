@@ -1,7 +1,7 @@
 import * as z from 'zod/v4';
 import type { McpServer } from '@modelcontextprotocol/server';
-import { and, eq } from 'drizzle-orm';
-import { approvals, type Db } from '@harness/db';
+import { and, eq, sql } from 'drizzle-orm';
+import { approvals, encrypt, type Db } from '@harness/db';
 import { decide, type ActionClass, type Policy } from './policy.js';
 import { hashArgs, writeAudit, type AuditEntry } from './audit.js';
 
@@ -31,6 +31,13 @@ export interface ToolDef<I extends z.ZodObject, O extends z.ZodObject> {
   output: O;
   handler: (args: z.infer<I>, deps: ToolDeps) => Promise<z.infer<O>>;
   recordIds?: (args: z.infer<I>, result: z.infer<O>) => string[];
+  /**
+   * Strip restricted values from the arguments before they are written to the
+   * approvals table in plaintext jsonb. The full arguments are still stored,
+   * encrypted, in `payload_encrypted`. Omit only for tools whose arguments can
+   * never carry a restricted value.
+   */
+  redact?: (args: z.infer<I>) => unknown;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -52,8 +59,31 @@ function textResult(payload: unknown, isError = false) {
   return { content: [{ type: 'text' as const, text: typeof payload === 'string' ? payload : JSON.stringify(payload) }], isError };
 }
 
+/**
+ * Park an approval, reusing only a *live pending* row. A row that was decided
+ * (approved/declined) or has passed its TTL is history: it must not silently
+ * satisfy a fresh request. An expired row is retired first, then a new one is
+ * parked. Uniqueness is enforced by the partial index
+ * `approvals_idempotency_pending_uq`, so concurrent callers race to one insert
+ * and the loser re-reads the winner's row.
+ */
 async function createOrReuseApproval(db: Db, deps: ToolDeps, tool: AnyToolDef, args: unknown, argsHash: string) {
   const idempotencyKey = `${deps.client}:${tool.name}:${argsHash}`;
+  const pendingRow = and(
+    eq(approvals.client, deps.client),
+    eq(approvals.idempotencyKey, idempotencyKey),
+    eq(approvals.status, 'pending'),
+  );
+
+  const existing = await db.query.approvals.findFirst({ where: pendingRow });
+  if (existing) {
+    if (existing.expiresAt > deps.now()) return existing;
+    await db
+      .update(approvals)
+      .set({ status: 'expired', decidedAt: deps.now() })
+      .where(eq(approvals.id, existing.id));
+  }
+
   const summary = `${tool.name} (${tool.actionClass}) requested by ${deps.caller}`;
   const expiresAt = new Date(deps.now().getTime() + deps.approvalTtlHours * 3600 * 1000);
   await db
@@ -61,16 +91,17 @@ async function createOrReuseApproval(db: Db, deps: ToolDeps, tool: AnyToolDef, a
     .values({
       client: deps.client,
       action: tool.name,
-      payload: { tool: tool.name, args },
+      // Plaintext jsonb for humans reviewing the request; restricted values are
+      // redacted out of it. The full arguments live in payload_encrypted.
+      payload: { tool: tool.name, args: tool.redact ? tool.redact(args) : args },
+      payloadEncrypted: encrypt(JSON.stringify({ tool: tool.name, args }), deps.encryptionKey),
       summary,
       requestedBy: deps.caller,
       expiresAt,
       idempotencyKey,
     })
-    .onConflictDoNothing({ target: approvals.idempotencyKey });
-  const row = await db.query.approvals.findFirst({
-    where: and(eq(approvals.idempotencyKey, idempotencyKey), eq(approvals.client, deps.client)),
-  });
+    .onConflictDoNothing({ target: approvals.idempotencyKey, where: sql`status = 'pending'` });
+  const row = await db.query.approvals.findFirst({ where: pendingRow });
   if (!row) throw new Error('approval row missing after insert');
   return row;
 }
@@ -78,11 +109,11 @@ async function createOrReuseApproval(db: Db, deps: ToolDeps, tool: AnyToolDef, a
 type AuditBase = Pick<AuditEntry, 'client' | 'caller' | 'tool' | 'actionClass' | 'argsHash'>;
 
 /**
- * Last-resort handler for failures on the blocked/approval paths (e.g. a
- * throwing `now()`, or a DB error while parking an approval). Never throws:
- * the audit write is itself wrapped so a secondary failure cannot escape.
- * The caller (blocked/approval branch) never runs its own handler here, so
- * this only ever reports an internal error, never a handler failure.
+ * Last-resort handler for a failure the normal paths could not record: a
+ * throwing `now()`, a DB error while parking an approval, or an audit write
+ * that itself failed after a handler threw. Never throws — the audit write is
+ * wrapped so a secondary failure cannot escape the MCP callback. The message is
+ * deliberately generic; the detail is in the audit log when it could be written.
  */
 async function handleUnexpectedError(db: Db, tool: AnyToolDef, base: AuditBase, err: unknown) {
   const message = err instanceof Error ? err.message : String(err);
@@ -131,7 +162,13 @@ export function registerTools(server: McpServer, tools: AnyToolDef[], deps: Tool
           return { ...textResult(structured), structuredContent: structured };
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
-          await writeAudit(deps.db, { ...base, decision: 'error', error: message });
+          try {
+            await writeAudit(deps.db, { ...base, decision: 'error', error: message });
+          } catch (auditErr) {
+            // The handler failed and we could not record why. Fall back to the
+            // guarded path so the callback still returns instead of throwing.
+            return await handleUnexpectedError(deps.db, tool, base, auditErr);
+          }
           const text =
             err instanceof ToolError
               ? `Tool ${tool.name} failed: ${message}`

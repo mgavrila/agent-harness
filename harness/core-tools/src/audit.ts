@@ -17,8 +17,24 @@ export interface AuditEntry {
   error?: string | null;
 }
 
+/** Recursively sort object keys so the hash does not depend on key order. */
+function canonicalize(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalize);
+  if (value === null || typeof value !== 'object') return value;
+  const source = value as Record<string, unknown>;
+  const sorted: Record<string, unknown> = {};
+  for (const key of Object.keys(source).sort()) {
+    sorted[key] = canonicalize(source[key]);
+  }
+  return sorted;
+}
+
+/**
+ * Stable fingerprint of a tool's arguments. Key order is normalized so that two
+ * semantically identical calls share an approval idempotency key.
+ */
 export function hashArgs(args: unknown): string {
-  return createHash('sha256').update(JSON.stringify(args ?? null)).digest('hex');
+  return createHash('sha256').update(JSON.stringify(canonicalize(args ?? null))).digest('hex');
 }
 
 export async function writeAudit(db: Db, entry: AuditEntry): Promise<void> {

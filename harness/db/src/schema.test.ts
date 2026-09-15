@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { createDb, type Db } from './client.js';
 import { providers, auditLog } from './schema.js';
 import { TEST_DATABASE_URL, resetDatabase } from './testing.js';
@@ -40,5 +40,14 @@ describe('schema', () => {
     expect(String(updateErr?.cause?.message ?? updateErr)).toMatch(/append-only/);
     const deleteErr: any = await db.delete(auditLog).where(eq(auditLog.id, row.id)).catch((e) => e);
     expect(String(deleteErr?.cause?.message ?? deleteErr)).toMatch(/append-only/);
+  });
+
+  it('audit_log rejects TRUNCATE', async () => {
+    await db.insert(auditLog).values({
+      client: 'test', caller: 'test', tool: 't', actionClass: 'read', argsHash: 'h', decision: 'auto',
+    });
+    const err: any = await db.execute(sql`TRUNCATE TABLE audit_log`).catch((e) => e);
+    expect(String(err?.cause?.message ?? err?.message ?? err)).toMatch(/append-only/);
+    expect(await db.select().from(auditLog)).toHaveLength(1);
   });
 });

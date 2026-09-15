@@ -1,3 +1,4 @@
+import { sql } from 'drizzle-orm';
 import {
   pgTable, uuid, text, timestamp, boolean, real, integer, jsonb, date,
   customType, uniqueIndex, index,
@@ -76,6 +77,7 @@ export const approvals = pgTable('approvals', {
   client: text('client').notNull(),
   action: text('action').notNull(),
   payload: jsonb('payload').notNull(),
+  payloadEncrypted: bytea('payload_encrypted'),
   summary: text('summary').notNull(),
   requestedBy: text('requested_by').notNull(),
   status: text('status').notNull().default('pending'),
@@ -87,7 +89,11 @@ export const approvals = pgTable('approvals', {
   slackChannel: text('slack_channel'),
   slackTs: text('slack_ts'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-}, (t) => [uniqueIndex('approvals_idempotency_uq').on(t.idempotencyKey)]);
+}, (t) => [
+  // Partial: only one live pending request per idempotency key. Decided and
+  // expired rows stay as history and must not block a fresh request.
+  uniqueIndex('approvals_idempotency_pending_uq').on(t.idempotencyKey).where(sql`status = 'pending'`),
+]);
 
 export const runs = pgTable('runs', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -123,4 +129,7 @@ export const auditLog = pgTable('audit_log', {
   approvalId: uuid('approval_id').references(() => approvals.id),
   error: text('error'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-}, (t) => [index('audit_log_tool_created_idx').on(t.tool, t.createdAt)]);
+}, (t) => [
+  index('audit_log_tool_created_idx').on(t.tool, t.createdAt),
+  index('audit_log_client_created_idx').on(t.client, t.createdAt.desc()),
+]);

@@ -4,7 +4,7 @@ import { eq } from 'drizzle-orm';
 import { fields, credentials, decrypt, type Db } from '@harness/db';
 import { registerTools, type ToolDeps } from '../registry.js';
 import { makeTestDeps, makeTestClient, openTestDb } from '../testing.js';
-import { providerTools } from './providers.js';
+import { providerTools, isRestrictedName } from './providers.js';
 
 let db: Db;
 let close: () => Promise<void>;
@@ -175,5 +175,98 @@ describe('providers tools', () => {
     expect(row.status).toBe('verified');
     expect(row.confirmedBy).toBe('U123');
     await c();
+  });
+
+  it('treats a name-recognised restricted field as restricted even when the caller says otherwise', async () => {
+    const { client, close: c } = await makeTestClient(factory);
+    const res = await client.callTool({
+      name: 'providers_upsert',
+      arguments: {
+        name: 'Dr. Alan Turing',
+        npi: '9998887776',
+        fields: [{ name: 'ssn', value: '999-88-7777', confidence: 0.99, restricted: false }],
+      },
+    });
+    const id = (res.structuredContent as { result: { provider_id: string } }).result.provider_id;
+    const row = (await db.select().from(fields).where(eq(fields.providerId, id))).find((r) => r.name === 'ssn')!;
+    expect(row.value).toBeNull();
+    expect(row.valueEncrypted).not.toBeNull();
+    expect(row.restricted).toBe(true);
+    expect(decrypt(row.valueEncrypted!, deps.encryptionKey)).toBe('999-88-7777');
+    await c();
+  });
+
+  it('confirm_field keeps a name-recognised restricted value out of plaintext', async () => {
+    const { client, close: c } = await makeTestClient(factory);
+    const up = await client.callTool({
+      name: 'providers_upsert',
+      arguments: { name: 'Dr. Alan Turing', npi: '9998887776' },
+    });
+    const id = (up.structuredContent as { result: { provider_id: string } }).result.provider_id;
+    await client.callTool({
+      name: 'providers_confirm_field',
+      arguments: { provider_id: id, field: 'DEA-Number', value: 'BX1234563', confirmed_by: 'U9' },
+    });
+    const row = (await db.select().from(fields).where(eq(fields.providerId, id))).find((r) => r.name === 'DEA-Number')!;
+    expect(row.value).toBeNull();
+    expect(row.restricted).toBe(true);
+    expect(decrypt(row.valueEncrypted!, deps.encryptionKey)).toBe('BX1234563');
+    await c();
+  });
+});
+
+describe('approval payload redaction', () => {
+  const redactOf = (name: string) => {
+    const tool = providerTools.find((t) => t.name === name)!;
+    if (!tool.redact) throw new Error(`${name} defines no redact`);
+    return tool.redact;
+  };
+
+  it('providers_upsert masks restricted field values and every credential number', () => {
+    const redacted = redactOf('providers_upsert')({
+      name: 'Dr. Ada Lovelace',
+      npi: '1234567890',
+      fields: [
+        { name: 'first_name', value: 'Ada' },
+        { name: 'ssn', value: '123-45-6789', restricted: false },
+        { name: 'nickname', value: 'secret', restricted: true },
+      ],
+      credentials: [
+        { kind: 'dea', number: 'BL1234567' },
+        { kind: 'license', state: 'CA' },
+      ],
+    }) as { fields: { name: string; value: string }[]; credentials: { kind: string; number?: string }[] };
+
+    expect(redacted.fields).toEqual([
+      { name: 'first_name', value: 'Ada' },
+      { name: 'ssn', value: '[restricted]', restricted: false },
+      { name: 'nickname', value: '[restricted]', restricted: true },
+    ]);
+    expect(redacted.credentials).toEqual([
+      { kind: 'dea', number: '[restricted]' },
+      { kind: 'license', state: 'CA' },
+    ]);
+  });
+
+  it('providers_confirm_field masks the value only for a restricted field name', () => {
+    const redact = redactOf('providers_confirm_field');
+    expect(redact({ provider_id: 'p', field: 'tax_id', value: '12-3456789' })).toMatchObject({
+      field: 'tax_id',
+      value: '[restricted]',
+    });
+    expect(redact({ provider_id: 'p', field: 'first_name', value: 'Ada' })).toMatchObject({
+      field: 'first_name',
+      value: 'Ada',
+    });
+  });
+});
+
+describe('isRestrictedName', () => {
+  it.each(['ssn', 'SSN', 'social_security_number', 'dea_number', 'tax_id', 'ein'])('treats %s as restricted', (name) => {
+    expect(isRestrictedName(name)).toBe(true);
+  });
+
+  it.each(['npi', 'first_name', 'deadline'])('treats %s as unrestricted', (name) => {
+    expect(isRestrictedName(name)).toBe(false);
   });
 });
