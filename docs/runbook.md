@@ -258,14 +258,18 @@ and loop timestamps only, never a summary or a payload, because anything
 reachable over HTTP is outside the audit trail. It answers 503 when an effect
 has failed or is parked, or when a loop recorded an error.
 
-The server binds `127.0.0.1` inside its own container, so it is never reachable
-from outside that container directly. From another Compose service it is
-reachable at `http://approvals:8787/healthz` only if the `approvals` service's
-Compose entry publishes or binds the port for the Compose network to see it —
-binding to `127.0.0.1` inside the container does not do that by itself. Both
-watchdog scripts default to `http://approvals:8787/healthz` and read
-`APPROVALS_HEALTH_URL` to override it, which is how they are pointed at
-`http://127.0.0.1:8787/healthz` for a manual check outside Compose.
+Inside the container the server binds every interface (`APPROVALS_HEALTH_BIND`,
+default `0.0.0.0`). That is not the exposure boundary: the Compose port mapping
+is, and it is pinned to `127.0.0.1:${APPROVALS_HEALTH_HOST_PORT:-8787}:8787`, so
+the endpoint is reachable from the operator's own machine and from the Compose
+network, and from nowhere else. A container-loopback bind would answer neither —
+Docker's port publish DNATs to the container's bridge address, and Hermes
+reaches the same address at `http://approvals:8787/healthz`. Set
+`APPROVALS_HEALTH_BIND=127.0.0.1` only for a bare-metal run, where the process
+itself is the boundary. Both watchdog scripts default to
+`http://approvals:8787/healthz` and read `APPROVALS_HEALTH_URL` to override it,
+which is how they are pointed at `http://127.0.0.1:8787/healthz` for a manual
+check outside Compose.
 
 Restricted values are kept out of Slack in three places, on purpose:
 

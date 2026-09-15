@@ -17,7 +17,7 @@ import {
   parseEditModalMetadata,
 } from './render.js';
 import { collectHealth, startRunner } from './runner.js';
-import { startHealthServer } from './health.js';
+import { DEFAULT_HEALTH_BIND, startHealthServer } from './health.js';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 loadEnv({ path: path.join(repoRoot, '.env'), quiet: true });
@@ -137,6 +137,12 @@ const runner = startRunner(deps, {
 
 const health = startHealthServer({
   port: Number(process.env.APPROVALS_HEALTH_PORT ?? 8787),
+  // Every interface by default. In Compose nothing can reach a listener on the
+  // container's own loopback — not the published host port, not
+  // `http://approvals:8787` from Hermes — and the exposure boundary is the port
+  // mapping, which is pinned to 127.0.0.1 on the host. Override for a
+  // bare-metal run where the process itself is the boundary.
+  bind: process.env.APPROVALS_HEALTH_BIND?.trim() || DEFAULT_HEALTH_BIND,
   snapshot: () => collectHealth(db, client, runner, deps.now),
 });
 

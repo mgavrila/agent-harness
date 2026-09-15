@@ -34,4 +34,4 @@ export {
   type RunnerLoopStatus,
   type HealthSnapshot,
 } from './runner.js';
-export { startHealthServer } from './health.js';
+export { startHealthServer, DEFAULT_HEALTH_BIND, type HealthServer } from './health.js';
