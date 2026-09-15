@@ -131,6 +131,52 @@ describe('effects outbox', () => {
     await c();
   });
 
+  it('stores what the sink returned on the dispatched row', async () => {
+    const { client, close: c } = await makeTestClient(factory);
+    await client.callTool({ name: 'send_roster', arguments: { payer: 'aetna' } });
+    const seen: Array<{ tool: string; attempts: number; summary: string }> = [];
+    const sinks: SinkRegistry = {
+      slack: async (_payload, effect) => {
+        seen.push({ tool: effect.tool, attempts: effect.attempts, summary: effect.summary });
+        return { slack_ts: '1.2' };
+      },
+    };
+    const r = await dispatchStagedEffects(db, sinks, { key: deps.encryptionKey });
+    expect(r.dispatched).toBe(1);
+    expect(seen).toEqual([{ tool: 'send_roster', attempts: 1, summary: 'Send aetna roster to Slack' }]);
+    const [row] = await db.select().from(toolEffects);
+    expect(row.result).toEqual({ slack_ts: '1.2' });
+    await c();
+  });
+
+  it('leaves the result null when the sink returns nothing', async () => {
+    const { client, close: c } = await makeTestClient(factory);
+    await client.callTool({ name: 'send_roster', arguments: { payer: 'aetna' } });
+    const r = await dispatchStagedEffects(db, { slack: async () => {} }, { key: deps.encryptionKey });
+    expect(r.dispatched).toBe(1);
+    const [row] = await db.select().from(toolEffects);
+    expect(row.result).toBeNull();
+    await c();
+  });
+
+  it('leaves a row alone when it changed state during dispatch, counting it conflicted', async () => {
+    const { client, close: c } = await makeTestClient(factory);
+    const res = await client.callTool({ name: 'send_roster', arguments: { payer: 'aetna' } });
+    const out = (res.structuredContent as { result: { effect_id: string } }).result;
+    const sinks: SinkRegistry = {
+      slack: async () => {
+        await db.update(toolEffects).set({ status: 'cancelled' }).where(eq(toolEffects.id, out.effect_id));
+        throw new Error('slack down');
+      },
+    };
+    const r = await dispatchStagedEffects(db, sinks, { key: deps.encryptionKey });
+    expect(r).toMatchObject({ conflicted: 1, retried: 0, failed: 0, dispatched: 0 });
+    const [row] = await db.select().from(toolEffects).where(eq(toolEffects.id, out.effect_id));
+    expect(row.status).toBe('cancelled');
+    expect(row.attempts).toBe(1);
+    await c();
+  });
+
   it('skips effects whose sink is not registered and leaves them staged', async () => {
     const { client, close: c } = await makeTestClient(factory);
     await client.callTool({ name: 'send_roster', arguments: { payer: 'aetna' } });

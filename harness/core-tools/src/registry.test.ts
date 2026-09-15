@@ -322,6 +322,23 @@ describe('registerTools', () => {
     await c();
   });
 
+  it('rolls the parked approval back when the audit write in the same transaction fails', async () => {
+    // A run id with no `runs` row makes the audit insert violate audit_log's
+    // run_id foreign key, which is the only way to fail the write after the
+    // approval row is already inserted in the same transaction.
+    const deps = makeTestDeps(db, { context: { runId: randomUUID() } });
+    const { client, close: c } = await makeTestClient(() => {
+      const server = new McpServer({ name: 'registry-test-approval-atomicity', version: '0.0.0' });
+      registerTools(server, [sendExternal], deps);
+      return server;
+    });
+
+    const res = await client.callTool({ name: 'send_external', arguments: { to: 'payer@example.com' } });
+    expect(res.isError).toBe(true);
+    expect(await db.select().from(approvals)).toHaveLength(0);
+    await c();
+  });
+
   it('restores session context when a tool transaction rolls back', async () => {
     const deps = makeTestDeps(db);
     const { client, close: c } = await makeTestClient(() => {

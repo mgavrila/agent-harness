@@ -4,6 +4,7 @@ import { config as loadEnv } from 'dotenv';
 import { serveStdio } from '@modelcontextprotocol/server/stdio';
 import { buildDepsFromEnv, createCoreToolsServer } from './server.js';
 import { reconcile } from './reconcile.js';
+import { writeAudit, hashArgs } from './audit.js';
 
 // The repository root .env, resolved from this file rather than from the
 // process working directory, which is whatever launched the MCP server.
@@ -14,6 +15,20 @@ const { deps, close } = await buildDepsFromEnv();
 try {
   const repaired = await reconcile(deps.db, { now: deps.now });
   console.error(`core-tools: reconcile on startup: ${JSON.stringify(repaired)}`);
+  // A startup repair changes rows nobody asked it to change, so it leaves a
+  // trace. Only when it actually repaired something: a no-op start would
+  // otherwise write a row on every process launch.
+  if (repaired.approvals_expired > 0 || repaired.dispatches_parked > 0) {
+    await writeAudit(deps.db, {
+      client: deps.client,
+      caller: 'startup',
+      tool: 'harness_reconcile',
+      actionClass: 'write.internal',
+      argsHash: hashArgs({ startup: true }),
+      decision: 'auto',
+      recordIds: [],
+    });
+  }
 } catch (err) {
   console.error(`core-tools: reconcile at startup failed: ${err instanceof Error ? err.message : String(err)}; continuing`);
 }

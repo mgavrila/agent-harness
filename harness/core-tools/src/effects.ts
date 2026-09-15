@@ -2,10 +2,27 @@ import { and, asc, eq, sql } from 'drizzle-orm';
 import { toolEffects, encrypt, decrypt, withTransaction, type Db } from '@harness/db';
 import type { ToolDeps } from './registry.js';
 
+/**
+ * Sends one staged effect. The second argument carries the row's context so a
+ * sink can key its own idempotency, label the message, or back off on a retry.
+ *
+ * Anything returned is stored on the row in plaintext jsonb (`tool_effects.result`)
+ * for operators to trace the effect to what it produced, so a sink must return
+ * only non-restricted values — identifiers and timestamps, never payload
+ * content. Return nothing when there is nothing to record.
+ */
 export type SinkHandler = (
   payload: unknown,
-  effect: { id: string; idempotencyKey: string; tool: string; client: string },
-) => Promise<void>;
+  effect: {
+    id: string;
+    idempotencyKey: string;
+    tool: string;
+    client: string;
+    summary: string;
+    runId: string | null;
+    attempts: number;
+  },
+) => Promise<Record<string, unknown> | void>;
 
 export type SinkRegistry = Record<string, SinkHandler>;
 
@@ -13,6 +30,7 @@ export interface StageEffectInput {
   sink: string;
   idempotencyKey: string;
   payload: unknown;
+  /** A short human label. Never put restricted values here; it is stored in plaintext. */
   summary: string;
 }
 
@@ -34,7 +52,7 @@ export async function stageEffect(deps: ToolDeps, e: StageEffectInput): Promise<
       sink: e.sink,
       idempotencyKey: scopedKey,
       payloadEncrypted: encrypt(JSON.stringify(e.payload ?? null), deps.encryptionKey),
-      summary: e.summary,
+      summary: e.summary.slice(0, 200),
       runId: deps.context.runId ?? null,
     })
     .onConflictDoNothing({ target: toolEffects.idempotencyKey })
@@ -57,6 +75,8 @@ export interface DispatchResult {
   failed: number;
   retried: number;
   skipped: number;
+  /** Rows that left `dispatching` while the sink was running, so the dispatcher did not write their outcome. */
+  conflicted: number;
 }
 
 /**
@@ -71,7 +91,7 @@ export async function dispatchStagedEffects(db: Db, sinks: SinkRegistry, opts: D
   const limit = opts.limit ?? 50;
   const maxAttempts = opts.maxAttempts ?? 3;
   const now = opts.now ?? (() => new Date());
-  const result: DispatchResult = { dispatched: 0, failed: 0, retried: 0, skipped: 0 };
+  const result: DispatchResult = { dispatched: 0, failed: 0, retried: 0, skipped: 0, conflicted: 0 };
 
   const candidates = await db
     .select({ id: toolEffects.id, sink: toolEffects.sink })
@@ -105,19 +125,42 @@ export async function dispatchStagedEffects(db: Db, sinks: SinkRegistry, opts: D
 
     try {
       const payload: unknown = JSON.parse(decrypt(claimed.payloadEncrypted, opts.key));
-      await handler(payload, { id: claimed.id, idempotencyKey: claimed.idempotencyKey, tool: claimed.tool, client: claimed.client });
-      await db
+      const sinkResult = await handler(payload, {
+        id: claimed.id,
+        idempotencyKey: claimed.idempotencyKey,
+        tool: claimed.tool,
+        client: claimed.client,
+        summary: claimed.summary,
+        runId: claimed.runId,
+        attempts: claimed.attempts,
+      });
+      // Only a row still in `dispatching` is ours to finish. Anything else was
+      // moved on by reconcile or by an operator while the sink was running, and
+      // overwriting it would undo their decision.
+      const updated = await db
         .update(toolEffects)
-        .set({ status: 'dispatched', dispatchedAt: now(), updatedAt: now(), lastError: null })
-        .where(eq(toolEffects.id, claimed.id));
+        .set({ status: 'dispatched', dispatchedAt: now(), updatedAt: now(), lastError: null, result: sinkResult ?? null })
+        .where(and(eq(toolEffects.id, claimed.id), eq(toolEffects.status, 'dispatching')))
+        .returning({ id: toolEffects.id });
+      if (updated.length === 0) {
+        console.error(`effects: effect ${claimed.id} changed state during dispatch; leaving as-is`);
+        result.conflicted += 1;
+        continue;
+      }
       result.dispatched += 1;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       const exhausted = claimed.attempts >= maxAttempts;
-      await db
+      const updated = await db
         .update(toolEffects)
-        .set({ status: exhausted ? 'failed' : 'staged', lastError: message, updatedAt: now() })
-        .where(eq(toolEffects.id, claimed.id));
+        .set({ status: exhausted ? 'failed' : 'staged', lastError: message.slice(0, 500), updatedAt: now() })
+        .where(and(eq(toolEffects.id, claimed.id), eq(toolEffects.status, 'dispatching')))
+        .returning({ id: toolEffects.id });
+      if (updated.length === 0) {
+        console.error(`effects: effect ${claimed.id} changed state during dispatch; leaving as-is`);
+        result.conflicted += 1;
+        continue;
+      }
       if (exhausted) result.failed += 1;
       else result.retried += 1;
     }

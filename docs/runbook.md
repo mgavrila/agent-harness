@@ -105,6 +105,23 @@ losing audit writes. Malformed calls are visible only in the agent runtime's own
 logs. Everything that gets past validation is audited, including calls that are
 blocked by policy, parked for approval, or fail inside the handler.
 
+### One call, two rows
+
+The count can also run the other way. A successful handler writes its `auto` row
+*inside* the transaction, and the wrapper writes an `error` row outside the
+transaction when the call throws. A failing `COMMIT` can produce both.
+
+Usually a failed `COMMIT` rolls the `auto` row back and only the `error` row
+survives, which is correct. But when the commit succeeded on the server and only
+the acknowledgement was lost (connection dropped at exactly that moment), the
+`auto` row is durable *and* the driver raises, so the wrapper adds an `error` row
+for the same call. `audit_log` is append-only, so neither row can be cleaned up.
+
+Two rows with the same `client`, `tool` and `args_hash` moments apart, one `auto`
+and one `error`, are therefore one call, not two. Check whether the handler's
+writes actually landed before concluding the action was lost — with the commit
+acknowledged or not, the `auto` row means the data is there.
+
 ## Effects outbox
 
 External side effects (Slack messages, file uploads) are never sent from
@@ -117,16 +134,56 @@ sink (did the message arrive?) and then set the row to `dispatched` or
 `cancelled` by hand:
 
 ```sql
-select id, tool, sink, summary, attempts, last_error, updated_at
+select id, tool, sink, summary, attempts, last_error, result, updated_at
 from tool_effects where status in ('failed','needs_review') order by updated_at;
 update tool_effects set status = 'cancelled' where id = '<id>';
 ```
+
+A `needs_review` row does **not** mean nothing was sent. It means the dispatcher
+never reported back — the sink may well have delivered the message before the
+process died. Always check the sink itself (did the Slack message arrive? does
+the remote file exist?) before resolving the row, and never assume a re-send is
+safe because the status is not `dispatched`.
+
+`summary`, `last_error` and `result` are stored in **plaintext**. They must never
+contain restricted values:
+
+- `summary` is a short human label, truncated to 200 characters. Put the payer
+  or the document kind in it, never a field value.
+- `last_error` is the sink's error message, truncated to 500 characters. A sink
+  must not include payload values in the messages it throws — an error like
+  `rejected recipient 123-45-6789` would copy a restricted value into a column
+  the audit tooling reads freely.
+- `result` is whatever the sink returned on success (a message timestamp, a
+  remote file id) so an operator can trace an effect to what it produced. A sink
+  is responsible for returning identifiers only, never payload content.
+
+Nothing drains the outbox yet. Plan 1.1 stages rows and provides
+`dispatchStagedEffects`, but no sinks are registered and no scheduler calls it,
+so staged rows simply accumulate until Plan 3 registers real sinks and a cron
+runs the dispatcher.
 
 ## Reconciliation
 
 `harness_reconcile` (also run once at process start) expires approvals past
 their TTL and parks stuck dispatches. Run it on a schedule in production
 (Plan 3 adds a cron playbook). It never re-sends anything.
+
+The MCP tool repairs **only the calling client's rows**, so an agent acting for
+one practice can never retire another practice's approvals. The startup pass in
+`main.ts` runs **unscoped**, as an operator-level task across every tenant; when
+it actually repairs something it writes one `audit_log` row with
+`caller = 'startup'` and `tool = 'harness_reconcile'`.
+
+## Session context
+
+The MCP server keeps one session context (run id, skill, skill version) per
+**process**, shared by every connection that process serves. That is correct for
+the stdio deployment, where Hermes launches one `core-tools` process per session.
+
+Anyone moving the server to a multi-session transport (HTTP) must build one
+`deps` object per session. Reusing a single one would stamp one session's run id
+and skill onto another session's audit rows.
 
 ## Writing migrations
 

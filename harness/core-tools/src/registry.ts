@@ -120,10 +120,30 @@ async function createOrReuseApproval(db: Db, deps: ToolDeps, tool: AnyToolDef, a
   return row;
 }
 
-type AuditBase = Pick<
+export type AuditBase = Pick<
   AuditEntry,
   'client' | 'caller' | 'tool' | 'actionClass' | 'argsHash' | 'runId' | 'skill' | 'skillVersion' | 'derivedFrom'
 >;
+
+/**
+ * The identity every audit row carries: who called, which tool, under what
+ * session context. One definition so a row written outside the registry — the
+ * replay in `approvals_execute` — cannot drift from the rows the registry
+ * writes. `derivedFrom` is the caller's lineage claim, not read from context.
+ */
+export function auditBaseFor(deps: ToolDeps, tool: AnyToolDef, argsHash: string, derivedFrom: string[] = []): AuditBase {
+  return {
+    client: deps.client,
+    caller: deps.caller,
+    tool: tool.name,
+    actionClass: tool.actionClass,
+    argsHash,
+    runId: deps.context.runId ?? null,
+    skill: deps.context.skill ?? null,
+    skillVersion: deps.context.skillVersion ?? null,
+    derivedFrom,
+  };
+}
 
 /**
  * Last-resort handler for a failure the normal paths could not record: a
@@ -156,6 +176,12 @@ function restoreContext(target: SessionContext, snapshot: SessionContext): void 
     if (!(key in snapshot)) delete target[key];
   }
   Object.assign(target, snapshot);
+  // A snapshot taken while a key held `undefined` would otherwise reinstate it
+  // as an own property, so `'tool' in context` stays true for a tool that is
+  // no longer running. Absent and explicitly-undefined must look the same.
+  for (const key of Object.keys(target) as (keyof SessionContext)[]) {
+    if (target[key] === undefined) delete target[key];
+  }
 }
 
 export function registerTools(server: McpServer, tools: AnyToolDef[], deps: ToolDeps): void {
@@ -176,17 +202,7 @@ export function registerTools(server: McpServer, tools: AnyToolDef[], deps: Tool
         const handlerArgs = rawArgs;
         const behavior = decide(tool.actionClass, deps.policy);
         const argsHash = hashArgs(handlerArgs);
-        const base = {
-          client: deps.client,
-          caller: deps.caller,
-          tool: tool.name,
-          actionClass: tool.actionClass,
-          argsHash,
-          runId: deps.context.runId ?? null,
-          skill: deps.context.skill ?? null,
-          skillVersion: deps.context.skillVersion ?? null,
-          derivedFrom: derived_from ?? [],
-        };
+        const base = auditBaseFor(deps, tool, argsHash, derived_from ?? []);
 
         if (behavior === 'blocked') {
           try {

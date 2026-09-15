@@ -5,6 +5,7 @@ import { eq } from 'drizzle-orm';
 import { approvals, auditLog, providers, type Db } from '@harness/db';
 import { defineTool, registerTools, ToolError, type ToolDeps } from '../registry.js';
 import { makeTestDeps, makeTestClient, openTestDb } from '../testing.js';
+import { DEFAULT_POLICY } from '../policy.js';
 import { approvalTools } from './approvals.js';
 
 let db: Db;
@@ -97,6 +98,55 @@ describe('approvals_execute', () => {
     expect(row.executedAt).toBeNull();
     const errors = await db.select().from(auditLog).where(eq(auditLog.decision, 'error'));
     expect(errors).toHaveLength(1);
+    await c();
+  });
+
+  it('carries the parking row\'s derived_from onto the audit row written at replay', async () => {
+    const { client, close: c } = await makeTestClient(factory);
+    await park(client, { name: 'Dr. First' });
+    const [firstAudit] = await db.select().from(auditLog);
+
+    const res = await client.callTool({
+      name: 'create_provider_external',
+      arguments: { name: 'Dr. Second', derived_from: [firstAudit.id] },
+    });
+    const id = (res.structuredContent as { approval_id: string }).approval_id;
+    const parking = (await db.select().from(auditLog).where(eq(auditLog.approvalId, id)))[0];
+    expect(parking.derivedFrom).toEqual([firstAudit.id]);
+
+    await db.update(approvals).set({ status: 'approved', decidedBy: 'U1', decidedAt: deps.now() }).where(eq(approvals.id, id));
+    const exec = await client.callTool({ name: 'approvals_execute', arguments: { approval_id: id } });
+    expect(exec.isError).toBeFalsy();
+
+    const rows = await db.select().from(auditLog).where(eq(auditLog.approvalId, id));
+    const auto = rows.find((r) => r.decision === 'auto')!;
+    expect(auto.derivedFrom).toEqual(parking.derivedFrom);
+    await c();
+  });
+
+  it('refuses to replay an action whose class has since become blocked by policy', async () => {
+    const { client, close: c } = await makeTestClient(factory);
+    const id = await park(client, { name: 'Dr. Blocked' });
+    await db.update(approvals).set({ status: 'approved', decidedBy: 'U1', decidedAt: deps.now() }).where(eq(approvals.id, id));
+
+    // Same key as the parking deps, so the stored payload still decrypts and
+    // the policy re-check is the only thing that can stop the replay.
+    const strictDeps = makeTestDeps(db, {
+      policy: { ...DEFAULT_POLICY, external: 'blocked' },
+      encryptionKey: deps.encryptionKey,
+    });
+    const { client: strictClient, close: c2 } = await makeTestClient(() => {
+      const server = new McpServer({ name: 'approvals-test-blocked', version: '0.0.0' });
+      registerTools(server, [createProviderExternal, ...approvalTools], strictDeps);
+      return server;
+    });
+    const res = await strictClient.callTool({ name: 'approvals_execute', arguments: { approval_id: id } });
+    expect(res.isError).toBe(true);
+    const [row] = await db.select().from(approvals).where(eq(approvals.id, id));
+    expect(row.status).toBe('approved');
+    expect(row.executedAt).toBeNull();
+    expect(await db.select().from(providers)).toHaveLength(0);
+    await c2();
     await c();
   });
 

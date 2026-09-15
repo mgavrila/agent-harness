@@ -123,6 +123,12 @@ export const toolEffects = pgTable('tool_effects', {
   status: text('status').notNull().default('staged'),
   attempts: integer('attempts').notNull().default(0),
   lastError: text('last_error'),
+  /**
+   * What the sink returned on a successful dispatch (a Slack message ts, a
+   * remote file id) so an operator can trace the effect to the thing it made.
+   * Plaintext jsonb: a sink must return only non-restricted values.
+   */
+  result: jsonb('result').$type<Record<string, unknown>>(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   dispatchedAt: timestamp('dispatched_at', { withTimezone: true }),

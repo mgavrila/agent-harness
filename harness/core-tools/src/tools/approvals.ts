@@ -1,8 +1,9 @@
 import * as z from 'zod/v4';
 import { and, eq, gt } from 'drizzle-orm';
-import { approvals, decrypt } from '@harness/db';
-import { defineTool, ToolError, type AnyToolDef, type ToolDeps } from '../registry.js';
+import { approvals, auditLog, decrypt } from '@harness/db';
+import { auditBaseFor, defineTool, ToolError, type AnyToolDef, type ToolDeps } from '../registry.js';
 import { writeAudit, hashArgs } from '../audit.js';
+import { decide } from '../policy.js';
 
 const approvalsExecute = defineTool({
   name: 'approvals_execute',
@@ -38,6 +39,12 @@ const approvalsExecute = defineTool({
     const parsed = JSON.parse(decrypt(row.payloadEncrypted, deps.encryptionKey)) as { tool: string; args: Record<string, unknown> };
     const target = deps.tools.get(parsed.tool);
     if (!target) throw new ToolError(`approval ${approval_id} references unknown tool ${parsed.tool}`);
+    // Policy is re-read at replay time: an approval granted before the class
+    // was blocked must not become a way around the current policy. Throwing
+    // here rolls the `executed` transition back to `approved`.
+    if (decide(target.actionClass, deps.policy) === 'blocked') {
+      throw new ToolError(`approval ${approval_id} cannot execute: ${target.name} is now blocked by policy`);
+    }
 
     const args = target.input.parse(parsed.args) as Record<string, unknown>;
     const targetDeps: ToolDeps = { ...deps, context: deps.context };
@@ -49,18 +56,16 @@ const approvalsExecute = defineTool({
     } finally {
       deps.context.tool = previousTool;
     }
+    // The replay continues the chain the parked call started, so it inherits
+    // that call's lineage rather than starting a fresh, empty one.
+    const parking = await deps.db.query.auditLog.findFirst({
+      where: and(eq(auditLog.approvalId, row.id), eq(auditLog.decision, 'approval')),
+    });
     await writeAudit(deps.db, {
-      client: deps.client,
-      caller: deps.caller,
-      tool: target.name,
-      actionClass: target.actionClass,
-      argsHash: hashArgs(args),
+      ...auditBaseFor(deps, target, hashArgs(args), parking?.derivedFrom ?? []),
       decision: 'auto',
       approvalId: row.id,
       recordIds: target.recordIds?.(args, result) ?? [],
-      runId: deps.context.runId ?? null,
-      skill: deps.context.skill ?? null,
-      skillVersion: deps.context.skillVersion ?? null,
     });
     return { approval_id: row.id, tool: target.name, status: 'executed' as const, result };
   },

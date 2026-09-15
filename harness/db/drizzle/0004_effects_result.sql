@@ -1,0 +1,1 @@
+ALTER TABLE "tool_effects" ADD COLUMN "result" jsonb;

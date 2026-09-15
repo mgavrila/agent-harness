@@ -44,6 +44,21 @@ describe('session context and lineage', () => {
     await c();
   });
 
+  it('refuses to adopt a run that belongs to another client and leaves the context untouched', async () => {
+    const { client, close: c } = await makeTestClient(() => createCoreToolsServer(deps));
+    const runId = '22222222-2222-4222-8222-222222222222';
+    await db.insert(runs).values({ id: runId, client: 'other-clinic', caller: 'their-caller' });
+
+    const res = await client.callTool({ name: 'harness_set_context', arguments: { run_id: runId } });
+    expect(res.isError).toBe(true);
+    expect(deps.context.runId).toBeUndefined();
+
+    await client.callTool({ name: 'providers_search', arguments: { query: 'nobody' } });
+    const search = (await db.select().from(auditLog)).find((r) => r.tool === 'providers_search')!;
+    expect(search.runId).toBeNull();
+    await c();
+  });
+
   it('stores derived_from on the audit row and strips it from handler args', async () => {
     const { client, close: c } = await makeTestClient(() => createCoreToolsServer(deps));
     const first = await client.callTool({ name: 'providers_search', arguments: { query: 'a' } });

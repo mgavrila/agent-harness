@@ -43,6 +43,11 @@ export async function buildDepsFromEnv(): Promise<{ deps: ToolDeps; close: () =>
     approvalTtlHours: numberFromEnv('APPROVAL_TTL_HOURS', 24, { min: 1, max: 720 }),
     confidenceThreshold: numberFromEnv('CONFIDENCE_THRESHOLD', 0.85, { min: 0, max: 1 }),
     sinks: {},
+    // One context object per process, shared by every connection this process
+    // serves. That is correct for the stdio deployment, where Hermes starts one
+    // process per session. A multi-session transport (HTTP) must not reuse this
+    // deps object: it has to build one `deps` per session, or one session's run
+    // id and skill would be stamped on another session's audit rows.
     context: {},
     tools: new Map(),
   };
