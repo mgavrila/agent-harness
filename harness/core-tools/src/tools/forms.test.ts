@@ -261,6 +261,48 @@ describe('forms_roster', () => {
     expect(csv).not.toContain('enc');
   });
 
+  it('reports a licence with no stored number as not on file', async () => {
+    // A licence read off a document that showed an issuer, a state and an
+    // expiry but no legible number: the row exists, number_encrypted is null.
+    const [p] = await db.insert(providers).values({ client: 'test', name: 'Dr. No Number', npi: '1234567893' }).returning();
+    await db.insert(credentials).values([
+      { providerId: p.id, kind: 'license', issuer: 'Texas Medical Board', state: 'TX', expiresAt: '2027-03-31' },
+      { providerId: p.id, kind: 'dea', issuer: 'DEA', expiresAt: '2028-02-28' },
+    ]);
+    const client = await connectTools('forms-test', formTools, deps);
+    const out = resultOf<{ file_id: string }>(
+      await client.callTool({ name: 'forms_roster', arguments: { payer_id: 'aetna', provider_ids: [p.id] } }),
+    );
+    const csv = await readFile(path.join(storageDir, 'out', out.file_id), 'utf8');
+    const [, row] = csv.trim().split('\n');
+    const cells = row.split(',');
+    // license_number_on_file and dea_on_file, in ROSTER_COLUMNS order.
+    expect(cells[ROSTER_COLUMNS.indexOf('license_number_on_file')]).toBe('no');
+    expect(cells[ROSTER_COLUMNS.indexOf('dea_on_file')]).toBe('no');
+    // The rest of the licence row is still exported: the row does exist.
+    expect(cells[ROSTER_COLUMNS.indexOf('license_state')]).toBe('TX');
+    expect(cells[ROSTER_COLUMNS.indexOf('license_expires_at')]).toBe('2027-03-31');
+  });
+
+  it('reports a DEA registration with a stored number as on file', async () => {
+    const [p] = await db.insert(providers).values({ client: 'test', name: 'Dr. Has Number', npi: '1234567893' }).returning();
+    await db.insert(credentials).values({
+      providerId: p.id,
+      kind: 'dea',
+      issuer: 'DEA',
+      expiresAt: '2028-02-28',
+      numberEncrypted: Buffer.from('enc'),
+    });
+    const client = await connectTools('forms-test', formTools, deps);
+    const out = resultOf<{ file_id: string }>(
+      await client.callTool({ name: 'forms_roster', arguments: { payer_id: 'aetna', provider_ids: [p.id] } }),
+    );
+    const csv = await readFile(path.join(storageDir, 'out', out.file_id), 'utf8');
+    const cells = csv.trim().split('\n')[1].split(',');
+    expect(cells[ROSTER_COLUMNS.indexOf('dea_on_file')]).toBe('yes');
+    expect(csv).not.toContain('enc');
+  });
+
   it('refuses a provider that belongs to another client and writes nothing', async () => {
     const mine = await seedCompleteProvider();
     const [theirs] = await db.insert(providers).values({ client: 'other-clinic', name: 'Dr. Elsewhere' }).returning();

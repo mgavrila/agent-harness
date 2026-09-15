@@ -1,7 +1,7 @@
 import { readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import * as z from 'zod/v4';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { credentials, fields } from '@harness/db';
 import { defineTool, ToolError, type AnyToolDef, type ToolDeps } from '../registry.js';
 import { writeOutFile, resolveOutFile } from '../storage.js';
@@ -11,21 +11,35 @@ import { fillTemplatePdf, resolveMappings, type ProviderData } from '../forms/fi
 import { buildRosterCsv, ROSTER_COLUMNS, type RosterRow } from '../forms/roster.js';
 import { requireProvider } from './providers.js';
 
-/** Read everything a template may need about one provider, scoped to the client. */
+/**
+ * Read everything a template may need about one provider, scoped to the client.
+ *
+ * Both queries are projections rather than `select()`: the encrypted columns
+ * are never pulled into this process, and `number_encrypted IS NOT NULL` is
+ * evaluated by Postgres. That is what lets the roster say whether a credential
+ * number is on file without the bytes ever being in memory.
+ */
 export async function loadProviderData(deps: ToolDeps, providerId: string): Promise<ProviderData> {
   const provider = await requireProvider(deps, providerId);
-  const fieldRows = await deps.db.select().from(fields).where(eq(fields.providerId, providerId));
-  const credentialRows = await deps.db.select().from(credentials).where(eq(credentials.providerId, providerId));
+  const fieldRows = await deps.db
+    .select({ name: fields.name, value: fields.value, restricted: fields.restricted, status: fields.status })
+    .from(fields)
+    .where(eq(fields.providerId, providerId));
+  const credentialRows = await deps.db
+    .select({
+      kind: credentials.kind,
+      issuer: credentials.issuer,
+      state: credentials.state,
+      issuedAt: credentials.issuedAt,
+      expiresAt: credentials.expiresAt,
+      hasNumber: sql<boolean>`${credentials.numberEncrypted} is not null`,
+    })
+    .from(credentials)
+    .where(eq(credentials.providerId, providerId));
   return {
     provider: { name: provider.name, npi: provider.npi, status: provider.status },
-    fields: fieldRows.map((f) => ({ name: f.name, value: f.value, restricted: f.restricted, status: f.status })),
-    credentials: credentialRows.map((c) => ({
-      kind: c.kind,
-      issuer: c.issuer,
-      state: c.state,
-      issuedAt: c.issuedAt,
-      expiresAt: c.expiresAt,
-    })),
+    fields: fieldRows,
+    credentials: credentialRows,
   };
 }
 
@@ -160,8 +174,11 @@ const formsRoster = defineTool({
         license_state: license?.state ?? null,
         license_issuer: license?.issuer ?? null,
         license_expires_at: license?.expiresAt ?? null,
-        license_number_on_file: license !== undefined,
-        dea_on_file: latest(data, 'dea') !== undefined,
+        // "On file" means a number is stored, not that a credential row
+        // exists: `number_encrypted` is nullable, so a licence recorded from a
+        // document with no legible number must report no.
+        license_number_on_file: license?.hasNumber ?? false,
+        dea_on_file: latest(data, 'dea')?.hasNumber ?? false,
         malpractice_carrier: malpractice?.issuer ?? null,
         malpractice_expires_at: malpractice?.expiresAt ?? null,
         board_cert_expires_at: boardCert?.expiresAt ?? null,

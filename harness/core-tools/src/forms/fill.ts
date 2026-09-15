@@ -13,6 +13,13 @@ export interface ProviderData {
     state: string | null;
     issuedAt: string | null;
     expiresAt: string | null;
+    /**
+     * Whether `number_encrypted` holds anything. The number itself is never
+     * loaded — the roster's `*_on_file` columns answer "is a number stored",
+     * and a credential row recorded from a document that showed an issuer and
+     * an expiry but no legible number must answer no.
+     */
+    hasNumber: boolean;
   }[];
 }
 
