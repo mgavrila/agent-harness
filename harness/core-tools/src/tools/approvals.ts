@@ -40,8 +40,15 @@ const approvalsExecute = defineTool({
     if (!target) throw new ToolError(`approval ${approval_id} references unknown tool ${parsed.tool}`);
 
     const args = target.input.parse(parsed.args) as Record<string, unknown>;
-    const targetDeps: ToolDeps = { ...deps, context: { ...deps.context, tool: target.name } };
-    const result = await target.handler(args, targetDeps);
+    const targetDeps: ToolDeps = { ...deps, context: deps.context };
+    const previousTool = deps.context.tool;
+    deps.context.tool = target.name;
+    let result: unknown;
+    try {
+      result = await target.handler(args, targetDeps);
+    } finally {
+      deps.context.tool = previousTool;
+    }
     await writeAudit(deps.db, {
       client: deps.client,
       caller: deps.caller,
@@ -52,6 +59,8 @@ const approvalsExecute = defineTool({
       approvalId: row.id,
       recordIds: target.recordIds?.(args, result) ?? [],
       runId: deps.context.runId ?? null,
+      skill: deps.context.skill ?? null,
+      skillVersion: deps.context.skillVersion ?? null,
     });
     return { approval_id: row.id, tool: target.name, status: 'executed' as const, result };
   },

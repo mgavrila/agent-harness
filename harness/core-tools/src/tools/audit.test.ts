@@ -93,6 +93,7 @@ describe('audit_query', () => {
       'deadlines_compute',
       'deadlines_upcoming',
       'harness_reconcile',
+      'harness_set_context',
       'providers_confirm_field',
       'providers_get',
       'providers_list_pending',

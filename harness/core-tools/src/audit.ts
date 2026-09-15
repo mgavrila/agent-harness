@@ -15,6 +15,12 @@ export interface AuditEntry {
   approvalId?: string | null;
   runId?: string | null;
   error?: string | null;
+  skill?: string | null;
+  skillVersion?: string | null;
+  derivedFrom?: string[];
+  inputTokens?: number | null;
+  outputTokens?: number | null;
+  costUsd?: number | null;
 }
 
 /** Recursively sort object keys so the hash does not depend on key order. */
@@ -49,5 +55,11 @@ export async function writeAudit(db: Db, entry: AuditEntry): Promise<void> {
     approvalId: entry.approvalId ?? null,
     runId: entry.runId ?? null,
     error: entry.error ?? null,
+    skill: entry.skill ?? null,
+    skillVersion: entry.skillVersion ?? null,
+    derivedFrom: entry.derivedFrom ?? [],
+    inputTokens: entry.inputTokens ?? null,
+    outputTokens: entry.outputTokens ?? null,
+    costUsd: entry.costUsd ?? null,
   });
 }

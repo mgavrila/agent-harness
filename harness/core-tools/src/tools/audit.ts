@@ -28,6 +28,10 @@ const auditQuery = defineTool({
         approval_id: z.string().nullable(),
         has_error: z.boolean(),
         created_at: z.string(),
+        run_id: z.string().nullable(),
+        skill: z.string().nullable(),
+        skill_version: z.string().nullable(),
+        derived_from: z.array(z.string()),
       }),
     ),
   }),
@@ -55,6 +59,10 @@ const auditQuery = defineTool({
         // identifiers or restricted values, so operators read it with psql.
         has_error: r.error !== null,
         created_at: r.createdAt.toISOString(),
+        run_id: r.runId,
+        skill: r.skill,
+        skill_version: r.skillVersion,
+        derived_from: (r.derivedFrom as string[]) ?? [],
       })),
     };
   },

@@ -120,7 +120,10 @@ async function createOrReuseApproval(db: Db, deps: ToolDeps, tool: AnyToolDef, a
   return row;
 }
 
-type AuditBase = Pick<AuditEntry, 'client' | 'caller' | 'tool' | 'actionClass' | 'argsHash'>;
+type AuditBase = Pick<
+  AuditEntry,
+  'client' | 'caller' | 'tool' | 'actionClass' | 'argsHash' | 'runId' | 'skill' | 'skillVersion' | 'derivedFrom'
+>;
 
 /**
  * Last-resort handler for a failure the normal paths could not record: a
@@ -142,13 +145,32 @@ async function handleUnexpectedError(db: Db, tool: AnyToolDef, base: AuditBase, 
 export function registerTools(server: McpServer, tools: AnyToolDef[], deps: ToolDeps): void {
   for (const tool of tools) deps.tools.set(tool.name, tool);
   for (const tool of tools) {
+    const inputSchema = tool.input.extend({
+      derived_from: z
+        .array(z.string().uuid())
+        .max(50)
+        .optional()
+        .describe('audit_log ids of earlier results these arguments were built from'),
+    });
     server.registerTool(
       tool.name,
-      { description: tool.description, inputSchema: tool.input, outputSchema: envelope(tool.output) },
+      { description: tool.description, inputSchema, outputSchema: envelope(tool.output) },
       async (args: Record<string, unknown>) => {
+        const { derived_from, ...rawArgs } = args as Record<string, unknown> & { derived_from?: string[] };
+        const handlerArgs = rawArgs;
         const behavior = decide(tool.actionClass, deps.policy);
-        const argsHash = hashArgs(args);
-        const base = { client: deps.client, caller: deps.caller, tool: tool.name, actionClass: tool.actionClass, argsHash };
+        const argsHash = hashArgs(handlerArgs);
+        const base = {
+          client: deps.client,
+          caller: deps.caller,
+          tool: tool.name,
+          actionClass: tool.actionClass,
+          argsHash,
+          runId: deps.context.runId ?? null,
+          skill: deps.context.skill ?? null,
+          skillVersion: deps.context.skillVersion ?? null,
+          derivedFrom: derived_from ?? [],
+        };
 
         if (behavior === 'blocked') {
           try {
@@ -162,7 +184,7 @@ export function registerTools(server: McpServer, tools: AnyToolDef[], deps: Tool
         if (behavior === 'approval') {
           try {
             const row = await withTransaction(deps.db, async (tx) => {
-              const parked = await createOrReuseApproval(tx, deps, tool, args, argsHash);
+              const parked = await createOrReuseApproval(tx, deps, tool, handlerArgs, argsHash);
               await writeAudit(tx, { ...base, decision: 'approval', approvalId: parked.id });
               return parked;
             });
@@ -175,10 +197,16 @@ export function registerTools(server: McpServer, tools: AnyToolDef[], deps: Tool
 
         try {
           const result = await withTransaction(deps.db, async (tx) => {
-            const txDeps: ToolDeps = { ...deps, db: tx, context: { ...deps.context, tool: tool.name } };
-            const out = await tool.handler(args, txDeps);
-            await writeAudit(tx, { ...base, decision: 'auto', recordIds: tool.recordIds?.(args, out) ?? [] });
-            return out;
+            const txDeps: ToolDeps = { ...deps, db: tx, context: deps.context };
+            const previousTool = deps.context.tool;
+            deps.context.tool = tool.name;
+            try {
+              const out = await tool.handler(handlerArgs, txDeps);
+              await writeAudit(tx, { ...base, decision: 'auto', recordIds: tool.recordIds?.(handlerArgs, out) ?? [] });
+              return out;
+            } finally {
+              deps.context.tool = previousTool;
+            }
           });
           const structured = { status: 'ok' as const, result };
           return { ...textResult(structured), structuredContent: structured };
