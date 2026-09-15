@@ -13,6 +13,14 @@
 ARG HERMES_TAG=v2026.9.14
 FROM nousresearch/hermes-agent:${HERMES_TAG}
 
+# The base image's own default user is already root, so this restates it
+# rather than escalating, and there is nothing to restore afterwards. Root at
+# image level is required, not a leftover: the s6-overlay entrypoint does the
+# UID remap, the data-volume chown and the config seeding as root, and
+# main-wrapper.sh then drops to the `hermes` user with `s6-setuidgid` before it
+# execs the command. Pinning a USER here (or `docker run --user`) skips that
+# bootstrap, and both entrypoint-dispatch.sh and stage2-hook.sh refuse to start
+# on an arbitrary non-root uid.
 USER root
 RUN npm install -g pnpm@11.4.0 && npm cache clean --force
 
@@ -27,6 +35,13 @@ COPY clients ./clients
 COPY scripts ./scripts
 RUN pnpm install --frozen-lockfile && chmod -R a+rX /srv/agent-harness
 
-# Hand the image back exactly as it was: /init stays PID 1 through the
-# unmodified ENTRYPOINT, and the working directory is the one it expects.
+# Hand the image back exactly as it was: the ENTRYPOINT is unmodified, /init
+# stays PID 1 through it, and the working directory is the one it expects. The
+# image-level user is root because that is what the base image declares and
+# what the entrypoint needs; the process that actually runs `gateway run` is
+# the `hermes` user, remapped to HERMES_UID/HERMES_GID (1000 in compose, 10000
+# unset). Verified through the real entrypoint:
+#
+#   $ docker run --rm -e HERMES_UID=1000 -e HERMES_GID=1000 harness-hermes sh -c id
+#   uid=1000(hermes) gid=1000(hermes) groups=1000(hermes)
 WORKDIR /opt/hermes

@@ -104,7 +104,10 @@ services:
       # root-equivalent access to the host: the Slack toolset has no terminal
       # (see platform_toolsets in hermes.config.yaml), so only an operator on
       # the CLI surface can reach it. Remove this mount and set
-      # terminal.backend to "local" if that trade is not acceptable.
+      # terminal.backend to "local" if that trade is not acceptable. The
+      # container's image-level user is root because the s6 entrypoint needs
+      # it, but the process that could use this socket runs as HERMES_UID —
+      # see hermes.Dockerfile.
       - /var/run/docker.sock:/var/run/docker.sock
     command: ["gateway", "run"]
 
