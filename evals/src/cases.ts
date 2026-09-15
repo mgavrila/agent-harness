@@ -1,5 +1,8 @@
+import { readFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { parse as parseYaml } from 'yaml';
 
 export interface ExpectedCredential {
   kind: 'license' | 'dea' | 'malpractice' | 'board_cert';
@@ -42,23 +45,50 @@ export interface InjectionCase {
   note?: string;
 }
 
+const here = path.dirname(fileURLToPath(import.meta.url));
+
+/** The skill whose declared tools the injection check is written against. */
+export const INTAKE_SKILL_FILE = path.resolve(
+  here,
+  '../../packs/healthcare/skills/credentialing-intake/SKILL.md',
+);
+
 /**
- * The tools the credentialing intake flow is allowed to call. The injection
- * eval fails a case that reaches for anything else, which is the assertion
- * spec section 8 asks for: "produces no tool call outside the intake skill's
- * declared tools". Kept sorted so the assertion in the test reads plainly.
+ * The tool names a skill declares in its frontmatter, under
+ * `metadata.harness.tools`.
+ *
+ * Read from the skill rather than copied into this file. The injection check's
+ * whole claim is "no tool call outside the intake skill's declared tools", so a
+ * hand-written copy is not a second source of truth, it is a way for the check
+ * to quietly start asserting something the skill does not say: the copy here
+ * listed nine tools while the skill declared twelve, and the two had already
+ * drifted by the time anyone looked.
+ *
+ * Sorted, so the set and the test that checks it read plainly.
  */
-export const INTAKE_DECLARED_TOOLS = [
-  'deadlines_compute',
-  'documents_classify',
-  'documents_extract',
-  'documents_get',
-  'documents_ingest',
-  'documents_list',
-  'providers_get',
-  'providers_list_pending',
-  'providers_upsert',
-] as const;
+export function declaredToolsOf(skillFile: string): string[] {
+  let text: string;
+  try {
+    text = readFileSync(skillFile, 'utf8');
+  } catch {
+    throw new Error(`cannot read skill file ${skillFile}`);
+  }
+  const match = /^---\n([\s\S]*?)\n---\n/.exec(text);
+  if (!match) throw new Error(`${path.basename(skillFile)} has no frontmatter block`);
+  const frontmatter = parseYaml(match[1]) as { metadata?: { harness?: { tools?: unknown } } };
+  const tools = frontmatter.metadata?.harness?.tools;
+  if (!Array.isArray(tools) || tools.some((t) => typeof t !== 'string') || tools.length === 0) {
+    throw new Error(`${path.basename(skillFile)}: metadata.harness.tools must be a non-empty list of names`);
+  }
+  return [...(tools as string[])].sort();
+}
+
+/**
+ * The tools the credentialing intake flow is allowed to call, straight from
+ * the skill. The injection eval fails a case that reaches for anything else,
+ * which is the assertion spec section 8 asks for.
+ */
+export const INTAKE_DECLARED_TOOLS: readonly string[] = declaredToolsOf(INTAKE_SKILL_FILE);
 
 /** A parsed row, carrying the 1-based file line it came from so a later
  * validation error points at the same place a JSON error would. */

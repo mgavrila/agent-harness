@@ -1,8 +1,16 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { INTAKE_DECLARED_TOOLS, loadExtractionCases, loadInjectionCases, loadJsonl } from './cases.js';
+import { parse as parseYaml } from 'yaml';
+import {
+  INTAKE_DECLARED_TOOLS,
+  INTAKE_SKILL_FILE,
+  declaredToolsOf,
+  loadExtractionCases,
+  loadInjectionCases,
+  loadJsonl,
+} from './cases.js';
 
 let dir: string;
 
@@ -91,22 +99,38 @@ describe('loadInjectionCases', () => {
 });
 
 describe('INTAKE_DECLARED_TOOLS', () => {
-  it('is the set the intake flow is allowed to use', () => {
-    expect([...INTAKE_DECLARED_TOOLS]).toEqual([
-      'deadlines_compute',
-      'documents_classify',
-      'documents_extract',
-      'documents_get',
-      'documents_ingest',
-      'documents_list',
-      'providers_get',
-      'providers_list_pending',
-      'providers_upsert',
-    ]);
+  it('is exactly what the intake skill declares in its frontmatter', async () => {
+    // Not a copy of the list: the same file the runtime reads. A hand-written
+    // copy had already drifted to nine names while the skill declared twelve,
+    // which quietly narrowed what the injection check was asserting.
+    const text = await readFile(INTAKE_SKILL_FILE, 'utf8');
+    const frontmatter = parseYaml(/^---\n([\s\S]*?)\n---\n/.exec(text)![1]) as {
+      metadata: { harness: { tools: string[] } };
+    };
+    expect([...INTAKE_DECLARED_TOOLS]).toEqual([...frontmatter.metadata.harness.tools].sort());
+    expect(INTAKE_DECLARED_TOOLS.length).toBeGreaterThan(0);
   });
 
   it('does not include anything that leaves the building', () => {
     expect(INTAKE_DECLARED_TOOLS).not.toContain('approvals_execute');
-    expect(INTAKE_DECLARED_TOOLS).not.toContain('verify_nppes');
+    expect(INTAKE_DECLARED_TOOLS).not.toContain('forms_release');
+  });
+});
+
+describe('declaredToolsOf', () => {
+  it('rejects a skill file with no frontmatter', async () => {
+    const bad = path.join(dir, 'NOFRONT.md');
+    await writeFile(bad, '# just a heading\n', 'utf8');
+    expect(() => declaredToolsOf(bad)).toThrow(/no frontmatter block/);
+  });
+
+  it('rejects frontmatter that declares no tools', async () => {
+    const bad = path.join(dir, 'NOTOOLS.md');
+    await writeFile(bad, '---\nname: x\nmetadata:\n  harness:\n    owner: y\n---\n\n# x\n', 'utf8');
+    expect(() => declaredToolsOf(bad)).toThrow(/metadata.harness.tools/);
+  });
+
+  it('names the file it could not read', () => {
+    expect(() => declaredToolsOf(path.join(dir, 'nope.md'))).toThrow(/cannot read skill file/);
   });
 });
