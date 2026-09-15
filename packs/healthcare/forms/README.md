@@ -33,14 +33,15 @@ order, with a header row, CRLF-free `\n` line endings, and UTF-8 encoding.
 | `license_state` | latest `license` credential | |
 | `license_issuer` | latest `license` credential | |
 | `license_expires_at` | latest `license` credential | ISO `YYYY-MM-DD` |
-| `license_number_on_file` | latest `license` credential | `yes` / `no` — **never the number** |
-| `dea_on_file` | latest `dea` credential | `yes` / `no` — **never the number** |
+| `license_number_on_file` | latest `license` credential | `yes` only when a number is actually stored on that credential; `no` otherwise — **never the number** |
+| `dea_on_file` | latest `dea` credential | `yes` only when a number is actually stored on that credential; `no` otherwise — **never the number** |
 | `malpractice_carrier` | latest `malpractice` credential | |
 | `malpractice_expires_at` | latest `malpractice` credential | ISO `YYYY-MM-DD` |
 | `board_cert_expires_at` | latest `board_cert` credential | ISO `YYYY-MM-DD` |
 | `provider_status` | `providers.status` | |
 
 Cells are quoted when they contain a comma, a double quote, a newline or a
-carriage return; internal double quotes are doubled. A cell that would start
-with `=`, `+`, `-` or `@` is prefixed with a single quote so a spreadsheet does
-not read it as a formula.
+carriage return; internal double quotes are doubled. A cell whose first
+character after any leading spaces, tabs, carriage returns or newlines is `=`,
+`+`, `-` or `@` is prefixed with a single quote so a spreadsheet does not read
+it as a formula.

@@ -287,7 +287,7 @@ and `hermes-init` strips those lines out of the `.env` it copies to
 `$HERMES_HOME/.env`. Approval decisions are gated by `SLACK_ALLOWED_USERS`
 regardless of which token is present.
 
-Health is on `http://<host>:${APPROVALS_HEALTH_PORT}/healthz`. It returns counts
+Health is on `http://127.0.0.1:${APPROVALS_HEALTH_HOST_PORT:-8787}/healthz` on the host (container port 8787, `APPROVALS_HEALTH_PORT`). It returns counts
 and loop timestamps only, never a summary or a payload, because anything
 reachable over HTTP is outside the audit trail. It answers 503 when an effect
 has failed or is parked, or when a loop recorded an error.

@@ -51,8 +51,16 @@ async function assertUnderRoot(candidate: string, root: string, effectId: string
   if (rel === '..' || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel)) {
     throw new Error(`slack_file: path outside the release directory (effect ${effectId})`);
   }
-  const realRoot = await realOrNearestAncestor(resolvedRoot);
-  const realCandidate = await realOrNearestAncestor(resolved);
+  let realRoot: string;
+  let realCandidate: string;
+  try {
+    realRoot = await realOrNearestAncestor(resolvedRoot);
+    realCandidate = await realOrNearestAncestor(resolved);
+  } catch {
+    // realpath errors (ELOOP, EACCES, ENOTDIR) carry the absolute path in
+    // their message; keep it out of the plaintext `tool_effects.last_error`.
+    throw new Error(`slack_file: staged file unavailable (effect ${effectId})`);
+  }
   // The separator matters: `${realRoot}-evil` starts with `realRoot` but is
   // not inside it.
   if (realCandidate !== realRoot && !realCandidate.startsWith(realRoot + path.sep)) {
