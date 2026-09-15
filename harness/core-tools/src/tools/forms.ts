@@ -216,7 +216,7 @@ const formsRelease = defineTool({
     bytes: z.number(),
   }),
   handler: async ({ file_id, channel }, deps) => {
-    const absolute = resolveOutFile(file_id, deps.storageDir);
+    const absolute = await resolveOutFile(file_id, deps.storageDir);
     let size: number;
     try {
       const info = await stat(absolute);

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtemp, rm, readFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, readFile, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { storageRoot, outRoot, contentTag, resolveOutFile, writeOutFile } from './storage.js';
@@ -20,15 +20,40 @@ describe('storage paths', () => {
     expect(storageRoot('/srv/x')).toBe('/srv/x');
   });
 
-  it('keeps every generated file under out/', () => {
+  it('keeps every generated file under out/', async () => {
     expect(outRoot(root)).toBe(path.join(root, 'out'));
-    expect(resolveOutFile('roster/aetna-abc.csv', root)).toBe(path.join(root, 'out', 'roster', 'aetna-abc.csv'));
+    await expect(resolveOutFile('roster/aetna-abc.csv', root)).resolves.toBe(
+      path.join(root, 'out', 'roster', 'aetna-abc.csv'),
+    );
   });
 
-  it('rejects a file id that escapes the out tree', () => {
+  it('rejects a file id that escapes the out tree', async () => {
     for (const bad of ['../secrets.txt', 'roster/../../etc/passwd', '/etc/passwd', '', '   ', '.']) {
-      expect(() => resolveOutFile(bad, root)).toThrow(/output directory/);
+      await expect(resolveOutFile(bad, root)).rejects.toThrow(/output directory/);
     }
+  });
+
+  it('rejects a file id that reaches outside through a symlink', async () => {
+    // A lexical check passes this: `out/escape/secrets.txt` has no `..` and is
+    // not absolute. `stat` in forms_release and `readFile` in the Slack sink
+    // both follow the link, so only the real path settles it.
+    const outside = path.join(root, 'outside');
+    await mkdir(outside, { recursive: true });
+    await writeFile(path.join(outside, 'secrets.txt'), 'restricted');
+    await mkdir(outRoot(root), { recursive: true });
+    await symlink(outside, path.join(outRoot(root), 'escape'));
+
+    await expect(resolveOutFile('escape/secrets.txt', root)).rejects.toThrow(/output directory/);
+    // The link itself is refused too, not only a path through it.
+    await expect(resolveOutFile('escape', root)).rejects.toThrow(/output directory/);
+  });
+
+  it('accepts a symlink that stays inside the out tree', async () => {
+    const forms = path.join(outRoot(root), 'forms');
+    await mkdir(forms, { recursive: true });
+    await writeFile(path.join(forms, 'real.pdf'), 'pdf');
+    await symlink(forms, path.join(outRoot(root), 'alias'));
+    await expect(resolveOutFile('alias/real.pdf', root)).resolves.toBe(path.join(outRoot(root), 'alias', 'real.pdf'));
   });
 
   it('writes a content-addressed file and returns its id', async () => {

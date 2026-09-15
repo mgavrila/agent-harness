@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
@@ -126,6 +126,35 @@ describe('slack sinks', () => {
       expect(out).toMatchObject({ dispatched: 0 });
       const [row] = await db.select().from(toolEffects);
       expect(row.status).toBe('staged');
+      expect(row.lastError).toBe(`slack_file: path outside storage root (effect ${row.id})`);
+      expect(slack.uploads).toHaveLength(0);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses a staged path that reaches outside the storage root through a symlink', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'harness-root-'));
+    try {
+      // The file exists and the path is lexically inside the root, so the old
+      // `path.relative` check passed it and `readFile` followed the link and
+      // uploaded the target.
+      const secret = path.join(dir, 'restricted.csv');
+      await writeFile(secret, 'ssn,123-45-6789\n');
+      await mkdir(path.join(root, 'out'), { recursive: true });
+      await symlink(secret, path.join(root, 'out', 'aetna-roster.csv'));
+      await stage(
+        'slack_file',
+        { path: path.join(root, 'out', 'aetna-roster.csv'), filename: 'aetna-roster.csv' },
+        'Release aetna-roster.csv to Slack',
+        'k10',
+      );
+      const slack = new FakeSlack();
+      const out = await dispatchStagedEffects(db, slackSinks(slack, { defaultChannel: 'C0DEFAULT', storageRoot: root }), {
+        key,
+      });
+      expect(out).toMatchObject({ dispatched: 0 });
+      const [row] = await db.select().from(toolEffects);
       expect(row.lastError).toBe(`slack_file: path outside storage root (effect ${row.id})`);
       expect(slack.uploads).toHaveLength(0);
     } finally {

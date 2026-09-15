@@ -7,7 +7,8 @@
     ".": "./src/server.ts",
     "./testing": "./src/testing.ts",
     "./effects": "./src/effects.ts",
-    "./reconcile": "./src/reconcile.ts"
+    "./reconcile": "./src/reconcile.ts",
+    "./storage": "./src/storage.ts"
   },
   "scripts": {
     "test": "vitest run",

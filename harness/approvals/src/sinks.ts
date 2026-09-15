@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import * as z from 'zod/v4';
 import type { SinkHandler, SinkRegistry } from '@harness/core-tools/effects';
+import { realOrNearestAncestor } from '@harness/core-tools/storage';
 import type { SlackApi } from './slack.js';
 
 // `channel` is nullable as well as optional: a staging tool writes an explicit
@@ -35,13 +36,26 @@ function parsePayload<T>(schema: z.ZodType<T>, payload: unknown, sink: string): 
 
 /**
  * Reject a staged path that does not resolve inside `root`. `forms_release`
- * already confines the path it stages to the storage root via
- * `resolveOutFile`, so this is defence in depth against a corrupted or
- * otherwise-produced row, not the primary guarantee.
+ * already confines the path it stages to the out tree via `resolveOutFile`,
+ * so this is defence in depth against a corrupted or otherwise-produced row,
+ * not the primary guarantee.
+ *
+ * Lexical resolution alone is not enough, because `readFile` below follows
+ * symlinks: a link planted under the out tree passes `path.relative` and then
+ * uploads whatever it points at. Both sides are compared as real paths too.
  */
-function assertUnderRoot(candidate: string, root: string, effectId: string): void {
-  const rel = path.relative(path.resolve(root), path.resolve(candidate));
+async function assertUnderRoot(candidate: string, root: string, effectId: string): Promise<void> {
+  const resolvedRoot = path.resolve(root);
+  const resolved = path.resolve(candidate);
+  const rel = path.relative(resolvedRoot, resolved);
   if (rel === '..' || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel)) {
+    throw new Error(`slack_file: path outside storage root (effect ${effectId})`);
+  }
+  const realRoot = await realOrNearestAncestor(resolvedRoot);
+  const realCandidate = await realOrNearestAncestor(resolved);
+  // The separator matters: `${realRoot}-evil` starts with `realRoot` but is
+  // not inside it.
+  if (realCandidate !== realRoot && !realCandidate.startsWith(realRoot + path.sep)) {
     throw new Error(`slack_file: path outside storage root (effect ${effectId})`);
   }
 }
@@ -65,7 +79,7 @@ export function slackSinks(api: SlackApi, opts: { defaultChannel: string; storag
     // `storageRoot` is optional here so existing callers (and today's tests,
     // which stage paths under an arbitrary tmpdir) are unaffected; the runner
     // that wires this sink up for real will pass `HARNESS_STORAGE_DIR`.
-    if (opts.storageRoot) assertUnderRoot(p.path, opts.storageRoot, effect.id);
+    if (opts.storageRoot) await assertUnderRoot(p.path, opts.storageRoot, effect.id);
     let bytes: Buffer;
     try {
       bytes = await readFile(p.path);

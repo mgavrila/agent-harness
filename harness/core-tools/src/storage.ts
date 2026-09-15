@@ -1,7 +1,33 @@
 import { createHash } from 'node:crypto';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, realpath, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { ToolError } from './registry.js';
+
+/**
+ * Resolve symlinks in `target`, walking up to the nearest existing ancestor
+ * when `target` itself does not exist yet and re-appending the remaining
+ * segments untouched (a path segment that does not exist cannot itself be a
+ * symlink, so this is safe).
+ *
+ * Duplicated from `documents/storage.ts` on the document-pipeline branch;
+ * the two collapse into one helper when the branches merge.
+ */
+export async function realOrNearestAncestor(target: string): Promise<string> {
+  const remainder: string[] = [];
+  let current = target;
+  for (;;) {
+    try {
+      const real = await realpath(current);
+      return remainder.length > 0 ? path.join(real, ...remainder) : real;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+      const parent = path.dirname(current);
+      if (parent === current) throw err; // reached the filesystem root; give up
+      remainder.unshift(path.basename(current));
+      current = parent;
+    }
+  }
+}
 
 /**
  * Root of the harness file store. There is no default: a deployment that has
@@ -30,8 +56,13 @@ export function contentTag(bytes: Uint8Array): string {
  * Turn a caller-supplied file id into an absolute path inside the out tree, or
  * refuse. A file id reaches us from a model, so an absolute path, a `..`
  * segment or an empty string is rejected rather than normalised away.
+ *
+ * The lexical check is not enough on its own: a symlink planted under the out
+ * tree lexically resolves inside it, and both `stat` in `forms_release` and
+ * `readFile` in the Slack file sink follow symlinks, so the target would be
+ * uploaded. The real paths are compared as well.
  */
-export function resolveOutFile(fileId: string, root: string): string {
+export async function resolveOutFile(fileId: string, root: string): Promise<string> {
   const base = outRoot(root);
   if (fileId.trim() === '' || path.isAbsolute(fileId)) {
     throw new ToolError(`file id "${fileId}" must be a path relative to the output directory`);
@@ -39,6 +70,13 @@ export function resolveOutFile(fileId: string, root: string): string {
   const abs = path.resolve(base, fileId);
   const rel = path.relative(base, abs);
   if (rel === '' || rel === '..' || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel)) {
+    throw new ToolError(`file id "${fileId}" is outside the output directory`);
+  }
+  const realBase = await realOrNearestAncestor(base);
+  const realAbs = await realOrNearestAncestor(abs);
+  // The separator matters: `${realBase}-evil` starts with `realBase` but is
+  // not inside it.
+  if (realAbs === realBase || !realAbs.startsWith(realBase + path.sep)) {
     throw new ToolError(`file id "${fileId}" is outside the output directory`);
   }
   return abs;
@@ -61,7 +99,7 @@ export async function writeOutFile(
   root: string,
 ): Promise<WrittenFile> {
   const fileId = `${input.dir}/${input.name}-${contentTag(input.bytes)}.${input.ext}`;
-  const abs = resolveOutFile(fileId, root);
+  const abs = await resolveOutFile(fileId, root);
   await mkdir(path.dirname(abs), { recursive: true });
   await writeFile(abs, input.bytes);
   return { file_id: fileId, path: abs, bytes: input.bytes.byteLength };
