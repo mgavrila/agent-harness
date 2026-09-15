@@ -43,5 +43,27 @@ services:
       retries: 12
       start_period: 30s
 
+  # Built, not started: Hermes launches core-tools over stdio in Plan 3.
+  # `docker compose build core-tools` proves the image still builds.
+  core-tools:
+    build:
+      context: ../..
+      dockerfile: harness/compose/core-tools.Dockerfile
+    profiles: ["build-only"]
+    environment:
+      DATABASE_URL: postgres://harness:harness@postgres:5432/harness
+      HARNESS_GATEWAY_URL: http://litellm:4000
+      HARNESS_STORAGE_DIR: /data/storage
+      HARNESS_ENCRYPTION_KEY: ${HARNESS_ENCRYPTION_KEY:?set HARNESS_ENCRYPTION_KEY in .env}
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?set LITELLM_MASTER_KEY in .env}
+      HARNESS_CLIENT: ${HARNESS_CLIENT:-demo-practice}
+    volumes:
+      - ../../storage:/data/storage
+    depends_on:
+      postgres:
+        condition: service_healthy
+      litellm:
+        condition: service_healthy
+
 volumes:
   pgdata: {}
