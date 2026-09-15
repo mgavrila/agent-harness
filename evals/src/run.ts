@@ -28,18 +28,6 @@ export interface RunOptions {
   confidenceThreshold?: number;
 }
 
-function emptySplit(): SplitReport {
-  return {
-    cases: 0,
-    failures: 0,
-    fieldAccuracy: 1,
-    credentialAccuracy: 1,
-    restrictedRecall: 1,
-    byKind: {},
-    calibration: { pending: { total: 0, correct: 0, accuracy: 1 }, extracted: { total: 0, correct: 0, accuracy: 1 }, pendingErrorRate: 0, extractedErrorRate: 0, calibrated: false },
-  };
-}
-
 /**
  * Pick at most `limit` cases. A limited run is a sample, and a sample that
  * takes the first N rows of a file grouped by provider measures one split and
@@ -220,11 +208,10 @@ export async function runEvals(opts: RunOptions): Promise<{ report: Report; mark
       if (verdict.same) agreedBySplit.set(verdict.split, (agreedBySplit.get(verdict.split) ?? 0) + 1);
     }
 
-    const splits = { text_layer: emptySplit(), scan: emptySplit() };
-    for (const name of ['text_layer', 'scan'] as const) {
+    const splitReport = (name: 'text_layer' | 'scan'): SplitReport => {
       const b = totals[name];
       const judgeCredit = agreedBySplit.get(name) ?? 0;
-      splits[name] = {
+      return {
         cases: b.cases,
         failures: b.failures,
         fieldAccuracy: b.fieldTotal === 0 ? 1 : Math.min(1, (b.fieldCorrect + judgeCredit) / b.fieldTotal),
@@ -240,7 +227,8 @@ export async function runEvals(opts: RunOptions): Promise<{ report: Report; mark
         ),
         calibration: scoreCalibration(b.calibration),
       };
-    }
+    };
+    const splits = { text_layer: splitReport('text_layer'), scan: splitReport('scan') };
 
     const report = buildReport({
       evalSetVersion: opts.evalSetVersion,
