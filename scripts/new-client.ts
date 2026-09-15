@@ -7,7 +7,7 @@
  * `clients/demo-practice` and rewrites the client slug and display name. It
  * deliberately does not touch `.env`, because secrets are the operator's job.
  */
-import { access, chmod, mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises';
+import { access, chmod, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
@@ -114,24 +114,31 @@ export async function newClient(opts: NewClientOptions): Promise<NewClientResult
   const files: string[] = [];
   const skipped: string[] = [];
 
-  for (const relative of TEMPLATE_FILES) {
-    const from = path.join(templateDir, relative);
-    if (!(await exists(from))) {
-      skipped.push(relative);
-      continue;
-    }
-    await copyTextFile(from, path.join(dir, relative), templateSlug, name);
-    files.push(relative);
-  }
-
-  const scriptsFrom = path.join(templateDir, SCRIPT_DIR);
-  if (await exists(scriptsFrom)) {
-    for (const entry of await readdir(scriptsFrom)) {
-      if (!entry.endsWith('.sh')) continue;
-      const relative = `${SCRIPT_DIR}/${entry}`;
-      await copyTextFile(path.join(scriptsFrom, entry), path.join(dir, relative), templateSlug, name);
+  try {
+    for (const relative of TEMPLATE_FILES) {
+      const from = path.join(templateDir, relative);
+      if (!(await exists(from))) {
+        skipped.push(relative);
+        continue;
+      }
+      await copyTextFile(from, path.join(dir, relative), templateSlug, name);
       files.push(relative);
     }
+
+    const scriptsFrom = path.join(templateDir, SCRIPT_DIR);
+    if (await exists(scriptsFrom)) {
+      for (const entry of await readdir(scriptsFrom)) {
+        if (!entry.endsWith('.sh')) continue;
+        const relative = `${SCRIPT_DIR}/${entry}`;
+        await copyTextFile(path.join(scriptsFrom, entry), path.join(dir, relative), templateSlug, name);
+        files.push(relative);
+      }
+    }
+  } catch (err) {
+    // Never leave a half-written client directory behind: a retry should
+    // see a clean slate, not "already exists" for a folder nobody can use.
+    await rm(dir, { recursive: true, force: true });
+    throw err;
   }
 
   return { dir, files, skipped };

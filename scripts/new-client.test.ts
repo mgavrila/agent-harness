@@ -95,4 +95,27 @@ describe('newClient', () => {
     const mode = (await stat(path.join(out.dir, 'cron', 'playbooks.sh'))).mode;
     expect(mode & 0o111).toBeGreaterThan(0);
   });
+
+  // chmod 000 does not block reads for root (root bypasses file permission
+  // checks), so this test would spuriously pass there: there'd be no read
+  // failure to clean up after.
+  const isRoot = typeof process.getuid === 'function' && process.getuid() === 0;
+
+  it.skipIf(isRoot)(
+    'removes a half-written client directory when the copy fails (skipped as root: chmod 000 does not block root reads)',
+    async () => {
+      const { access, chmod } = await import('node:fs/promises');
+      const blocked = path.join(root, 'clients', 'demo-practice', 'policy.yaml');
+      await chmod(blocked, 0o000);
+      try {
+        await expect(newClient({ pack: 'healthcare', name: 'river-clinic', root })).rejects.toThrow();
+        await expect(access(path.join(root, 'clients', 'river-clinic'))).rejects.toThrow();
+      } finally {
+        await chmod(blocked, 0o644);
+      }
+
+      const out = await newClient({ pack: 'healthcare', name: 'river-clinic', root });
+      expect(out.dir).toBe(path.join(root, 'clients', 'river-clinic'));
+    },
+  );
 });
