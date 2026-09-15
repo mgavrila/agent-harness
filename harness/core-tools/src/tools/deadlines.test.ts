@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import { McpServer } from '@modelcontextprotocol/server';
-import { deadlines, type Db } from '@harness/db';
+import { and, eq } from 'drizzle-orm';
+import { credentials, deadlines, type Db } from '@harness/db';
 import { registerTools, type ToolDeps } from '../registry.js';
 import { makeTestDeps, makeTestClient, openTestDb } from '../testing.js';
 import { providerTools } from './providers.js';
@@ -79,6 +80,51 @@ describe('deadlines tools', () => {
     ]);
     expect(items[0].overdue).toBe(true);
     expect(items[3]).toMatchObject({ days_left: 30, overdue: false, provider_name: 'Dr. Grace Hopper' });
+    await c();
+  });
+
+  it('compute retires stale deadlines when a credential loses its expiry, preserving notifiedAt on survivors', async () => {
+    const { client, close: c } = await makeTestClient(factory);
+    const id = await seed(client);
+    await client.callTool({ name: 'deadlines_compute', arguments: { provider_id: id } });
+
+    const licenseCred = await db.query.credentials.findFirst({
+      where: and(eq(credentials.providerId, id), eq(credentials.kind, 'license')),
+    });
+    if (!licenseCred) throw new Error('license credential missing');
+    await db
+      .update(deadlines)
+      .set({ notifiedAt: new Date('2026-08-01T00:00:00Z') })
+      .where(and(eq(deadlines.credentialId, licenseCred.id), eq(deadlines.kind, 'expiration')));
+
+    await client.callTool({
+      name: 'providers_upsert',
+      arguments: {
+        name: 'Dr. Grace Hopper',
+        npi: '1112223334',
+        credentials: [{ kind: 'malpractice', number: 'M1' }],
+      },
+    });
+
+    const second = await client.callTool({ name: 'deadlines_compute', arguments: { provider_id: id } });
+    const secondDeadlines = (
+      second.structuredContent as { result: { deadlines: { credential_id: string; kind: string; due_at: string }[] } }
+    ).result.deadlines;
+    expect(secondDeadlines).toHaveLength(4);
+
+    const malpracticeCred = await db.query.credentials.findFirst({
+      where: and(eq(credentials.providerId, id), eq(credentials.kind, 'malpractice')),
+    });
+    if (!malpracticeCred) throw new Error('malpractice credential missing');
+    expect(secondDeadlines.every((d) => d.credential_id !== malpracticeCred.id)).toBe(true);
+
+    const rows = await db.select().from(deadlines).where(eq(deadlines.providerId, id));
+    expect(rows).toHaveLength(4);
+    expect(rows.every((r) => r.credentialId !== malpracticeCred.id)).toBe(true);
+
+    const licenseExpiration = rows.find((r) => r.credentialId === licenseCred.id && r.kind === 'expiration');
+    expect(licenseExpiration?.notifiedAt).toBeTruthy();
+
     await c();
   });
 

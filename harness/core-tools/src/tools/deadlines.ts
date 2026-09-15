@@ -1,5 +1,5 @@
 import * as z from 'zod/v4';
-import { and, asc, eq, lte } from 'drizzle-orm';
+import { and, asc, eq, inArray, lte } from 'drizzle-orm';
 import { credentials, deadlines, providers } from '@harness/db';
 import { defineTool, type AnyToolDef } from '../registry.js';
 import { computeDeadlines, daysUntil, addDays } from '../deadlines/compute.js';
@@ -22,6 +22,17 @@ const deadlinesCompute = defineTool({
         .insert(deadlines)
         .values({ providerId: provider_id, credentialId: d.credentialId, kind: d.kind, dueAt: d.dueAt })
         .onConflictDoUpdate({ target: [deadlines.credentialId, deadlines.kind], set: { dueAt: d.dueAt } });
+    }
+    const validKeys = new Set(computed.map((d) => `${d.credentialId}:${d.kind}`));
+    const existingRows = await deps.db
+      .select({ id: deadlines.id, credentialId: deadlines.credentialId, kind: deadlines.kind })
+      .from(deadlines)
+      .where(eq(deadlines.providerId, provider_id));
+    const staleIds = existingRows
+      .filter((r) => !validKeys.has(`${r.credentialId}:${r.kind}`))
+      .map((r) => r.id);
+    if (staleIds.length > 0) {
+      await deps.db.delete(deadlines).where(inArray(deadlines.id, staleIds));
     }
     return { deadlines: computed.map((d) => ({ credential_id: d.credentialId, kind: d.kind, due_at: d.dueAt })) };
   },
