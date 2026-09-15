@@ -24,8 +24,11 @@ describe('stdio entrypoint', () => {
       },
     });
     await client.connect(transport);
-    const { tools } = await client.listTools();
-    expect(tools.map((t) => t.name)).toContain('providers_upsert');
-    await client.close();
+    try {
+      const { tools } = await client.listTools();
+      expect(tools.map((t) => t.name)).toContain('providers_upsert');
+    } finally {
+      await client.close();
+    }
   }, 30_000);
 });

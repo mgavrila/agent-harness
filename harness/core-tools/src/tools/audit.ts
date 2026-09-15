@@ -5,12 +5,14 @@ import { defineTool, type AnyToolDef } from '../registry.js';
 
 const auditQuery = defineTool({
   name: 'audit_query',
-  description: 'Query the append-only audit log of tool calls for this client. Newest first.',
+  description:
+    'Query the append-only audit log of tool calls for this client. Newest first. ' +
+    '`since` is an ISO 8601 datetime (UTC `Z` or numeric offset).',
   actionClass: 'read',
   input: z.object({
     tool: z.string().optional(),
     decision: z.enum(['auto', 'approval', 'blocked', 'error']).optional(),
-    since: z.string().datetime().optional(),
+    since: z.string().datetime({ offset: true }).optional(),
     limit: z.number().int().min(1).max(500).default(50),
   }),
   output: z.object({
