@@ -39,6 +39,12 @@ describe('routing.schema', () => {
   it('rejects an unknown route name', () => {
     expect(() => parseRouting(`${ROUTING}\n  summarise:\n    model: groq/openai/gpt-oss-120b\n`)).toThrow();
   });
+
+  it('rejects an unknown key on a route', () => {
+    expect(() =>
+      parseRouting(ROUTING.replace('  chat:\n    model: gemini/gemini-3-flash-preview\n', '  chat:\n    model: gemini/gemini-3-flash-preview\n    apikey: sk-inline-not-allowed\n')),
+    ).toThrow(/apikey/);
+  });
 });
 
 describe('apiKeyEnvFor', () => {
@@ -59,7 +65,7 @@ describe('renderLiteLlmConfig', () => {
   const rendered = renderLiteLlmConfig(parseRouting(ROUTING));
   const parsed = parseYaml(rendered) as {
     model_list: { model_name: string; litellm_params: Record<string, unknown> }[];
-    router_settings: { fallbacks: Record<string, string[]>[]; num_retries: number; request_timeout: number };
+    router_settings: { fallbacks: Record<string, string[]>[]; num_retries: number };
     general_settings: { master_key: string };
     litellm_settings: Record<string, unknown>;
   };
@@ -89,7 +95,14 @@ describe('renderLiteLlmConfig', () => {
   it('declares the fallback chain in router_settings', () => {
     expect(parsed.router_settings.fallbacks).toEqual([{ chat: ['chat-fallback-1'] }]);
     expect(parsed.router_settings.num_retries).toBe(2);
-    expect(parsed.router_settings.request_timeout).toBe(120);
+  });
+
+  it('honours the request timeout via litellm_settings, not router_settings', () => {
+    // `router_settings.request_timeout` is not a valid Router.__init__() argument
+    // in the current LiteLLM image (it logs a warning and silently ignores it);
+    // litellm_settings.request_timeout is the key that image actually honours.
+    expect(parsed.litellm_settings.request_timeout).toBe(120);
+    expect(parsed.router_settings).not.toHaveProperty('request_timeout');
   });
 
   it('reads the master key from the environment, never inlining it', () => {

@@ -45,7 +45,6 @@ router_settings:
     - reason:
         - reason-fallback-1
   num_retries: 2
-  request_timeout: 120
   allowed_fails: 3
   cooldown_time: 30
 general_settings:
@@ -54,3 +53,4 @@ litellm_settings:
   drop_params: true
   set_verbose: false
   turn_off_message_logging: true
+  request_timeout: 120

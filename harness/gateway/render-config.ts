@@ -76,7 +76,6 @@ export function renderLiteLlmConfig(routing: RoutingFile): string {
     router_settings: {
       fallbacks,
       num_retries: routing.defaults.num_retries,
-      request_timeout: routing.defaults.request_timeout_s,
       allowed_fails: 3,
       cooldown_time: 30,
     },
@@ -90,6 +89,10 @@ export function renderLiteLlmConfig(routing: RoutingFile): string {
       set_verbose: false,
       // Prompts may contain patient-adjacent text. Never echo them into logs.
       turn_off_message_logging: true,
+      // `request_timeout` under router_settings is not a valid Router.__init__()
+      // argument in the current LiteLLM image (it logs a warning and ignores
+      // it); litellm_settings.request_timeout is the key this image honours.
+      request_timeout: routing.defaults.request_timeout_s,
     },
   };
 
