@@ -75,6 +75,7 @@ services:
         condition: service_healthy
       litellm:
         condition: service_healthy
+
   # Seeds the Hermes data volume from the client folder. SOUL.md and config.yaml
   # are ours and are rewritten on every start; the cron directory is Hermes's
   # own and is only ever added to, so its job records survive a redeploy.
@@ -205,6 +206,11 @@ services:
       HARNESS_STORAGE_DIR: "/srv/harness-storage"
       HARNESS_FORMS_DIR: "/srv/agent-harness/packs/healthcare/forms"
       HARNESS_POLICY_FILE: "/srv/agent-harness/clients/demo-practice/policy.yaml"
+      # Passed to the core-tools child this app spawns, which refuses to start
+      # without a gateway key. Same proxy as Hermes, reached on the compose
+      # network rather than the host loopback the .env value names.
+      HARNESS_GATEWAY_URL: "http://litellm:4000"
+      LITELLM_MASTER_KEY: "${LITELLM_MASTER_KEY:?set LITELLM_MASTER_KEY in .env}"
       # The approver's own Slack app — a second app, not Hermes's. One app
       # token cannot serve two Socket Mode connections: Slack delivers each
       # event to exactly one of them, so the buttons would work half the time.

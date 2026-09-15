@@ -7,6 +7,7 @@ import { outRoot } from '@harness/core-tools/storage';
 import { slackSinks } from './sinks.js';
 import { webClientApi } from './slack.js';
 import { createMcpCoreToolsClient } from './execute.js';
+import { coreToolsChildEnv } from './child-env.js';
 import { registerApprovalHandlers, parseAllowedUsers, type ActionArgs, type HandlerRegistry, type ViewArgs } from './app.js';
 import {
   EDIT_MODAL_CALLBACK_ID,
@@ -131,17 +132,7 @@ const core = createMcpCoreToolsClient({
   command: 'pnpm',
   args: ['--dir', repoRoot, '--filter', '@harness/core-tools', 'start'],
   // The child needs the harness variables; it must not inherit the Slack tokens.
-  env: {
-    PATH: process.env.PATH ?? '',
-    HOME: process.env.HOME ?? '',
-    DATABASE_URL: required('DATABASE_URL'),
-    HARNESS_ENCRYPTION_KEY: required('HARNESS_ENCRYPTION_KEY'),
-    HARNESS_CLIENT: client,
-    CORE_TOOLS_CALLER: 'approvals-app',
-    HARNESS_STORAGE_DIR: storageRoot,
-    ...(process.env.HARNESS_POLICY_FILE ? { HARNESS_POLICY_FILE: process.env.HARNESS_POLICY_FILE } : {}),
-    ...(process.env.HARNESS_FORMS_DIR ? { HARNESS_FORMS_DIR: process.env.HARNESS_FORMS_DIR } : {}),
-  },
+  env: coreToolsChildEnv({ env: process.env, client, storageRoot }),
 });
 
 const deps = {
