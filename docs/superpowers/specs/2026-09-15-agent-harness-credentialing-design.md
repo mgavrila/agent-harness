@@ -169,6 +169,10 @@ ingest -> text layer or OCR (tesseract) -> redact -> extract -> upsert
   and Approve, Edit, Decline buttons. Decision writes the row, edits the
   message, and posts a thread reply that Hermes receives as a new turn:
   `Approval <id> approved by <user>`.
+- Edit opens a Slack modal with a free-text note. It marks the row
+  `declined` with the note, and the thread reply carries the note so the
+  agent redoes the action with the correction and requests approval again.
+  Edit never releases anything by itself.
 - Hermes then calls `approvals.execute(id)`, which runs the parked action
   exactly once (idempotency key) and audits it.
 - Expiry job (Hermes cron, `no_agent` script) marks stale rows `expired` and
