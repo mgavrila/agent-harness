@@ -312,7 +312,7 @@ describe('documents_classify and documents_extract', () => {
     expect(stored.find((f) => f.name === 'npi')!.sourcePage).toBe(1);
 
     const doc = (await db.select().from(documents)).find((d) => d.id === ing.document_id)!;
-    expect(doc.textPath).toBe('incoming/license.redacted.txt');
+    expect(doc.textPath).toBe('incoming/license.pdf.redacted.txt');
     const text = await readFile(path.join(storageDir, doc.textPath!), 'utf8');
     expect(text).toContain('California');
   });
@@ -339,7 +339,7 @@ describe('documents_classify and documents_extract', () => {
     expect(ssn.restricted).toBe(true);
     expect(decrypt(ssn.valueEncrypted!, deps.encryptionKey)).toBe('123-45-6789');
 
-    const onDisk = await readFile(path.join(storageDir, 'incoming/w9-ssn.redacted.txt'), 'utf8');
+    const onDisk = await readFile(path.join(storageDir, 'incoming/w9-ssn.pdf.redacted.txt'), 'utf8');
     expect(onDisk).not.toContain('123-45-6789');
     expect(onDisk).toContain('{{ssn:1}}');
   });

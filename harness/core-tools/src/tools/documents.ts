@@ -355,10 +355,17 @@ const documentsExtract = defineTool({
       .where(eq(documents.id, document_id));
 
     // Only redacted text is ever written to disk, whatever restricted_to_model
-    // says, and only now that every database write above has succeeded: if
-    // anything above had thrown, the transaction rolls back and this file
-    // must never have existed. If the write itself fails partway, remove
-    // whatever landed so a rolled-back extraction never leaves orphaned text.
+    // says, and only now that every database write above has succeeded: a
+    // throw above this line rolls the transaction back before the file exists.
+    //
+    // This write is NOT, however, after the commit. `runAuto` in registry.ts
+    // runs the handler inside `withTransaction` and inserts the audit row
+    // after the handler returns, still inside it, so a failing audit insert or
+    // a failing commit rolls the rows back with this file already on disk. The
+    // window is narrow and the file holds redacted text only, so the orphan is
+    // accepted rather than designed out: a re-run of documents_extract for the
+    // same document computes the same path and overwrites it. If the write
+    // itself fails partway, remove whatever landed.
     try {
       await writeFile(textAbs, redacted.map((p) => `<<<PAGE ${p.num}>>>\n${p.text}`).join('\n\n'), 'utf8');
     } catch (err) {

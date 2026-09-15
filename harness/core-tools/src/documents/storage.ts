@@ -76,10 +76,16 @@ export async function sha256File(absPath: string): Promise<string> {
   return createHash('sha256').update(bytes).digest('hex');
 }
 
-/** Where the redacted text for a document lives: beside it, with a fixed suffix. */
+/**
+ * Where the redacted text for a document lives: beside it, with a fixed suffix
+ * appended to the whole file name. Appending rather than replacing the
+ * extension is what keeps `incoming/a.pdf` and `incoming/a.png` — two
+ * different documents, each with its own `documents` row — from resolving to
+ * one `incoming/a.redacted.txt` that the second extraction would silently
+ * overwrite while both rows still pointed at it.
+ */
 export function documentTextPath(absPath: string): string {
-  const ext = path.extname(absPath);
-  return `${absPath.slice(0, absPath.length - ext.length)}.redacted.txt`;
+  return `${absPath}.redacted.txt`;
 }
 
 /** Store paths relative to the storage root so a moved root does not invalidate rows. */
