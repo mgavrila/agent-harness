@@ -17,6 +17,7 @@
   },
   "devDependencies": {
     "@types/node": "^26.5.1",
+    "pdf-parse": "2.4.5",
     "tsx": "^4.23.13",
     "typescript": "^7.0.2",
     "vitest": "^5.0.0"
