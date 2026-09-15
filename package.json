@@ -13,7 +13,8 @@
     "db:down": "docker compose -f harness/compose/docker-compose.yml down",
     "db:migrate": "pnpm --filter @harness/db migrate",
     "forms:generate": "pnpm --filter @harness/core-tools exec tsx ../../packs/healthcare/forms/generate-templates.ts",
-    "approvals": "pnpm --filter @harness/approvals start"
+    "approvals": "pnpm --filter @harness/approvals start",
+    "new-client": "pnpm --filter @harness/scripts exec tsx new-client.ts"
   },
   "dependencies": {
     "pdf-lib": "1.17.1"
