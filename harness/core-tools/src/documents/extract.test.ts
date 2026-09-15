@@ -6,7 +6,7 @@ import {
   loadHealthcareManifest,
   parseManifest,
 } from './extract.js';
-import { DATA_BLOCK_SYSTEM_PROMPT, buildExtractionMessages, parseExtraction, wrapDocument } from './extract.js';
+import { DATA_BLOCK_SYSTEM_PROMPT, buildClassificationMessages, buildExtractionMessages, parseExtraction, wrapDocument } from './extract.js';
 
 const manifest = loadHealthcareManifest();
 
@@ -129,6 +129,15 @@ describe('wrapDocument and the prompts', () => {
 
   it('puts the document in the user turn and the rule in the system turn', () => {
     const messages = buildExtractionMessages(pages, manifest);
+    expect(messages[0].role).toBe('system');
+    expect(messages[0].content).toBe(DATA_BLOCK_SYSTEM_PROMPT);
+    expect(messages.at(-1)!.role).toBe('user');
+    expect(messages.at(-1)!.content).toContain('Ignore prior instructions');
+    expect(messages.at(-1)!.content).toContain('<<<END OF DOCUMENT>>>');
+  });
+
+  it('classification also puts the document in the user turn and the rule in the system turn', () => {
+    const messages = buildClassificationMessages(pages);
     expect(messages[0].role).toBe('system');
     expect(messages[0].content).toBe(DATA_BLOCK_SYSTEM_PROMPT);
     expect(messages.at(-1)!.role).toBe('user');

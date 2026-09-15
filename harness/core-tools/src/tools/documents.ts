@@ -214,11 +214,18 @@ function assertPromptRedacted(deps: ToolDeps, messages: ModelMessage[]): void {
 const documentsClassify = defineTool({
   name: 'documents_classify',
   description:
-    'Decide what kind of credentialing document this is (state licence, DEA certificate, malpractice certificate, W-9 or other) and record it. ' +
+    'Decide what kind of credentialing document this is (state licence, DEA certificate, malpractice certificate, W-9 or other) and record it, ' +
+    'unless a kind is already on file: a kind declared at ingest, or set by an earlier classification, is authoritative and is never overwritten ' +
+    'by a disagreeing model reply — the model\'s own answer is still returned as model_kind so a human can see the disagreement. ' +
     'Reads the document text, redacting restricted identifiers first.',
   actionClass: 'write.internal',
   input: z.object({ document_id: z.string().uuid() }),
-  output: z.object({ document_id: z.string(), document_kind: z.string(), confidence: z.number() }),
+  output: z.object({
+    document_id: z.string(),
+    document_kind: z.string(),
+    model_kind: z.string().describe("What the model said. Differs from document_kind only when a declared kind was already on file."),
+    confidence: z.number(),
+  }),
   handler: async ({ document_id }, deps) => {
     const row = await requireDocument(deps, document_id);
     const manifest = loadHealthcareManifest();
@@ -232,10 +239,17 @@ const documentsClassify = defineTool({
       validate: ClassificationReply,
       temperature: 0,
     });
-    const kind = (manifest.document_kinds as string[]).includes(json.document_kind) ? json.document_kind : 'other';
+    const modelKind = (manifest.document_kinds as string[]).includes(json.document_kind) ? json.document_kind : 'other';
     const confidence = Math.min(1, Math.max(0, json.confidence));
-    await deps.db.update(documents).set({ kind }).where(eq(documents.id, document_id));
-    return { document_id, document_kind: kind, confidence };
+    // A kind already on file is authoritative, the same rule documents_ingest
+    // applies to a declared kind and documents_extract applies by preferring
+    // row.kind: classification never overwrites it, even when the model
+    // disagrees.
+    if (row.kind) {
+      return { document_id, document_kind: row.kind, model_kind: modelKind, confidence };
+    }
+    await deps.db.update(documents).set({ kind: modelKind }).where(eq(documents.id, document_id));
+    return { document_id, document_kind: modelKind, model_kind: modelKind, confidence };
   },
   recordIds: ({ document_id }) => [document_id],
 });

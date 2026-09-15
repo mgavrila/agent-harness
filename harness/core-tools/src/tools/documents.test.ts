@@ -257,14 +257,28 @@ describe('documents_classify and documents_extract', () => {
     ],
   });
 
-  it('classifies a document and records the kind', async () => {
+  it('classifies a document with no kind on file and records the model\'s answer', async () => {
     gateway.setResponder(() => ({ content: JSON.stringify({ document_kind: 'state_license', confidence: 0.93 }) }));
     const client = await connectWithGateway();
     const ing = resultOf<IngestOut>(await client.callTool({ name: 'documents_ingest', arguments: { path: 'incoming/license.pdf' } }));
-    const out = resultOf<{ document_id: string; document_kind: string; confidence: number }>(
+    const out = resultOf<{ document_id: string; document_kind: string; model_kind: string; confidence: number }>(
       await client.callTool({ name: 'documents_classify', arguments: { document_id: ing.document_id } }),
     );
-    expect(out).toMatchObject({ document_kind: 'state_license', confidence: 0.93 });
+    expect(out).toMatchObject({ document_kind: 'state_license', model_kind: 'state_license', confidence: 0.93 });
+    const row = (await db.select().from(documents)).find((d) => d.id === ing.document_id)!;
+    expect(row.kind).toBe('state_license');
+  });
+
+  it('never overwrites a kind already on file, even when the model disagrees', async () => {
+    gateway.setResponder(() => ({ content: JSON.stringify({ document_kind: 'w9', confidence: 0.99 }) }));
+    const client = await connectWithGateway();
+    const ing = resultOf<IngestOut>(
+      await client.callTool({ name: 'documents_ingest', arguments: { path: 'incoming/license.pdf', kind: 'state_license' } }),
+    );
+    const out = resultOf<{ document_id: string; document_kind: string; model_kind: string; confidence: number }>(
+      await client.callTool({ name: 'documents_classify', arguments: { document_id: ing.document_id } }),
+    );
+    expect(out).toMatchObject({ document_kind: 'state_license', model_kind: 'w9', confidence: 0.99 });
     const row = (await db.select().from(documents)).find((d) => d.id === ing.document_id)!;
     expect(row.kind).toBe('state_license');
   });
