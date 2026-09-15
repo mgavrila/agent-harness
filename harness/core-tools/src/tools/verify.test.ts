@@ -41,7 +41,11 @@ const ORGANISATION = {
   ],
 };
 
-const MALFORMED = { Errors: [{ description: 'NPI must be 10 digits', field: 'number', number: '06' }] };
+/** The registry answers a bad request with HTTP 200 and an Errors array. */
+const REGISTRY_ERROR = { Errors: [{ description: 'NPI must be 10 digits', field: 'number', number: '06' }] };
+
+/** A record the registry did return, but with the keys the tool reads missing. */
+const UNREADABLE_RECORD = { result_count: 1, results: [{ basic: {}, addresses: [] }] };
 
 beforeAll(async () => {
   registry = createServer((_req, res) => {
@@ -146,12 +150,31 @@ describe('verify_nppes', () => {
     expect(res.isError).toBe(true);
   });
 
-  it('surfaces a registry error body as a ToolError', async () => {
-    reply = { status: 200, body: MALFORMED };
+  it('reports a registry error as a ToolError without quoting the registry body', async () => {
+    reply = { status: 200, body: REGISTRY_ERROR };
     const client = await connect();
     const res = await client.callTool({ name: 'verify_nppes', arguments: { npi: '0000000006' } });
     expect(res.isError).toBe(true);
-    expect(JSON.stringify(res.content)).toMatch(/NPI must be 10 digits/);
+    expect(JSON.stringify(res.content)).toMatch(/NPPES rejected the lookup/);
+    // The description is a third-party response body; it goes to stderr only.
+    expect(JSON.stringify(res.content)).not.toMatch(/NPI must be 10 digits/);
+  });
+
+  it('reports a present but unreadable record as found, with nulls', async () => {
+    // "This NPI is not registered" and "the registry holds a record we could
+    // not read" are opposite answers to a credentialing question. A record
+    // missing its enumeration type used to come back as found: false, which
+    // reads as the first when the registry said the second.
+    reply = { status: 200, body: UNREADABLE_RECORD };
+    const client = await connect();
+    const out = resultOf<NppesOut>(await client.callTool({ name: 'verify_nppes', arguments: { npi: '1063837144' } }));
+    expect(out).toMatchObject({
+      found: true,
+      match: null,
+      registry_name: null,
+      registry_status: null,
+      enumeration_type: null,
+    });
   });
 
   it('surfaces a registry outage as a ToolError', async () => {

@@ -12,11 +12,20 @@ export interface VerifyConfig {
 
 export const NPPES_DEFAULT_BASE_URL = 'https://npiregistry.cms.hhs.gov/api/';
 
+/**
+ * A record the registry returned. Every field but the NPI is nullable,
+ * because "the registry holds a record we could not read" and "the registry
+ * holds no such NPI" are opposite answers to a credentialing question and
+ * must not collapse into one. A record present but missing its enumeration
+ * type, its number or its name is reported as found, with nulls where the
+ * unreadable parts were.
+ */
 export interface NppesRecord {
-  number: string;
-  enumerationType: 'NPI-1' | 'NPI-2';
-  /** Full name for an individual, organisation name for an organisation. */
-  name: string;
+  /** The NPI as the registry echoed it, or null when the record omits it. */
+  number: string | null;
+  enumerationType: 'NPI-1' | 'NPI-2' | null;
+  /** Full name for an individual, organisation name for an organisation. Null when the record does not state one. */
+  name: string | null;
   /** 'A' for active. Null when the registry omits it. */
   status: string | null;
   state: string | null;
@@ -78,16 +87,28 @@ export function namesMatch(a: string, b: string): boolean {
   return true;
 }
 
-function recordFrom(result: NppesResult): NppesRecord | null {
+/**
+ * Read whatever a returned record does say. Never returns null: the caller
+ * already knows a record was returned, and reporting an unreadable one as
+ * `found: false` would tell a credentialing reviewer this NPI is not
+ * registered, which is the opposite of what the registry said. Fields that
+ * cannot be read come back null so the reviewer sees a record with gaps.
+ */
+function recordFrom(result: NppesResult): NppesRecord {
   const enumerationType = result.enumeration_type === 'NPI-2' ? 'NPI-2' : result.enumeration_type === 'NPI-1' ? 'NPI-1' : null;
-  if (!enumerationType || !result.number) return null;
   const basic = result.basic ?? {};
   const name =
     enumerationType === 'NPI-2'
       ? (basic.organization_name ?? '')
       : [basic.first_name, basic.middle_name, basic.last_name].filter((p) => p && p !== '').join(' ');
   const location = (result.addresses ?? []).find((a) => a.address_purpose === 'LOCATION') ?? result.addresses?.[0];
-  return { number: result.number, enumerationType, name, status: basic.status ?? null, state: location?.state ?? null };
+  return {
+    number: result.number ?? null,
+    enumerationType,
+    name: name === '' ? null : name,
+    status: basic.status ?? null,
+    state: location?.state ?? null,
+  };
 }
 
 /**
@@ -127,7 +148,12 @@ export async function fetchNppes(npi: string, cfg: VerifyConfig): Promise<NppesR
   }
   // The registry answers a bad request with HTTP 200 and an Errors array.
   if (Array.isArray(body.Errors) && body.Errors.length > 0) {
-    throw new ToolError(`NPPES rejected the lookup: ${body.Errors[0]?.description ?? 'unknown error'}`);
+    // The description is a third-party response body, so it is logged for an
+    // operator and kept out of the agent-visible message, which stays fixed
+    // text like every other one in this file.
+    const description = body.Errors[0]?.description;
+    if (description) process.stderr.write(`NPPES rejected a lookup: ${description}\n`);
+    throw new ToolError('NPPES rejected the lookup');
   }
   const first = body.results?.[0];
   if (!body.result_count || !first) return null;
@@ -178,13 +204,14 @@ const verifyNppes = defineTool({
       };
     }
 
-    // An organisation record has no personal name to compare, so the tool
-    // reports the registry name and leaves the judgement to a human.
-    const comparable = provider !== undefined && record.enumerationType === 'NPI-1';
+    // An organisation record has no personal name to compare, and a record
+    // whose name could not be read has nothing to compare either, so the tool
+    // reports what the registry said and leaves the judgement to a human.
+    const comparable = provider !== undefined && record.enumerationType === 'NPI-1' && record.name !== null;
     return {
       npi,
       found: true,
-      match: comparable ? namesMatch(provider.name, record.name) : null,
+      match: comparable ? namesMatch(provider.name, record.name!) : null,
       registry_name: record.name,
       registry_status: record.status,
       registry_state: record.state,
