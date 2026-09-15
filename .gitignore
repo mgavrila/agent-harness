@@ -1,0 +1,26 @@
+# secrets
+.env
+*.env
+!.env.example
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# data and generated files
+data/
+storage/
+*.sqlite
+packs/*/synthetic/out/
+evals/results/
+
+# os / editors
+.DS_Store
+.idea/
+.vscode/
