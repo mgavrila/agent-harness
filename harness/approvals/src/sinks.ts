@@ -1,4 +1,5 @@
 import { readFile } from 'node:fs/promises';
+import path from 'node:path';
 import * as z from 'zod/v4';
 import type { SinkHandler, SinkRegistry } from '@harness/core-tools/effects';
 import type { SlackApi } from './slack.js';
@@ -33,11 +34,24 @@ function parsePayload<T>(schema: z.ZodType<T>, payload: unknown, sink: string): 
 }
 
 /**
+ * Reject a staged path that does not resolve inside `root`. `forms_release`
+ * already confines the path it stages to the storage root via
+ * `resolveOutFile`, so this is defence in depth against a corrupted or
+ * otherwise-produced row, not the primary guarantee.
+ */
+function assertUnderRoot(candidate: string, root: string, effectId: string): void {
+  const rel = path.relative(path.resolve(root), path.resolve(candidate));
+  if (rel === '..' || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel)) {
+    throw new Error(`slack_file: path outside storage root (effect ${effectId})`);
+  }
+}
+
+/**
  * Slack senders for the effects outbox. Each returns only identifiers: the
  * dispatcher stores the return value in `tool_effects.result` as plaintext
  * jsonb, so nothing from the payload may come back out.
  */
-export function slackSinks(api: SlackApi, opts: { defaultChannel: string }): SinkRegistry {
+export function slackSinks(api: SlackApi, opts: { defaultChannel: string; storageRoot?: string }): SinkRegistry {
   const messageSink: SinkHandler = async (payload) => {
     const p = parsePayload(MessagePayload, payload, 'slack_message');
     const channel = p.channel ?? opts.defaultChannel;
@@ -48,7 +62,18 @@ export function slackSinks(api: SlackApi, opts: { defaultChannel: string }): Sin
   const fileSink: SinkHandler = async (payload, effect) => {
     const p = parsePayload(FilePayload, payload, 'slack_file');
     const channel = p.channel ?? opts.defaultChannel;
-    const bytes = await readFile(p.path);
+    // `storageRoot` is optional here so existing callers (and today's tests,
+    // which stage paths under an arbitrary tmpdir) are unaffected; the runner
+    // that wires this sink up for real will pass `HARNESS_STORAGE_DIR`.
+    if (opts.storageRoot) assertUnderRoot(p.path, opts.storageRoot, effect.id);
+    let bytes: Buffer;
+    try {
+      bytes = await readFile(p.path);
+    } catch {
+      // Node's fs error message includes the absolute path; never let that
+      // reach the plaintext `tool_effects.last_error` column.
+      throw new Error(`slack_file: staged file unavailable (effect ${effect.id})`);
+    }
     await api.files.uploadV2({
       channel_id: channel,
       file: bytes,

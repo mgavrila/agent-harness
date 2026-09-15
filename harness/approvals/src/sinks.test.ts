@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
@@ -93,5 +93,65 @@ describe('slack sinks', () => {
     const slack = new FakeSlack();
     const out = await dispatchStagedEffects(db, slackSinks(slack, { defaultChannel: 'C0DEFAULT' }), { key });
     expect(out).toMatchObject({ skipped: 1, dispatched: 0 });
+  });
+
+  it('never leaks a filesystem path when the staged file is missing', async () => {
+    const missing = path.join(dir, 'missing.csv');
+    await stage('slack_file', { path: missing, filename: 'missing.csv' }, 'missing file', 'k7');
+    const slack = new FakeSlack();
+    const out = await dispatchStagedEffects(db, slackSinks(slack, { defaultChannel: 'C0DEFAULT' }), { key });
+    expect(out).toMatchObject({ dispatched: 0 });
+    const [row] = await db.select().from(toolEffects);
+    expect(row.status).toBe('staged');
+    expect(row.lastError).toBe(`slack_file: staged file unavailable (effect ${row.id})`);
+    expect(row.lastError).not.toContain(missing);
+    expect(row.lastError).not.toContain('ENOENT');
+    expect(slack.uploads).toHaveLength(0);
+  });
+
+  it('refuses a staged path outside the configured storage root before reading it', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'harness-root-'));
+    try {
+      // Deliberately does not exist: if the sink attempted to read it before
+      // checking the root, the error would be "staged file unavailable"
+      // instead, so getting the root-check message proves the check ran first.
+      const outside = path.join(dir, 'not-in-root.csv');
+      await stage('slack_file', { path: outside, filename: 'not-in-root.csv' }, 'outside root', 'k8');
+      const slack = new FakeSlack();
+      const out = await dispatchStagedEffects(
+        db,
+        slackSinks(slack, { defaultChannel: 'C0DEFAULT', storageRoot: root }),
+        { key },
+      );
+      expect(out).toMatchObject({ dispatched: 0 });
+      const [row] = await db.select().from(toolEffects);
+      expect(row.status).toBe('staged');
+      expect(row.lastError).toBe(`slack_file: path outside storage root (effect ${row.id})`);
+      expect(slack.uploads).toHaveLength(0);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('uploads a staged file whose path resolves inside the storage root', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'harness-root-'));
+    try {
+      const sub = path.join(root, 'out', 'roster');
+      await mkdir(sub, { recursive: true });
+      const file = path.join(sub, 'aetna-roster.csv');
+      await writeFile(file, 'payer_id,provider_name\naetna,Dr. Ada Reyes\n');
+      await stage('slack_file', { path: file, filename: 'aetna-roster.csv' }, 'Release aetna-roster.csv to Slack', 'k9');
+      const slack = new FakeSlack();
+      const out = await dispatchStagedEffects(
+        db,
+        slackSinks(slack, { defaultChannel: 'C0DEFAULT', storageRoot: root }),
+        { key },
+      );
+      expect(out).toMatchObject({ dispatched: 1 });
+      expect(slack.uploads).toHaveLength(1);
+      expect(slack.uploads[0]).toMatchObject({ filename: 'aetna-roster.csv' });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 });
