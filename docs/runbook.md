@@ -442,7 +442,7 @@ does not make that client runnable on its own — the Compose file still names
    service. Three occurrences of `demo-practice` in total.
 5. Start it under its own Compose project so it does not collide with another
    client's containers and volumes:
-   `COMPOSE_PROJECT_NAME=<slug> docker compose -f harness/compose/docker-compose.yml --profile demo up -d --build`.
+   `COMPOSE_PROJECT_NAME=<slug> docker compose --env-file .env -f harness/compose/docker-compose.yml --profile demo up -d --build`.
 
 Do **not** use `pnpm demo:up` for a new client. It runs the default Compose
 project with the `demo-practice` paths above, so it starts demo-practice
@@ -453,7 +453,7 @@ whatever `HARNESS_CLIENT` says.
 Three jobs run in the Hermes cron fleet. Install or repair them with:
 
 ```bash
-docker compose -f harness/compose/docker-compose.yml exec hermes \
+docker compose --env-file .env -f harness/compose/docker-compose.yml exec hermes \
   bash /opt/data/cron/playbooks.sh
 ```
 

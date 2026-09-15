@@ -6,7 +6,7 @@
 # tier with a BAA, or the local vLLM endpoint shown at the bottom.
 #
 # Routes are jobs, not providers. Change a model here and run
-#   pnpm gateway:config && docker compose -f harness/compose/docker-compose.yml up -d litellm
+#   pnpm gateway:config && docker compose --env-file .env -f harness/compose/docker-compose.yml up -d litellm
 # and nothing in the TypeScript changes.
 
 routes:

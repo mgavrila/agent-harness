@@ -16,8 +16,10 @@ export { realOrNearestAncestor };
  * documents into whatever directory happened to be the working directory.
  */
 export function storageRoot(dir: string | undefined = process.env.HARNESS_STORAGE_DIR): string {
-  if (!dir || dir.trim() === '') throw new Error('HARNESS_STORAGE_DIR must be set to an absolute path');
-  return path.resolve(dir);
+  if (!dir || dir.trim() === '' || !path.isAbsolute(dir.trim())) {
+    throw new Error('HARNESS_STORAGE_DIR must be set to an absolute path');
+  }
+  return path.resolve(dir.trim());
 }
 
 /**

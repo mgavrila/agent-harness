@@ -17,6 +17,7 @@ describe('storage paths', () => {
   it('refuses to guess a storage root', () => {
     expect(() => storageRoot(undefined)).toThrow(/HARNESS_STORAGE_DIR/);
     expect(() => storageRoot('   ')).toThrow(/HARNESS_STORAGE_DIR/);
+    expect(() => storageRoot('./.harness-storage')).toThrow(/absolute/);
     expect(storageRoot('/srv/x')).toBe('/srv/x');
   });
 
