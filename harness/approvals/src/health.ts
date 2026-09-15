@@ -44,8 +44,14 @@ export function startHealthServer(opts: {
         res.end(JSON.stringify(snapshot));
       })
       .catch((err: unknown) => {
+        // A fixed body. `collectHealth` runs four count queries and a
+        // `runner.status()`, so a failure here is a driver or Postgres error,
+        // and those carry fragments of the statement or of the connection
+        // target. This route is unauthenticated and outside the audit trail;
+        // the detail goes to stderr, where an operator can read it.
+        console.error(`approvals: health snapshot failed: ${err instanceof Error ? err.message : String(err)}`);
         res.writeHead(500, { 'content-type': 'application/json' });
-        res.end(JSON.stringify({ ok: false, error: err instanceof Error ? err.message : String(err) }));
+        res.end('{"ok":false,"error":"snapshot failed"}');
       });
   });
   // Resolve-only: a bind failure still surfaces as the server's own 'error'

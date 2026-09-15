@@ -1,5 +1,5 @@
 import type { AddressInfo } from 'node:net';
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { startHealthServer, type HealthServer } from './health.js';
 import type { HealthSnapshot } from './runner.js';
 
@@ -73,5 +73,23 @@ describe('startHealthServer', () => {
     server = startHealthServer({ port: 0, snapshot: async () => snapshot(true) });
     await server.ready;
     expect((server.address() as AddressInfo).address).toBe('0.0.0.0');
+  });
+
+  it('never returns the underlying error text on the 500 path', async () => {
+    const stderr = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const port = await start({
+      snapshot: async () => {
+        throw new Error('connection to host=db.internal user=harness_app failed');
+      },
+    });
+    const res = await fetch(`http://127.0.0.1:${port}/healthz`);
+    expect(res.status).toBe(500);
+    const body = await res.text();
+    expect(JSON.parse(body)).toEqual({ ok: false, error: 'snapshot failed' });
+    expect(body).not.toContain('db.internal');
+    expect(body).not.toContain('harness_app');
+    // The detail is still available to an operator, on stderr.
+    expect(stderr.mock.calls.flat().join(' ')).toContain('db.internal');
+    stderr.mockRestore();
   });
 });
