@@ -10,6 +10,7 @@ import { auditTools } from './tools/audit.js';
 import { approvalTools } from './tools/approvals.js';
 import { harnessTools } from './tools/harness.js';
 import { documentTools } from './tools/documents.js';
+import { NPPES_DEFAULT_BASE_URL, verifyTools } from './tools/verify.js';
 
 export const ALL_TOOLS = [
   ...providerTools,
@@ -18,6 +19,7 @@ export const ALL_TOOLS = [
   ...approvalTools,
   ...harnessTools,
   ...documentTools,
+  ...verifyTools,
 ];
 
 export function createCoreToolsServer(deps: ToolDeps): McpServer {
@@ -55,6 +57,12 @@ export async function buildDepsFromEnv(): Promise<{ deps: ToolDeps; close: () =>
     gateway: gatewayFromEnv(),
     storageDir: path.resolve(process.env.HARNESS_STORAGE_DIR ?? './storage'),
     restrictedToModel: process.env.HARNESS_RESTRICTED_TO_MODEL === 'true',
+    verify: {
+      nppesEnabled: process.env.VERIFY_NPPES_ENABLED !== 'false',
+      nppesBaseUrl: process.env.NPPES_BASE_URL ?? NPPES_DEFAULT_BASE_URL,
+      stateLicenseEnabled: process.env.VERIFY_STATE_LICENSE_ENABLED === 'true',
+      timeoutMs: numberFromEnv('VERIFY_TIMEOUT_MS', 15_000, { min: 1_000, max: 60_000 }),
+    },
     sinks: {},
     // One context object per process, shared by every connection this process
     // serves. That is correct for the stdio deployment, where Hermes starts one

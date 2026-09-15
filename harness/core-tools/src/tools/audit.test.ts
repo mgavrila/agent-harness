@@ -96,6 +96,8 @@ describe('audit_query', () => {
       'providers_list_pending',
       'providers_search',
       'providers_upsert',
+      'verify_nppes',
+      'verify_state_license',
     ]);
   });
 });

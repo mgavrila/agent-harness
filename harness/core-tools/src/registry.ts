@@ -6,6 +6,7 @@ import { decide, type ActionClass, type Policy } from './policy.js';
 import { hashArgs, writeAudit, type AuditEntry } from './audit.js';
 import type { SinkRegistry } from './effects.js';
 import type { GatewayConfig } from './models.js';
+import type { VerifyConfig } from './tools/verify.js';
 
 export class ToolError extends Error {
   constructor(message: string) {
@@ -41,6 +42,8 @@ export interface ToolDeps {
    * that requires a BAA with the model provider (spec section 4.4).
    */
   restrictedToModel: boolean;
+  /** External registry lookups: which are enabled, and where they live. */
+  verify: VerifyConfig;
   /** External-effect senders keyed by sink name (e.g. 'slack'). Empty in Plan 1.1; Plan 3 registers real ones. */
   sinks: SinkRegistry;
   context: SessionContext;
