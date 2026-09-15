@@ -81,15 +81,20 @@ export function resolveMappings(mappings: TemplateMapping[], data: ProviderData)
 }
 
 /**
- * Fill and flatten an AcroForm. Flattening is deliberate: the recipient gets a
- * document, not an editable form whose values a viewer might silently drop.
- * `updateMetadata: false` keeps the template's pinned dates, so identical
- * inputs produce identical bytes and therefore an identical file id.
+ * Fill, and by default flatten, an AcroForm. Flattening is deliberate for the
+ * tool path: the recipient gets a document, not an editable form whose values
+ * a viewer might silently drop. `updateMetadata: false` keeps the template's
+ * pinned dates, so identical inputs produce identical bytes and therefore an
+ * identical file id. `flatten: false` is for tests that need to read the
+ * values back with `PDFDocument.load` + `form.getTextField(...).getText()` —
+ * a flattened form has no fields left to read.
  */
 export async function fillTemplatePdf(
   templateBytes: Uint8Array,
   values: { pdf_field: string; value: string }[],
+  options: { flatten?: boolean } = {},
 ): Promise<Uint8Array> {
+  const { flatten = true } = options;
   const doc = await PDFDocument.load(templateBytes, { updateMetadata: false });
   const form = doc.getForm();
   const known = new Set(form.getFields().map((f) => f.getName()));
@@ -99,6 +104,6 @@ export async function fillTemplatePdf(
     }
     form.getTextField(pdf_field).setText(value);
   }
-  form.flatten();
+  if (flatten) form.flatten();
   return doc.save();
 }

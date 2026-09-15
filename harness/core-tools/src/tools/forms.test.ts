@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile, access, readFile, copyFile } from 'node:fs/prom
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { and, eq } from 'drizzle-orm';
-import { credentials, fields, providers } from '@harness/db';
+import { auditLog, credentials, fields, providers } from '@harness/db';
 import { useTestDb, makeTestDeps, connectTools, resultOf } from '../testing.js';
 import { defaultFormsDir } from '../forms/templates.js';
 import { formTools } from './forms.js';
@@ -160,5 +160,73 @@ describe('forms_fill', () => {
     });
     expect(res.isError).toBe(true);
     expect(textOf(res)).toContain('not found');
+  });
+
+  it('audits a successful fill with the provider id, and no field values anywhere in the row', async () => {
+    const providerId = await seedCompleteProvider();
+    const client = await connectTools('forms-test', formTools, deps);
+    await client.callTool({
+      name: 'forms_fill',
+      arguments: { template_id: 'payer-credentialing-application', provider_id: providerId },
+    });
+    const rows = await db.select().from(auditLog).where(eq(auditLog.tool, 'forms_fill'));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ decision: 'auto', recordIds: [providerId] });
+    const dump = JSON.stringify(rows[0]);
+    expect(dump).not.toContain('Family Medicine');
+    expect(dump).not.toContain('Elm Street Family Care');
+    expect(dump).not.toContain('12 Elm St');
+    expect(dump).not.toContain('Texas Medical Board');
+  });
+
+  it('audits a refused fill (pending field) as an error, without the field value', async () => {
+    const providerId = await seedCompleteProvider();
+    await db.update(fields).set({ status: 'pending', confidence: 0.4 }).where(eqField(providerId, 'practice_address'));
+    const client = await connectTools('forms-test', formTools, deps);
+    await client.callTool({
+      name: 'forms_fill',
+      arguments: { template_id: 'payer-credentialing-application', provider_id: providerId },
+    });
+    const rows = await db.select().from(auditLog).where(eq(auditLog.tool, 'forms_fill'));
+    expect(rows).toHaveLength(1);
+    expect(rows[0].decision).toBe('error');
+    expect(rows[0].error).toContain('field:practice_address');
+    expect(rows[0].error).not.toContain('12 Elm St, Austin TX');
+  });
+
+  it('refuses an optional mapping that names a restricted field, naming only the mapping label', async () => {
+    const providerId = await seedCompleteProvider();
+    const badDir = await mkdtemp(path.join(tmpdir(), 'harness-badforms-optional-'));
+    await copyFile(
+      path.join(defaultFormsDir(), 'state-license-renewal-cover.pdf'),
+      path.join(badDir, 'state-license-renewal-cover.pdf'),
+    );
+    await writeFile(
+      path.join(badDir, 'templates.json'),
+      JSON.stringify({
+        version: 1,
+        templates: [
+          {
+            id: 'leaky-optional',
+            title: 'Leaky optional template',
+            file: 'state-license-renewal-cover.pdf',
+            mappings: [
+              { pdf_field: 'provider_full_name', source: 'provider', property: 'name', required: true },
+              { pdf_field: 'license_state', source: 'field', name: 'dea_number', required: false },
+            ],
+          },
+        ],
+      }),
+    );
+    const leaky = makeTestDeps(db, { storageDir, formsDir: badDir });
+    const client = await connectTools('forms-test', formTools, leaky);
+    const res = await client.callTool({
+      name: 'forms_fill',
+      arguments: { template_id: 'leaky-optional', provider_id: providerId },
+    });
+    expect(res.isError).toBe(true);
+    expect(textOf(res)).toContain('field:dea_number');
+    expect(textOf(res)).toContain('restricted');
+    await rm(badDir, { recursive: true, force: true });
   });
 });
