@@ -86,6 +86,60 @@ describe('redactPages', () => {
     expect(out.pages).toEqual(pages);
     expect(out.hits).toEqual([]);
   });
+
+  it('redacts a bare nine-digit SSN with no punctuation', () => {
+    const out = redactPages([{ num: 1, text: 'SSN 123456789 filed' }]);
+    expect(out.pages[0].text).toBe('SSN {{ssn:1}} filed');
+    expect(out.hits).toEqual([
+      { kind: 'ssn', value: '123456789', token: '{{ssn:1}}', fieldName: 'ssn', page: 1 },
+    ]);
+  });
+
+  it('does not redact nine bare digits that are part of a longer, ten-digit NPI', () => {
+    const out = redactPages([{ num: 1, text: 'NPI 1234567893' }]);
+    expect(out.pages[0].text).toBe('NPI 1234567893');
+    expect(out.hits).toHaveLength(0);
+  });
+
+  it('does not redact nine bare digits with an excluded SSA area code', () => {
+    const out = redactPages([{ num: 1, text: 'Ref 900123456' }]);
+    expect(out.pages[0].text).toBe('Ref 900123456');
+    expect(out.hits).toHaveLength(0);
+  });
+
+  it('normalizes an OCR-confused letter O to 0 in an SSN and redacts it', () => {
+    const out = redactPages([{ num: 1, text: 'SSN 123-45-678O' }]);
+    expect(out.pages[0].text).toBe('SSN {{ssn:1}}');
+    expect(out.hits[0].value).toBe('123-45-6780');
+  });
+
+  it('normalizes OCR noise before validating a DEA check digit, and rejects it if it still fails', () => {
+    // 'I' normalizes to '1'; the resulting digits are BL1234567, the same
+    // wrong-check-digit number as "rejects a wrong check digit" above. This
+    // proves normalization ran before validation, not that OCR tolerance
+    // makes every noisy candidate a hit.
+    const out = redactPages([{ num: 1, text: 'DEA BLI234567 shipped' }]);
+    expect(out.pages[0].text).toBe('DEA BLI234567 shipped');
+    expect(out.hits).toHaveLength(0);
+  });
+
+  it('does not treat a non-Latin look-alike digit as OCR noise', () => {
+    const out = redactPages([{ num: 1, text: 'DEA BL123456З shipped' }]);
+    expect(out.pages[0].text).toBe('DEA BL123456З shipped');
+    expect(out.hits).toHaveLength(0);
+  });
+
+  it('joins an SSN split across a line break between groups', () => {
+    const out = redactPages([{ num: 1, text: 'SSN 123-45-\n6789 on file' }]);
+    expect(out.pages[0].text).toBe('SSN {{ssn:1}} on file');
+    expect(out.hits[0].value).toBe('123456789');
+  });
+
+  it('joins an EIN split across a line break between groups', () => {
+    const out = redactPages([{ num: 1, text: 'EIN 12-\n3456789 filed' }]);
+    expect(out.pages[0].text).toBe('EIN {{ein:1}} filed');
+    expect(out.hits[0].value).toBe('123456789');
+  });
 });
 
 describe('fieldNameFor', () => {
@@ -116,6 +170,18 @@ describe('assertRedacted', () => {
   it('throws when a restricted pattern survives', () => {
     expect(() => assertRedacted('SSN 123-45-6789')).toThrow(/not redacted/);
     expect(() => assertRedacted('DEA BL1234563')).toThrow(/not redacted/);
+  });
+
+  it('throws on a bare nine-digit SSN', () => {
+    expect(() => assertRedacted('SSN 123456789')).toThrow(/not redacted/);
+  });
+
+  it('throws on an OCR-confused SSN that a strict scan would miss', () => {
+    expect(() => assertRedacted('SSN 123-45-678O')).toThrow(/not redacted/);
+  });
+
+  it('throws on an SSN split across a line break', () => {
+    expect(() => assertRedacted('SSN 123-45-\n6789')).toThrow(/not redacted/);
   });
 
   it('never quotes the value it found', () => {
