@@ -15,9 +15,16 @@
     "gateway:config": "pnpm --filter @harness/gateway render",
     "gateway:up": "docker compose --env-file .env -f harness/compose/docker-compose.yml up -d litellm",
     "gateway:logs": "docker compose --env-file .env -f harness/compose/docker-compose.yml logs -f litellm",
+    "forms:generate": "pnpm --filter @harness/pack-healthcare forms:generate",
     "synth": "pnpm --filter @harness/pack-healthcare generate",
     "synth:fast": "pnpm --filter @harness/pack-healthcare generate -- --scans=false",
     "evals": "pnpm --filter @harness/evals start",
-    "evals:baseline": "pnpm --filter @harness/evals start -- --update-baseline=true"
+    "evals:baseline": "pnpm --filter @harness/evals start -- --update-baseline=true",
+    "approvals": "pnpm --filter @harness/approvals start",
+    "new-client": "pnpm --filter @harness/scripts exec tsx new-client.ts",
+    "demo:up": "docker compose --env-file .env -f harness/compose/docker-compose.yml --profile demo up -d --build",
+    "demo:down": "docker compose --env-file .env -f harness/compose/docker-compose.yml --profile demo down",
+    "demo:logs": "docker compose --env-file .env -f harness/compose/docker-compose.yml --profile demo logs -f hermes approvals",
+    "demo:playbooks": "docker compose --env-file .env -f harness/compose/docker-compose.yml exec hermes bash /opt/data/cron/playbooks.sh"
   }
 }

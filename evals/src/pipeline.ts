@@ -4,6 +4,7 @@ import {
   DEFAULT_POLICY,
   MASKED,
   createCoreToolsServer,
+  defaultFormsDir,
   type GatewayConfig,
   type Policy,
   type ToolDeps,
@@ -63,6 +64,10 @@ export async function openPipeline(opts: OpenPipelineOptions): Promise<PipelineH
     confidenceThreshold,
     gateway: opts.gateway,
     storageDir: opts.storageDir,
+    // The pipeline under test reads documents; it fills no forms. The shipped
+    // templates directory is still the honest value: a tool that did reach for
+    // one would find what a deployment finds, not a stub.
+    formsDir: defaultFormsDir(),
     restrictedToModel: false,
     verify: { nppesEnabled: false, nppesBaseUrl: 'http://127.0.0.1:1/api/', stateLicenseEnabled: false, timeoutMs: 5_000 },
     sinks: {},

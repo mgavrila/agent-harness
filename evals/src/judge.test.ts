@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { DEFAULT_POLICY, isRestrictedName, type ToolDeps } from '@harness/core-tools';
+import { DEFAULT_POLICY, defaultFormsDir, isRestrictedName, type ToolDeps } from '@harness/core-tools';
 import { startFakeGateway, type FakeGateway } from '@harness/core-tools/fake-gateway';
 import { createDb, runMigrations } from '@harness/db';
 import { FREE_TEXT_FIELDS, judgeFreeText, type JudgeItem } from './judge.js';
@@ -33,6 +33,7 @@ beforeAll(async () => {
     confidenceThreshold: 0.85,
     gateway: { baseUrl: gateway.url, apiKey: 'sk-eval', timeoutMs: 10_000, maxCallsPerRun: 100 },
     storageDir: here,
+    formsDir: defaultFormsDir(),
     restrictedToModel: false,
     verify: { nppesEnabled: false, nppesBaseUrl: 'http://127.0.0.1:1/api/', stateLicenseEnabled: false, timeoutMs: 5_000 },
     sinks: {},

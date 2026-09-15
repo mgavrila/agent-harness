@@ -17,8 +17,12 @@ export type DocumentKind = (typeof DOCUMENT_KINDS)[number];
  * when `target` itself does not exist yet and re-appending the remaining
  * segments untouched (a path segment that does not exist cannot itself be a
  * symlink, so this is safe).
+ *
+ * The one containment primitive for the whole file store: `../storage.ts`
+ * re-exports this for the `out/` tree rather than keeping a second copy, so
+ * ingest and generated output are contained by the same code.
  */
-async function realOrNearestAncestor(target: string): Promise<string> {
+export async function realOrNearestAncestor(target: string): Promise<string> {
   const remainder: string[] = [];
   let current = target;
   for (;;) {

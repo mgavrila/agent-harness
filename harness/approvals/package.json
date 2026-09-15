@@ -1,0 +1,31 @@
+{
+  "name": "@harness/approvals",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./testing": "./src/testing.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "start": "tsx src/main.ts"
+  },
+  "dependencies": {
+    "@harness/core-tools": "workspace:*",
+    "@harness/db": "workspace:*",
+    "@modelcontextprotocol/client": "^2.0.0",
+    "@slack/bolt": "^5.1.0",
+    "@slack/web-api": "^8.1.1",
+    "dotenv": "^17.4.2",
+    "drizzle-orm": "^0.45.2",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "^26.5.1",
+    "tsx": "^4.23.13",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.0"
+  }
+}

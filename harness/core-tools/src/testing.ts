@@ -1,4 +1,7 @@
 import { randomBytes } from 'node:crypto';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { afterAll, beforeEach, onTestFinished } from 'vitest';
 import type { Client } from '@modelcontextprotocol/client';
 import { McpServer } from '@modelcontextprotocol/server';
@@ -6,6 +9,7 @@ import { createDb, type Db } from '@harness/db';
 import { TEST_DATABASE_URL, resetDatabase } from '@harness/db/testing';
 import { DEFAULT_POLICY } from './policy.js';
 import { connectInProcess } from './in-process.js';
+import { defaultFormsDir } from './forms/templates.js';
 import { DEFAULT_CONFIDENCE_THRESHOLD, registerTools, type AnyToolDef, type ToolDeps } from './registry.js';
 
 export function makeTestDeps(db: Db, overrides: Partial<ToolDeps> = {}): ToolDeps {
@@ -19,7 +23,10 @@ export function makeTestDeps(db: Db, overrides: Partial<ToolDeps> = {}): ToolDep
     approvalTtlHours: 24,
     confidenceThreshold: DEFAULT_CONFIDENCE_THRESHOLD,
     gateway: { baseUrl: 'http://127.0.0.1:1', apiKey: 'sk-test', timeoutMs: 5_000, maxCallsPerRun: 100 },
-    storageDir: '/nonexistent-storage-dir',
+    // A throwaway directory per call, so a test that forgets to override it
+    // still cannot write into the repository.
+    storageDir: mkdtempSync(path.join(tmpdir(), 'harness-test-storage-')),
+    formsDir: defaultFormsDir(),
     restrictedToModel: false,
     verify: {
       nppesEnabled: true,

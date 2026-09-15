@@ -10,7 +10,8 @@
   "scripts": {
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "generate": "tsx synthetic/generate.ts"
+    "generate": "tsx synthetic/generate.ts",
+    "forms:generate": "tsx forms/generate-templates.ts"
   },
   "dependencies": {
     "pdf-lib": "^1.17.1"

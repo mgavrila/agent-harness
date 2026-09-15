@@ -9,7 +9,7 @@ default policy is, and how to make test data.
 | `policy.yaml` | The default action-class table. |
 | `synthetic/generate.ts` | Twenty synthetic providers with four documents each, as text-layer PDFs and as scans, plus ground truth. |
 | `evals/` | Case files the `@harness/evals` runner reads. |
-| `skills/` | Placeholder. Skills land in Plan 3. |
+| `skills/` | The four credentialing skills, each a `SKILL.md` with Hermes frontmatter plus the harness keys. |
 
 ## Which numbers reach a model
 

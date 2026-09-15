@@ -23,7 +23,7 @@ harness/     model gateway config, core tools MCP server, approvals app, db, com
 packs/       healthcare/
 clients/     demo-practice/
 evals/       runner and judges
-scripts/     new-client.py
+scripts/     new-client.ts
 docs/        specs, ADRs, runbook
 ```
 
@@ -81,3 +81,15 @@ overrides the base URL only; the proxy key still comes from
 No baseline is committed yet. Until one is, a run scores itself and reports "no
 baseline" rather than a verdict; `docs/promotion-gate.md` says why and how to
 record the first one.
+
+## Run the demo practice
+
+```bash
+cp clients/demo-practice/.env.example .env     # then fill in the blanks
+pnpm install
+pnpm db:up && pnpm db:migrate
+pnpm demo:up
+```
+
+`docs/demo.md` is the five-minute script. `docs/runbook.md` covers the
+operational side: effects outbox, approvals app, playbooks, and storage.

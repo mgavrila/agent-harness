@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "templates": [
+    {
+      "id": "payer-credentialing-application",
+      "title": "Payer Credentialing Application (demo)",
+      "file": "payer-credentialing-application.pdf",
+      "mappings": [
+        { "pdf_field": "provider_full_name", "source": "provider", "property": "name", "required": true },
+        { "pdf_field": "provider_npi", "source": "provider", "property": "npi", "required": true },
+        { "pdf_field": "primary_specialty", "source": "field", "name": "primary_specialty", "required": true },
+        { "pdf_field": "practice_name", "source": "field", "name": "practice_name", "required": false },
+        { "pdf_field": "practice_address", "source": "field", "name": "practice_address", "required": true },
+        { "pdf_field": "license_state", "source": "credential", "kind": "license", "property": "state", "required": true },
+        { "pdf_field": "license_expires_at", "source": "credential", "kind": "license", "property": "expires_at", "required": true },
+        { "pdf_field": "malpractice_carrier", "source": "credential", "kind": "malpractice", "property": "issuer", "required": false },
+        { "pdf_field": "malpractice_expires_at", "source": "credential", "kind": "malpractice", "property": "expires_at", "required": true },
+        { "pdf_field": "board_cert_expires_at", "source": "credential", "kind": "board_cert", "property": "expires_at", "required": false }
+      ]
+    },
+    {
+      "id": "state-license-renewal-cover",
+      "title": "State License Renewal Cover Sheet (demo)",
+      "file": "state-license-renewal-cover.pdf",
+      "mappings": [
+        { "pdf_field": "provider_full_name", "source": "provider", "property": "name", "required": true },
+        { "pdf_field": "provider_npi", "source": "provider", "property": "npi", "required": true },
+        { "pdf_field": "license_state", "source": "credential", "kind": "license", "property": "state", "required": true },
+        { "pdf_field": "license_issuer", "source": "credential", "kind": "license", "property": "issuer", "required": false },
+        { "pdf_field": "license_expires_at", "source": "credential", "kind": "license", "property": "expires_at", "required": true },
+        { "pdf_field": "practice_address", "source": "field", "name": "practice_address", "required": true }
+      ]
+    }
+  ]
+}

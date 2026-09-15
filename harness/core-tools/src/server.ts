@@ -4,12 +4,15 @@ import { createDb, loadKey } from '@harness/db';
 import { DEFAULT_CONFIDENCE_THRESHOLD, registerTools, type ToolDeps } from './registry.js';
 import { loadPolicy } from './policy.js';
 import { gatewayFromEnv } from './models.js';
+import { storageRoot } from './storage.js';
+import { defaultFormsDir } from './forms/templates.js';
 import { providerTools } from './tools/providers.js';
 import { deadlineTools } from './tools/deadlines.js';
 import { auditTools } from './tools/audit.js';
 import { approvalTools } from './tools/approvals.js';
 import { harnessTools } from './tools/harness.js';
 import { documentTools } from './tools/documents.js';
+import { formTools } from './tools/forms.js';
 import { NPPES_DEFAULT_BASE_URL, verifyTools } from './tools/verify.js';
 
 export const ALL_TOOLS = [
@@ -19,6 +22,7 @@ export const ALL_TOOLS = [
   ...approvalTools,
   ...harnessTools,
   ...documentTools,
+  ...formTools,
   ...verifyTools,
 ];
 
@@ -73,7 +77,11 @@ export async function buildDepsFromEnv(): Promise<{ deps: ToolDeps; close: () =>
     approvalTtlHours: numberFromEnv('APPROVAL_TTL_HOURS', 24, { min: 1, max: 720 }),
     confidenceThreshold: numberFromEnv('CONFIDENCE_THRESHOLD', DEFAULT_CONFIDENCE_THRESHOLD, { min: 0, max: 1 }),
     gateway: gatewayFromEnv(),
-    storageDir: path.resolve(process.env.HARNESS_STORAGE_DIR ?? './storage'),
+    // One root for the whole file store, required and with no default (see
+    // storageRoot). Ingested documents live under it as documents/storage.ts
+    // lays them out; generated output goes under `<root>/out`.
+    storageDir: storageRoot(),
+    formsDir: process.env.HARNESS_FORMS_DIR?.trim() ? path.resolve(process.env.HARNESS_FORMS_DIR) : defaultFormsDir(),
     restrictedToModel: booleanFromEnv('HARNESS_RESTRICTED_TO_MODEL'),
     verify: {
       nppesEnabled: booleanFromEnv('VERIFY_NPPES_ENABLED'),
@@ -115,3 +123,5 @@ export {
 } from './fake-gateway.js';
 export { MASKED, isRestrictedName } from './tools/providers.js';
 export { assertRedacted } from './documents/redact.js';
+export { defaultFormsDir } from './forms/templates.js';
+export { storageRoot, outRoot } from './storage.js';

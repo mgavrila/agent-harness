@@ -43,8 +43,20 @@ export interface ToolDeps {
   confidenceThreshold: number;
   /** How to reach the model gateway. Every model call goes through it. */
   gateway: GatewayConfig;
-  /** Absolute directory documents are read from and written under. Nothing outside it is readable. */
+  /**
+   * Absolute root of the file store, from `storageRoot()`: required, with no
+   * default, so a deployment that has not said where files live fails at
+   * startup instead of scattering provider documents into the working
+   * directory. One root serves both halves and they do not collide: ingested
+   * documents sit where the caller puts them under it (`incoming/`, and their
+   * `.redacted.txt` sidecars beside them), and everything a tool generates for
+   * a human goes under `<storageDir>/out`. Nothing outside the root is
+   * readable: `resolveStoragePath` and `resolveOutFile` both check the lexical
+   * path and the symlink-resolved path against it.
+   */
   storageDir: string;
+  /** Directory holding the active pack's `templates.json` and its PDFs. */
+  formsDir: string;
   /**
    * Whether restricted identifiers (SSN, EIN, DEA) may be sent to a model.
    * False for every client by default. Turning it on is a documented decision

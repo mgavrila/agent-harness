@@ -1,0 +1,126 @@
+# Hermes Agent configuration for the demo-practice client.
+#
+# Copied verbatim to $HERMES_HOME/config.yaml (/opt/data/config.yaml in the
+# container) by the hermes-init service. Hermes itself is never modified: every
+# key below is documented at https://hermes-agent.nousresearch.com/docs.
+#
+# ${VAR} references are resolved by Hermes, in this file and inside the
+# mcp_servers block. See docs/user-guide/configuration.
+
+# --- Model ------------------------------------------------------------------
+# The LiteLLM gateway (Plan 2) exposes named routes as OpenAI-compatible model
+# names, so switching provider is a gateway change and never a Hermes change.
+model:
+  default: "chat"
+  provider: "custom"
+  base_url: "http://gateway:4000/v1"
+  api_key: "${LITELLM_MASTER_KEY}"
+  context_length: 131072
+
+# `reason` is the slower, stronger route. One-shot per session.
+fallback_providers:
+  - provider: custom
+    model: "reason"
+    base_url: "http://gateway:4000/v1"
+
+# --- Sandbox ----------------------------------------------------------------
+terminal:
+  backend: "docker"
+  cwd: "/workspace"
+  timeout: 180
+  lifetime_seconds: 300
+  docker_image: "nikolaik/python-nodejs:python3.11-nodejs20"
+  # Never mount the launch directory: the agent has no reason to reach the repo.
+  docker_mount_cwd_to_workspace: false
+
+# --- Self-improvement gates -------------------------------------------------
+# Both gates are on. Skill writes are staged under ~/.hermes/pending/skills/ and
+# reviewed with /skills pending. Memory writes are staged and reviewed with
+# /memory pending.
+#
+# Note: the design spec section 4.1 says memory.write_approval: false. This
+# deviates deliberately. A session that has read provider documents can write a
+# memory carrying protected health information, and the research notes require
+# "approval plus a PHI scrub check before commit, not logging after the fact".
+skills:
+  write_approval: true
+  guard_agent_created: true
+  external_dirs:
+    - /srv/agent-harness/packs/healthcare/skills
+
+memory:
+  memory_enabled: true
+  user_profile_enabled: true
+  write_approval: true
+
+# --- Robustness -------------------------------------------------------------
+# The static rules the Self-Harness paper kept accepting: verify before
+# concluding, and a hard loop breaker on repeated tool failure. SOUL.md states
+# them in prose; these enforce them in the runtime.
+agent:
+  verify_on_stop: true
+  max_verify_nudges: 3
+
+tool_loop_guardrails:
+  warnings_enabled: true
+  hard_stop_enabled: true
+  non_interactive_hard_stop_enabled: true
+  warn_after:
+    exact_failure: 2
+    same_tool_failure: 2
+    idempotent_no_progress: 2
+  hard_stop_after:
+    exact_failure: 3
+    same_tool_failure: 3
+    idempotent_no_progress: 3
+
+# --- Tools ------------------------------------------------------------------
+# The harness core tools, spawned as a stdio child. There is no `cwd` key for an
+# MCP server, so the command carries the directory: `pnpm --dir <abs>`.
+# Only these variables reach the child; Hermes passes the declared env plus a
+# safe baseline and nothing else.
+#
+# Plan 2 adds `documents_*` and `verify_nppes` to this same core-tools server;
+# no config change is needed here when that lands, since tools are discovered
+# from the running server rather than listed in this file.
+mcp_servers:
+  core-tools:
+    command: "pnpm"
+    args: ["--dir", "/srv/agent-harness", "--filter", "@harness/core-tools", "start"]
+    env:
+      DATABASE_URL: "${DATABASE_URL}"
+      HARNESS_ENCRYPTION_KEY: "${HARNESS_ENCRYPTION_KEY}"
+      HARNESS_CLIENT: "demo-practice"
+      HARNESS_POLICY_FILE: "/srv/agent-harness/clients/demo-practice/policy.yaml"
+      HARNESS_STORAGE_DIR: "/srv/harness-storage"
+      HARNESS_FORMS_DIR: "/srv/agent-harness/packs/healthcare/forms"
+      CORE_TOOLS_CALLER: "hermes"
+      APPROVAL_TTL_HOURS: "24"
+      CONFIDENCE_THRESHOLD: "0.85"
+    timeout: 120
+    connect_timeout: 60
+
+# Slack gets the harness tools, memory and skills — and no terminal, no file,
+# no browser, no web. The toolset name for an MCP server is mcp-<server name>.
+platform_toolsets:
+  slack: [mcp-core-tools, memory, skills, todo, session_search]
+  cli: [mcp-core-tools, memory, skills, todo, terminal, file]
+
+platforms:
+  slack:
+    reply_to_mode: "first"
+    extra:
+      unfurl_links: false
+      unfurl_media: false
+      native_task_cards: false
+      # Documented on the Slack messaging page but absent from
+      # cli-config.yaml.example. Confirm with `hermes config get platforms.slack`
+      # before enabling.
+      # reply_in_thread: true
+
+# --- Playbooks --------------------------------------------------------------
+# Jobs are created by clients/demo-practice/cron/playbooks.sh, not written here.
+cron:
+  preflight: true
+  # A missed nightly run is not replayed: yesterday's window has moved.
+  catch_up_missed: false

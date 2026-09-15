@@ -6,9 +6,12 @@
   "exports": {
     ".": "./src/server.ts",
     "./testing": "./src/testing.ts",
+    "./effects": "./src/effects.ts",
     "./fake-gateway": "./src/fake-gateway.ts",
     "./in-process": "./src/in-process.ts",
-    "./models": "./src/models.ts"
+    "./models": "./src/models.ts",
+    "./reconcile": "./src/reconcile.ts",
+    "./storage": "./src/storage.ts"
   },
   "scripts": {
     "test": "vitest run",
@@ -22,6 +25,7 @@
     "@modelcontextprotocol/server": "^2.0.0",
     "dotenv": "^17.4.2",
     "drizzle-orm": "^0.45.2",
+    "pdf-lib": "1.17.1",
     "pdf-parse": "2.4.5",
     "pg": "^8.23.0",
     "yaml": "^2.9.1",
@@ -31,7 +35,6 @@
     "@modelcontextprotocol/client": "^2.0.0",
     "@types/node": "^26.5.1",
     "@types/pg": "^8.23.1",
-    "pdf-lib": "1.17.1",
     "tsx": "^4.23.13",
     "typescript": "^7.0.2",
     "vitest": "^5.0.0"

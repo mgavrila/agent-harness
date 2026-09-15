@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { auditLog, runs } from '@harness/db';
+import { eq } from 'drizzle-orm';
+import { auditLog, runs, toolEffects } from '@harness/db';
 import { type ToolDeps } from '../registry.js';
 import { connectTestClient, makeTestDeps, resultOf, useTestDb } from '../testing.js';
 import { createCoreToolsServer } from '../server.js';
@@ -63,5 +64,55 @@ describe('session context and lineage', () => {
     const q = await client.callTool({ name: 'audit_query', arguments: { tool: 'providers_search' } });
     const { entries } = resultOf<{ entries: { id: string; derived_from: string[] }[] }>(q);
     expect(entries.find((e) => e.id === secondAudit.id)!.derived_from).toEqual([firstAudit.id]);
+  });
+
+  it('stages a slack_message effect instead of sending', async () => {
+    const client = await connectServer();
+    const out = resultOf<{ effect_id: string; staged: boolean }>(
+      await client.callTool({
+        name: 'harness_notify',
+        arguments: { text: '2 credentials expire within 90 days.', idempotency_key: 'expirations:2026-09-15' },
+      }),
+    );
+    expect(out.staged).toBe(true);
+    const [row] = await db.select().from(toolEffects);
+    expect(row).toMatchObject({ sink: 'slack_message', tool: 'harness_notify', status: 'staged', client: 'test' });
+    expect(row.idempotencyKey).toBe('test:expirations:2026-09-15');
+    // The text is the payload, which is encrypted; the summary is a label.
+    expect(row.payloadEncrypted.toString('utf8')).not.toContain('expire within 90 days');
+    expect(row.summary).not.toContain('expire within 90 days');
+  });
+
+  it('stages the same digest once', async () => {
+    const client = await connectServer();
+    const args = { text: 'one item', idempotency_key: 'expirations:2026-09-15' };
+    await client.callTool({ name: 'harness_notify', arguments: args });
+    const second = resultOf<{ staged: boolean }>(await client.callTool({ name: 'harness_notify', arguments: args }));
+    expect(second.staged).toBe(false);
+    expect(await db.select().from(toolEffects)).toHaveLength(1);
+  });
+
+  it('refuses a message that looks like it carries a restricted identifier', async () => {
+    const client = await connectServer();
+    const res = await client.callTool({
+      name: 'harness_notify',
+      arguments: { text: 'Dr. Reyes SSN 123-45-6789 is on file', idempotency_key: 'x' },
+    });
+    expect(res.isError).toBe(true);
+    expect(await db.select().from(toolEffects)).toHaveLength(0);
+  });
+
+  it('records the lineage the caller declares', async () => {
+    const client = await connectServer();
+    const [earlier] = await db
+      .insert(auditLog)
+      .values({ client: 'test', caller: 'test-caller', tool: 'deadlines_upcoming', actionClass: 'read', argsHash: 'h', decision: 'auto' })
+      .returning();
+    await client.callTool({
+      name: 'harness_notify',
+      arguments: { text: 'one item', idempotency_key: 'k', derived_from: [earlier.id] },
+    });
+    const rows = await db.select().from(auditLog).where(eq(auditLog.tool, 'harness_notify'));
+    expect(rows[0].derivedFrom).toEqual([earlier.id]);
   });
 });
