@@ -26,7 +26,7 @@ export type CredentialInput = z.infer<typeof CredentialInput>;
 
 const RESTRICTED_FIELD_NAMES = new Set(['ssn', 'ein', 'dea_number', 'tax_id']);
 
-async function requireProvider(deps: ToolDeps, providerId: string) {
+export async function requireProvider(deps: ToolDeps, providerId: string) {
   const p = await deps.db.query.providers.findFirst({ where: and(eq(providers.id, providerId), eq(providers.client, deps.client)) });
   if (!p) throw new ToolError(`provider ${providerId} not found`);
   return p;
