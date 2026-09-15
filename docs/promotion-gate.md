@@ -6,10 +6,18 @@ is the implementation.
 
 ## The rule
 
-A candidate is promoted when, measured **with the model that will serve it**:
+A candidate is promoted when, measured **with the model that will serve it**,
+none of these three block it:
 
-1. It does not regress on **either** split (`text_layer` and `scan`), and
-2. It improves on **at least one** metric.
+1. A regression beyond tolerance on either split (`text_layer` or `scan`).
+2. A stopped measurement — a metric the baseline measured that this run did
+   not (see [A metric that is missing is not a metric that is
+   passing](#a-metric-that-is-missing-is-not-a-metric-that-is-passing)).
+3. A failed injection case.
+
+— and, with none of those three present, it still needs:
+
+4. An improvement on **at least one** metric.
 
 No improvement means no promotion. A neutral change still costs a review, a
 deploy and a rollback risk, and the only evidence that a candidate helps is a
@@ -82,9 +90,11 @@ safety row is not shippable at all, whatever the gate says.
 
 Field accuracy is an exact comparison after normalising case, thousands
 separators and whitespace. Six fields are named in `FREE_TEXT_FIELDS` where an
-exact comparison is the wrong instrument — "Medical Board of California" and
-"California Medical Board" are one issuer — and only those misses go to the
-`judge` route for a second opinion.
+exact comparison is the wrong instrument — "Riverside Family Medicine" and
+"Riverside Family Medicine, PC" are one practice — and only those misses go to
+the `judge` route for a second opinion. A credential's issuer (for example
+"Medical Board of California") is not one of the six: credentials are matched
+by their own comparison, so an issuer name never reaches the judge.
 
 A verdict the judge agrees with is credited **to the split the miss came from**,
 never pooled. Splits are scored apart because they are not interchangeable; a
@@ -181,14 +191,27 @@ fallback deployment to `clients/<name>/routing.yaml`, or run a smaller sample.
 Record the sample size in `eval_set_version`, as above, because a 24-case
 sample and the full 162-case corpus are different eval sets.
 
+## Exit codes
+
+| Code | Meaning |
+|---|---|
+| `0` | No blocker fired. Covers a run with no baseline, and a neutral run against one (no regression, no stopped measurement, no injection failure, but also no improvement — `passesPromotionGate` is `false` and the exit code is still `0`; a neutral run is a legitimate result, not a failure). |
+| `1` | At least one of the three blockers in [The rule](#the-rule) fired: a regression beyond tolerance, a stopped measurement, or a failed injection case. |
+| `2` | Bad CLI usage — for example `--limit` given something other than a positive integer. Nothing is run or scored. |
+
+The exit code is never keyed off `passesPromotionGate` directly: that flag also
+requires an improvement, which a `HOLD` run may correctly lack without being an
+error.
+
 ## Running it
 
 ```bash
 pnpm db:up && pnpm gateway:up
 pnpm synth                       # regenerate the corpus if the generator changed
-pnpm evals                       # writes evals/results/report.{json,md}, exits 1 on regression
+pnpm evals                       # writes evals/results/report.{json,md}; see Exit codes
 pnpm evals:baseline              # accept the current scores as the new baseline
 ```
 
-`evals/baseline.json` is committed. Updating it is a reviewed change: the diff
-shows exactly which numbers moved and the pull request says why.
+Committing `evals/baseline.json` is a reviewed change: the diff shows exactly
+which numbers moved and the pull request says why. See [There is no committed
+baseline yet](#there-is-no-committed-baseline-yet) for the current state.

@@ -2,16 +2,24 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { randomBytes } from 'node:crypto';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { PDFDocument, StandardFonts } from 'pdf-lib';
 import { DEFAULT_POLICY, type ToolDeps } from '@harness/core-tools';
 import { startFakeGateway, type FakeGateway } from '@harness/core-tools/fake-gateway';
 import { createDb } from '@harness/db';
-import { runEvals, selectCases } from './run.js';
+import { runEvals, selectCases, parseLimitFlag } from './run.js';
 import type { ExtractionCase } from './cases.js';
 import type { Report } from './report.js';
 
 const DATABASE_URL = process.env.EVALS_DATABASE_URL ?? 'postgres://harness:harness@localhost:15432/harness_evals';
+
+const execFileAsync = promisify(execFile);
+const evalsDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const tsxBin = path.join(evalsDir, 'node_modules', '.bin', 'tsx');
+const runScript = path.join(evalsDir, 'src', 'run.ts');
 
 let dir: string;
 let corpus: string;
@@ -211,19 +219,34 @@ describe('runEvals', () => {
     expect(report.splits.text_layer.fieldAccuracy).toBe(0.75);
   }, 180_000);
 
-  it('gives a broken judge no way to clear the gate against a baseline that had one', async () => {
-    const judged = await runEvals(options());
-    expect(judged.report.metrics['judge.agreement_rate']).toBe(1);
-    const baselineFile = path.join(dir, 'baseline-judged.json');
-    await writeFile(baselineFile, JSON.stringify(judged.report, null, 2), 'utf8');
-
+  it('exits non-zero when a stopped measurement is the only blocker, against a baseline that had it', async () => {
+    // Run with a broken judge first, so this run's own report is what the
+    // "current" run below will also produce -- deterministically, since
+    // nothing here depends on randomness. Cloning that report as the baseline,
+    // with only a `judge.agreement_rate` key added, guarantees every other
+    // metric compares as `unchanged`: the ONLY thing that can block promotion
+    // in this test is `stoppedMeasuring`. A version of this test that instead
+    // baselined a working-judge run would also pick up a field-accuracy
+    // regression (the judge-forgiven miss going back to being a miss), which
+    // would pass even if run.ts ignored `stoppedMeasuring` entirely.
     gateway.setResponder((call) => (call.model === 'judge' ? { status: 500 } : { content: EXTRACTION }));
-    const { markdown } = await runEvals(options({ baselineFile }));
+    const broken = await runEvals(options());
+    expect(broken.report.judge).toBeNull();
+    expect(broken.report.metrics).not.toHaveProperty('judge.agreement_rate');
+
+    const baselineFile = path.join(dir, 'baseline-stopped-judge.json');
+    const baseline = { ...broken.report, metrics: { ...broken.report.metrics, 'judge.agreement_rate': 1 } };
+    await writeFile(baselineFile, JSON.stringify(baseline, null, 2), 'utf8');
+
+    const { exitCode, markdown } = await runEvals(options({ baselineFile }));
     gateway.setResponder((call) => ({ content: call.model === 'judge' ? VERDICTS : EXTRACTION }));
 
+    expect(exitCode).toBe(1);
     expect(markdown).toContain('HOLD');
     expect(markdown).toContain('judge.agreement_rate');
     expect(markdown).not.toMatch(/\| judge\.agreement_rate \|/);
+    // No other metric moved, so nothing should show up as a numeric regression.
+    expect(markdown).not.toContain('REGRESSED');
   }, 240_000);
 
   it('scores the pending-field check with the threshold the pipeline actually used', async () => {
@@ -322,4 +345,92 @@ describe('selectCases', () => {
     const lopsided = [...['t1', 't2', 't3'].map((id) => make(id, 'text_layer')), make('s1', 'scan')];
     expect(selectCases(lopsided, 3).map((c) => c.id)).toEqual(['s1', 't1', 't2']);
   });
+});
+
+describe('parseLimitFlag', () => {
+  it('returns undefined when --limit is not given', () => {
+    expect(parseLimitFlag(['node', 'run.ts'])).toEqual({ ok: true, limit: undefined });
+  });
+
+  it('accepts a positive integer', () => {
+    expect(parseLimitFlag(['--limit=24'])).toEqual({ ok: true, limit: 24 });
+    expect(parseLimitFlag(['--limit=1'])).toEqual({ ok: true, limit: 1 });
+  });
+
+  // `Number('')`, `Number('  ')` and `Number(null)` are all `0` or `NaN`-adjacent
+  // surprises; `selectCases` treats an unguarded NaN/0 limit as "pick nothing",
+  // which used to make a typo'd --limit exit 0 having scored zero cases.
+  for (const bad of ['0', '-3', '3.5', 'abc', '', ' ', '1e3', '024', 'NaN', 'Infinity']) {
+    it(`rejects ${JSON.stringify(bad)} as not a positive integer`, () => {
+      const result = parseLimitFlag([`--limit=${bad}`]);
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error).toContain('--limit must be a positive integer');
+    });
+  }
+});
+
+describe('CLI', () => {
+  it('exits 2 on an invalid --limit and runs no cases', async () => {
+    const outDir = path.join(dir, 'cli-bad-limit-out');
+    await expect(
+      execFileAsync(
+        tsxBin,
+        [
+          runScript,
+          '--limit=abc',
+          `--out=${outDir}`,
+          `--cases=${path.join(dir, 'cases.jsonl')}`,
+          `--corpus=${corpus}`,
+          `--injection=${path.join(dir, 'injection.jsonl')}`,
+          `--baseline=${path.join(dir, 'no-such-baseline.json')}`,
+        ],
+        {
+          cwd: evalsDir,
+          env: {
+            ...process.env,
+            // Deliberately absent/invalid gateway credentials: a bad --limit
+            // must be rejected before any of this is touched.
+            LITELLM_MASTER_KEY: '',
+            HARNESS_GATEWAY_URL: '',
+            EVALS_DATABASE_URL: DATABASE_URL,
+          },
+        },
+      ),
+    ).rejects.toMatchObject({ code: 2, stderr: expect.stringContaining('--limit must be a positive integer') });
+
+    await expect(readFile(path.join(outDir, 'report.json'), 'utf8')).rejects.toThrow();
+  }, 60_000);
+
+  it('lets --gateway override the base URL that reaches openPipeline, independent of HARNESS_GATEWAY_URL', async () => {
+    const outDir = path.join(dir, 'cli-gateway-override-out');
+    await execFileAsync(
+      tsxBin,
+      [
+        runScript,
+        `--gateway=${gateway.url}`,
+        `--out=${outDir}`,
+        `--cases=${path.join(dir, 'cases.jsonl')}`,
+        `--corpus=${corpus}`,
+        `--injection=${path.join(dir, 'injection.jsonl')}`,
+        `--baseline=${path.join(dir, 'no-such-baseline.json')}`,
+      ],
+      {
+        cwd: evalsDir,
+        env: {
+          ...process.env,
+          LITELLM_MASTER_KEY: 'sk-eval',
+          // Wrong on purpose: if the CLI used this instead of --gateway, every
+          // extraction call would fail to connect and no field would ever
+          // match, so a passing report here is only possible if --gateway's
+          // base URL is what actually reached openPipeline.
+          HARNESS_GATEWAY_URL: 'http://127.0.0.1:1',
+          EVALS_DATABASE_URL: DATABASE_URL,
+        },
+      },
+    );
+
+    const report = JSON.parse(await readFile(path.join(outDir, 'report.json'), 'utf8')) as Report;
+    expect(report.splits.text_layer.failures).toBe(0);
+    expect(report.splits.text_layer.fieldAccuracy).toBeGreaterThan(0);
+  }, 120_000);
 });

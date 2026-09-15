@@ -2,10 +2,11 @@ import * as z from 'zod/v4';
 import { callModelJson, isRestrictedName, type ToolDeps } from '@harness/core-tools';
 
 /**
- * Fields where a string comparison is the wrong instrument. "Medical Board of
- * California" and "California Medical Board" are the same issuer; "$1,000,000 /
- * $3,000,000" and "1M/3M" are the same coverage. Everything else — names,
- * numbers, dates — is scored exactly, because for those a near miss is a miss.
+ * Fields where a string comparison is the wrong instrument. "Riverside Family
+ * Medicine" and "Riverside Family Medicine, PC" are the same practice;
+ * "$1,000,000 / $3,000,000" and "1M/3M" are the same coverage. Everything
+ * else — names, numbers, dates — is scored exactly, because for those a near
+ * miss is a miss.
  *
  * No restricted field may be listed here. A restricted value never leaves the
  * database in plaintext, so there is nothing to compare, and putting one in a

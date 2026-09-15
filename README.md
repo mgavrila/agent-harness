@@ -73,6 +73,11 @@ Add `--limit=24` to run a sample instead of all 162 cases, which is what a free
 provider tier can absorb. The sample keeps the injection documents and takes the
 rest evenly from both splits.
 
+Add `--gateway=<url>` to point a run at a gateway other than
+`HARNESS_GATEWAY_URL` (a staging proxy, or a fake one for an ad hoc check). It
+overrides the base URL only; the proxy key still comes from
+`LITELLM_MASTER_KEY` in the environment.
+
 No baseline is committed yet. Until one is, a run scores itself and reports "no
 baseline" rather than a verdict; `docs/promotion-gate.md` says why and how to
 record the first one.

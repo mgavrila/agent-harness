@@ -237,22 +237,78 @@ export async function runEvals(opts: RunOptions): Promise<{ report: Report; mark
     await writeFile(path.join(opts.outDir, 'report.json'), `${JSON.stringify(report, null, 2)}\n`, 'utf8');
     await writeFile(path.join(opts.outDir, 'report.md'), markdown, 'utf8');
 
-    // CI contract: non-zero on a regression, or on a failed injection case,
-    // whether or not a baseline exists. "No baseline yet" is not a pass.
+    // CI contract: non-zero on a regression, on a metric the baseline measured
+    // that this run did not, or on a failed injection case, whether or not a
+    // baseline exists. "No baseline yet" is not a pass. This is deliberately
+    // NOT keyed off `passesPromotionGate`: a neutral run (no regression, no
+    // improvement either) is a legitimate exit 0, not a failure.
     const regressed = comparison !== null && comparison.regressions.length > 0;
+    const stoppedMeasuring = comparison !== null && comparison.stoppedMeasuring.length > 0;
     const leaked = report.injection.passed < report.injection.cases;
-    return { report, markdown, exitCode: regressed || leaked ? 1 : 0 };
+    return { report, markdown, exitCode: regressed || stoppedMeasuring || leaked ? 1 : 0 };
   } finally {
     await pipeline.close();
   }
 }
 
-function flag(name: string): string | undefined {
-  const hit = process.argv.find((a) => a.startsWith(`--${name}=`));
+function flagFrom(argv: readonly string[], name: string): string | undefined {
+  const hit = argv.find((a) => a.startsWith(`--${name}=`));
   return hit?.slice(name.length + 3);
 }
 
+function flag(name: string): string | undefined {
+  return flagFrom(process.argv, name);
+}
+
+export type LimitFlagResult = { ok: true; limit: number | undefined } | { ok: false; error: string };
+
+/**
+ * `--limit=N` must be a positive integer. `Number(flag)` alone lets `NaN`
+ * (from an empty, non-numeric, or missing value) through as a defined
+ * `RunOptions.limit`, and `selectCases` treats a `NaN` limit as "keep
+ * shrinking the picked list forever" only by accident of `picked.length <
+ * limit` being false for a `NaN` bound in one direction and true in the
+ * other — in practice it silently selects zero cases, so the run scores
+ * nothing and still exits 0. A bad `--limit` must fail loudly instead.
+ *
+ * Pure and exported so a test can check every input without spawning the CLI;
+ * the CLI entry point below turns `{ ok: false }` into `exit 2`.
+ */
+export function parseLimitFlag(argv: readonly string[]): LimitFlagResult {
+  const raw = flagFrom(argv, 'limit');
+  if (raw === undefined) return { ok: true, limit: undefined };
+  if (!/^[1-9][0-9]*$/.test(raw)) {
+    return { ok: false, error: `--limit must be a positive integer, got ${JSON.stringify(raw)}` };
+  }
+  return { ok: true, limit: Number(raw) };
+}
+
+/**
+ * CLI usage: `pnpm --filter @harness/evals start -- [flags]`
+ *
+ *   --corpus=<dir>      Corpus root. Defaults to packs/healthcare/synthetic/out.
+ *   --cases=<file>      Extraction cases file. Defaults to <corpus>/cases.jsonl.
+ *   --injection=<file>  Injection cases file. Defaults to packs/healthcare/evals/injection.jsonl.
+ *   --out=<dir>         Where report.json and report.md are written. Defaults to evals/results.
+ *   --baseline=<file>   Baseline report to compare against. Defaults to evals/baseline.json.
+ *   --version=<string>  Recorded as eval_set_version. Defaults to 1.0.0.
+ *   --limit=<N>         Positive integer. Run a sample of N cases instead of the whole corpus
+ *                        (see selectCases). Anything else is a usage error: exit 2, nothing run.
+ *   --gateway=<url>     Override the gateway's base URL only. The key still comes from
+ *                        LITELLM_MASTER_KEY via gatewayFromEnv() -- this never takes a key on
+ *                        the command line.
+ *   --update-baseline=true  After scoring, write the report as the new evals/baseline.json.
+ */
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  // Validate CLI-only flags before anything that touches the environment or a
+  // network, so a usage error exits 2 with no cases run and no gateway or
+  // database required, rather than failing later for an unrelated reason.
+  const limitFlag = parseLimitFlag(process.argv);
+  if (!limitFlag.ok) {
+    process.stderr.write(`${limitFlag.error}\n`);
+    process.exit(2);
+  }
+
   // CLI only, like `@harness/db`'s migrate: a test that imports `runEvals` must
   // not pick up the developer's repository-root .env.
   const { config: loadEnv } = await import('dotenv');
@@ -260,7 +316,15 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
 
   const corpusDir = path.resolve(flag('corpus') ?? path.join(repoRoot, 'packs/healthcare/synthetic/out'));
   const gateway = gatewayFromEnv();
+  // `--gateway` overrides only the proxy's base URL, for pointing a run at a
+  // gateway other than `HARNESS_GATEWAY_URL` (a staging proxy, a fake one in
+  // an ad hoc smoke test). The key still comes from the environment: a
+  // gateway address is not a secret and belongs on the command line, but
+  // `LITELLM_MASTER_KEY` does not.
+  const gatewayOverride = flag('gateway');
+  if (gatewayOverride) gateway.baseUrl = gatewayOverride.replace(/\/+$/, '');
   const routing = JSON.parse(process.env.EVALS_SERVING_MODEL ?? '{}') as Record<string, string>;
+  const limit = limitFlag.limit;
 
   const { report, markdown, exitCode } = await runEvals({
     corpusDir,
@@ -273,7 +337,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     judgeDeps: null,
     servingModel: Object.keys(routing).length > 0 ? routing : { extract: 'see clients/<name>/routing.yaml', judge: 'see clients/<name>/routing.yaml' },
     evalSetVersion: flag('version') ?? '1.0.0',
-    limit: flag('limit') ? Number(flag('limit')) : undefined,
+    limit,
   });
 
   process.stdout.write(`${markdown}\n`);
