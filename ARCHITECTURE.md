@@ -55,6 +55,7 @@ shared  <-  pack-api  <-  { core-tools, packs/* }
 shared  <-  db        <-  core-tools  <-  { approvals, evals }
 shared  <-  gateway   <-  core-tools
 core-tools  ..>  packs/*        (runtime only: dynamic import, never a static one)
+evals       ->   packs/healthcare  (static: the eval corpus, cases and skill list are the healthcare pack's; making evals pack-agnostic is a follow-up)
 ```
 
 `scripts` is a leaf. There are no cycles.
