@@ -14,6 +14,7 @@
     "forms:generate": "tsx forms/generate-templates.ts"
   },
   "dependencies": {
+    "@harness/shared": "workspace:*",
     "pdf-lib": "^1.17.1"
   },
   "devDependencies": {

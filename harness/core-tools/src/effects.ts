@@ -1,6 +1,9 @@
 import { and, asc, eq, sql } from 'drizzle-orm';
 import { toolEffects, encrypt, decrypt, withTransaction, type Db } from '@harness/db';
+import { createLogger, describeError } from '@harness/shared';
 import type { ToolDeps } from './registry.js';
+
+const log = createLogger('effects');
 
 /**
  * Sends one staged effect. The second argument carries the row's context so a
@@ -122,7 +125,7 @@ async function finishDispatch(db: Db, id: string, values: Partial<EffectRow>): P
     .where(and(eq(toolEffects.id, id), eq(toolEffects.status, 'dispatching')))
     .returning({ id: toolEffects.id });
   if (updated.length > 0) return true;
-  console.error(`effects: effect ${id} changed state during dispatch; leaving as-is`);
+  log.warn(`effect ${id} changed state during dispatch; leaving as-is`);
   return false;
 }
 
@@ -158,7 +161,7 @@ async function sendClaimedEffect(
     });
     return written ? 'dispatched' : 'conflicted';
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    const message = describeError(err);
     const exhausted = claimed.attempts >= maxAttempts;
     const written = await finishDispatch(db, claimed.id, {
       status: exhausted ? 'failed' : 'staged',

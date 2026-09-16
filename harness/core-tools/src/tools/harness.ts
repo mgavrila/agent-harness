@@ -2,6 +2,7 @@ import * as z from 'zod/v4';
 import { eq } from 'drizzle-orm';
 import { runs } from '@harness/db';
 import { defineTool, ToolError, type AnyToolDef } from '../registry.js';
+import { containsRestrictedPattern } from '../shared/redaction/patterns.js';
 import { reconcile } from '../reconcile.js';
 import { stageEffect } from '../effects.js';
 
@@ -62,17 +63,6 @@ const harnessSetContext = defineTool({
   },
 });
 
-/**
- * Shapes a restricted identifier takes in free text. The approvals app applies
- * the same check to a Slack card; this one stops a message at the source, so a
- * bad digest never reaches the outbox at all.
- */
-const RESTRICTED_TEXT_PATTERNS: RegExp[] = [
-  /\b\d{3}-\d{2}-\d{4}\b/, // US social security number
-  /\b\d{2}-\d{7}\b/, // employer identification number
-  /\b[A-Za-z]{2}\d{7}\b/, // DEA registration
-];
-
 const harnessNotify = defineTool({
   name: 'harness_notify',
   description:
@@ -91,7 +81,7 @@ const harnessNotify = defineTool({
   }),
   output: z.object({ effect_id: z.string(), staged: z.boolean() }),
   handler: async ({ text, idempotency_key, channel }, deps) => {
-    if (RESTRICTED_TEXT_PATTERNS.some((re) => re.test(text))) {
+    if (containsRestrictedPattern(text)) {
       throw new ToolError(
         'message refused: it looks like it contains a restricted identifier; restricted values never go to Slack',
       );

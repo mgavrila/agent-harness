@@ -126,12 +126,10 @@ Break any of these and the harness is not safe to run against real data.
 
 ## The three error types
 
-Declared once, in `@harness/shared` _(target state, landing in Task 4)_. Today they are
-scattered, and one of them does not exist yet: `ToolError` is in
-`harness/core-tools/src/registry.ts`, `ModelOutputError` in
-`harness/core-tools/src/models.ts`, and `ConfigError` is nowhere in the tree — it arrives
-with `@harness/shared` in Task 4, and until then a misconfigured process throws a plain
-`Error` at startup.
+Declared once, in `@harness/shared`, at `harness/shared/src/errors.ts`. `@harness/core-tools`
+re-exports all three from its own public API, so a module that still reaches `ToolError`
+through `registry.ts` or `@harness/core-tools` gets the same class; Tasks 5 to 11 point those
+imports at the shared package directly.
 
 | Type                               | Means                                                                                                 | Who sees the message     |
 | ---------------------------------- | ----------------------------------------------------------------------------------------------------- | ------------------------ |
@@ -151,9 +149,8 @@ helpers, and db's logger — all disappear.
 
 ## Where each cross-cutting concern lives
 
-All in `@harness/shared` _(target state, landing in Task 4; these modules live in
-`harness/core-tools/src/` today, scattered)_. Every package depends on it directly, so nothing
-re-exports them to reach another package.
+All in `@harness/shared`, under `harness/shared/src/`. Every package declares the dependency
+directly, so nothing has to re-export them to reach another package.
 
 | Concern              | Module          | Exports                                                         |
 | -------------------- | --------------- | --------------------------------------------------------------- |
@@ -221,7 +218,7 @@ error per package, by appending the package's source root to `STRICT_LAYER_ROOTS
 `eslint.config.js`; dependency-cruiser is promoted the same way, by changing one `severity`
 on that package's row in `.dependency-cruiser.cjs`. Adding a package to the architecture
 rules is one row in `PACKAGES` and one entry in `WORKSPACE_DIRS`, which is how
-`@harness/shared` and `@harness/pack-api` will be added.
+`@harness/shared` was added and how `@harness/pack-api` will be.
 
 ## Proof that a refactor changed nothing
 

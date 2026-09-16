@@ -1,13 +1,11 @@
 import { createHash } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { ToolError } from './registry.js';
-import { realOrNearestAncestor } from './documents/storage.js';
+import { ConfigError, ToolError, assertInsideRoot, optionalEnv, realOrNearestAncestor } from '@harness/shared';
 
-// One containment primitive for the whole file store. It used to be duplicated
-// here verbatim while the document pipeline was on its own branch; two copies
-// of the check that decides whether a path is inside the storage root is how
-// one of them later drifts.
+// One containment primitive for the whole file store, from @harness/shared. Re-exported
+// because @harness/approvals' Slack sink reaches it through `@harness/core-tools/storage`;
+// Task 9 points that import at the shared package directly.
 export { realOrNearestAncestor };
 
 /**
@@ -15,9 +13,9 @@ export { realOrNearestAncestor };
  * not said where files live must fail at startup rather than scatter provider
  * documents into whatever directory happened to be the working directory.
  */
-export function storageRoot(dir: string | undefined = process.env.HARNESS_STORAGE_DIR): string {
+export function storageRoot(dir: string | undefined = optionalEnv('HARNESS_STORAGE_DIR')): string {
   if (!dir || dir.trim() === '' || !path.isAbsolute(dir.trim())) {
-    throw new Error('HARNESS_STORAGE_DIR must be set to an absolute path');
+    throw new ConfigError('HARNESS_STORAGE_DIR must be set to an absolute path');
   }
   return path.resolve(dir.trim());
 }
@@ -46,23 +44,18 @@ export function contentTag(bytes: Uint8Array): string {
  * uploaded. The real paths are compared as well.
  */
 export async function resolveOutFile(fileId: string, root: string): Promise<string> {
-  const base = outRoot(root);
   if (fileId.trim() === '' || path.isAbsolute(fileId)) {
     throw new ToolError(`file id "${fileId}" must be a path relative to the output directory`);
   }
-  const abs = path.resolve(base, fileId);
-  const rel = path.relative(base, abs);
-  if (rel === '' || rel === '..' || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel)) {
-    throw new ToolError(`file id "${fileId}" is outside the output directory`);
-  }
-  const realBase = await realOrNearestAncestor(base);
-  const realAbs = await realOrNearestAncestor(abs);
-  // The separator matters: `${realBase}-evil` starts with `realBase` but is
-  // not inside it.
-  if (realAbs === realBase || !realAbs.startsWith(realBase + path.sep)) {
-    throw new ToolError(`file id "${fileId}" is outside the output directory`);
-  }
-  return abs;
+  return assertInsideRoot(
+    fileId,
+    outRoot(root),
+    () => {
+      throw new ToolError(`file id "${fileId}" is outside the output directory`);
+    },
+    // The out tree itself is not a file id.
+    { allowRoot: false },
+  );
 }
 
 export interface WrittenFile {

@@ -2,9 +2,11 @@ import * as z from 'zod/v4';
 import { and, eq } from 'drizzle-orm';
 import { modelCalls } from '@harness/db';
 import { ROUTES, type Route } from '@harness/gateway/routing';
-import { ToolError, type ToolDeps } from './registry.js';
+import { ModelOutputError, ToolError, requiredEnv } from '@harness/shared';
+import type { ToolDeps } from './registry.js';
 
 export { ROUTES, type Route };
+export { ModelOutputError };
 
 export interface GatewayConfig {
   /** Origin of the LiteLLM proxy, no trailing slash. */
@@ -22,8 +24,12 @@ export interface GatewayConfig {
 }
 
 export function gatewayFromEnv(): GatewayConfig {
-  const apiKey = process.env.LITELLM_MASTER_KEY;
-  if (!apiKey) throw new Error('LITELLM_MASTER_KEY is not set');
+  const apiKey = requiredEnv('LITELLM_MASTER_KEY');
+  // Read directly, not through optionalEnv/numberFromEnv: those treat an empty string as
+  // unset, and this function has always treated an empty HARNESS_GATEWAY_URL as the literal
+  // empty base URL and an empty numeric variable as `Number('') === 0`, which fails the range
+  // check below and throws at startup. Preserving that exact behaviour is the point of leaving
+  // these three reads alone — nothing tests it, but nothing should silently change it either.
   const raw = process.env.HARNESS_GATEWAY_URL ?? 'http://127.0.0.1:4000';
   const timeout = Number(process.env.HARNESS_GATEWAY_TIMEOUT_MS ?? 120_000);
   if (!Number.isFinite(timeout) || timeout < 1_000 || timeout > 600_000) {
@@ -172,24 +178,6 @@ export async function callModel(deps: ToolDeps, opts: ModelCallOptions): Promise
 function stripFence(text: string): string {
   const fenced = /^\s*```(?:json)?\s*\n([\s\S]*?)\n?```\s*$/.exec(text);
   return fenced ? fenced[1] : text;
-}
-
-/**
- * The model's output failed to parse as JSON, or parsed but did not match the
- * caller's zod schema. Gateway-side `strict: true` on the response schema is a
- * request, not a guarantee every provider honors, so this is checked again on
- * this side. The message carries only the zod issue paths and zod's own
- * type-name wording, never a value from the reply, which may contain document
- * text — so, unlike most failures, it is safe to surface to the agent, which
- * needs the field detail to have any chance of recovering. A `ToolError`
- * subclass rather than a plain `Error` for exactly that reason: only a
- * `ToolError`'s message reaches the caller (see `runAuto` in registry.ts).
- */
-export class ModelOutputError extends ToolError {
-  constructor(route: string, detail: string) {
-    super(`model output invalid on route ${route}: ${detail}`);
-    this.name = 'ModelOutputError';
-  }
 }
 
 export async function callModelJson<T>(

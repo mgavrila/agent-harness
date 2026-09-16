@@ -43,7 +43,7 @@ const NO_BARE_THROW = {
  * own root here as it lands (e.g. 'harness/db/src'); Task 11 appends whatever is left. Adding a
  * root is the *only* edit a package task makes to this file.
  */
-const STRICT_LAYER_ROOTS = ['harness/db/src', 'harness/gateway/src'];
+const STRICT_LAYER_ROOTS = ['harness/db/src', 'harness/gateway/src', 'harness/shared/src'];
 
 /** True for the two spellings of a disabled rule, bare or at the head of an options array. */
 const isOff = (severity) => severity === 'off' || severity === 0;
@@ -61,14 +61,21 @@ function asWarning(value) {
 /**
  * console.* belongs in the logger and in process entrypoints, nowhere else.
  *
- * `synthetic/generate.ts` is the pack's corpus generator and its own CLI, so it prints.
- * Task 10 splits the CLI out of it and renames that half to `synthetic/cli.ts`; rename this
- * entry with it.
+ * `harness/shared/src/log.ts` is named outright: the whole package is the shared layer, so it
+ * has no `src/shared/` directory for the glob below to match. That glob stays for `@harness/db`
+ * and for any package that grows a local `shared/log.ts` later.
+ *
+ * `synthetic/generate.ts` is the pack's corpus generator and its own CLI, so it prints. Task 11
+ * splits the CLI out of it and renames that half to `synthetic/cli.ts`; both names are listed
+ * so the exemption survives the tasks in between rather than lapsing at the rename. Task 11
+ * drops the stale entry once it lands.
  */
 const CONSOLE_IS_FINE = [
+  'harness/shared/src/log.ts',
   '**/src/shared/log.ts',
   '**/src/app/**/*.ts',
   'packs/healthcare/synthetic/generate.ts',
+  'packs/healthcare/synthetic/cli.ts',
   'packs/healthcare/forms/generate-templates.ts',
 ];
 
@@ -83,6 +90,7 @@ const CONSOLE_IS_FINE = [
  * by name rather than folded into the `harness/db/src` entry.
  */
 const PROCESS_ENV_IS_FINE = [
+  'harness/shared/src/env.ts',
   '**/src/shared/env.ts',
   '**/src/app/**/*.ts',
   '**/*.test.ts',

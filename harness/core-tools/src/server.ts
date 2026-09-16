@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { McpServer } from '@modelcontextprotocol/server';
 import { createDb, loadKey } from '@harness/db';
+import { booleanFromEnv, numberFromEnv } from '@harness/shared';
 import { DEFAULT_CONFIDENCE_THRESHOLD, registerTools, type ToolDeps } from './registry.js';
 import { loadPolicy } from './policy.js';
 import { gatewayFromEnv } from './models.js';
@@ -30,39 +31,6 @@ export function createCoreToolsServer(deps: ToolDeps): McpServer {
   const server = new McpServer({ name: 'core-tools', version: '0.1.0' });
   registerTools(server, ALL_TOOLS, deps);
   return server;
-}
-
-/**
- * Read a numeric environment variable, falling back when it is unset or empty.
- * A present but unparseable or out-of-range value is a configuration error and
- * fails startup rather than silently becoming NaN.
- */
-export function numberFromEnv(name: string, fallback: number, { min, max }: { min: number; max: number }): number {
-  const raw = process.env[name];
-  if (raw === undefined || raw.trim() === '') return fallback;
-  const value = Number(raw);
-  if (!Number.isFinite(value) || value < min || value > max) {
-    throw new Error(`${name} must be a number between ${min} and ${max}`);
-  }
-  return value;
-}
-
-/**
- * Read a boolean environment variable. `true` and `1` are on; everything else
- * — unset, empty, `false`, `0`, `no`, a typo — is off. Case and surrounding
- * whitespace are ignored.
- *
- * Every boolean in `buildDepsFromEnv` goes through this one helper so no flag
- * can be read differently from another. Before it, `VERIFY_NPPES_ENABLED`
- * alone disabled on the literal `'false'` while its neighbours enabled on the
- * literal `'true'`, so `VERIFY_NPPES_ENABLED=0` left outbound registry lookups
- * switched on while the same spelling switched everything else off. Every one
- * of these defaults to off: a deployment that sets nothing makes no outbound
- * calls and sends nothing restricted to a model.
- */
-export function booleanFromEnv(name: string): boolean {
-  const raw = process.env[name]?.trim().toLowerCase();
-  return raw === 'true' || raw === '1';
 }
 
 export async function buildDepsFromEnv(): Promise<{ deps: ToolDeps; close: () => Promise<void> }> {
@@ -102,18 +70,44 @@ export async function buildDepsFromEnv(): Promise<{ deps: ToolDeps; close: () =>
 }
 
 export {
-  registerTools,
-  defineTool,
   ToolError,
-  DEFAULT_CONFIDENCE_THRESHOLD,
-  type ToolDeps,
-  type AnyToolDef,
-} from './registry.js';
+  ModelOutputError,
+  ConfigError,
+  describeError,
+  numberFromEnv,
+  booleanFromEnv,
+  requiredEnv,
+  optionalEnv,
+  createLogger,
+  realOrNearestAncestor,
+  assertInsideRoot,
+  runBounded,
+  readJsonl,
+  writeJsonl,
+  csvCell,
+  type NumberEnvOptions,
+  type Logger,
+  type EscapeReason,
+  type InsideRootOptions,
+  type RunBoundedOptions,
+  type RunBoundedOutcome,
+  type JsonlRow,
+} from '@harness/shared';
+export { containsRestrictedPattern, isValidDea, type RestrictedKind } from './shared/redaction/patterns.js';
+export { isRestrictedName, MASKED } from './shared/redaction/names.js';
+export {
+  redactPages,
+  assertRedacted,
+  fieldNameFor,
+  type RedactablePage,
+  type RedactedText,
+  type RedactionHit,
+} from './shared/redaction/text.js';
+export { registerTools, defineTool, DEFAULT_CONFIDENCE_THRESHOLD, type ToolDeps, type AnyToolDef } from './registry.js';
 export {
   callModel,
   callModelJson,
   gatewayFromEnv,
-  ModelOutputError,
   ROUTES,
   type Route,
   type GatewayConfig,
@@ -128,7 +122,5 @@ export {
   type FakeReply,
   type Responder,
 } from './fake-gateway.js';
-export { MASKED, isRestrictedName } from './tools/providers.js';
-export { assertRedacted } from './documents/redact.js';
 export { defaultFormsDir } from './forms/templates.js';
 export { storageRoot, outRoot } from './storage.js';

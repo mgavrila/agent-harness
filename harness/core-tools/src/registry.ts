@@ -2,18 +2,14 @@ import * as z from 'zod/v4';
 import type { McpServer } from '@modelcontextprotocol/server';
 import { and, eq, sql } from 'drizzle-orm';
 import { approvals, encrypt, withTransaction, type Db } from '@harness/db';
+import { ToolError, describeError } from '@harness/shared';
 import { decide, type ActionClass, type Policy } from './policy.js';
 import { hashArgs, writeAudit, type AuditEntry } from './audit.js';
 import type { SinkRegistry } from './effects.js';
 import type { GatewayConfig } from './models.js';
 import type { VerifyConfig } from './tools/verify.js';
 
-export class ToolError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'ToolError';
-  }
-}
+export { ToolError };
 
 export interface SessionContext {
   runId?: string;
@@ -209,7 +205,7 @@ export function auditBaseFor(
  * deliberately generic; the detail is in the audit log when it could be written.
  */
 async function handleUnexpectedError(db: Db, tool: AnyToolDef, base: AuditBase, err: unknown): Promise<ToolCallResult> {
-  const message = err instanceof Error ? err.message : String(err);
+  const message = describeError(err);
   try {
     await writeAudit(db, { ...base, decision: 'error', error: message });
   } catch {
@@ -328,7 +324,7 @@ async function runAuto(
     );
     return envelopeResult({ status: 'ok', result });
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    const message = describeError(err);
     try {
       await writeAudit(deps.db, { ...base, decision: 'error', error: message });
     } catch (auditErr) {

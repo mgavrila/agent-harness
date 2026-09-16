@@ -1,12 +1,8 @@
-import { execFile } from 'node:child_process';
 import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { promisify } from 'node:util';
 import { PDFParse } from 'pdf-parse';
-import { ToolError } from '../registry.js';
-
-const run = promisify(execFile);
+import { ToolError, runBounded } from '@harness/shared';
 
 export interface PageText {
   /** 1-based page number, matching what a reviewer sees and what `fields.source_page` stores. */
@@ -69,17 +65,6 @@ const INSTALL_HINT: Record<string, string> = {
 };
 
 /**
- * True when `err` is the error `execFile` rejects with because the process
- * was killed for running past its `timeout` option, rather than failing on
- * its own. Node sets `killed` only when something (here, the timeout) sent
- * the process a signal; we always ask for `killSignal: 'SIGKILL'`, so this
- * is unambiguous.
- */
-function isTimeoutError(err: unknown): boolean {
-  return typeof err === 'object' && err !== null && (err as { killed?: boolean }).killed === true;
-}
-
-/**
  * Fail early and legibly when an OCR binary is missing, instead of surfacing a
  * bare ENOENT from deep inside a page loop. `pdftoppm -v` writes its banner to
  * stderr and exits 0; `tesseract --version` writes to stdout. Neither stream is
@@ -91,13 +76,12 @@ export async function assertBinary(
   timeoutMs = DEFAULT_ASSERT_TIMEOUT_MS,
 ): Promise<void> {
   const args = name === 'tesseract' ? ['--version'] : ['-v'];
-  try {
-    await run(name, args, { timeout: timeoutMs, killSignal: 'SIGKILL' });
-  } catch (err) {
-    if (isTimeoutError(err))
-      throw new ToolError(`${name} did not respond within ${timeoutMs}ms while checking it is installed`);
-    throw new ToolError(`${name} is not installed; OCR is unavailable. Install it: ${INSTALL_HINT[name]}`);
+  const outcome = await runBounded(name, args, { timeoutMs });
+  if (outcome.ok) return;
+  if (outcome.reason === 'timeout') {
+    throw new ToolError(`${name} did not respond within ${timeoutMs}ms while checking it is installed`);
   }
+  throw new ToolError(`${name} is not installed; OCR is unavailable. Install it: ${INSTALL_HINT[name]}`);
 }
 
 /**
@@ -108,17 +92,13 @@ export async function assertBinary(
  * values read off the page — is ever quoted back.
  */
 async function tesseractOnImage(imagePath: string, lang: string, timeoutMs: number, page: number): Promise<string> {
-  try {
-    const { stdout } = await run('tesseract', [imagePath, 'stdout', '-l', lang, '--psm', '6'], {
-      maxBuffer: 32 * 1024 * 1024,
-      timeout: timeoutMs,
-      killSignal: 'SIGKILL',
-    });
-    return stdout;
-  } catch (err) {
-    if (isTimeoutError(err)) throw new ToolError(`ocr timed out on page ${page} of ${path.basename(imagePath)}`);
-    throw new ToolError(`OCR failed on ${path.basename(imagePath)}`);
-  }
+  const outcome = await runBounded('tesseract', [imagePath, 'stdout', '-l', lang, '--psm', '6'], {
+    maxBuffer: 32 * 1024 * 1024,
+    timeoutMs,
+  });
+  if (outcome.ok) return outcome.stdout;
+  if (outcome.reason === 'timeout') throw new ToolError(`ocr timed out on page ${page} of ${path.basename(imagePath)}`);
+  throw new ToolError(`OCR failed on ${path.basename(imagePath)}`);
 }
 
 /**
@@ -142,13 +122,13 @@ export async function ocrPdf(
     const pages: PageText[] = [];
     for (let num = 1; num <= pageCount; num += 1) {
       const prefix = path.join(scratch, `p${num}`);
-      try {
-        await run('pdftoppm', ['-r', String(dpi), '-png', '-f', String(num), '-l', String(num), absPath, prefix], {
-          timeout: rasteriseTimeoutMs,
-          killSignal: 'SIGKILL',
-        });
-      } catch (err) {
-        if (isTimeoutError(err)) throw new ToolError(`rasterise timed out for ${path.basename(absPath)}`);
+      const outcome = await runBounded(
+        'pdftoppm',
+        ['-r', String(dpi), '-png', '-f', String(num), '-l', String(num), absPath, prefix],
+        { timeoutMs: rasteriseTimeoutMs },
+      );
+      if (!outcome.ok) {
+        if (outcome.reason === 'timeout') throw new ToolError(`rasterise timed out for ${path.basename(absPath)}`);
         throw new ToolError(`could not rasterise page ${num} of the document`);
       }
       // pdftoppm appends a zero-padded page suffix whose width depends on the

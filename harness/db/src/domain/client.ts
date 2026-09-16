@@ -1,7 +1,7 @@
 import { drizzle, type NodePgQueryResultHKT } from 'drizzle-orm/node-postgres';
 import type { PgDatabase } from 'drizzle-orm/pg-core';
 import pg from 'pg';
-import { createLogger } from '../shared/log.js';
+import { createLogger } from '@harness/shared';
 import * as schema from './schema.js';
 
 const log = createLogger('db');

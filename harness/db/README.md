@@ -1,13 +1,13 @@
 # @harness/db
 
 Schema, migrations, the connection pool and the encryption primitives. Everything else in the
-workspace sits above this package; it imports nothing from the workspace itself.
+workspace sits above this package; the one workspace package it imports is `@harness/shared`,
+which sits below it.
 
 ## Layout
 
 ```
 src/shared/crypto.ts    AES-256-GCM encrypt/decrypt, key loading
-src/shared/log.ts       a scoped stderr logger (local: importing core-tools would be a cycle)
 src/domain/schema.ts    every table, index and constraint — the drizzle-kit source of truth
 src/domain/client.ts    createDb, withTransaction, the Db type
 src/domain/migrate.ts   runMigrations
@@ -15,6 +15,9 @@ src/app/migrate.ts      the `pnpm --filter @harness/db migrate` entrypoint
 src/index.ts            the public API
 src/testing.ts          ./testing: TEST_DATABASE_URL, resetDatabase, useTestDb
 ```
+
+Logging, environment parsing and the error types come from `@harness/shared`, which sits below
+this package in the graph and has no workspace dependency of its own.
 
 ## Public API
 

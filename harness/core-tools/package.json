@@ -22,6 +22,7 @@
     "@harness/db": "workspace:*",
     "@harness/gateway": "workspace:*",
     "@harness/pack-healthcare": "workspace:*",
+    "@harness/shared": "workspace:*",
     "@modelcontextprotocol/server": "^2.0.0",
     "dotenv": "^17.4.2",
     "drizzle-orm": "^0.45.2",

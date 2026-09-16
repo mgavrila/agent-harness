@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { parse as parseYaml } from 'yaml';
 import * as z from 'zod/v4';
+import { optionalEnv } from '@harness/shared';
 
 export const ACTION_CLASSES = ['read', 'write.internal', 'external', 'financial', 'destructive'] as const;
 export type ActionClass = (typeof ACTION_CLASSES)[number];
@@ -35,7 +36,7 @@ export function parsePolicy(yamlText: string): Policy {
   return { ...DEFAULT_POLICY, ...(parsed.data.classes ?? {}) };
 }
 
-export async function loadPolicy(filePath: string | undefined = process.env.HARNESS_POLICY_FILE): Promise<Policy> {
+export async function loadPolicy(filePath: string | undefined = optionalEnv('HARNESS_POLICY_FILE')): Promise<Policy> {
   if (!filePath) return { ...DEFAULT_POLICY };
   const text = await readFile(filePath, 'utf8');
   return parsePolicy(text);

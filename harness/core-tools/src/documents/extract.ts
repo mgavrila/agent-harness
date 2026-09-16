@@ -1,6 +1,6 @@
 import { createRequire } from 'node:module';
 import * as z from 'zod/v4';
-import { isRestrictedName } from '../tools/providers.js';
+import { isRestrictedName } from '../shared/redaction/names.js';
 import { CREDENTIAL_KINDS } from '../deadlines/compute.js';
 import type { ModelMessage } from '../models.js';
 import { DOCUMENT_KINDS, type DocumentKind } from './storage.js';
@@ -62,7 +62,7 @@ const ProviderManifest = z
       if (f.restricted && !isRestrictedName(f.name)) {
         ctx.addIssue({
           code: 'custom',
-          message: `restricted field "${f.name}" is not recognised by isRestrictedName; add its stem to RESTRICTED_NAME_KEYS in tools/providers.ts`,
+          message: `restricted field "${f.name}" is not recognised by isRestrictedName; add its stem to RESTRICTED_NAME_KEYS in shared/redaction/names.ts`,
         });
       }
     }

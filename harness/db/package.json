@@ -15,6 +15,7 @@
     "migrate": "tsx src/app/migrate.ts"
   },
   "dependencies": {
+    "@harness/shared": "workspace:*",
     "dotenv": "^17.4.2",
     "drizzle-orm": "^0.45.2",
     "pg": "^8.23.0"

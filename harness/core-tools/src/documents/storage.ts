@@ -1,37 +1,10 @@
 import { createHash } from 'node:crypto';
-import { readFile, realpath } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { ToolError } from '../registry.js';
+import { ToolError, assertInsideRoot } from '@harness/shared';
 
 export const DOCUMENT_KINDS = ['state_license', 'dea_certificate', 'malpractice_certificate', 'w9', 'other'] as const;
 export type DocumentKind = (typeof DOCUMENT_KINDS)[number];
-
-/**
- * Resolve symlinks in `target`, walking up to the nearest existing ancestor
- * when `target` itself does not exist yet and re-appending the remaining
- * segments untouched (a path segment that does not exist cannot itself be a
- * symlink, so this is safe).
- *
- * The one containment primitive for the whole file store: `../storage.ts`
- * re-exports this for the `out/` tree rather than keeping a second copy, so
- * ingest and generated output are contained by the same code.
- */
-export async function realOrNearestAncestor(target: string): Promise<string> {
-  const remainder: string[] = [];
-  let current = target;
-  for (;;) {
-    try {
-      const real = await realpath(current);
-      return remainder.length > 0 ? path.join(real, ...remainder) : real;
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
-      const parent = path.dirname(current);
-      if (parent === current) throw err; // reached the filesystem root; give up
-      remainder.unshift(path.basename(current));
-      current = parent;
-    }
-  }
-}
 
 /**
  * Turn a caller-supplied path into an absolute path that is provably inside
@@ -45,18 +18,9 @@ export async function realOrNearestAncestor(target: string): Promise<string> {
  */
 export async function resolveStoragePath(storageDir: string, requested: string): Promise<string> {
   if (requested.trim() === '') throw new ToolError('document path is empty');
-  const root = path.resolve(storageDir);
-  const resolved = path.resolve(root, requested);
-  // The separator matters: `${root}-evil` starts with `root` but is not in it.
-  if (resolved !== root && !resolved.startsWith(root + path.sep)) {
+  return assertInsideRoot(requested, storageDir, () => {
     throw new ToolError('document path is outside HARNESS_STORAGE_DIR');
-  }
-  const realRoot = await realOrNearestAncestor(root);
-  const realResolved = await realOrNearestAncestor(resolved);
-  if (realResolved !== realRoot && !realResolved.startsWith(realRoot + path.sep)) {
-    throw new ToolError('document path is outside HARNESS_STORAGE_DIR');
-  }
-  return resolved;
+  });
 }
 
 export async function readDocumentBytes(absPath: string): Promise<Uint8Array> {

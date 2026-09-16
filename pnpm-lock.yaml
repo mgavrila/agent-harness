@@ -56,6 +56,9 @@ importers:
       '@harness/pack-healthcare':
         specifier: workspace:*
         version: link:../packs/healthcare
+      '@harness/shared':
+        specifier: workspace:*
+        version: link:../harness/shared
       dotenv:
         specifier: ^17.4.2
         version: 17.4.2
@@ -93,6 +96,9 @@ importers:
       '@harness/db':
         specifier: workspace:*
         version: link:../db
+      '@harness/shared':
+        specifier: workspace:*
+        version: link:../shared
       '@modelcontextprotocol/client':
         specifier: ^2.0.0
         version: 2.0.0
@@ -136,6 +142,9 @@ importers:
       '@harness/pack-healthcare':
         specifier: workspace:*
         version: link:../../packs/healthcare
+      '@harness/shared':
+        specifier: workspace:*
+        version: link:../shared
       '@modelcontextprotocol/server':
         specifier: ^2.0.0
         version: 2.0.0
@@ -182,6 +191,9 @@ importers:
 
   harness/db:
     dependencies:
+      '@harness/shared':
+        specifier: workspace:*
+        version: link:../shared
       dotenv:
         specifier: ^17.4.2
         version: 17.4.2
@@ -213,6 +225,9 @@ importers:
 
   harness/gateway:
     dependencies:
+      '@harness/shared':
+        specifier: workspace:*
+        version: link:../shared
       yaml:
         specifier: ^2.9.1
         version: 2.9.1
@@ -233,8 +248,23 @@ importers:
         specifier: ^5.0.0
         version: 5.0.0(@types/node@26.5.1)(vite@8.3.0(@types/node@26.5.1)(esbuild@0.28.2)(tsx@4.23.13)(yaml@2.9.1))
 
+  harness/shared:
+    devDependencies:
+      '@types/node':
+        specifier: ^26.5.1
+        version: 26.5.1
+      typescript:
+        specifier: ^7.0.2
+        version: 7.0.2
+      vitest:
+        specifier: ^5.0.0
+        version: 5.0.0(@types/node@26.5.1)(vite@8.3.0(@types/node@26.5.1)(esbuild@0.28.2)(tsx@4.23.13)(yaml@2.9.1))
+
   packs/healthcare:
     dependencies:
+      '@harness/shared':
+        specifier: workspace:*
+        version: link:../../harness/shared
       pdf-lib:
         specifier: ^1.17.1
         version: 1.17.1
@@ -256,6 +286,10 @@ importers:
         version: 5.0.0(@types/node@26.5.1)(vite@8.3.0(@types/node@26.5.1)(esbuild@0.28.2)(tsx@4.23.13)(yaml@2.9.1))
 
   scripts:
+    dependencies:
+      '@harness/shared':
+        specifier: workspace:*
+        version: link:../harness/shared
     devDependencies:
       '@types/node':
         specifier: ^26.5.1

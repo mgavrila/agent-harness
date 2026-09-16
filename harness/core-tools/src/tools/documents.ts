@@ -12,7 +12,7 @@ import {
   toStorageRelative,
 } from '../documents/storage.js';
 import { pdfPageCount, extractDocumentText } from '../documents/text.js';
-import { assertRedacted, redactPages } from '../documents/redact.js';
+import { assertRedacted, redactPages } from '../shared/redaction/text.js';
 import { callModelJson, type ModelMessage } from '../models.js';
 import {
   buildClassificationMessages,

@@ -38,6 +38,7 @@ const path = require('node:path');
 
 /** @type {{ name: string, src: string, severity: 'warn' | 'error' }[]} */
 const PACKAGES = [
+  { name: 'shared', src: 'harness/shared/src', severity: 'error' },
   { name: 'db', src: 'harness/db/src', severity: 'error' },
   { name: 'gateway', src: 'harness/gateway/src', severity: 'error' },
   { name: 'core-tools', src: 'harness/core-tools/src', severity: 'warn' },
@@ -92,6 +93,7 @@ function layerRules({ name, src, severity }) {
 
 /** Every workspace package directory, in the order pnpm-workspace.yaml lists them. */
 const WORKSPACE_DIRS = [
+  'harness/shared',
   'harness/db',
   'harness/gateway',
   'harness/core-tools',
@@ -170,6 +172,14 @@ const GLOBAL_RULES = [
       ],
     },
     to: {},
+  },
+  {
+    name: 'shared-has-no-workspace-dependencies',
+    comment:
+      '@harness/shared is the bottom of the graph. @harness/db and every pack import it, so a dependency on any other workspace package would be a cycle. Node built-ins only.',
+    severity: 'error',
+    from: { path: '^harness/shared/src/' },
+    to: { path: '^(harness|packs|evals|scripts)/', pathNot: '^harness/shared/src/' },
   },
   ...WORKSPACE_DIRS.map(crossPackageRule),
 ];

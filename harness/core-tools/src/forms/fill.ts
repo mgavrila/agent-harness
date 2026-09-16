@@ -1,6 +1,6 @@
 import { PDFDocument } from 'pdf-lib';
 import { ToolError } from '../registry.js';
-import { isRestrictedName } from '../tools/providers.js';
+import { isRestrictedName } from '../shared/redaction/names.js';
 import { mappingLabel, type TemplateMapping } from './templates.js';
 
 /** Everything a template or a roster may read about one provider. */
