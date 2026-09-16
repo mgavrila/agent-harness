@@ -5,8 +5,8 @@ import { booleanFromEnv, numberFromEnv } from '@harness/shared';
 import { registerTools } from './domain/tooling/registry.js';
 import { DEFAULT_CONFIDENCE_THRESHOLD, type ToolDeps } from './domain/tooling/types.js';
 import { loadPolicy } from './domain/tooling/policy.js';
-import { gatewayFromEnv } from './models.js';
-import { storageRoot } from './storage.js';
+import { gatewayFromEnv } from './domain/models/gateway.js';
+import { storageRoot } from './domain/storage/layout.js';
 import { defaultFormsDir } from './forms/templates.js';
 import { providerTools } from './tools/providers.js';
 import { deadlineTools } from './tools/deadlines.js';
@@ -47,7 +47,7 @@ export async function buildDepsFromEnv(): Promise<{ deps: ToolDeps; close: () =>
     confidenceThreshold: numberFromEnv('CONFIDENCE_THRESHOLD', DEFAULT_CONFIDENCE_THRESHOLD, { min: 0, max: 1 }),
     gateway: gatewayFromEnv(),
     // One root for the whole file store, required and with no default (see
-    // storageRoot). Ingested documents live under it as documents/storage.ts
+    // storageRoot). Ingested documents live under it as domain/storage/
     // lays them out; generated output goes under `<root>/out`.
     storageDir: storageRoot(),
     formsDir: process.env.HARNESS_FORMS_DIR?.trim() ? path.resolve(process.env.HARNESS_FORMS_DIR) : defaultFormsDir(),
@@ -106,15 +106,8 @@ export {
 } from './shared/redaction/text.js';
 export { registerTools, defineTool } from './domain/tooling/registry.js';
 export { DEFAULT_CONFIDENCE_THRESHOLD, type ToolDeps, type AnyToolDef } from './domain/tooling/types.js';
-export {
-  callModel,
-  callModelJson,
-  gatewayFromEnv,
-  ROUTES,
-  type Route,
-  type GatewayConfig,
-  type ModelCallResult,
-} from './models.js';
+export { callModel, callModelJson, gatewayFromEnv } from './domain/models/gateway.js';
+export { ROUTES, type Route, type GatewayConfig, type ModelCallResult } from './domain/models/types.js';
 export { DEFAULT_POLICY, decide, type Policy, type ActionClass, type Behavior } from './domain/tooling/policy.js';
 export { connectInProcess } from './domain/tooling/in-process.js';
 export {
@@ -123,6 +116,6 @@ export {
   type FakeGatewayCall,
   type FakeReply,
   type Responder,
-} from './fake-gateway.js';
+} from './domain/models/fake.js';
 export { defaultFormsDir } from './forms/templates.js';
-export { storageRoot, outRoot } from './storage.js';
+export { storageRoot, outRoot } from './domain/storage/layout.js';

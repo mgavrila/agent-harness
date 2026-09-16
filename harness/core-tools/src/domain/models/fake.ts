@@ -1,6 +1,6 @@
 import { createServer, type IncomingMessage, type Server } from 'node:http';
 import { AddressInfo } from 'node:net';
-import type { ModelMessage } from './models.js';
+import type { ModelMessage } from './types.js';
 
 export interface FakeGatewayCall {
   model: string;

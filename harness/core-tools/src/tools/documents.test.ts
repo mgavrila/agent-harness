@@ -46,7 +46,7 @@ async function writePdf(rel: string, pageTexts: string[]): Promise<void> {
 beforeAll(async () => {
   storageDir = await mkdtemp(path.join(tmpdir(), 'harness-docs-'));
   // Enough text per page that extractDocumentText reads the text layer rather
-  // than falling back to OCR (see MIN_CHARS_PER_PAGE in documents/text.ts).
+  // than falling back to OCR (see MIN_CHARS_PER_PAGE in domain/documents/text.ts).
   await writePdf('incoming/license.pdf', [
     'State of California Medical Board\nPhysician and Surgeon License\nName: Ada Lovelace MD\nNPI: 1234567890',
     'Specialty: Internal Medicine\nLicense Status: Active\nExpiration Date: 2027-03-31',

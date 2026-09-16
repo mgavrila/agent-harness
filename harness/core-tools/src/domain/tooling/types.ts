@@ -1,7 +1,7 @@
 import type * as z from 'zod/v4';
 import type { Db } from '@harness/db';
 import type { SinkRegistry } from '../../effects.js'; // until Task 7 moves it to ../effects/types.js
-import type { GatewayConfig } from '../../models.js'; // until Task 6 moves it to ../models/types.js
+import type { GatewayConfig } from '../models/types.js';
 import type { VerifyConfig } from '../../tools/verify.js'; // until Task 7 moves it to ../verify/types.js
 import type { ActionClass, Policy } from './policy.js';
 import type { AuditEntry } from './audit.js';

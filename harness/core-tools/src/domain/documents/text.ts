@@ -3,17 +3,9 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { PDFParse } from 'pdf-parse';
 import { ToolError, runBounded } from '@harness/shared';
+import type { ExtractedText, PageText } from './types.js';
 
-export interface PageText {
-  /** 1-based page number, matching what a reviewer sees and what `fields.source_page` stores. */
-  num: number;
-  text: string;
-}
-
-export interface ExtractedText {
-  pages: PageText[];
-  ocrUsed: boolean;
-}
+export type { ExtractedText, PageText };
 
 /** Below this many characters a page is treated as having no usable text layer. */
 export const MIN_CHARS_PER_PAGE = 40;

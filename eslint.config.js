@@ -162,8 +162,8 @@ export default tseslint.config(
         },
       ],
       'import-x/no-default-export': 'error',
-      // Warn until Task 11: registry.ts <-> tools/verify.ts, registry.ts <-> models.ts and
-      // registry.ts <-> effects.ts are type-only cycles today, and Tasks 5-7 are what remove them.
+      // Warn until Task 11: registry.ts <-> tools/verify.ts and registry.ts <-> effects.ts are
+      // type-only cycles today, and Task 7 is what removes them.
       'import-x/no-cycle': ['warn', { maxDepth: Infinity }],
 
       'no-console': 'warn',

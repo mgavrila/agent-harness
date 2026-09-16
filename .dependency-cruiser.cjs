@@ -135,7 +135,7 @@ const GLOBAL_RULES = [
   {
     name: 'no-circular',
     comment:
-      'A cycle means two modules are really one. Warn until Task 11 of the maintainability plan: registry.ts sits in three type-only cycles that Tasks 5 to 7 remove.',
+      'A cycle means two modules are really one. Warn until Task 11 of the maintainability plan: registry.ts sits in two type-only cycles that Task 7 removes.',
     severity: 'warn',
     from: {},
     to: { circular: true },

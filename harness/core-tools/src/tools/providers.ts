@@ -7,8 +7,8 @@ import type { AnyToolDef, ToolDeps } from '../domain/tooling/types.js';
 import { MASKED, isRestrictedName } from '../shared/redaction/names.js';
 import { CREDENTIAL_KINDS } from '../deadlines/compute.js';
 
-// Re-exported so `documents/extract.ts`, `forms/fill.ts` and the tests keep resolving through
-// this module until Task 7 points every caller at the shared redaction folder directly.
+// Re-exported so `forms/templates.test.ts` keeps resolving through this module until Task 7
+// points its last caller at the shared redaction folder directly.
 export { MASKED, isRestrictedName };
 
 export const FieldInput = z.object({

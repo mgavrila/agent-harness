@@ -6,7 +6,7 @@ import { credentials, fields } from '@harness/db';
 import { ToolError } from '@harness/shared';
 import { defineTool } from '../domain/tooling/registry.js';
 import type { AnyToolDef, ToolDeps } from '../domain/tooling/types.js';
-import { writeOutFile, resolveOutFile } from '../storage.js';
+import { writeOutFile, resolveOutFile } from '../domain/storage/file-store.js';
 import { stageEffect } from '../effects.js';
 import { getTemplate, loadManifest, mappingLabel } from '../forms/templates.js';
 import { fillTemplatePdf, latestCredential, resolveMappings, type ProviderData } from '../forms/fill.js';

@@ -83,7 +83,8 @@ export function renderLiteLlmConfig(routing: RoutingFile): string {
     },
     litellm_settings: {
       // Providers differ in which OpenAI parameters they accept; dropping the
-      // unsupported ones keeps one calling convention in src/models.ts.
+      // unsupported ones keeps one calling convention in core-tools'
+      // domain/models/gateway.ts.
       drop_params: true,
       set_verbose: false,
       // Prompts may contain patient-adjacent text. Never echo them into logs.

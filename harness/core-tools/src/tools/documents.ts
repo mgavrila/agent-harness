@@ -5,25 +5,17 @@ import { documents } from '@harness/db';
 import { ToolError } from '@harness/shared';
 import { defineTool } from '../domain/tooling/registry.js';
 import type { AnyToolDef, ToolDeps } from '../domain/tooling/types.js';
-import {
-  DOCUMENT_KINDS,
-  documentTextPath,
-  readDocumentBytes,
-  resolveStoragePath,
-  sha256File,
-  toStorageRelative,
-} from '../documents/storage.js';
-import { pdfPageCount, extractDocumentText } from '../documents/text.js';
+import { DOCUMENT_KINDS } from '../domain/documents/types.js';
+import { documentTextPath, toStorageRelative } from '../domain/storage/layout.js';
+import { readDocumentBytes, resolveStoragePath, sha256File } from '../domain/storage/file-store.js';
+import { pdfPageCount, extractDocumentText } from '../domain/documents/text.js';
 import { assertRedacted, redactPages } from '../shared/redaction/text.js';
-import { callModelJson, type ModelMessage } from '../models.js';
-import {
-  buildClassificationMessages,
-  buildClassificationSchema,
-  buildExtractionMessages,
-  buildExtractionSchema,
-  loadHealthcareManifest,
-  parseExtraction,
-} from '../documents/extract.js';
+import { callModelJson } from '../domain/models/gateway.js';
+import type { ModelMessage } from '../domain/models/types.js';
+import { loadHealthcareManifest } from '../domain/documents/manifest.js';
+import { buildClassificationSchema, buildExtractionSchema } from '../domain/documents/schema.js';
+import { buildClassificationMessages, buildExtractionMessages } from '../domain/documents/prompts.js';
+import { parseExtraction } from '../domain/documents/parse.js';
 import { requireProvider, upsertProviderRecord, type CredentialInput, type FieldInput } from './providers.js';
 
 export { DOCUMENT_KINDS, documentTextPath };

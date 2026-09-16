@@ -1,5 +1,5 @@
 {
-  "$comment": "Extraction manifest for the healthcare credentialing pack. This is NOT a JSON Schema: buildExtractionSchema() in harness/core-tools/src/documents/extract.ts expands it into the inlined JSON Schema sent to the model as response_format. A manifest is used because structured-output support across providers is unreliable with $ref and $defs, and because restricted fields must be dropped from the model-facing schema while staying part of the record.",
+  "$comment": "Extraction manifest for the healthcare credentialing pack. This is NOT a JSON Schema: buildExtractionSchema() in harness/core-tools/src/domain/documents/schema.ts expands it into the inlined JSON Schema sent to the model as response_format. A manifest is used because structured-output support across providers is unreliable with $ref and $defs, and because restricted fields must be dropped from the model-facing schema while staying part of the record.",
   "version": "1.0.0",
   "fields": [
     {

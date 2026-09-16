@@ -15,7 +15,10 @@ venv/
 
 # data and generated files
 data/
-storage/
+# Anchored: an unanchored `storage/` also matches source directories at any depth, which
+# silently hid harness/core-tools/src/domain/storage/ from git. The file store this ignores
+# is a repository-root directory; every deployed root is an absolute path outside the tree.
+/storage/
 .harness-storage/
 *.sqlite
 packs/*/synthetic/out/

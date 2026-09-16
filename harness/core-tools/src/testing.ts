@@ -89,6 +89,6 @@ export {
   type FakeGatewayCall,
   type FakeReply,
   type Responder,
-} from './fake-gateway.js';
+} from './domain/models/fake.js';
 
 export { useTestDb } from '@harness/db/testing';

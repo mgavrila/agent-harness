@@ -1,27 +1,17 @@
 import * as z from 'zod/v4';
 import { and, eq } from 'drizzle-orm';
 import { modelCalls } from '@harness/db';
-import { ROUTES, type Route } from '@harness/gateway/routing';
 import { ModelOutputError, ToolError, requiredEnv } from '@harness/shared';
-import type { ToolDeps } from './domain/tooling/types.js';
-
-export { ROUTES, type Route };
-export { ModelOutputError };
-
-export interface GatewayConfig {
-  /** Origin of the LiteLLM proxy, no trailing slash. */
-  baseUrl: string;
-  /** The proxy master key. Provider keys never leave the proxy. */
-  apiKey: string;
-  timeoutMs: number;
-  /**
-   * The runaway breaker from spec section 4.2. LiteLLM's `max_budget` is a
-   * daily cap across everything; this is the per-run one. A loop that calls the
-   * extract route a thousand times stays inside the daily budget right up until
-   * it does not, and by then the day is gone.
-   */
-  maxCallsPerRun: number;
-}
+import type { ToolDeps } from '../tooling/types.js';
+import {
+  ROUTES,
+  type GatewayConfig,
+  type JsonSchemaSpec,
+  type ModelCallOptions,
+  type ModelCallResult,
+  type ModelGateway,
+  type Route,
+} from './types.js';
 
 export function gatewayFromEnv(): GatewayConfig {
   const apiKey = requiredEnv('LITELLM_MASTER_KEY');
@@ -40,34 +30,6 @@ export function gatewayFromEnv(): GatewayConfig {
     throw new Error('HARNESS_GATEWAY_MAX_CALLS_PER_RUN must be a whole number between 1 and 10000');
   }
   return { baseUrl: raw.replace(/\/+$/, ''), apiKey, timeoutMs: timeout, maxCallsPerRun: maxCalls };
-}
-
-export interface ModelMessage {
-  role: 'system' | 'user' | 'assistant';
-  content: string;
-}
-
-export interface JsonSchemaSpec {
-  /** A schema name the provider echoes back. Lowercase, underscores. */
-  name: string;
-  schema: Record<string, unknown>;
-}
-
-export interface ModelCallOptions {
-  route: Route;
-  messages: ModelMessage[];
-  jsonSchema?: JsonSchemaSpec;
-  temperature?: number;
-  maxTokens?: number;
-}
-
-export interface ModelCallResult {
-  text: string;
-  /** The model the gateway actually used, which may be a fallback. */
-  model: string;
-  inputTokens: number;
-  outputTokens: number;
-  costUsd: number;
 }
 
 interface ChatCompletionResponse {
@@ -93,6 +55,64 @@ function gatewayError(route: Route, status: number, body: string): ToolError {
   return new ToolError(`model route "${route}" failed at the gateway (HTTP ${status})`);
 }
 
+/**
+ * The LiteLLM adapter: one chat completion over HTTP, and nothing else. It knows the
+ * gateway's wire format and its failure modes; it knows nothing about runs, budgets or the
+ * database, which is what `callModel` below adds.
+ */
+export function httpGateway(config: GatewayConfig): ModelGateway {
+  return {
+    async call(opts: ModelCallOptions): Promise<ModelCallResult> {
+      const body: Record<string, unknown> = {
+        model: opts.route,
+        messages: opts.messages,
+      };
+      if (opts.temperature !== undefined) body.temperature = opts.temperature;
+      if (opts.maxTokens !== undefined) body.max_tokens = opts.maxTokens;
+      if (opts.jsonSchema) {
+        body.response_format = {
+          type: 'json_schema',
+          json_schema: { name: opts.jsonSchema.name, strict: true, schema: opts.jsonSchema.schema },
+        };
+      }
+
+      let response: Response;
+      try {
+        response = await fetch(`${config.baseUrl}/v1/chat/completions`, {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            authorization: `Bearer ${config.apiKey}`,
+          },
+          body: JSON.stringify(body),
+          signal: AbortSignal.timeout(config.timeoutMs),
+        });
+      } catch (err) {
+        const name = err instanceof Error ? err.name : '';
+        if (name === 'TimeoutError' || name === 'AbortError') {
+          throw new ToolError(`model route "${opts.route}" timed out after ${config.timeoutMs}ms`);
+        }
+        throw new ToolError(`model route "${opts.route}" could not reach the gateway at ${config.baseUrl}`);
+      }
+
+      if (!response.ok) {
+        throw gatewayError(opts.route, response.status, await response.text().catch(() => ''));
+      }
+
+      const payload = (await response.json()) as ChatCompletionResponse;
+      const text = payload.choices?.[0]?.message?.content ?? '';
+      const model = payload.model ?? opts.route;
+      const inputTokens = payload.usage?.prompt_tokens ?? 0;
+      const outputTokens = payload.usage?.completion_tokens ?? 0;
+      const costHeader = response.headers.get('x-litellm-response-cost');
+      const parsedCost = costHeader === null ? Number.NaN : Number(costHeader);
+      const costUsd = Number.isFinite(parsedCost) ? parsedCost : 0;
+
+      return { text, model, inputTokens, outputTokens, costUsd };
+    },
+  };
+}
+
 export async function callModel(deps: ToolDeps, opts: ModelCallOptions): Promise<ModelCallResult> {
   if (!ROUTES.includes(opts.route)) throw new ToolError(`unknown model route "${opts.route}"`);
 
@@ -112,50 +132,7 @@ export async function callModel(deps: ToolDeps, opts: ModelCallOptions): Promise
     }
   }
 
-  const body: Record<string, unknown> = {
-    model: opts.route,
-    messages: opts.messages,
-  };
-  if (opts.temperature !== undefined) body.temperature = opts.temperature;
-  if (opts.maxTokens !== undefined) body.max_tokens = opts.maxTokens;
-  if (opts.jsonSchema) {
-    body.response_format = {
-      type: 'json_schema',
-      json_schema: { name: opts.jsonSchema.name, strict: true, schema: opts.jsonSchema.schema },
-    };
-  }
-
-  let response: Response;
-  try {
-    response = await fetch(`${deps.gateway.baseUrl}/v1/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        authorization: `Bearer ${deps.gateway.apiKey}`,
-      },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(deps.gateway.timeoutMs),
-    });
-  } catch (err) {
-    const name = err instanceof Error ? err.name : '';
-    if (name === 'TimeoutError' || name === 'AbortError') {
-      throw new ToolError(`model route "${opts.route}" timed out after ${deps.gateway.timeoutMs}ms`);
-    }
-    throw new ToolError(`model route "${opts.route}" could not reach the gateway at ${deps.gateway.baseUrl}`);
-  }
-
-  if (!response.ok) {
-    throw gatewayError(opts.route, response.status, await response.text().catch(() => ''));
-  }
-
-  const payload = (await response.json()) as ChatCompletionResponse;
-  const text = payload.choices?.[0]?.message?.content ?? '';
-  const model = payload.model ?? opts.route;
-  const inputTokens = payload.usage?.prompt_tokens ?? 0;
-  const outputTokens = payload.usage?.completion_tokens ?? 0;
-  const costHeader = response.headers.get('x-litellm-response-cost');
-  const parsedCost = costHeader === null ? Number.NaN : Number(costHeader);
-  const costUsd = Number.isFinite(parsedCost) ? parsedCost : 0;
+  const result = await httpGateway(deps.gateway).call(opts);
 
   // Attribution only. LiteLLM's own spend tables are what enforce the budget;
   // this row joins the spend to a run and a route. It is written on the same
@@ -165,13 +142,13 @@ export async function callModel(deps: ToolDeps, opts: ModelCallOptions): Promise
     runId: deps.context.runId ?? null,
     client: deps.client,
     route: opts.route,
-    model,
-    inputTokens,
-    outputTokens,
-    costUsd,
+    model: result.model,
+    inputTokens: result.inputTokens,
+    outputTokens: result.outputTokens,
+    costUsd: result.costUsd,
   });
 
-  return { text, model, inputTokens, outputTokens, costUsd };
+  return result;
 }
 
 /** Some providers wrap JSON in a markdown fence even under a response schema. */

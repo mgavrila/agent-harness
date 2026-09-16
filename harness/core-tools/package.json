@@ -7,11 +7,11 @@
     ".": "./src/server.ts",
     "./testing": "./src/testing.ts",
     "./effects": "./src/effects.ts",
-    "./fake-gateway": "./src/fake-gateway.ts",
+    "./fake-gateway": "./src/domain/models/fake.ts",
     "./in-process": "./src/domain/tooling/in-process.ts",
-    "./models": "./src/models.ts",
+    "./models": "./src/domain/models/gateway.ts",
     "./reconcile": "./src/domain/tooling/reconcile.ts",
-    "./storage": "./src/storage.ts"
+    "./storage": "./src/domain/storage/layout.ts"
   },
   "scripts": {
     "test": "vitest run",

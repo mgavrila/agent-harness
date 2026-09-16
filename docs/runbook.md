@@ -316,8 +316,8 @@ ingest and `resolveOutFile` for output. Each compares the lexical path *and*
 the symlink-resolved path against its root, so neither an absolute path, nor a
 `..` segment, nor a symlink planted inside the tree can name a file outside it.
 `realOrNearestAncestor` is the shared primitive behind both; it lives in
-`documents/storage.ts` and `storage.ts` imports it, so there is one
-implementation to keep right.
+`@harness/shared` and `domain/storage/file-store.ts` reaches it through
+`assertInsideRoot`, so there is one implementation to keep right.
 
 In Compose, the same named volume is mounted into the `hermes` container (where
 the core-tools child writes the file) and the `approvals` container (where the

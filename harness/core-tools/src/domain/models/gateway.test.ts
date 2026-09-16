@@ -2,10 +2,10 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import * as z from 'zod/v4';
 import { eq } from 'drizzle-orm';
 import { modelCalls, runs } from '@harness/db';
-import { ToolError } from '@harness/shared';
-import type { ToolDeps } from './domain/tooling/types.js';
-import { callModel, callModelJson, gatewayFromEnv, ModelOutputError } from './models.js';
-import { makeTestDeps, useTestDb, startFakeGateway, type FakeGateway } from './testing.js';
+import { ModelOutputError, ToolError } from '@harness/shared';
+import { makeTestDeps, useTestDb, startFakeGateway, type FakeGateway } from '../../testing.js';
+import type { ToolDeps } from '../tooling/types.js';
+import { callModel, callModelJson, gatewayFromEnv } from './gateway.js';
 
 const db = useTestDb();
 let gateway: FakeGateway;
