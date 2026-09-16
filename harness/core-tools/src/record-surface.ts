@@ -1,0 +1,195 @@
+import { execFile } from 'node:child_process';
+import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
+import { connectInProcess } from './in-process.js';
+import { DEFAULT_POLICY } from './policy.js';
+import { DEFAULT_CONFIDENCE_THRESHOLD, type ToolDeps } from './registry.js';
+import { createCoreToolsServer } from './server.js';
+import { NPPES_DEFAULT_BASE_URL } from './tools/verify.js';
+
+const run = promisify(execFile);
+
+/** Where both snapshots live, relative to the repository root. */
+export const ARCHITECTURE_DIR = 'docs/architecture';
+
+export interface ToolSurfaceEntry {
+  name: string;
+  inputSchema: unknown;
+  outputSchema: unknown;
+}
+
+/**
+ * Dependencies good enough to *register* every tool and no further. `registerTools` writes
+ * each definition into `deps.tools` and reads its schemas; it never calls a handler, so
+ * nothing below is ever used. The database handle is a null cast on purpose: recording the
+ * public surface must not need Postgres, or the snapshot could not be regenerated offline.
+ */
+export function surfaceDeps(): ToolDeps {
+  return {
+    db: null as unknown as ToolDeps['db'],
+    client: 'surface',
+    caller: 'surface',
+    policy: { ...DEFAULT_POLICY },
+    encryptionKey: Buffer.alloc(32),
+    now: () => new Date('2026-01-01T00:00:00Z'),
+    approvalTtlHours: 24,
+    confidenceThreshold: DEFAULT_CONFIDENCE_THRESHOLD,
+    gateway: { baseUrl: 'http://127.0.0.1:1', apiKey: 'unused', timeoutMs: 1_000, maxCallsPerRun: 1 },
+    storageDir: '/nonexistent/surface',
+    formsDir: '/nonexistent/surface',
+    restrictedToModel: false,
+    verify: {
+      nppesEnabled: false,
+      nppesBaseUrl: NPPES_DEFAULT_BASE_URL,
+      stateLicenseEnabled: false,
+      timeoutMs: 1_000,
+    },
+    sinks: {},
+    context: {},
+    tools: new Map(),
+  };
+}
+
+/**
+ * Every MCP tool this server publishes, with the JSON Schema a client actually receives —
+ * not the zod object, the resolved schema, because that is what an agent reads and what a
+ * rename or a widened field would change.
+ */
+export async function readToolSurface(): Promise<ToolSurfaceEntry[]> {
+  const { client, close } = await connectInProcess(() => createCoreToolsServer(surfaceDeps()));
+  try {
+    const { tools } = await client.listTools();
+    return (tools as { name: string; inputSchema: unknown; outputSchema?: unknown }[])
+      .map((tool) => ({
+        name: tool.name,
+        inputSchema: tool.inputSchema,
+        outputSchema: tool.outputSchema ?? null,
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  } finally {
+    await close();
+  }
+}
+
+/**
+ * The rendered Compose config.
+ *
+ * `--no-interpolate --no-path-resolution` is what makes this snapshot-able at all, and both
+ * flags are load-bearing:
+ *
+ *   - Without `--no-interpolate`, Compose refuses to render (`required variable
+ *     LITELLM_MASTER_KEY is missing a value`) unless a filled-in `.env` exists — and when one
+ *     does, the `hermes` service's `env_file: ../../.env` copies the developer's real API
+ *     keys straight into the output. Nothing like that can be committed.
+ *   - Without `--no-path-resolution`, every bind mount is rewritten to an absolute host path,
+ *     so the snapshot differs on every machine.
+ *
+ * Both `--profile` flags are needed because `config` omits services whose profile is not
+ * enabled, and `approvals`, `hermes`, `hermes-init` and `core-tools` all have one.
+ */
+export async function readComposeSurface(repoRoot: string): Promise<string> {
+  try {
+    const { stdout } = await run(
+      'docker',
+      [
+        'compose',
+        '-f',
+        'harness/compose/docker-compose.yml',
+        '--profile',
+        'demo',
+        '--profile',
+        'build-only',
+        'config',
+        '--no-interpolate',
+        '--no-path-resolution',
+      ],
+      { cwd: repoRoot, timeout: 60_000, maxBuffer: 8 * 1024 * 1024 },
+    );
+    return stdout;
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    throw new Error(
+      `could not render the Compose config. The docker CLI has to be on PATH; the stack does not have to be running. ${detail}`,
+    );
+  }
+}
+
+/**
+ * Helpers whose first argument is the name of an environment variable. The scan below reads
+ * their call sites as well as direct member reads off `process.env`, because after the shared
+ * env module lands most reads go through one of these and a scan that only looked for the
+ * direct form would see almost nothing. Add a wrapper here when you add one to the code.
+ *
+ * Note for whoever edits the prose in this file: the scan regexes are applied to every
+ * non-test source file, this one included, so a comment that spells out a direct
+ * `process.env` member read would be picked up as a variable of that name and reported as
+ * undocumented. Describe the pattern instead of writing it out.
+ */
+export const ENV_READING_HELPERS = [
+  'numberFromEnv',
+  'booleanFromEnv',
+  'requiredEnv',
+  'optionalEnv',
+  'required',
+  'requiredFrom',
+  'seconds',
+  'port',
+] as const;
+
+const SOURCE_ROOTS = ['harness', 'packs', 'evals', 'scripts'];
+const DIRECT_ENV = /process\.env\.([A-Z][A-Z0-9_]*)/g;
+const INDEXED_ENV = /process\.env\[\s*'([A-Z][A-Z0-9_]*)'\s*\]/g;
+const HELPER_ENV = new RegExp(
+  String.raw`\b(?:${ENV_READING_HELPERS.join('|')})\(\s*(?:env,\s*)?'([A-Z][A-Z0-9_]*)'`,
+  'g',
+);
+
+async function sourceFiles(dir: string): Promise<string[]> {
+  const found: string[] = [];
+  for (const entry of await readdir(dir, { withFileTypes: true })) {
+    if (entry.name === 'node_modules' || entry.name.startsWith('.')) continue;
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) found.push(...(await sourceFiles(full)));
+    else if (entry.name.endsWith('.ts') && !entry.name.endsWith('.test.ts')) found.push(full);
+  }
+  return found;
+}
+
+/** Every environment variable name the shipping code reads, sorted and deduplicated. */
+export async function readEnvNames(repoRoot: string): Promise<string[]> {
+  const names = new Set<string>();
+  for (const root of SOURCE_ROOTS) {
+    for (const file of await sourceFiles(path.join(repoRoot, root))) {
+      const text = await readFile(file, 'utf8');
+      for (const pattern of [DIRECT_ENV, INDEXED_ENV, HELPER_ENV]) {
+        for (const match of text.matchAll(pattern)) names.add(match[1]);
+      }
+    }
+  }
+  return [...names].sort();
+}
+
+/** Every name `.env.example` documents, commented-out lines included. */
+export async function envNamesFromExample(file: string): Promise<string[]> {
+  const text = await readFile(file, 'utf8');
+  const names = new Set<string>();
+  for (const line of text.split('\n')) {
+    const match = /^#?\s*([A-Z][A-Z0-9_]*)=/.exec(line.trim());
+    if (match) names.add(match[1]);
+  }
+  return [...names].sort();
+}
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+const repoRoot = path.resolve(here, '../../..');
+
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  const outDir = path.join(repoRoot, ARCHITECTURE_DIR);
+  await mkdir(outDir, { recursive: true });
+  const tools = await readToolSurface();
+  await writeFile(path.join(outDir, 'tool-surface.json'), `${JSON.stringify(tools, null, 2)}\n`, 'utf8');
+  await writeFile(path.join(outDir, 'compose-surface.yaml'), await readComposeSurface(repoRoot), 'utf8');
+  console.error(`recorded ${tools.length} tools and the compose config into ${ARCHITECTURE_DIR}/`);
+}
