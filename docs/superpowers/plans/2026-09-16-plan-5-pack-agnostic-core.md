@@ -30,7 +30,7 @@ Every task's requirements implicitly include this section.
 - **Commit messages: conventional prefix, imperative subject, and NO trailer of any kind.** No `Co-Authored-By`, no `Generated with`, nothing. This overrides any trailer guidance from the environment.
 - **Never run `docker compose up`, `docker compose down` or `pnpm db:up`/`pnpm db:down`.** `docker compose ... config` is read-only and is what the surface test uses; that one is fine.
 - **Never source `.env` into the shell before running tests.** A crypto test asserts the behaviour of an unset `HARNESS_ENCRYPTION_KEY`.
-- Test database: `postgres://harness:harness@localhost:15432/harness_test`. Evals database: `postgres://harness:harness@localhost:15432/harness_evals`. Both exist; do not create or drop them. Creating a **schema** inside `harness_test` is allowed and Task 2 does it.
+- Test database: `postgres://harness:harness@localhost:15432/harness_test`. Evals database: `postgres://harness:harness@localhost:15432/harness_evals`. Both exist; do not create or drop them. **One exception:** Task 2's migration test creates and drops a database of its own, `harness_test_migration`, over the `harness_test` connection, because a migration whose generated SQL is schema-qualified to `"public"` cannot be replayed inside a scratch schema. It is created in `beforeAll` and dropped in `afterAll`, it is the only database this plan creates, and no other suite touches it.
 - Do not push from a task.
 
 ---
@@ -68,7 +68,7 @@ Everything below was read out of this checkout (main at `843098a`) on 2026-09-16
 
 The spec's section 5 lists `documents_*` and `deadlines_*` as core tools whose names and behaviour are "unchanged", and its section 9 requires `docs/architecture/tool-surface.json` to be byte-identical. Those two cannot both be true, because eleven of the 23 tools carry `provider`, `credential`, `licence` or `malpractice` in a schema key or a description, and spec section 8 forbids those words in core-tools' source. Each ruling below is recorded in ARCHITECTURE.md by Task 7.
 
-1. **Byte-identity wins, so the healthcare pack contributes twelve wrappers, not five.** The pack ships `providers_upsert/get/search/confirm_field/list_pending` (renames over `records_*`) and same-named replacements for `documents_ingest/get/list/classify/extract` and `deadlines_compute/upcoming`. Every one is a `defineTool` whose zod schemas are copied verbatim out of today's `tools/*.ts`, so the resolved JSON Schema is the same bytes. **Why:** the alternative is re-recording the snapshot and rewriting the `expect` lines in `tools/documents.test.ts` and `tools/deadlines.test.ts` that read `provider_id` and `credential_id`, both of which the Global Constraints forbid. The brief for this plan asked for six alias tools. Twelve is what the byte-identity constraint actually produces: seven same-named replacements (five `documents_*`, two `deadlines_*`) and five renames (`providers_*` over `records_*`). Eleven of the 23 published tools carry a credentialing word in a schema key or a description, and the twelfth, `documents_get`, shares the `DocumentView` object with two of them. The surface test is what proves the count is right. They are written once, in Task 3, into `harness/core-tools/src/tools/compat.ts`, and Task 4 moves the file into the pack without touching a line of the definitions — which is what keeps every gate green at the end of every task.
+1. **Byte-identity wins, so the healthcare pack contributes twelve wrappers, not five.** The pack ships `providers_upsert/get/search/confirm_field/list_pending` (renames over `records_*`) and same-named replacements for `documents_ingest/get/list/classify/extract` and `deadlines_compute/upcoming`. Every one is a `defineTool` whose zod schemas are copied verbatim out of today's `tools/*.ts`, so the resolved JSON Schema is the same bytes. **Why:** the alternative is re-recording the snapshot and rewriting the `expect` lines in `tools/documents.test.ts` and `tools/deadlines.test.ts` that read `provider_id` and `credential_id`, both of which the Global Constraints forbid. The brief for this plan asked for six alias tools. Twelve is what the byte-identity constraint actually produces: seven same-named replacements (five `documents_*`, two `deadlines_*`) and five renames (`providers_*` over `records_*`). **Only the seven go in `Pack.replaces`** — a rename supersedes nothing, and the five `records_*` names are withheld from this deployment by Decision 3's `genericTools` gate instead. Eleven of the 23 published tools carry a credentialing word in a schema key or a description, and the twelfth, `documents_get`, shares the `DocumentView` object with two of them. The surface test is what proves the count is right. They are written once, in Task 3, into `harness/core-tools/src/tools/compat.ts`, and Task 4 moves the file into the pack without touching a line of the definitions — which is what keeps every gate green at the end of every task.
 
 2. **A pack replaces a kernel tool by declaring `Pack.replaces`; it does not shadow it by accident.** `createCoreToolsServer` builds the kernel catalogue, removes every name any loaded pack lists in `replaces`, appends the packs' own tools, and throws `ConfigError` on a name that is not a kernel tool, on two packs replacing the same name, and on a duplicate in the final list. **Why not "last one wins":** a silent shadow is a deployment that serves a tool nobody wrote down, and the failure mode (a pack typo leaving the generic tool published alongside a half-working alias) is invisible in a surface snapshot that nobody re-records.
 
@@ -78,7 +78,9 @@ The spec's section 5 lists `documents_*` and `deadlines_*` as core tools whose n
 
 5. **Three kernel operations are not tools and reach a pack through `deps.kernel`.** `writeOutFile`, `stageRelease` and the pair `isRestrictedName`/`MASKED`. They have no place in an MCP catalogue (one takes raw bytes; one is a predicate) and the pack cannot import them. `PackKernel` declares them in `@harness/pack-api` and `domain/packs/kernel.ts` implements it with one documented cast, because `PackToolDeps` is a structural *view* of `ToolDeps` and a function typed over the view is not assignable from one typed over the whole.
 
-6. **Agent-visible prose that names a domain comes from the pack.** Three strings the kernel used to own move into the contract: the extraction prompt's first line (`ExtractionManifest.role`), the extraction instruction and the attachment sentence (`ExtractionTarget.instruction`, `attachment_instruction`), and the message thrown when a document yields no name (`RecordKindSpec.missingNameError`). Healthcare supplies the exact strings in use today, so the prompt on the wire and the error an agent reads are unchanged, and the eval baseline does not move.
+6. **Agent-visible prose that names a domain comes from the pack.** Four strings the kernel used to own move into the contract: the extraction prompt's first line (`ExtractionManifest.role`), the extraction instruction and the prompt's attachment sentence (`ExtractionTarget.instruction`, `ExtractionTarget.attachment_instruction`), the JSON-Schema description of the attachment array (`ExtractionTarget.attachment_schema_description`), and the message thrown when a document yields no name (`RecordKindSpec.missingNameError`). Healthcare supplies the exact strings in use today, so the prompt on the wire and the error an agent reads are unchanged, and the eval baseline does not move.
+
+    **The prompt sentence and the schema description are two separate strings and must stay separate.** Today they are different text: `domain/documents/prompts.ts` writes the three-line "Also list every credential the document evidences…" into the user turn, while `domain/documents/schema.ts` hardcodes "Credentials this document evidences. The registration, licence or policy number is deliberately NOT part of this schema…" into the `credentials` array's `description`. Collapsing them onto one field would change the `response_format` bytes and break `domain/documents/schema.test.ts`, which is exactly the behaviour preservation this plan exists to keep. `attachment_instruction` is the prompt sentence; `attachment_schema_description` is the JSON-Schema one; the healthcare manifest carries both, verbatim.
 
 7. **The healthcare tool tests land in `harness/core-tools/src/app/pack-healthcare/`, not in `packs/healthcare/`.** Spec section 9 asks for them to move "to the pack's test folder". A test that boots the real kernel against Postgres needs `@harness/core-tools/testing`, and a pack may not depend on core-tools; adding it as a `devDependency` would make `@harness/core-tools` and `@harness/pack-healthcare` a cyclic pair in the workspace graph, which is not worth risking for a directory name. `src/app/` is core-tools' composition layer, it already imports the pack by name under the cruiser exemption, and `app/pack-tools.test.ts` already lives there. Every assertion moves unchanged and now runs through the alias tools, which is the part of the spec's request that carries the meaning. The vocabulary test excludes `*.test.ts`, so the credentialing words in those files are fine where they are.
 
@@ -105,6 +107,8 @@ The spec's section 5 lists `documents_*` and `deadlines_*` as core tools whose n
     `no loaded pack declares attachment kind "<kind>"`, and Task 3's repository test asserts it.
 
 13. **`deadlines_upcoming` gains a `record_kind` filter in the kernel and the healthcare wrapper passes `'provider'`.** Without it, a deployment loading two packs would list an epic's deadline under `provider_name`. Today every record is a provider, so the filtered result is identical to the unfiltered one and no assertion moves.
+
+**One place the spec describes a table that does not exist, and the plan follows the code.** Spec section 3 lists the `deadlines` columns as `lead_days int` and `status`. Neither is in the real table. `harness/db/src/domain/schema.ts` and `harness/db/drizzle/0007_*.sql` both give `deadlines` a `window_days integer DEFAULT 90 NOT NULL` and a `notified_at timestamptz`, and `domain/deadlines/repository.ts` reads exactly those. **Task 2 keeps `window_days` and `notified_at` and adds no `lead_days` or `status` column**, because migration 0008 is a re-keying of `deadlines` onto `records`/`attachments` and nothing in this plan needs a new deadline column: the lead time now comes from `AttachmentKindSpec.leadDays`, which is a pack declaration, not a row. An implementer who finds the spec and the plan disagreeing here should trust the plan and the schema file. Task 7 records the deviation in `ARCHITECTURE.md`.
 
 ---
 ## File structure
@@ -133,7 +137,7 @@ The workspace grows from nine packages to ten: `packs/stories` (Task 6). `pnpm-w
 | `harness/db/src/domain/schema.ts` (`providers`, `credentials`) | same path; `records`, `attachments`, and `recordId`/`attachmentId` on `documents`, `fields`, `deadlines` |
 | — | `harness/db/drizzle/0008_generic_records.sql` (generated, then hand-edited) |
 | — | `harness/db/drizzle/meta/0008_snapshot.json`, `meta/_journal.json` (generated) |
-| — | `harness/db/src/domain/legacy-0007.test-helpers.ts` (the pre-0008 DDL, for the migration test) |
+| — | `harness/db/src/domain/legacy-0007.test-helpers.ts` (the pre-0008 DDL, and the scratch database `harness_test_migration` the migration test replays it in) |
 | — | `harness/db/src/domain/migration-0008.test.ts` |
 | `harness/db/src/testing.ts` | same path; the truncation list names `records` and `attachments` |
 | `harness/db/src/domain/schema.test.ts` | same path; the `providers`/`credentials` describes become `records`/`attachments` |
@@ -283,12 +287,18 @@ Nothing outside `@harness/pack-api` changes behaviour in this task. `packs/healt
   // @harness/pack-api — extraction.ts
   interface ExtractionTarget {
     document_kinds: readonly string[]; record_kind: string; schema_name: string;
-    instruction: string; attachment_instruction?: string;
+    attachments_key: string; instruction: string;
+    /** The prompt sentence. Goes in the user turn, via `buildExtractionMessages`. */
+    attachment_instruction?: string;
+    /** The JSON-Schema `description` of the attachment array. Goes in `response_format`. */
+    attachment_schema_description?: string;
   }
   interface ExtractionManifest {
     version: string; document_kinds: readonly string[]; role: string; targets: ExtractionTarget[];
   }
   function parseExtractionManifest(raw: unknown): ExtractionManifest
+  function targetFor(manifest: ExtractionManifest, documentKind: string | undefined): ExtractionTarget | undefined
+  const ANY_DOCUMENT_KIND = '*'
 
   // @harness/pack-api — kernel.ts
   interface CoreToolView { readonly name: string; handler: (args: any, deps: any) => Promise<any> }
@@ -867,8 +877,18 @@ export interface ExtractionTarget {
   attachments_key: string;
   /** The imperative line that opens the extraction turn. */
   instruction: string;
-  /** The sentence describing which attachments to list. Omit for a kind with none. */
+  /**
+   * The **prompt** sentence describing which attachments to list, written into the user turn by
+   * `buildExtractionMessages`. Omit for a target with no attachments.
+   */
   attachment_instruction?: string;
+  /**
+   * The **JSON-Schema** `description` of the attachment array, sent to the model inside
+   * `response_format`. A separate string from `attachment_instruction` on purpose: today's
+   * healthcare pipeline puts different text in the two places, and the `response_format` bytes
+   * are part of what this plan must not change. Omit for a target with no attachments.
+   */
+  attachment_schema_description?: string;
 }
 
 /**
@@ -895,6 +915,7 @@ const ExtractionTargetShape = z.object({
     .default('attachments'),
   instruction: z.string().min(1),
   attachment_instruction: z.string().min(1).optional(),
+  attachment_schema_description: z.string().min(1).optional(),
 });
 
 const ExtractionManifestShape = z.object({
@@ -1604,7 +1625,8 @@ Expected: `Tests 20 passed` (3 manifest, 9 records, 6 extraction, 2 kernel) plus
         "schema_name": "provider_extraction",
         "attachments_key": "credentials",
         "instruction": "Extract the provider details this document evidences.",
-        "attachment_instruction": "Also list every credential the document evidences (state licence, DEA registration,\nmalpractice policy, board certification) with its issuer, state and dates.\nDo not report any registration, policy or licence NUMBER: this pipeline does not extract them."
+        "attachment_instruction": "Also list every credential the document evidences (state licence, DEA registration,\nmalpractice policy, board certification) with its issuer, state and dates.\nDo not report any registration, policy or licence NUMBER: this pipeline does not extract them.",
+        "attachment_schema_description": "Credentials this document evidences. The registration, licence or policy number is deliberately NOT part of this schema and is not extracted at all: report only the kind, issuer, state and dates."
       }
     ]
   }
@@ -1612,6 +1634,8 @@ Expected: `Tests 20 passed` (3 manifest, 9 records, 6 extraction, 2 kernel) plus
 ```
 
 The `leadDays` values are lifted from `LEAD_DAYS` in `harness/core-tools/src/domain/deadlines/compute.ts:12-17`; Task 3 deletes that table.
+
+**The two attachment strings are different text and both are copied verbatim.** `attachment_instruction` is the three-line block in `harness/core-tools/src/domain/documents/prompts.ts:60-62`, joined with `\n` exactly as it is there. `attachment_schema_description` is the single sentence hardcoded as the `credentials` array's `description` in `harness/core-tools/src/domain/documents/schema.ts:74-75`. Task 3 threads the first into `buildExtractionMessages` and the second into `buildExtractionSchema`, which is what keeps the prompt on the wire and the `response_format` JSON Schema byte-identical. Diff each string against its source file before moving on: a single changed character here moves the eval baseline and fails `domain/documents/schema.test.ts`.
 
 - [ ] **Step 13: Bring the healthcare pack up to the new contract**
 
@@ -1908,7 +1932,7 @@ Renaming two tables breaks every query in `@harness/core-tools` that names them,
 - Create: `harness/db/drizzle/0008_generic_records.sql` (generated, then edited)
 - Create: `harness/db/drizzle/meta/0008_snapshot.json` (generated, untouched)
 - Modify: `harness/db/drizzle/meta/_journal.json` (generated, untouched)
-- Create: `harness/db/src/domain/legacy-0007.test-helpers.ts`
+- Create: `harness/db/src/domain/legacy-0007.test-helpers.ts` (the pre-0008 DDL, and the scratch database `harness_test_migration` it is built in)
 - Create: `harness/db/src/domain/migration-0008.test.ts`
 - Modify: `harness/core-tools/src/domain/providers/repository.ts`, `mask.ts`, `domain/deadlines/repository.ts`, `domain/documents/pipeline.ts`, `domain/forms/provider-data.ts` (the compatibility alias only)
 - Modify: `docs/runbook.md` is **not** touched here; Task 7 owns it.
@@ -1928,8 +1952,10 @@ Renaming two tables breaks every query in `@harness/core-tools` that names them,
 
   // @harness/db — src/domain/legacy-0007.test-helpers.ts
   const LEGACY_0007_DDL: string
-  function createLegacySchema(db: Db, schema: string): Promise<void>
-  function dropSchema(db: Db, schema: string): Promise<void>
+  const MIGRATION_DATABASE = 'harness_test_migration'
+  function migrationDatabaseUrl(maintenanceUrl: string): string
+  function createLegacyDatabase(maintenanceUrl: string): Promise<{ db: Db; close: () => Promise<void> }>
+  function dropLegacyDatabase(maintenanceUrl: string): Promise<void>
   ```
 
 **What does not change.** `approvals`, `runs`, `model_calls`, `tool_effects` and `audit_log`, including the append-only trigger and the partial unique index on pending approvals. Every encrypted column stays `bytea` and the bytes are copied verbatim, so an existing key still decrypts them.
@@ -2100,15 +2126,22 @@ pnpm --filter @harness/db exec drizzle-kit generate
 ```
 Expected: `No schema changes, nothing to migrate`. The snapshot is written from `schema.ts` and is untouched by the SQL edit, so this is the check that the final shape of the hand-edited file matches what `schema.ts` says. If it wants to write `0009`, something in Step 1 and something in Step 3 disagree; fix Step 3, never the snapshot.
 
-- [ ] **Step 5: Write the legacy-schema fixture**
+- [ ] **Step 5: Write the legacy-database fixture**
 
-The migration test replays `0008` over a database that looks like `0007`. It cannot use the real one — `harness_test` is already migrated — and it may not create a database, so it creates a **Postgres schema** inside `harness_test`, builds the pre-`0008` tables there, runs the migration with `search_path` pointed at it, and drops the schema afterwards.
+The migration test replays `0008` over a database that looks like `0007`. It cannot use the real one — `harness_test` is already migrated — so it builds **a database of its own**, `harness_test_migration`, creates the pre-`0008` tables in that database's `public` schema, replays the migration there, and drops the database afterwards.
+
+**Why a database and not a schema inside `harness_test`.** A scratch schema is the obvious move and it does not work, for two independent reasons:
+
+1. `SET LOCAL search_path` outside a transaction is a no-op, and `createDb` hands back a `pg.Pool`, so consecutive `db.execute` calls are not even guaranteed the same backend. The legacy DDL would land in `public`, where `documents`, `fields` and `deadlines` already exist from the real migrations, and `beforeAll` would throw on the first `CREATE TABLE`.
+2. Even with the `search_path` fixed, it still fails: `drizzle-kit generate` writes **schema-qualified** foreign keys — `REFERENCES "public"."records"("id")`, `"public"."documents"` — so the copied `attachments` rows would be checked against the empty `public` tables and the insert would fail. Replaying a generated migration anywhere but `public` would mean rewriting its SQL before executing it, and a test that edits the artefact it is meant to verify proves nothing.
+
+A dedicated database has neither problem: everything, the legacy tables and the migration alike, is in `public`, and the generated SQL runs exactly as it ships. `harness/compose/postgres/init.sql` creates only `harness_test`, `harness_evals` and `litellm`, so this one is created by the test; `POSTGRES_USER` is `harness` and is the cluster superuser, so it may. This is the single exception to the "do not create or drop a database" rule in the Global Constraints, and it is written down there.
 
 Create `harness/db/src/domain/legacy-0007.test-helpers.ts`:
 
 ```ts
 import { sql } from 'drizzle-orm';
-import type { Db } from './client.js';
+import { createDb, type Db } from './client.js';
 
 /**
  * The five tables migration 0008 touches, exactly as they stood after 0007.
@@ -2184,27 +2217,67 @@ CREATE TABLE "deadlines" (
 CREATE UNIQUE INDEX "deadlines_credential_kind_uq" ON "deadlines" USING btree ("credential_id","kind");
 `;
 
-/**
- * Build the pre-0008 tables inside their own Postgres schema, so the migration can be replayed
- * without touching the migrated `public` schema every other test runs against. A schema, not a
- * database: the test databases are shared with other checkouts and must not be created or
- * dropped.
- */
-export async function createLegacySchema(db: Db, schema: string): Promise<void> {
-  await db.execute(sql.raw(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`));
-  await db.execute(sql.raw(`CREATE SCHEMA "${schema}"`));
-  // `bytea` is a real Postgres type, but drizzle quotes it, and a quoted identifier is
-  // case-sensitive and schema-qualified — so the legacy DDL and the migration both need it
-  // resolvable from inside the test schema. A domain over the built-in does that.
-  await db.execute(sql.raw(`CREATE DOMAIN "${schema}"."bytea" AS pg_catalog.bytea`));
-  await db.execute(sql.raw(`SET LOCAL search_path TO "${schema}"`));
-  await db.execute(sql.raw(LEGACY_0007_DDL));
+/** The database the migration test builds and drops. Nothing else in the repository uses it. */
+export const MIGRATION_DATABASE = 'harness_test_migration';
+
+/** `maintenanceUrl` with its database swapped for `MIGRATION_DATABASE`, everything else intact. */
+export function migrationDatabaseUrl(maintenanceUrl: string): string {
+  const url = new URL(maintenanceUrl);
+  url.pathname = `/${MIGRATION_DATABASE}`;
+  return url.toString();
 }
 
-export async function dropSchema(db: Db, schema: string): Promise<void> {
-  await db.execute(sql.raw(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`));
+/**
+ * Build a database that looks like the world just after migration 0007, and hand back a handle
+ * on it.
+ *
+ * `maintenanceUrl` is `TEST_DATABASE_URL`: `CREATE DATABASE` has to be issued from a connection
+ * to some *other* database, and `harness_test` is the one that is always there. The drop-first
+ * is for the run after a crashed one; `WITH (FORCE)` closes any connection a dead worker left
+ * behind. Neither statement may run inside a transaction, which is why they go straight at the
+ * pool rather than through `db.transaction`.
+ *
+ * The tables land in the new database's own `public` schema. That is the whole point: the
+ * migration's generated SQL is schema-qualified to `"public"`, so it replays byte for byte,
+ * with no rewriting and no `search_path` to get wrong.
+ */
+export async function createLegacyDatabase(
+  maintenanceUrl: string,
+): Promise<{ db: Db; close: () => Promise<void> }> {
+  const maintenance = createDb(maintenanceUrl);
+  try {
+    await maintenance.db.execute(sql.raw(`DROP DATABASE IF EXISTS "${MIGRATION_DATABASE}" WITH (FORCE)`));
+    await maintenance.db.execute(sql.raw(`CREATE DATABASE "${MIGRATION_DATABASE}"`));
+  } finally {
+    await maintenance.close();
+  }
+
+  const scratch = createDb(migrationDatabaseUrl(maintenanceUrl));
+  try {
+    await scratch.db.execute(sql.raw(LEGACY_0007_DDL));
+  } catch (err) {
+    await scratch.close();
+    throw err;
+  }
+  return { db: scratch.db, close: scratch.close };
+}
+
+/**
+ * Drop the scratch database. Safe to call when it was never created, and safe to call twice.
+ * The caller closes its own pool on the scratch database *first*, or the drop blocks behind it
+ * — `WITH (FORCE)` covers the case where it forgot.
+ */
+export async function dropLegacyDatabase(maintenanceUrl: string): Promise<void> {
+  const maintenance = createDb(maintenanceUrl);
+  try {
+    await maintenance.db.execute(sql.raw(`DROP DATABASE IF EXISTS "${MIGRATION_DATABASE}" WITH (FORCE)`));
+  } finally {
+    await maintenance.close();
+  }
 }
 ```
+
+Two things the scratch-schema version needed and this one does not. There is no `CREATE DOMAIN "…"."bytea"` shim: `bytea` is a `pg_catalog` type and quoting it resolves fine from `public`; the shim existed only because a quoted type name would not resolve from inside a non-default schema. And there is no `SET LOCAL search_path` anywhere, which is what makes the pooling question moot — every statement, on whichever backend the pool hands out, sees the same default `public`.
 
 - [ ] **Step 6: Write the migration test**
 
@@ -2218,12 +2291,11 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createDb } from './client.js';
-import { createLegacySchema, dropSchema } from './legacy-0007.test-helpers.js';
+import type { Db } from './client.js';
+import { createLegacyDatabase, dropLegacyDatabase } from './legacy-0007.test-helpers.js';
 import { decrypt, encrypt } from '../shared/crypto.js';
 import { TEST_DATABASE_URL } from '../testing.js';
 
-const SCHEMA = 'migration_0008';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const MIGRATION = path.resolve(here, '../../drizzle/0008_generic_records.sql');
 
@@ -2231,7 +2303,12 @@ const key = Buffer.alloc(32, 7);
 const LICENCE_NUMBER = 'AB1234567';
 const SSN = '123-45-6789';
 
-const { db, close } = createDb(TEST_DATABASE_URL);
+/**
+ * Assigned in `beforeAll`, because the handle cannot exist before the database does. Every
+ * statement below runs against `harness_test_migration`, never against `harness_test`.
+ */
+let db: Db;
+let close: () => Promise<void>;
 
 /**
  * The migration, statement by statement, with drizzle's own breakpoint as the separator and its
@@ -2252,12 +2329,14 @@ function migrationStatements(): string[] {
 }
 
 beforeAll(async () => {
-  await createLegacySchema(db, SCHEMA);
+  ({ db, close } = await createLegacyDatabase(TEST_DATABASE_URL));
 });
 
+// Close this file's pool on the scratch database before dropping it, or the drop waits on the
+// connection. The drop runs even when the pool is already gone, and even when `beforeAll` threw.
 afterAll(async () => {
-  await dropSchema(db, SCHEMA);
-  await close();
+  await close?.();
+  await dropLegacyDatabase(TEST_DATABASE_URL);
 });
 
 describe('migration 0008_generic_records', () => {
@@ -2270,9 +2349,12 @@ describe('migration 0008_generic_records', () => {
   });
 
   it('copies every provider, credential, field, document and deadline into the record model', async () => {
+    // One transaction for the seed, the replay and every assertion. It is not needed for
+    // isolation — this is a database of its own and `afterAll` drops it — but it pins a single
+    // pooled backend for the whole sequence and it means a half-applied migration cannot be
+    // left behind for a re-run to trip over. There is no `search_path` to set: the legacy
+    // tables and the migration's `"public"."records"` references are in the same schema.
     await db.transaction(async (tx) => {
-      await tx.execute(sql.raw(`SET LOCAL search_path TO "${SCHEMA}"`));
-
       // A miniature of the demo database: one provider with an NPI, one without, one belonging
       // to a second client so the copy cannot lose the scoping.
       await tx.execute(sql.raw(`
@@ -2342,9 +2424,11 @@ describe('migration 0008_generic_records', () => {
       expect(decrypt(secrets.number, key)).toBe(LICENCE_NUMBER);
       expect(decrypt(secrets.ssn, key)).toBe(SSN);
 
-      // And the tables the migration replaced are gone.
+      // And the tables the migration replaced are gone. `public` of this database holds only
+      // what the legacy fixture created and what 0008 left behind — no approvals, no audit_log,
+      // because the fixture does not create them and 0008 does not touch them.
       const remaining = await tx.execute(sql.raw(`
-        SELECT table_name FROM information_schema.tables WHERE table_schema = '${SCHEMA}' ORDER BY table_name
+        SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' ORDER BY table_name
       `));
       expect(remaining.rows.map((r) => r.table_name)).toEqual(['attachments', 'deadlines', 'documents', 'fields', 'records']);
 
@@ -2354,12 +2438,19 @@ describe('migration 0008_generic_records', () => {
 });
 ```
 
-`tx.rollback()` at the end throws drizzle's rollback sentinel, which `db.transaction` swallows; the schema is left with the legacy tables and `afterAll` drops it either way.
+`tx.rollback()` at the end throws drizzle's rollback sentinel, which `db.transaction` swallows. The scratch database is left holding the legacy tables, and `afterAll` drops the database either way — including when an assertion above threw, because `afterAll` runs regardless and `DROP DATABASE IF EXISTS … WITH (FORCE)` does not care what state it is in.
 
 ```bash
 pnpm --filter @harness/db exec vitest run src/domain/migration-0008.test.ts
 ```
 Expected: `Tests 2 passed`.
+
+Then check the cleanup actually happened, because a leaked database is the one failure mode this fixture can leave behind:
+
+```bash
+psql postgres://harness:harness@localhost:15432/harness_test -Atc "SELECT datname FROM pg_database WHERE datname = 'harness_test_migration'"
+```
+Expected: no output. If the name is printed, a worker died mid-run; `DROP DATABASE harness_test_migration WITH (FORCE)` clears it and the next run would have dropped it anyway.
 
 - [ ] **Step 7: Keep core-tools compiling with one alias**
 
@@ -2474,6 +2565,7 @@ The biggest task. `domain/providers` becomes `domain/records`, the five `provide
 - Modify: `harness/core-tools/src/domain/deadlines/compute.ts`, `compute.test.ts`, `repository.ts`
 - Modify: `harness/core-tools/src/domain/documents/schema.ts`, `schema.test.ts`, `prompts.ts`, `prompts.test.ts`, `parse.ts`, `parse.test.ts`, `types.ts`, `pipeline.ts`
 - Modify: `harness/core-tools/src/tools/documents.ts`, `tools/deadlines.ts`, `tools/catalog.ts`
+- Modify: `harness/core-tools/src/tools/skills-frontmatter.test.ts` (**it goes red in this task if it is not touched** — see Step 15)
 - Modify: `harness/core-tools/src/domain/packs/types.ts`, `registry.ts`, `registry.test.ts`
 - Modify: `harness/core-tools/src/domain/tooling/types.ts`
 - Modify: `harness/core-tools/src/domain/forms/provider-data.ts`, `domain/forms/types.ts`, `tools/forms.ts`, `tools/verify.ts` (renamed reads only)
@@ -2526,7 +2618,7 @@ The biggest task. `domain/providers` becomes `domain/records`, the five `provide
   function kernelTools(packs: PackRegistry): AnyToolDef[]
   function publishedTools(deps: ToolDeps): AnyToolDef[]
   function createCoreToolsServer(deps: ToolDeps): McpServer
-  function allTools(packs: PackRegistry): AnyToolDef[]   // kept, = kernelTools; skills-frontmatter.test.ts names it
+  function allTools(packs: PackRegistry): AnyToolDef[]   // kept, = kernelTools; only src/index.ts names it now
 
   // domain/tooling/types.ts
   interface ToolDeps { …; kernelTools: Map<string, AnyToolDef>; kernel: PackKernel }
@@ -3306,7 +3398,7 @@ export interface ParsedExtraction {
 }
 ```
 
-**`domain/documents/schema.ts`** — the two builders take what they need rather than a whole manifest. Every string the model reads is unchanged, and `attachments` replaces `credentials` as the JSON key **only in the kernel's own vocabulary**: the model-facing property keeps the name the target's `attachment_instruction` describes, so the JSON Schema property is still `credentials` for healthcare. That is what `schema_name` and the per-target prose are for, and it is why the key is a parameter:
+**`domain/documents/schema.ts`** — the two builders take what they need rather than a whole manifest. Every string the model reads is unchanged, and `attachments` replaces `credentials` as the JSON key **only in the kernel's own vocabulary**: the model-facing property keeps the name the target's `attachments_key` declares, so the JSON Schema property is still `credentials` for healthcare. That is what `schema_name` and the per-target prose are for, and it is why the key is a parameter:
 
 ```ts
 import { ATTACHMENT_PROPERTIES, type AttachmentKindSpec, type ManifestField } from '@harness/pack-api';
@@ -3326,7 +3418,12 @@ export interface ExtractionSchemaInput {
   attachmentKinds: AttachmentKindSpec[];
   /** The JSON property the attachment list is returned under. `credentials` for healthcare. */
   attachmentsKey: string;
-  /** The sentence above the attachment array. Omitted when the target declares no attachments. */
+  /**
+   * The attachment array's JSON-Schema `description`, from the target's
+   * `attachment_schema_description`. **Not** the prompt sentence: that is
+   * `attachment_instruction` and it goes to `buildExtractionMessages`. Omitted when the target
+   * declares no attachments.
+   */
   attachmentsDescription?: string;
 }
 
@@ -3334,9 +3431,11 @@ export function buildExtractionSchema(input: ExtractionSchemaInput): { name: str
 export function buildClassificationSchema(documentKinds: readonly string[]): { name: string; schema: Record<string, unknown> }
 ```
 
-`fieldSlot` is unchanged. The body of `buildExtractionSchema` is today's with four substitutions: `manifest.fields` → `input.fields`, `CREDENTIAL_KINDS` → `input.attachmentKinds.map((a) => a.kind)`, `CREDENTIAL_PROPERTIES` → `ATTACHMENT_PROPERTIES`, `'provider_extraction'` → `input.schemaName`, `'credentials'` → `input.attachmentsKey`, and the array's `description` → `input.attachmentsDescription`. `buildClassificationSchema` keeps `'document_classification'` as its name and takes the kind list directly.
+`fieldSlot` is unchanged. The body of `buildExtractionSchema` is today's with six substitutions: `manifest.fields` → `input.fields`, `CREDENTIAL_KINDS` → `input.attachmentKinds.map((a) => a.kind)`, `CREDENTIAL_PROPERTIES` → `ATTACHMENT_PROPERTIES`, `'provider_extraction'` → `input.schemaName`, `'credentials'` → `input.attachmentsKey` (in `required` and in `properties` alike), and the array's hardcoded `description` → `input.attachmentsDescription`. `buildClassificationSchema` keeps `'document_classification'` as its name and takes the kind list directly.
 
 `attachmentsKey` is the target's `attachments_key`, which Task 1 put on `ExtractionTarget` with a default of `'attachments'`; `packs/healthcare/schema/provider.json` sets it to `"credentials"`, which is why the model-facing property keeps the word the prompt uses and the extraction JSON on the wire does not change.
+
+`attachmentsDescription` is the target's **`attachment_schema_description`**, not its `attachment_instruction`. The two are different strings today — the schema carries "Credentials this document evidences. The registration, licence or policy number is deliberately NOT part of this schema…" while the prompt carries the three-line "Also list every credential…" block — and passing the prompt sentence here would change the `response_format` bytes and fail `domain/documents/schema.test.ts`. Keep them apart in every caller.
 
 `domain/documents/schema.test.ts` keeps every `expect`; its fixture builds an `ExtractionSchemaInput` instead of a manifest.
 
@@ -3451,7 +3550,9 @@ export async function extractDocument(
       fields: modelFields,
       attachmentKinds: target.attachmentKinds,
       attachmentsKey: target.target.attachments_key,
-      attachmentsDescription: target.target.attachment_instruction,
+      // The schema's string, not the prompt's: these are two different fields on the target
+      // and today's healthcare pipeline puts different text in each place.
+      attachmentsDescription: target.target.attachment_schema_description,
     }),
     validate: extractionReplyFor(target.target.attachments_key),
     temperature: 0,
@@ -3578,7 +3679,7 @@ const DocumentView = z.object({
 });
 ```
 
-- `documents_ingest`: `record_id: z.string().uuid().optional()`; description unchanged (it names no domain).
+- `documents_ingest`: `record_id: z.string().uuid().optional()`; the tool description is unchanged, but the `path` input's `.describe(...)` is **not**: today it reads `'Path relative to the harness storage directory, e.g. incoming/license.pdf'`, and `license` is a credentialing word that Task 6's vocabulary rule will fail on. It becomes `'Path relative to the harness storage directory, e.g. incoming/scan.pdf'`. **The healthcare wrapper's copy in `compat.ts` keeps `incoming/license.pdf` exactly** — that is the one an MCP client receives in a healthcare deployment and the one `tool-surface.json` records, so the two copies deliberately differ from here on. `compat.ts` is written in Step 14; copy the wrapper's description out of today's `tools/documents.ts` *before* making this edit, or diff it against `git show HEAD:harness/core-tools/src/tools/documents.ts` afterwards.
 - `documents_list`: `input: z.object({ record_id: z.string().uuid().optional() })`; description becomes `'List the documents on file for this client, newest first. Pass record_id to scope to one record; omit it to list every document ingested by this client, including ones not yet attached to a record.'`
 - `documents_classify`: description becomes `'Decide what kind of document this is, from the kinds the loaded packs declare, and record it, unless a kind is already on file: a kind declared at ingest, or set by an earlier classification, is authoritative and is never overwritten by a disagreeing model reply — the model\'s own answer is still returned as model_kind so a human can see the disagreement. Reads the document text, redacting restricted identifiers first.'`
 - `documents_extract`: `record_id` in and out, `attachments: z.number()` in place of `credentials`, and the description becomes `'Read a document end to end: text layer or OCR, redact SSN/EIN/DEA, ask the extract route for the fields and attachments its extraction target declares, then write them to a record of that target\'s kind. Fields below the confidence threshold are stored as pending for a human to confirm. Restricted identifiers are stored encrypted straight from the redaction pass and are never sent to a model.'`
@@ -3637,7 +3738,30 @@ export function registryOf(all: Pack[]): PackRegistry {
   // encrypting. A pack shipped against an older rule set fails here, at startup, named.
   const records = all.flatMap((p) => p.records.map((r) => parseRecordKindSpec(r)));
   const attachments = all.flatMap((p) => (p.attachments ?? []).map((a) => parseAttachmentKindSpec(a)));
-  const ownerOf = new Map(all.flatMap((p) => p.records.map((r) => [r.kind, p] as const)));
+
+  // No two loaded packs may claim the same document kind, and `'*'` is a kind for this purpose.
+  //
+  // Without this, `targetFor` would be decided by HARNESS_PACKS order: two packs declaring a
+  // catch-all both claim every document, and the second one silently never receives a
+  // document at all — its extractions would be built against the first pack's record kind and
+  // would fail deep in the pipeline with a missing-name error that names the wrong domain.
+  // Refusing at construction turns a routing mystery into a startup message naming both packs.
+  // Within one pack the same collision is already a `ConfigError` from `parseExtractionManifest`.
+  const claimedBy = new Map<string, string>();
+  for (const pack of all) {
+    for (const target of pack.extraction.targets) {
+      for (const kind of target.document_kinds) {
+        const already = claimedBy.get(kind);
+        if (already !== undefined && already !== pack.name) {
+          throw new ConfigError(
+            `packs "${already}" and "${pack.name}" both claim document kind "${kind}"; ` +
+              'at most one loaded pack may claim a kind, and only one may declare the "*" catch-all',
+          );
+        }
+        claimedBy.set(kind, pack.name);
+      }
+    }
+  }
 
   function resolve(pack: Pack, target: ExtractionTarget): ResolvedTarget {
     const recordKind = records.find((r) => r.kind === target.record_kind);
@@ -3670,8 +3794,9 @@ export function registryOf(all: Pack[]): PackRegistry {
     },
     attachmentKind: (kind) => attachments.find((a) => a.kind === kind),
     targetFor(documentKind) {
-      // An exact claim wins over any catch-all, in load order; only then does a catch-all
-      // answer. That ordering is what keeps two loaded packs from fighting over one document.
+      // An exact claim wins over any catch-all; only then does a catch-all answer. The result
+      // does not depend on load order: the claim check above has already refused two packs
+      // claiming one kind, so at most one exact claim and at most one catch-all exist.
       if (documentKind !== undefined) {
         for (const pack of all) {
           const exact = pack.extraction.targets.find((t) => t.document_kinds.includes(documentKind));
@@ -3697,9 +3822,9 @@ export function registryOf(all: Pack[]): PackRegistry {
 }
 ```
 
-`ownerOf` is unused by the registry itself — `packForKind` in the repository does the same lookup off `all` — so delete the line rather than leaving it; `pnpm lint` fails on an unused binding.
+Today's `registryOf` also builds an `ownerOf` map. It is unused by the registry itself — `packForKind` in the repository does the same lookup off `all` — so it is absent from the code above rather than carried forward; `pnpm lint` fails on an unused binding.
 
-`domain/packs/registry.test.ts` keeps all seven `it`s; the `manifest().version` assertion becomes `manifest().version` on the extraction block (still `'1.0.0'`), and three `it`s are added:
+`domain/packs/registry.test.ts` keeps every existing `it` (there are **eleven**, across four `describe`s — do not trust a smaller count); the `manifest().version` assertion becomes `manifest().version` on the extraction block (still `'1.0.0'`), and four `it`s are added:
 
 ```ts
   it('lists the record and attachment kinds the pack declares, parsed', async () => {
@@ -3724,7 +3849,39 @@ export function registryOf(all: Pack[]): PackRegistry {
     ]);
     expect(() => noCatchAll.targetFor('other')).toThrow('no loaded pack extracts a document of kind "other"');
   });
+
+  it('refuses two packs that claim the same document kind, so routing never depends on load order', () => {
+    const second = { ...healthcarePack, name: 'twin' };
+    // Both declare the '*' catch-all, which is the collision the stories pack was shaped to avoid.
+    expect(() => registryOf([healthcarePack, second])).toThrow(ConfigError);
+    expect(() => registryOf([healthcarePack, second])).toThrow(
+      'packs "healthcare" and "twin" both claim document kind "*"',
+    );
+
+    // An exact claim collides the same way.
+    const claimsW9 = {
+      ...healthcarePack,
+      name: 'twin',
+      extraction: {
+        ...healthcarePack.extraction,
+        targets: [{ ...healthcarePack.extraction.targets[0], document_kinds: ['w9'] }],
+      },
+    };
+    expect(() => registryOf([healthcarePack, claimsW9])).not.toThrow();
+
+    const alsoW9 = {
+      ...healthcarePack,
+      name: 'triplet',
+      extraction: {
+        ...healthcarePack.extraction,
+        targets: [{ ...healthcarePack.extraction.targets[0], document_kinds: ['w9'] }],
+      },
+    };
+    expect(() => registryOf([claimsW9, alsoW9])).toThrow('both claim document kind "w9"');
+  });
 ```
+
+with `import { ConfigError } from '@harness/shared';` at the top if the file does not already have it. Note the middle assertion: healthcare's `["*"]` and a second pack's `["w9"]` are **not** a collision — the catch-all claims only the kinds no one named, which is exactly the arrangement Task 6's stories pack uses.
 
 - [ ] **Step 11: Write `PACK_KERNEL` and put it, and `kernelTools`, on `ToolDeps`**
 
@@ -4107,6 +4264,12 @@ Create `harness/core-tools/src/tools/compat.ts`. **This file is Task 4's cargo.*
  * Each handler reaches its kernel tool through `deps.kernelTools`, never `deps.tools`: the
  * published catalogue holds these wrappers under `documents_ingest` and `deadlines_compute`, so
  * a lookup there would find the wrapper and recurse.
+ *
+ * One description here is load-bearing in a way that is easy to miss: `documents_ingest`'s
+ * `path` input says `e.g. incoming/license.pdf`. Step 9 reworded the *kernel's* copy of that
+ * string to `incoming/scan.pdf` so Task 6's vocabulary rule passes. This copy must keep
+ * `license`, because it is the one an MCP client receives and the one `tool-surface.json`
+ * records. The two are meant to differ. Do not "fix" this file to match the kernel.
  */
 import * as z from 'zod/v4';
 import { ToolError } from '@harness/shared';
@@ -4129,7 +4292,21 @@ import { URGENCY_BUCKETS } from '../domain/deadlines/compute.js';
 import { FieldInput } from '../domain/records/types.js';
 import { MASKED, isRestrictedName } from '../shared/redaction/names.js';
 
-/** The kernel tools these twelve replace. `publishedTools` drops each one from the catalogue. */
+/**
+ * The kernel tools these twelve replace. `publishedTools` drops each one from the catalogue.
+ *
+ * The five `records_*` entries are here **only because this task has no pack-level gate yet**.
+ * `compat.ts` is a source inside `publishedTools`, not a pack, so `RecordKindSpec.genericTools`
+ * — which is what actually hides `records_*` from a healthcare deployment (Decision 3) — has
+ * nothing to act on until Task 4 hands the wrappers to the pack. Listing them here is harmless
+ * for one task, because with only healthcare loaded the `genericTools: false` gate would drop
+ * the same five anyway.
+ *
+ * **Task 4 does not copy this list into `Pack.replaces`.** `HEALTHCARE_REPLACES` is the seven
+ * same-named tools only. `replaces` is process-wide: a pack that replaced `records_get` would
+ * take it away from every other pack loaded beside it, which is precisely what Decision 3
+ * forbids and what Task 6's dual-pack run asserts against.
+ */
 export const COMPAT_REPLACES = [
   'records_upsert',
   'records_get',
@@ -4582,7 +4759,7 @@ export function compatTools(deps: ToolDeps): AnyToolDef[] {
 }
 ```
 
-- [ ] **Step 15: Write the two-list catalogue**
+- [ ] **Step 15: Write the two-list catalogue, and re-point the skill-frontmatter test at the published one**
 
 Replace `harness/core-tools/src/tools/catalog.ts`:
 
@@ -4622,7 +4799,13 @@ export function kernelTools(packs: PackRegistry): AnyToolDef[] {
   ];
 }
 
-/** Kept for `tools/skills-frontmatter.test.ts` and `src/index.ts`, which name it. */
+/**
+ * Kept for `src/index.ts`, which re-exports it.
+ *
+ * It is **not** what a skill's declared tools are checked against any more: that has to be the
+ * published catalogue, because from this task onwards the kernel list and the published list
+ * differ. `tools/skills-frontmatter.test.ts` uses `publishedTools` — see the end of this step.
+ */
 export const allTools = kernelTools;
 
 /**
@@ -4703,6 +4886,112 @@ export function createCoreToolsServer(deps: ToolDeps): McpServer {
 }
 ```
 
+**Now fix the test this step breaks.** `harness/core-tools/src/tools/skills-frontmatter.test.ts` builds `KNOWN_TOOL_NAMES` from `allTools(packs)`. From the end of this step `allTools` is the *kernel* list, which no longer defines `providers_*` — and after Task 4 it will not define `forms_*` or `verify_*` either. The four healthcare skills declare exactly those names, so the file goes red here and stays red unless it is rewritten now. Two changes, and the second is what Task 6 will lean on:
+
+1. **The known-tool set comes from the published catalogue**, which is what an agent can actually call, not from the kernel list.
+2. **It walks every directory in `packs.skillsDirs()`**, not `skillsDirs()[0]`, so a second pack's skills are checked as soon as one is loaded.
+
+Rewrite the file as:
+
+```ts
+import { readFileSync, readdirSync } from 'node:fs';
+import path from 'node:path';
+import { describe, it, expect } from 'vitest';
+import { parse } from 'yaml';
+import type { Db } from '@harness/db';
+import { pack as healthcarePack } from '@harness/pack-healthcare';
+import { registryOf } from '../domain/packs/registry.js';
+import { makeTestDeps } from '../testing.js';
+import { publishedTools } from './catalog.js';
+
+const packs = registryOf([healthcarePack]);
+
+/**
+ * Every tool a skill may name: the **published** catalogue, the list an MCP client receives.
+ *
+ * It used to be `allTools(packs)`, the kernel's own definitions. Those two were the same list
+ * until the kernel became pack-agnostic; they are not any more. The kernel defines `records_*`
+ * and the healthcare pack publishes `providers_*` over them, so a skill checked against the
+ * kernel list would fail on every name it can actually call, and a skill naming a kernel tool
+ * the loaded packs replaced would wrongly pass. `publishedTools` is the same function
+ * `createCoreToolsServer` registers from, so this set is exactly what the server serves.
+ *
+ * The null database is safe and deliberate: `publishedTools` builds and filters definitions and
+ * never calls a handler, so this test needs no Postgres — the same trick `app/record-surface.ts`
+ * uses to record the surface offline.
+ */
+function publishedNames(registry: typeof packs): Set<string> {
+  const deps = makeTestDeps(null as unknown as Db, { packs: registry });
+  return new Set(publishedTools(deps).map((t) => t.name));
+}
+
+const KNOWN_TOOL_NAMES = publishedNames(packs);
+
+const REQUIRED_HARNESS_KEYS = ['owner', 'eval_status', 'evals', 'action_classes', 'tools'] as const;
+
+/** Every skill directory of every loaded pack, as `[skillsDir, skillName]` pairs. */
+function skillsOf(dirs: string[]): [string, string][] {
+  return dirs.flatMap((dir) =>
+    readdirSync(dir, { withFileTypes: true })
+      // Directories only: a stray file beside the skills is not a skill.
+      .filter((e) => e.isDirectory())
+      .map((e) => [dir, e.name] as [string, string]),
+  );
+}
+
+function readFrontmatter(dir: string, name: string): Record<string, unknown> {
+  const text = readFileSync(path.join(dir, name, 'SKILL.md'), 'utf8');
+  const match = /^---\n([\s\S]*?)\n---\n/.exec(text);
+  if (!match) throw new Error(`${name}: SKILL.md has no frontmatter block`);
+  return parse(match[1]) as Record<string, unknown>;
+}
+
+describe('loaded pack skill frontmatter', () => {
+  const skills = skillsOf(packs.skillsDirs());
+
+  it('discovers the four credentialing skills', () => {
+    expect(skills.map(([, name]) => name).sort()).toEqual([
+      'credentialing-expirations',
+      'credentialing-fill-form',
+      'credentialing-intake',
+      'credentialing-roster',
+    ]);
+  });
+
+  it.each(skills)('%s/%s has valid frontmatter', (dir, name) => {
+    const fm = readFrontmatter(dir, name);
+    expect(fm.name).toBe(name);
+    for (const key of ['description', 'version']) {
+      expect(fm[key], `${name}: missing ${key}`).toBeTruthy();
+    }
+
+    const harness = (fm.metadata as Record<string, unknown> | undefined)?.harness as
+      Record<string, unknown> | undefined;
+    expect(harness, `${name}: missing metadata.harness`).toBeTruthy();
+    for (const key of REQUIRED_HARNESS_KEYS) {
+      expect(harness?.[key], `${name}: missing metadata.harness.${key}`).not.toBeUndefined();
+    }
+
+    const tools = harness?.tools as string[];
+    expect(Array.isArray(tools), `${name}: metadata.harness.tools must be an array`).toBe(true);
+    expect(tools, `${name}: must call harness_set_context first`).toContain('harness_set_context');
+
+    for (const tool of tools) {
+      expect(KNOWN_TOOL_NAMES.has(tool), `${name}: unknown tool "${tool}"`).toBe(true);
+    }
+  });
+});
+```
+
+`publishedNames` takes the registry as an argument for one reason: Task 6 calls it a second time with `registryOf([healthcarePack, storiesPack])` and asserts the union. Leave the parameter in even though this task passes the same value twice.
+
+Every `expect` from the old file survives, including the four-directory assertion — with one pack loaded, `skillsDirs()` is a one-element array and the discovered set is the same four names.
+
+```bash
+pnpm --filter @harness/core-tools exec vitest run src/tools/skills-frontmatter.test.ts
+```
+Expected: `Tests 5 passed` — the discovery `it` plus one per skill. The four healthcare skills name `providers_*`, `documents_*`, `forms_*`, `verify_nppes` and `harness_set_context`, and every one of those is in the published catalogue at the end of this task because `compat.ts` publishes the twelve wrappers.
+
 - [ ] **Step 16: Re-point the last core-tools callers and the public API**
 
 - `domain/forms/provider-data.ts`: `loadProviderData` reads `records`, `fields` and `attachments` by their real names now that the transitional aliases are gone; `requireProvider` becomes `requireRecord`; the credential projection reads `attachments.numberEncrypted`. `ProviderData.credentials[].hasNumber` keeps its meaning and its `is not null` projection.
@@ -4736,7 +5025,12 @@ pnpm arch
 pnpm format:check
 pnpm -r test
 ```
-Expected: clean typecheck; no lint errors; `0 errors`; Prettier reports nothing; 9 packages pass. The core-tools count moves: `providers.test.ts` and `deadlines.test.ts` are the same tests in a new folder, `documents.test.ts` is split across two files with the same total, and `records/repository.test.ts`, `tools/records.test.ts`, `packs/assignability.test.ts` and the four new registry and compute `it`s are additions.
+Expected: clean typecheck; no lint errors; `0 errors`; Prettier reports nothing; 9 packages pass. The core-tools count moves: `providers.test.ts` and `deadlines.test.ts` are the same tests in a new folder, `documents.test.ts` is split across two files with the same total, `skills-frontmatter.test.ts` keeps its five `it`s against a new fixture, and `records/repository.test.ts`, `tools/records.test.ts`, `packs/assignability.test.ts` and the five new registry and compute `it`s are additions.
+
+```bash
+pnpm --filter @harness/core-tools exec vitest run src/tools/skills-frontmatter.test.ts src/domain/packs/registry.test.ts
+```
+Expected: `Tests 5 passed` and `Tests 15 passed`. The first is the file Step 15 re-pointed at `publishedTools`; if it is red here, the rewrite was skipped and the four skills are being checked against a kernel list that no longer publishes `providers_*`.
 
 ```bash
 pnpm --filter @harness/core-tools exec vitest run src/app/surface.test.ts
@@ -4766,7 +5060,9 @@ Plan 5 Task 4 moves that file into packs/healthcare."
 ---
 ### Task 4: `packs/healthcare` — verify, forms, the credential vocabulary, and the eighteen tools
 
-Everything credentialing leaves the kernel. `domain/verify`, `domain/forms` and `tools/compat.ts` move into the pack; the pack's `tools(deps)` returns eighteen definitions — the twelve wrappers unchanged, `verify_nppes`, `verify_state_license` and the four `forms_*` — and declares the twelve kernel names it replaces. `ToolDeps.verify` is deleted and the pack reads its four environment variables itself.
+Everything credentialing leaves the kernel. `domain/verify`, `domain/forms` and `tools/compat.ts` move into the pack; the pack's `tools(deps)` returns eighteen definitions — the twelve wrappers unchanged, `verify_nppes`, `verify_state_license` and the four `forms_*` — and declares the **seven** kernel names it replaces. `ToolDeps.verify` is deleted and the pack reads its four environment variables itself.
+
+**Seven, not twelve.** `Pack.replaces` carries only the tools this pack re-publishes under the *same* name: `documents_ingest`, `documents_get`, `documents_list`, `documents_classify`, `documents_extract`, `deadlines_compute` and `deadlines_upcoming`. The five `providers_*` wrappers are renames over `records_*`, and the five `records_*` names stay gated by `genericTools: false` on the `provider` record kind, exactly as Decision 3 requires — so a second pack loaded beside healthcare still gets the generic record tools. Task 3's `COMPAT_REPLACES` listed twelve because a source that is not a pack has no `genericTools` gate; do not copy that list across.
 
 After this task, `harness/core-tools/src/` names no credentialing concept outside its tests. Task 6 is what proves it.
 
@@ -4784,8 +5080,8 @@ After this task, `harness/core-tools/src/` names no credentialing concept outsid
 - Modify: `packs/healthcare/src/index.ts` (`records`, `attachments`, `replaces`, `tools`), `packs/healthcare/package.json` (adds `pdf-lib`, already present; adds the `./generate` export, already present)
 - Modify: `harness/core-tools/src/tools/catalog.ts` (the compat source and the form/verify lists go), `src/index.ts`, `src/testing.ts`, `src/app/server.ts`, `src/app/record-surface.ts`, `src/domain/tooling/types.ts` (`verify` deleted)
 - Modify: `evals/src/domain/pipeline.ts`, `evals/src/judge-deps.test-helpers.ts` (`verify` deleted)
-- Modify: `.dependency-cruiser.cjs` (`a-pack-never-imports-core-tools` exempts test files)
-- Modify: `eslint.config.js` (`packs/healthcare/src` joins `STRICT_LAYER_ROOTS`; `packs/healthcare/src/config.ts` joins `PROCESS_ENV_IS_FINE`)
+- Modify: `.dependency-cruiser.cjs` (`a-pack-never-imports-core-tools` exempts test files; `pack-healthcare` joins `PACKAGES`)
+- Modify: `eslint.config.js` (`packs/healthcare/src/config.ts` joins `PROCESS_ENV_IS_FINE`)
 - Delete: `harness/core-tools/src/domain/verify/`, `harness/core-tools/src/domain/forms/`, `harness/core-tools/src/tools/verify.ts`, `harness/core-tools/src/tools/forms.ts`, `harness/core-tools/src/tools/compat.ts`
 
 **Interfaces:**
@@ -4806,7 +5102,7 @@ After this task, `harness/core-tools/src/` names no credentialing concept outsid
   function buildRoster(deps: PackToolDeps, payerId: string, providerIds: string[]): Promise<RosterRow[]>
 
   // packs/healthcare/src/tools/index.ts
-  const HEALTHCARE_REPLACES: readonly string[]   // the twelve kernel names
+  const HEALTHCARE_REPLACES: readonly string[]   // the SEVEN same-named kernel tools: documents_ingest/get/list/classify/extract, deadlines_compute/upcoming
   function healthcareTools(deps: PackToolDeps): AnyToolDef[]
   ```
 
@@ -5071,7 +5367,31 @@ import { FieldInput, URGENCY_BUCKETS } from './shapes.js';
 and `ToolDeps` becomes `PackToolDeps` in `callKernel` and `documentsIngestFor`. `MASKED` and `isRestrictedName` become `deps.kernel.MASKED` and `deps.kernel.isRestrictedName` — which is why the whole file becomes a factory: `redact` has no `deps` argument of its own, so it closes over the one `tools(deps)` was handed.
 
 ```ts
-export const HEALTHCARE_REPLACES = [ /* the twelve, unchanged from COMPAT_REPLACES */ ] as const;
+/**
+ * The kernel tools this pack takes over: the **seven same-named** ones, and no others.
+ *
+ * `replaces` removes a name from the published catalogue for the whole process, so it may only
+ * carry names this pack genuinely re-publishes under the same name. The five `providers_*`
+ * wrappers are *renames* over `records_*`, not replacements, and the five `records_*` names are
+ * hidden from a healthcare-only deployment by `genericTools: false` on the `provider` record
+ * kind instead (Decision 3). That second mechanism is what lets a second pack loaded beside
+ * this one still reach the generic record tools — and `harness/core-tools/src/app/dual-pack.test.ts`
+ * is what fails if this list ever grows back to twelve.
+ *
+ * `COMPAT_REPLACES` in Task 3's `tools/compat.ts` did list twelve; it was not a pack, so it had
+ * no `genericTools` gate to lean on. Dropping the five here is the whole difference between the
+ * two lists, and the surface snapshot proves it changes nothing for healthcare: 17 kernel tools
+ * − 7 replaced − 5 gated off + 18 from this pack = the same 23 names as before.
+ */
+export const HEALTHCARE_REPLACES = [
+  'deadlines_compute',
+  'deadlines_upcoming',
+  'documents_ingest',
+  'documents_get',
+  'documents_list',
+  'documents_classify',
+  'documents_extract',
+] as const;
 
 export function aliasTools(deps: PackToolDeps): AnyToolDef[] {
   const { MASKED, isRestrictedName } = deps.kernel;
@@ -5281,7 +5601,20 @@ Also delete the `verify` block from `makeTestDeps` in `src/testing.ts`; the four
 
 **No pack declares `@harness/core-tools` as a dependency**, and none of the five moved test files lives in a pack — they are in `harness/core-tools/src/app/pack-healthcare/`. This exemption is here for the pack's *own* unit tests, which import nothing from core-tools today; it is a rule the workspace graph stays clean without and that exists so the next pack's author is not blocked by a false error. Say so in the comment, which the snippet above does.
 
-`eslint.config.js` — add `'packs/healthcare/src'` to `STRICT_LAYER_ROOTS` and `{ name: 'pack-healthcare', src: 'packs/healthcare/src', severity: 'error' }` to `.dependency-cruiser.cjs`'s `PACKAGES`, so the pack's own `shared → domain → tools` layering is enforced like every other package's.
+**Register the pack for layer enforcement.** Add one row to `.dependency-cruiser.cjs`'s `PACKAGES`, so the pack's own `shared → domain → tools → app` layering is enforced like every other package's:
+
+```js
+const PACKAGES = [
+  // …
+  { name: 'evals', src: 'evals/src', severity: 'error' },
+  { name: 'pack-healthcare', src: 'packs/healthcare/src', severity: 'error' },
+  { name: 'scripts', src: 'scripts/src', severity: 'error' },
+];
+```
+
+`packs/healthcare` is already in `WORKSPACE_DIRS`, so no second edit there. `layerRules` turns that one row into the five upward-import bans automatically, which is what `.dependency-cruiser.cjs`'s own "HOW A NEW PACKAGE IS ADDED" comment describes.
+
+**`eslint.config.js` needs no layer entry.** An earlier draft of this plan told you to add `'packs/healthcare/src'` to a `STRICT_LAYER_ROOTS` array; **that identifier does not exist in this repository.** It was a Plan 4 migration scaffold and Plan 4's Task 12 collapsed it. The layer rules that survive in `eslint.config.js` are already package-agnostic globs — `'**/src/tools/**/*.ts'` carries `NO_PROCESS_ENV` and `NO_BARE_THROW`, and it matches `packs/healthcare/src/tools/` with no edit. The only `eslint.config.js` change this task needs is the `PROCESS_ENV_IS_FINE` entry from Step 3.
 
 - [ ] **Step 10: Run every gate**
 
@@ -5305,7 +5638,9 @@ Expected: `Tests 3 passed`, and no output from `git status`. **This is the task'
 ```bash
 grep -rniE 'provider|credential|licen[cs]e|npi|nppes|malpractice|payer|roster' harness/core-tools/src --include='*.ts' | grep -v '\.test\.ts'
 ```
-Expected: a handful of hits, all of them comments using "provider" to mean a model vendor or a file-store aside — `domain/models/types.ts`, `domain/models/gateway.ts`, `domain/storage/layout.ts`. Task 6 rewords each one and turns this grep into a test. **No hit may be in a schema, a description, an identifier or a SQL column**; if one is, it belongs in the pack and this task is not finished.
+Expected: **ten hits across seven files**, every one a comment. Task 6 Step 8 enumerates them in a table and rewords each one; the files are `domain/models/types.ts` (2), `domain/models/gateway.ts` (2), `domain/storage/layout.ts` (1), `domain/storage/types.ts` (1), `domain/effects/outbox.ts` (1), `domain/tooling/types.ts` (2–3, depending on whether Step 7's deletion of `deps.verify` took the `nppesRegistry` sentence with it) and `domain/packs/registry.ts` (1 comment, reported on two lines). Do not reword them here; leave them for Task 6, which is the task that lands the test.
+
+**No hit may be in a schema, a description, an identifier or a SQL column**, and after this task there is exactly one such string left in the tree — `documents_ingest`'s `e.g. incoming/license.pdf` — which is in `packs/healthcare/src/tools/aliases.ts`, not in core-tools, because Task 3 Step 9 reworded the kernel's copy and Step 14 kept the wrapper's. If this grep prints a line from `tools/documents.ts`, that rewording was skipped and this task is not finished.
 
 - [ ] **Step 11: Commit**
 
@@ -5797,8 +6132,9 @@ A kernel that still assumes credentialing passes every test in Tasks 1 to 5, bec
 - Create: `harness/core-tools/src/app/dual-pack.test.ts`
 - Create: `harness/core-tools/src/kernel-vocabulary.test.ts`
 - Modify: `harness/core-tools/package.json` (`@harness/pack-stories` as a devDependency)
-- Modify: `harness/core-tools/src/domain/models/types.ts`, `domain/models/gateway.ts`, `domain/storage/layout.ts` (three comments reworded)
-- Modify: `.dependency-cruiser.cjs` (`packs/stories` joins `WORKSPACE_DIRS` and `PACKAGES`), `eslint.config.js` (`packs/stories/src` joins `STRICT_LAYER_ROOTS`; `packs/stories/synthetic/cli.ts` joins `CONSOLE_IS_FINE`)
+- Modify: `harness/core-tools/src/tools/skills-frontmatter.test.ts` (the union block — Step 4)
+- Modify, for the vocabulary rule (ten comment lines across seven files, enumerated in Step 8): `harness/core-tools/src/domain/models/types.ts`, `domain/models/gateway.ts`, `domain/storage/layout.ts`, `domain/storage/types.ts`, `domain/effects/outbox.ts`, `domain/tooling/types.ts`, `domain/packs/registry.ts`
+- Modify: `.dependency-cruiser.cjs` (`packs/stories` joins `WORKSPACE_DIRS` and `PACKAGES`), `eslint.config.js` (`packs/stories/synthetic/cli.ts` joins `CONSOLE_IS_FINE`)
 - Modify: root `package.json` (`synth:stories`)
 
 **Interfaces:**
@@ -5904,23 +6240,28 @@ Expected: pnpm reports one more project.
   ],
   "extraction": {
     "version": "1.0.0",
-    "document_kinds": ["meeting_notes", "other"],
+    "document_kinds": ["meeting_notes"],
     "role": "You read product meeting notes and return structured data.",
     "targets": [
       {
-        "document_kinds": ["*"],
+        "document_kinds": ["meeting_notes"],
         "record_kind": "epic",
         "schema_name": "epic_extraction",
         "attachments_key": "links",
         "instruction": "Extract the epic these notes describe.",
-        "attachment_instruction": "Also list every tracker or document the notes link to, with the system that issued it."
+        "attachment_instruction": "Also list every tracker or document the notes link to, with the system that issued it.",
+        "attachment_schema_description": "Trackers and documents these notes link to. Report the system that issued each one, not a URL."
       }
     ]
   }
 }
 ```
 
-Two things here are the whole reason this pack exists. `source_link`'s `leadDays: 0` is the case Task 3's `computeDeadlines` was changed for — an attachment kind that never needs renewing — and `attachments_key: "links"` is a second pack calling the model-facing property something other than `credentials`, which is what proves the kernel does not own that word.
+Three things here are the whole reason this pack exists. `source_link`'s `leadDays: 0` is the case Task 3's `computeDeadlines` was changed for — an attachment kind that never needs renewing. `attachments_key: "links"` is a second pack calling the model-facing property something other than `credentials`, which is what proves the kernel does not own that word. And `attachment_instruction` and `attachment_schema_description` differ from each other here too, so the split Task 1 made is exercised by both packs rather than only by the one it was preserved for.
+
+**The stories pack claims `meeting_notes` exactly and declares no other document kind — deliberately, and this is the one thing about it that is not free to change.** An earlier draft gave it `document_kinds: ["meeting_notes", "other"]` with a `["*"]` catch-all target. Loaded beside healthcare, which also declares `["*"]`, that is two packs claiming every document kind, and `targetFor('meeting_notes')` would resolve to whichever pack loaded first — healthcare — so the stories intake would be extracted against the provider schema and would throw the missing-name error. An exact claim wins over any catch-all, so claiming `meeting_notes` by name is what makes the routing deterministic regardless of `HARNESS_PACKS` order. `"other"` is dropped rather than kept, because `definePack` refuses a declared document kind that no target claims and the only way to keep it would be a second catch-all.
+
+Task 3 Step 10 backs the convention with a check, so a future pack cannot re-create the collision quietly: **no two loaded packs may claim the same document kind**, `'*'` included.
 
 - [ ] **Step 3: Write the pack**
 
@@ -6008,9 +6349,12 @@ describe('the stories pack', () => {
     expect(pack.formsDir).toBeUndefined();
   });
 
-  it('routes its one document kind to the epic target', () => {
-    expect(pack.documentKinds).toEqual(['meeting_notes', 'other']);
+  it('routes its one document kind to the epic target, by name rather than by catch-all', () => {
+    expect(pack.documentKinds).toEqual(['meeting_notes']);
     expect(pack.extraction.targets).toHaveLength(1);
+    expect(pack.extraction.targets[0].document_kinds).toEqual(['meeting_notes']);
+    // No '*': healthcare declares the catch-all, and two of them would collide at load.
+    expect(pack.extraction.targets[0].document_kinds).not.toContain('*');
     expect(pack.extraction.targets[0].record_kind).toBe('epic');
   });
 });
@@ -6094,6 +6438,43 @@ Before saying the intake is done: `records_get` shows the title and owner you
 reported, and `records_list_pending` returns an empty list. Say what those two
 calls returned, not what you expect them to return.
 ```
+
+**Extend the frontmatter test to the union.** Task 3 Step 15 rewrote `harness/core-tools/src/tools/skills-frontmatter.test.ts` to check declared tool names against the *published* catalogue and to walk every directory in `packs.skillsDirs()`, but the registry it builds is still `registryOf([healthcarePack])`, so the stories skill is not reached. Add the second pack and a second `describe`, leaving the healthcare block and its four-directory assertion exactly as they are:
+
+```ts
+import { pack as storiesPack } from '@harness/pack-stories';
+
+// …the existing healthcare describe, unchanged…
+
+describe('two packs loaded at once', () => {
+  const both = registryOf([healthcarePack, storiesPack]);
+  const known = publishedNames(both);
+  const skills = skillsOf(both.skillsDirs());
+
+  it('walks both skills directories, not just the first', () => {
+    expect(both.skillsDirs()).toHaveLength(2);
+    expect(skills.map(([, name]) => name).sort()).toEqual([
+      'credentialing-expirations',
+      'credentialing-fill-form',
+      'credentialing-intake',
+      'credentialing-roster',
+      'stories-intake',
+    ]);
+  });
+
+  it.each(skills)('%s/%s names only tools the union catalogue publishes', (dir, name) => {
+    const harness = (readFrontmatter(dir, name).metadata as Record<string, unknown>).harness as
+      Record<string, unknown>;
+    for (const tool of harness.tools as string[]) {
+      expect(known.has(tool), `${name}: unknown tool "${tool}"`).toBe(true);
+    }
+  });
+});
+```
+
+This is the assertion that makes the stories skill's eight names mean something: `records_search`, `records_get`, `records_list_pending` and `records_confirm_field` are published **only** because healthcare's `replaces` is the seven same-named tools and not the twelve. Get that wrong in Task 4 and this test names the missing tool.
+
+`harness/core-tools/package.json` already gains `@harness/pack-stories` as a devDependency in Step 7, which is what lets this file import it.
 
 - [ ] **Step 5: Write the corpus generator**
 
@@ -6285,12 +6666,30 @@ beforeAll(async () => {
 });
 
 describe('two packs in one process', () => {
+  it('replaces only the seven same-named tools, leaving records_* for the other pack', () => {
+    // Decision 3, asserted rather than assumed. If this list ever grows back to twelve, the
+    // five records_* names below vanish process-wide and the stories pack has no record tools
+    // at all — which is the exact failure this pack exists to catch.
+    expect([...(healthcarePack.replaces ?? [])].sort()).toEqual([
+      'deadlines_compute',
+      'deadlines_upcoming',
+      'documents_classify',
+      'documents_extract',
+      'documents_get',
+      'documents_ingest',
+      'documents_list',
+    ]);
+    expect(storiesPack.replaces).toBeUndefined();
+  });
+
   it('publishes the union of both catalogues, with no name published twice', () => {
     const deps = makeTestDeps(db, { packs });
     const names = publishedTools(deps).map((t) => t.name);
     expect(new Set(names).size).toBe(names.length);
-    // Healthcare's eighteen, the five kernel tools no pack replaced, and the five generic
-    // records_* tools, which are published now because the stories pack leaves genericTools true.
+    // Seventeen kernel tools, seven of them replaced by healthcare, plus healthcare's eighteen:
+    // 17 − 7 + 18 = 28. The five records_* survive because the stories pack's `epic` kind
+    // leaves genericTools true, so the publication gate does not drop them.
+    expect(names).toHaveLength(28);
     for (const name of ['providers_get', 'forms_fill', 'verify_nppes', 'deadlines_upcoming']) {
       expect(names).toContain(name);
     }
@@ -6298,6 +6697,21 @@ describe('two packs in one process', () => {
       expect(names).toContain(name);
     }
     expect(names).toContain('audit_query');
+  });
+
+  it('refuses to load two packs that claim the same document kind', () => {
+    // The stories pack claims `meeting_notes` by name precisely so this does not happen to it.
+    // A pack that reached for a second catch-all would fail here rather than silently never
+    // receiving a document.
+    const greedy = {
+      ...storiesPack,
+      name: 'greedy',
+      extraction: {
+        ...storiesPack.extraction,
+        targets: [{ ...storiesPack.extraction.targets[0], document_kinds: ['*'] }],
+      },
+    };
+    expect(() => registryOf([healthcarePack, greedy])).toThrow('both claim document kind "*"');
   });
 
   it('offers both packs record kinds to records_* and both packs document kinds to documents_ingest', () => {
@@ -6431,7 +6845,7 @@ with `import { isRestrictedName } from '../shared/redaction/names.js';` at the t
 pnpm install
 pnpm --filter @harness/core-tools exec vitest run src/app/dual-pack.test.ts
 ```
-Expected: `Tests 7 passed`. A failure here is the interesting kind: a hard-coded `'provider'`, a manifest read that assumed one pack, or a lead-day table the kernel still owns.
+Expected: `Tests 9 passed`. A failure here is the interesting kind: a hard-coded `'provider'`, a manifest read that assumed one pack, a `Pack.replaces` that swallowed `records_*`, or a lead-day table the kernel still owns.
 
 - [ ] **Step 8: Write the vocabulary rule**
 
@@ -6514,10 +6928,32 @@ describe('the kernel names no area of the product', () => {
 ```bash
 pnpm --filter @harness/core-tools exec vitest run src/kernel-vocabulary.test.ts
 ```
-Expected: FAIL, listing three comment lines. Fix each by saying what the kernel means:
 
-- `harness/core-tools/src/domain/models/types.ts` and `domain/models/gateway.ts`: "provider" there means a model vendor. Reword to "model vendor" — `'structured-output support across model vendors is unreliable'`, `'a non-HTTP model vendor'`, and so on. There is no behaviour in a comment.
-- `harness/core-tools/src/domain/storage/layout.ts`: `'scatter provider documents into whatever directory happened to be the working directory'` becomes `'scatter ingested documents into whatever directory happened to be the working directory'`.
+**Expected: FAIL, listing ten lines across seven files.** An earlier draft of this plan predicted three; it was counting only the two `domain/models` files and `domain/storage/layout.ts`. The real list, verified by running the same regex over the tree with the files Tasks 3 and 4 move already subtracted, is below. Every one is a comment, every one is in `harness/core-tools/src`, and none is in a schema, a description, an identifier or a SQL column — so all ten are fixed by saying what the kernel actually means, and **no allowlist entry is added**:
+
+| File | Line, today | What it says | Reword to |
+|---|---|---|---|
+| `domain/models/types.ts` | 8 | "The proxy master key. **Provider** keys never leave the proxy." | "model vendor keys" |
+| `domain/models/types.ts` | 26 | "A schema name the **provider** echoes back." | "the model vendor echoes back" |
+| `domain/models/gateway.ts` | 48 | "**Provider** error bodies routinely quote the prompt" | "Model vendor error bodies" |
+| `domain/models/gateway.ts` | 159 | "Some **providers** wrap JSON in a markdown fence" | "Some model vendors" |
+| `domain/storage/layout.ts` | 7 | "scatter **provider** documents into whatever directory" | "scatter ingested documents into whatever directory" |
+| `domain/storage/types.ts` | 13 | "Subdirectory under `out/`, e.g. `forms` or `roster`." | "e.g. `forms` or `exports`" — a generic example, because `forms` and `roster` are both pack output directories |
+| `domain/effects/outbox.ts` | 27 | "two clients computing the same key (e.g. `roster:aetna`)" | "(e.g. `export:acme`)" |
+| `domain/tooling/types.ts` | 44 | "`nppesRegistry(deps.verify)` inside `verify_nppes`" | the whole clause goes: `deps.verify` was deleted in Task 4, so the sentence about the three adapters now names only `httpGateway(deps.gateway)` and `fileStorage(root)` |
+| `domain/tooling/types.ts` | 70 | "instead of scattering **provider** documents into the working directory" | "scattering ingested documents" |
+| `domain/tooling/types.ts` | 84 | "requires a BAA with the model **provider**" | "with the model vendor" |
+| `domain/tooling/types.ts` | 98 | "what lets one build serve **credentialing** today and a different area tomorrow" | "serve one area of the product today and a different one tomorrow" |
+| `domain/packs/registry.ts` | 16–17 | "`Pack.extraction` is typed `ProviderManifest` … `packs/healthcare/src/index.ts` casts `provider.json`" | Task 1 already renames the type to `ExtractionManifest`; reword the rest to name no pack — "a pack is free to hand in the raw JSON a human edits rather than validating it" |
+
+That is twelve rows for ten reported lines: `domain/tooling/types.ts:44` disappears with `deps.verify` if Task 4's edit took the sentence with it, and `domain/packs/registry.ts:16-17` is one comment reported twice. **Run the grep; fix what it prints.** The table is the floor, not the ceiling.
+
+**Two things the rule does *not* scan, and one string that depends on it.** `SCANNED` covers `harness/core-tools/src` and `evals/src` only, minus `*.test.ts`, `shared/redaction/` and `*.test-helpers.ts`. It does not reach `packs/`. That matters for one published string: `documents_ingest`'s `path` input carries `.describe('Path relative to the harness storage directory, e.g. incoming/license.pdf')`, and `licen[cs]e` is in `FORBIDDEN`. There are two copies of that description by the end of Task 4 and they must diverge:
+
+- the **healthcare wrapper's** copy, in `packs/healthcare/src/tools/aliases.ts`, keeps `incoming/license.pdf` character for character. It is what `docs/architecture/tool-surface.json` records, so changing it moves the snapshot. The rule does not scan `packs/`, so it never sees it.
+- the **kernel's** copy, in `harness/core-tools/src/tools/documents.ts`, is reworded by Task 3 Step 9 to `e.g. incoming/scan.pdf`. Nothing publishes it in a healthcare deployment — the wrapper replaces `documents_ingest` — so the surface does not move either.
+
+If this grep reports `tools/documents.ts`, Task 3's rewording was skipped. Fix it there; do not allowlist it, and do not touch the wrapper.
 
 Re-run until the list is empty. **Do not add an allowlist entry.**
 
@@ -6540,7 +6976,7 @@ const WORKSPACE_DIRS = [
 ];
 ```
 
-`eslint.config.js` — `'packs/stories/src'` joins `STRICT_LAYER_ROOTS`.
+`eslint.config.js` needs **no** layer entry for this pack either, for the reason Task 4 Step 9 spells out: there is no `STRICT_LAYER_ROOTS` in this repository, and the construct rules are already package-agnostic globs that match `packs/stories/src/` unedited. The only `eslint.config.js` change in this task is the `CONSOLE_IS_FINE` entry from Step 5.
 
 `pnpm arch` already globs `packs/*/src/**/*.ts` and `packs/*/synthetic/**/*.ts`, so no script changes.
 
@@ -6559,7 +6995,7 @@ Expected: clean typecheck; no lint errors; `0 errors`; Prettier reports nothing;
 ```bash
 HARNESS_PACKS=@harness/pack-healthcare,@harness/pack-stories pnpm --filter @harness/core-tools exec vitest run src/app/dual-pack.test.ts src/tools/skills-frontmatter.test.ts
 ```
-Expected: both pass. The frontmatter test walks every loaded pack's skills directory, so the stories skill's eight declared tool names are checked against the union catalogue — which is where a skill naming a tool no loaded pack publishes fails.
+Expected: both pass — `Tests 9 passed` for the dual-pack file, and for the frontmatter file the healthcare block plus the two-pack block Step 4 added (11 in total: 1 + 4 for healthcare, 1 + 5 for the union). The frontmatter test now builds a second registry over both packs and walks both skills directories, so the stories skill's eight declared tool names are checked against the union of the published catalogues — which is where a skill naming a tool no loaded pack publishes fails.
 
 ```bash
 pnpm --filter @harness/core-tools exec vitest run src/app/surface.test.ts
@@ -6654,6 +7090,12 @@ One pair of tables carries every pack's data.
 | `attachments` | `kind`, `issuer`, `state`, dates, `number_encrypted`, `properties jsonb`. A licence, a link. |
 | `deadlines` | keyed on an attachment: one `expiration` row and, when the kind has a lead time, one `renewal_start` |
 | `documents` | unchanged, attached to a record rather than to a provider |
+
+`deadlines` keeps the columns it has always had — `window_days` and `notified_at`. The design
+note for this work listed `lead_days` and `status` instead; neither has ever existed, and
+migration 0008 re-keys the table onto `records` and `attachments` without adding either. The
+lead time is not a column at all: it is `AttachmentKindSpec.leadDays`, which a pack declares
+and the kernel reads at compute time.
 
 A pack declares what may go in them — `RecordKindSpec` and `AttachmentKindSpec` in
 `@harness/pack-api` — and ships no migration. `records_upsert` refuses a kind no loaded pack
@@ -6783,23 +7225,38 @@ complete one; read it alongside this.
    ```json
    {
      "version": "1.0.0",
-     "document_kinds": ["meeting_notes", "other"],
+     "document_kinds": ["meeting_notes"],
      "role": "You read product meeting notes and return structured data.",
      "targets": [
        {
-         "document_kinds": ["*"],
+         "document_kinds": ["meeting_notes"],
          "record_kind": "epic",
          "schema_name": "epic_extraction",
          "attachments_key": "links",
-         "instruction": "Extract the epic these notes describe."
+         "instruction": "Extract the epic these notes describe.",
+         "attachment_instruction": "Also list every tracker or document the notes link to, with the system that issued it.",
+         "attachment_schema_description": "Trackers and documents these notes link to. Report the system that issued each one, not a URL."
        }
      ]
    }
    ```
 
-   `"*"` claims every kind no other target named. `definePack` refuses a target naming a record
-   kind you did not declare, and a document kind no target reaches. The kernel supplies the
-   injection-defence block under your `role` line and you cannot replace it.
+   `definePack` refuses a target naming a record kind you did not declare, and a document kind
+   no target reaches. The kernel supplies the injection-defence block under your `role` line and
+   you cannot replace it.
+
+   `attachment_instruction` and `attachment_schema_description` are two different strings on
+   purpose: the first is the sentence in the prompt's user turn, the second is the `description`
+   of the attachment array in the JSON Schema sent as `response_format`. Most packs will want
+   them to say much the same thing; they are separate because the healthcare pack's have always
+   differed and the surface of a model call is not something to change by accident.
+
+   **Name your document kinds rather than reaching for `"*"`.** A target may claim `"*"`, which
+   picks up every kind no other target named, but only one loaded pack may declare it: two packs
+   claiming the same document kind — `"*"` counted as a kind — is a `ConfigError` at startup
+   naming both, because otherwise which pack receives a document would depend on the order of
+   `HARNESS_PACKS`. The healthcare pack holds the catch-all for historical reasons; a new pack
+   claims its kinds by name, as the stories pack does.
 
 5. **Export `pack` from `src/index.ts`.** `formsDir` and `skillsDir` must be absolute and
    resolved from `import.meta.url`: `definePack` refuses a relative one, because it would
@@ -6815,8 +7272,13 @@ complete one; read it alongside this.
      tool under the kernel's name;
    - reach the three non-tool kernel operations through `deps.kernel`:
      `writeOutFile`, `stageRelease`, and `isRestrictedName`/`MASKED`;
-   - list in `replaces` every kernel tool yours supersedes. A name that is not a kernel tool is
-     a startup failure, and two loaded packs may not replace the same one.
+   - list in `replaces` every kernel tool yours supersedes **under the same name**. A name that
+     is not a kernel tool is a startup failure, and two loaded packs may not replace the same
+     one. A tool of yours under a *different* name is not a replacement and does not belong in
+     the list: `replaces` is process-wide, so a name you put there is gone for every other pack
+     too. To keep the generic `records_*` tools out of your own deployment, set
+     `genericTools: false` on your record kind instead — that is per kind, not per process, and
+     it is why the healthcare pack replaces seven names rather than twelve.
 
 7. **Write the skills.** One `<name>/SKILL.md` per skill under `skillsDir`, with
    `metadata.harness.tools` naming only tools the loaded catalogue publishes;
@@ -6845,7 +7307,9 @@ complete one; read it alongside this.
 
 The first pack named in `HARNESS_PACKS` answers `deps.packs.manifest()` and
 `deps.packs.formsDir()`; `documentKinds()`, `recordKinds()` and `attachmentKinds()` union them
-all, and `targetFor()` prefers an exact claim on a document kind over any catch-all.
+all, and `targetFor()` prefers an exact claim on a document kind over the catch-all. That
+resolution does not depend on load order: `registryOf` refuses two packs that claim the same
+document kind, `"*"` included, so at most one exact claim and at most one catch-all exist.
 ````
 
 - [ ] **Step 3: Both pack READMEs**
@@ -6873,6 +7337,11 @@ kernel's generic tools: `providers_upsert/get/search/confirm_field/list_pending`
 `deadlines_compute/upcoming`. Each wrapper's zod schema is the pre-Plan-5 definition character
 for character, which is why `docs/architecture/tool-surface.json` did not move; each one calls
 its kernel handler through `deps.kernelTools`.
+
+`replaces` lists **seven** of those twelve, not all of them: the five same-named `documents_*`
+and the two `deadlines_*`. The `providers_*` five are renames over `records_*`, and the
+`records_*` names are hidden from this deployment by `genericTools: false` on the `provider`
+record kind instead — per kind, so a second pack loaded beside this one keeps them.
 
 The pack has no database handle. `forms_fill` and `forms_roster` read a provider through
 `records_get`, which client-scopes the read and masks every restricted value, and write their
