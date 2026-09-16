@@ -140,7 +140,7 @@ export const ENV_READING_HELPERS = [
   'optionalEnv',
   'envOrDefault',
   'required',
-  'requiredFrom',
+  
   'seconds',
   'port',
 ] as const;
