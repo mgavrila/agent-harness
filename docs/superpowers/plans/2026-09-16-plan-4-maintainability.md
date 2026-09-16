@@ -60,7 +60,7 @@ Everything below was executed against this checkout on 2026-09-16. Quote the com
 | Prettier reformats 68 of 115 TypeScript files at `printWidth: 120` | Line lengths today: p50 35, p90 86, p99 127, max 268; 251 lines over 120 columns, 49 over 140. 120 is the smallest width that does not rewrap the whole codebase. | `prettier --list-different` over `harness packs evals scripts`; `awk` over every source line |
 | `docker compose --env-file .env.example ... config` **does not work** | `error while interpolating services.litellm.environment.LITELLM_MASTER_KEY: required variable LITELLM_MASTER_KEY is missing a value`. Filling in placeholders makes it succeed, but then the `hermes` service's `env_file: ../../.env` injects **the developer's real `.env`** into the output: the render printed a live `GEMINI_API_KEY` and a live `HARNESS_ENCRYPTION_KEY`. It also prints absolute host paths. None of that can be committed. | Ran the command as written, then again with a placeholder env file, and grepped the output |
 | **The fix: `--no-interpolate --no-path-resolution`** | `docker compose -f harness/compose/docker-compose.yml --profile demo --profile build-only config --no-interpolate --no-path-resolution` renders all six services in 294 deterministic lines, keeps `${VAR:-default}` and `${VAR:?msg}` literal, keeps `env_file` as an unread reference, needs no `.env` at all and contains no secret and no host path. | Ran it and grepped for the machine's real API key: zero hits |
-| The MCP surface is snapshot-able in-process | `connectInProcess(() => createCoreToolsServer(deps))` then `client.listTools()` returns all 22 tools with `inputSchema` and `outputSchema` as resolved JSON Schema; serialised and sorted it is 2247 lines of JSON. No database connection is needed to list tools. | Ran a scratch script against this checkout |
+| The MCP surface is snapshot-able in-process | `connectInProcess(() => createCoreToolsServer(deps))` then `client.listTools()` returns all 23 tools with `inputSchema` and `outputSchema` as resolved JSON Schema; serialised and sorted it is 2247 lines of JSON. No database connection is needed to list tools. | Ran a scratch script against this checkout |
 | Every environment variable the code reads is already in `.env.example` | 26 names, from `process.env.X` plus the string-literal first argument of `numberFromEnv`/`booleanFromEnv`/`required`/`requiredFrom`. Zero missing. | `grep` for both forms, then checked each against `.env.example` |
 | Which core-tools subpath exports other packages actually import | `./storage` (approvals `app/main.ts`, `sinks.ts`), `./effects` (approvals `sinks.ts`, `runner.ts`, `sinks.test.ts`), `./fake-gateway` (evals `judge.test.ts`, `pipeline.test.ts`, `run.test.ts`), `./in-process` (evals `pipeline.ts`). **`./testing`, `./models` and `./reconcile` are imported by nobody outside core-tools.** | `grep -rn "@harness/core-tools" harness/approvals/src evals/src harness/gateway` |
 | The gateway config appears in 11 test fixtures across 5 files | `harness/core-tools/src/models.test.ts`, `.../tools/documents.test.ts`, `evals/src/{run,judge,pipeline}.test.ts` | `grep -rn "gateway: {" --include='*.test.ts'` |
@@ -99,7 +99,7 @@ Every file that moves, across all seven packages, old path → new path. A row t
 | `.vscode/extensions.json` | recommends `dbaeumer.vscode-eslint` and `esbenp.prettier-vscode` |
 | `ARCHITECTURE.md` | the layer table, package map, the path of one tool call, the three invariants, the three error types, where each cross-cutting concern lives |
 | `CONTRIBUTING.md` | adding a tool / domain / pack / client / migration / test; commit conventions; local stack commands |
-| `docs/architecture/tool-surface.json` | committed snapshot: 22 tool names with their input and output JSON schemas |
+| `docs/architecture/tool-surface.json` | committed snapshot: 23 tool names with their input and output JSON schemas |
 | `docs/architecture/compose-surface.yaml` | committed snapshot: the rendered Compose config |
 | `harness/core-tools/src/surface.test.ts` | the test that checks all three surfaces (moves to `src/app/` in Task 7) |
 | `harness/core-tools/src/record-surface.ts` | regenerates both snapshots (moves to `src/app/` in Task 7) |
@@ -210,7 +210,7 @@ Every file that moves, across all seven packages, old path → new path. A row t
 | `harness/core-tools/src/server.ts` | **split** → `src/app/server.ts` (`ALL_TOOLS`, `createCoreToolsServer`, `buildDepsFromEnv`) + `src/index.ts` (the public API barrel) |
 | `harness/core-tools/src/main.ts` | `harness/core-tools/src/app/main.ts` |
 | `harness/core-tools/src/main.test.ts` | `harness/core-tools/src/app/main.test.ts` |
-| `harness/core-tools/src/skills-frontmatter.test.ts` | `harness/core-tools/src/app/skills-frontmatter.test.ts` |
+| `harness/core-tools/src/skills-frontmatter.test.ts` | `harness/core-tools/src/tools/skills-frontmatter.test.ts` |
 | `harness/core-tools/src/surface.test.ts` | `harness/core-tools/src/app/surface.test.ts` |
 | `harness/core-tools/src/record-surface.ts` | `harness/core-tools/src/app/record-surface.ts` |
 | `harness/core-tools/src/testing.ts` | path unchanged; becomes a barrel over the domain fakes |
@@ -393,10 +393,11 @@ evals/results
 evals/baseline.json
 docs/architecture/tool-surface.json
 docs/architecture/compose-surface.yaml
+docs/
 storage
 ```
 
-`harness/gateway/litellm.config.yaml`, `docs/architecture/*` and `evals/baseline.json` are generated files compared byte-for-byte by a test or by `git status`; reformatting them would make the generator and the checked-in copy disagree forever.
+`harness/gateway/litellm.config.yaml`, `docs/architecture/*` and `evals/baseline.json` are generated files compared byte-for-byte by a test or by `git status`; reformatting them would make the generator and the checked-in copy disagree forever. `docs/` is listed for a different reason: it holds this plan, its spec and every runbook, and `pnpm-lock.yaml` is listed because it is machine-generated by pnpm — Prettier reformatting either would make Step 7's formatting commit rewrite documents nobody asked to change, and would rewrite the plan the implementer is currently reading. `harness/db/drizzle` (the migrations, not `harness/db/drizzle.config.ts`) is already listed above for the same reason: a migration file's bytes are load-bearing.
 
 - [ ] **Step 3: Write `.editorconfig` and the VS Code recommendation file**
 
@@ -492,8 +493,19 @@ const CONSOLE_IS_FINE = [
  * @harness/db sits below the shared layer: importing core-tools from it would be a cycle, so
  * it reads its two variables (DATABASE_URL, HARNESS_ENCRYPTION_KEY) as default parameters
  * that every caller can override. Revisit if it ever grows a third.
+ *
+ * The drizzle.config.ts glob below covers `harness/db/drizzle.config.ts`, which reads
+ * `process.env.DATABASE_URL` at the package root, outside `src/` and outside any package's
+ * lint-scoped source tree — a drizzle-kit config file, not a domain module, so it is exempted
+ * by name rather than folded into the `harness/db/src` entry.
  */
-const PROCESS_ENV_IS_FINE = ['**/src/shared/env.ts', '**/src/app/**/*.ts', '**/*.test.ts', 'harness/db/src/**/*.ts'];
+const PROCESS_ENV_IS_FINE = [
+  '**/src/shared/env.ts',
+  '**/src/app/**/*.ts',
+  '**/*.test.ts',
+  'harness/db/src/**/*.ts',
+  '**/drizzle.config.ts',
+];
 
 export default tseslint.config(
   {
@@ -1125,7 +1137,7 @@ Expected: three failures, the first two on `ENOENT: no such file or directory, o
 ```bash
 pnpm surface:record
 ```
-Expected on stderr: `recorded 22 tools and the compose config into docs/architecture/`
+Expected on stderr: `recorded 23 tools and the compose config into docs/architecture/`
 
 ```bash
 wc -l docs/architecture/tool-surface.json docs/architecture/compose-surface.yaml
@@ -3165,9 +3177,12 @@ import { ROSTER_COLUMNS, buildRosterCsv, type RosterRow } from './roster.js';
 
 - [ ] **Step 14: Write the redaction patterns module**
 
-Create `harness/core-tools/src/shared/redaction/patterns.ts`. Everything from
-`src/documents/redact.ts` lines 22-196 moves here unchanged, and `containsRestrictedPattern`
-plus its shape set arrive from the two duplicated copies.
+Create `harness/core-tools/src/shared/redaction/patterns.ts`. Two disjoint ranges of
+`src/documents/redact.ts` move here unchanged — lines 22-151 (`D` through `deaAccept`) and
+171-196 (the `Pattern` interface and the `PATTERNS` array, renamed `RestrictedPattern` and
+`RESTRICTED_PATTERNS` below) — skipping lines 153-169 (`CANONICAL_FIELD`, `fieldNameFor`),
+which move to `text.ts` instead. `containsRestrictedPattern` plus its shape set arrive from
+the two duplicated copies, not from `redact.ts`.
 
 ```ts
 /**
@@ -3409,8 +3424,13 @@ export function isRestrictedName(name: string): boolean {
 
 - [ ] **Step 16: Write the redaction text module**
 
-Create `harness/core-tools/src/shared/redaction/text.ts` with lines 1-20 and 153-263 of
-`src/documents/redact.ts`, rewired to the patterns module:
+Create `harness/core-tools/src/shared/redaction/text.ts` with lines 1-2 and 5-20 of
+`src/documents/redact.ts` (the imports and the `RedactionHit`/`RedactedText` interfaces —
+`RestrictedKind` at line 3 moves to `patterns.ts` instead, and this file imports it back),
+lines 153-169 (`CANONICAL_FIELD`, `fieldNameFor`), and lines 198-263 (`redactPages`,
+`assertRedacted`, plus the comment above each). This is the complement of `patterns.ts`
+above: together the two files cover every line of `redact.ts` exactly once. Rewired to the
+patterns module:
 
 ```ts
 import { RESTRICTED_PATTERNS, type RestrictedKind } from './patterns.js';
@@ -3868,15 +3888,14 @@ import { isRestrictedName } from '../shared/redaction/names.js';
 That also removes `forms/fill.ts`'s only reason to reach into `tools/`, which is a layer
 violation dependency-cruiser will report the moment core-tools is promoted in Task 7.
 
-Finally, `src/documents/extract.ts`'s `superRefine` message names the old home:
+Finally, `src/documents/extract.ts`'s `superRefine` message names the old home
+(`tools/providers.ts`); update it to name the new one. No test asserts on this message —
+`grep -rn "not recognised" harness` finds only the one declaration, in `extract.ts` itself —
+so the whole string is free to change:
 
 ```ts
           message: `restricted field "${f.name}" is not recognised by isRestrictedName; add its stem to RESTRICTED_NAME_KEYS in shared/redaction/names.ts`,
 ```
-
-`extract.test.ts` matches this message with `/not recognised by isRestrictedName/`, so the
-tail may change; confirm with `grep -n "not recognised" harness/core-tools/src/documents/extract.test.ts`
-before editing and leave the string alone if the test quotes it in full.
 
 `harness/core-tools/package.json` needs no edit in this task: no dependency is added and the
 subpath map does not change until Task 7 introduces `index.ts`.
@@ -3943,7 +3962,7 @@ beside it. The type-only import cycles between `registry.ts`, `models.ts`, `effe
 - Move: `harness/core-tools/src/reconcile.test.ts` → `harness/core-tools/src/domain/tooling/reconcile.test.ts`
 - Move: `harness/core-tools/src/in-process.ts` → `harness/core-tools/src/domain/tooling/in-process.ts`
 - Delete: `harness/core-tools/src/registry.ts`
-- Modify: every file that imported `./registry.js`, `./policy.js`, `./audit.js`, `./reconcile.js` or `./in-process.js` — 24 files, listed in Step 6
+- Modify: every file that imported `./registry.js`, `./policy.js`, `./audit.js`, `./reconcile.js` or `./in-process.js` — 28 files (9 at the src root, including `record-surface.ts`, `effects.test.ts` and `models.test.ts`, plus 19 one level down), enumerated in Step 6
 - Modify: `harness/core-tools/package.json` (`./in-process` and `./reconcile` retarget)
 
 **Interfaces:**
@@ -4029,13 +4048,22 @@ folder, so that line is already correct — the sed above is a no-op that docume
 Everything a tool author has to read is in this one file, which is why it carries the long
 comments. It is the only module in the package that other domains import for its types.
 
+`SinkRegistry`, `GatewayConfig` and `VerifyConfig` are not moved by this task — Task 6 moves
+`GatewayConfig` into `domain/models/types.ts` and Task 7 moves `SinkRegistry` into
+`domain/effects/types.ts` and `VerifyConfig` into `domain/verify/types.ts`. Until then they
+still live where they do today, so `types.ts` imports them from their **current** locations —
+the package-root `models.ts` and `effects.ts`, and `tools/verify.ts` — exactly the pattern
+Task 6 already uses for `documents/manifest.ts` importing `../../deadlines/compute.js` "until
+Task 7". Task 6 Step 4 and Task 7 Step 4 each carry one `sed` that repoints these three lines
+the moment their target file exists (see those steps):
+
 ```ts
 import type { McpServer } from '@modelcontextprotocol/server';
 import type * as z from 'zod/v4';
 import type { Db } from '@harness/db';
-import type { SinkRegistry } from '../effects/types.js';
-import type { GatewayConfig } from '../models/types.js';
-import type { VerifyConfig } from '../verify/types.js';
+import type { SinkRegistry } from '../../effects.js'; // until Task 7 moves it to ../effects/types.js
+import type { GatewayConfig } from '../../models.js'; // until Task 6 moves it to ../models/types.js
+import type { VerifyConfig } from '../../tools/verify.js'; // until Task 7 moves it to ../verify/types.js
 import type { ActionClass, Policy } from './policy.js';
 import type { AuditEntry } from './audit.js';
 
@@ -4488,20 +4516,38 @@ git rm harness/core-tools/src/registry.ts
 
 - [ ] **Step 6: Rewrite every import of the five moved modules**
 
-Twenty-four files. Run this from the repository root; it is mechanical and `pnpm -r typecheck`
-is the check that it was complete.
+Every src-root file that imports `./registry.js`, `./policy.js`, `./audit.js`,
+`./reconcile.js` or `./in-process.js`, verified against the tree Task 1 leaves behind by
+`grep -rl "from '\./registry\.js'\|from '\./policy\.js'\|from '\./audit\.js'\|from '\./reconcile\.js'\|from '\./in-process\.js'" -- *.ts`
+run from `harness/core-tools/src` (the files Step 1 already moved into `domain/tooling/` are
+excluded — they got their own sed at their destination):
+
+- `server.ts` — `./registry.js`, `./policy.js`, `./in-process.js`
+- `main.ts` — `./audit.js`, `./reconcile.js`
+- `storage.ts` — `./registry.js`
+- `effects.ts` — `./registry.js`
+- `effects.test.ts` — `./registry.js`
+- `models.ts` — `./registry.js`
+- `models.test.ts` — `./registry.js`
+- `testing.ts` — `./registry.js`, `./policy.js`, `./in-process.js`
+- `record-surface.ts` — `./registry.js`, `./policy.js`, `./in-process.js` (plus `./server.js`
+  and `./tools/verify.js`, both unaffected by this task)
+
+Run this from the repository root; it is mechanical and `pnpm -r typecheck` is the check that
+it was complete.
 
 ```bash
 cd harness/core-tools/src
 
-# Files at the src root: server.ts, main.ts, storage.ts, effects.ts, models.ts, testing.ts, fake-gateway.ts
+# Every file at the src root that imports one of the five moved modules.
 sed -i '' \
   -e "s#from './registry.js'#from './domain/tooling/types.js'#g" \
   -e "s#from './policy.js'#from './domain/tooling/policy.js'#g" \
   -e "s#from './audit.js'#from './domain/tooling/audit.js'#g" \
   -e "s#from './reconcile.js'#from './domain/tooling/reconcile.js'#g" \
   -e "s#from './in-process.js'#from './domain/tooling/in-process.js'#g" \
-  server.ts main.ts storage.ts effects.ts models.ts testing.ts
+  server.ts main.ts storage.ts effects.ts effects.test.ts models.ts models.test.ts testing.ts \
+  record-surface.ts
 
 # One level down: tools/*, documents/*, forms/*, deadlines/*
 sed -i '' \
@@ -4515,9 +4561,12 @@ sed -i '' \
 cd ../../..
 ```
 
+`record-surface.ts` is the file the surface snapshot test depends on: miss it here and
+`surface.test.ts` fails at this task's own gate, not quietly later.
+
 That points everything at `types.js`, which is right for the majority — most of those imports
-are `ToolDeps`, `ToolDef`, `AnyToolDef` or `DEFAULT_CONFIDENCE_THRESHOLD`. Six files also want
-a *function*, and `pnpm -r typecheck` names each one. Fix them by hand:
+are `ToolDeps`, `ToolDef`, `AnyToolDef` or `DEFAULT_CONFIDENCE_THRESHOLD`. Seven files also
+want a *function*, and `pnpm -r typecheck` names each one. Fix them by hand:
 
 | File | Also needs | From |
 |---|---|---|
@@ -4527,14 +4576,21 @@ a *function*, and `pnpm -r typecheck` names each one. Fix them by hand:
 | `src/tools/approvals.ts` | `defineTool` | `../domain/tooling/registry.js` |
 | every other `src/tools/*.ts` | `defineTool` | `../domain/tooling/registry.js` |
 | `src/domain/tooling/registry.test.ts` | `defineTool` | `./registry.js` |
+| `src/effects.test.ts` | `defineTool` | `./domain/tooling/registry.js` |
 
 `ToolError` is no longer re-exported from the kernel — Task 4 left that re-export on the old
-`registry.ts`, which this task deletes. Point every remaining importer at the shared module:
+`registry.ts`, which this task deletes. Point every remaining importer at the shared module.
+`models.test.ts` needs the same fix as the one-level-down files: it imports `ToolError` from
+`./registry.js`, and Step 6's rewrite above just pointed that at `./domain/tooling/types.js`,
+which does not export it. Two patterns, because a src-root file's import is `./domain/…` and a
+one-level-down file's is `../domain/…`:
 
 ```bash
 cd harness/core-tools/src
-grep -rln "ToolError" tools documents forms domain storage.ts models.ts effects.ts testing.ts \
-  | xargs sed -i '' -e "s#import { ToolError } from '\.\./domain/tooling/types\.js';#import { ToolError } from '../shared/errors.js';#"
+grep -rln "ToolError" tools documents forms domain storage.ts models.ts models.test.ts effects.ts testing.ts \
+  | xargs sed -i '' \
+    -e "s#import { ToolError } from '\.\./domain/tooling/types\.js';#import { ToolError } from '../shared/errors.js';#" \
+    -e "s#import { ToolError } from '\./domain/tooling/types\.js';#import { ToolError } from './shared/errors.js';#"
 cd ../../..
 ```
 
@@ -5038,7 +5094,7 @@ cd ../../../../..
 
 `gateway.test.ts` imports `ModelOutputError`; point that at `'../../shared/errors.js'`.
 
-- [ ] **Step 4: Rewire the callers**
+- [ ] **Step 4: Rewire the callers, and re-point `domain/tooling/types.ts` at the new `GatewayConfig`**
 
 ```bash
 cd harness/core-tools/src
@@ -5057,14 +5113,24 @@ sed -i '' \
 cd ../../..
 ```
 
-Then fix by hand, guided by `pnpm -r typecheck`:
+`domain/tooling/types.ts` still reads `GatewayConfig` from `'../../models.js'` — the comment
+Task 5 left on that line says "until Task 6 moves it to `../models/types.js`". This is that
+task, and `../models/types.js` now exists, so re-point it and drop the comment:
+
+```bash
+sed -i '' \
+  -e "s#import type { GatewayConfig } from '../../models.js'; // until Task 6 moves it to ../models/types.js#import type { GatewayConfig } from '../models/types.js';#" \
+  harness/core-tools/src/domain/tooling/types.ts
+```
+
+Then fix everything else by hand, guided by `pnpm -r typecheck`:
 
 | File | Import it needs |
 |---|---|
 | `src/server.ts` | `storageRoot`, `outRoot` from `./domain/storage/layout.js`; `gatewayFromEnv` from `./domain/models/gateway.js` |
 | `src/tools/documents.ts` | `DOCUMENT_KINDS` from `../domain/documents/types.js`; `documentTextPath`, `toStorageRelative` from `../domain/storage/layout.js`; `readDocumentBytes`, `resolveStoragePath`, `sha256File` from `../domain/storage/file-store.js`; `loadHealthcareManifest` from `../domain/documents/manifest.js`; `buildClassificationSchema`, `buildExtractionSchema` from `../domain/documents/schema.js`; `buildClassificationMessages`, `buildExtractionMessages` from `../domain/documents/prompts.js`; `parseExtraction` from `../domain/documents/parse.js`; `callModelJson`, `type ModelMessage` from `../domain/models/gateway.js` and `../domain/models/types.js` |
 | `src/tools/forms.ts` | `resolveOutFile`, `writeOutFile` from `../domain/storage/file-store.js` |
-| `src/domain/tooling/types.ts` | its `GatewayConfig` import is already `../models/types.js` from Task 5 and now resolves |
+| `src/domain/tooling/types.ts` | `GatewayConfig` re-pointed to `../models/types.js` above; the other two type-only imports (`SinkRegistry`, `VerifyConfig`) are unaffected by this task and stay on their Task 5 placeholders until Task 7 |
 | `src/effects.ts` | unchanged |
 
 - [ ] **Step 5: Retarget three subpath exports**
@@ -5127,7 +5193,7 @@ public API, and a composition root that is the only place left reading the envir
 
 **Files:**
 - Create: `src/domain/providers/types.ts`, `mask.ts`, `repository.ts`
-- Create: `src/domain/forms/types.ts`, `provider-data.ts`
+- Create: `src/domain/forms/types.ts`, `provider-data.ts`, `release.ts`
 - Create: `src/domain/effects/types.ts`, `outbox.ts`
 - Create: `src/domain/verify/types.ts`, `names.ts`, `nppes.ts`, `names.test.ts`
 - Create: `src/domain/approvals/execute.ts`
@@ -5244,6 +5310,19 @@ sed -i '' -e "s#from '\./server\.js'#from './catalog.js'#" tools/skills-frontmat
 cd ../../..
 ```
 
+`tools/skills-frontmatter.test.ts` also resolves the pack's skills directory from
+`__dirname`, one level deeper than it was at the package's `src/` root:
+
+```bash
+sed -i '' \
+  -e "s#path.join(__dirname, '../../../packs/healthcare/skills')#path.join(__dirname, '../../../../packs/healthcare/skills')#" \
+  harness/core-tools/src/tools/skills-frontmatter.test.ts
+```
+
+Skipping this is loud, not silent: `readdirSync` on the wrong path throws and the test fails
+immediately, but it is still worth doing here rather than leaving it for `pnpm -r test` to
+catch.
+
 The two files now in `app/` need their imports repointed by hand; the sed above only fixed the
 prefixes it could see:
 
@@ -5307,16 +5386,30 @@ functions and the types it imports today:
 export type { DispatchOptions, DispatchResult, SinkHandler, SinkRegistry, StageEffectInput } from './types.js';
 ```
 
+`src/effects.test.ts` already imports `defineTool` from `./domain/tooling/registry.js`, not
+`./registry.js` — Task 5 repointed it there (Step 6's by-hand table), because `registry.ts`
+was already gone by then. The only rewrite this move still needs is the deeper relative path:
+
 ```bash
 cd harness/core-tools
 git mv src/effects.test.ts src/domain/effects/outbox.test.ts
 git rm src/effects.ts
 sed -i '' \
   -e "s#from './effects.js'#from './outbox.js'#" \
-  -e "s#from './registry.js'#from '../tooling/registry.js'#" \
+  -e "s#from './domain/tooling/registry.js'#from '../tooling/registry.js'#" \
   -e "s#from './testing.js'#from '../../testing.js'#" \
   src/domain/effects/outbox.test.ts
 cd ../..
+```
+
+Now also re-point `domain/tooling/types.ts`'s `SinkRegistry` import: Task 5 left it reading
+`'../../effects.js'` with a "until Task 7 moves it to `../effects/types.js`" comment, and
+`../effects/types.js` now exists.
+
+```bash
+sed -i '' \
+  -e "s#import type { SinkRegistry } from '../../effects.js'; // until Task 7 moves it to ../effects/types.js#import type { SinkRegistry } from '../effects/types.js';#" \
+  harness/core-tools/src/domain/tooling/types.ts
 ```
 
 - [ ] **Step 3: Build `domain/providers`**
@@ -5464,6 +5557,16 @@ export interface VerifyRegistry {
   /** Null means the registry has no such NPI, which is the expected answer for a synthetic one. */
   lookupNpi(npi: string): Promise<NppesRecord | null>;
 }
+```
+
+Now re-point `domain/tooling/types.ts`'s `VerifyConfig` import: Task 5 left it reading
+`'../../tools/verify.js'` with a "until Task 7 moves it to `../verify/types.js`" comment, and
+`../verify/types.js` now exists.
+
+```bash
+sed -i '' \
+  -e "s#import type { VerifyConfig } from '../../tools/verify.js'; // until Task 7 moves it to ../verify/types.js#import type { VerifyConfig } from '../verify/types.js';#" \
+  harness/core-tools/src/domain/tooling/types.ts
 ```
 
 `src/domain/verify/names.ts` takes `TITLES`, `SUFFIXES` and `namesMatch` from
@@ -5989,7 +6092,7 @@ Create `harness/core-tools/README.md`:
 # @harness/core-tools
 
 The MCP server every agent talks to: the tooling kernel that applies policy, opens the
-transaction and writes the audit row; the domains that hold the actual work; the 22 tools that
+transaction and writes the audit row; the domains that hold the actual work; the 23 tools that
 expose them; and the shared helpers the packages above this one import instead of copying.
 
 ## Layout
@@ -5997,7 +6100,7 @@ expose them; and the shared helpers the packages above this one import instead o
 ```
 src/shared/        env, errors, paths, log, subprocess, jsonl, csv, redaction/ — no domain knowledge
 src/domain/        tooling, approvals, deadlines, documents, effects, forms, models, providers, storage, verify
-src/tools/         22 defineTool blocks in 8 files, plus catalog.ts
+src/tools/         23 defineTool blocks in 8 files, plus catalog.ts
 src/app/           server.ts (deps from the environment), main.ts (stdio entrypoint), record-surface.ts
 src/index.ts       the public API
 src/testing.ts     ./testing: makeTestDeps, connectTools, resultOf, approvalIdOf, useTestDb, startFakeGateway
@@ -6059,8 +6162,8 @@ pnpm lint
 ```
 Expected: no errors. In particular no `no-console` and no `process.env` error anywhere under
 `harness/core-tools/src`, and no `throw new Error` error under `src/tools/` — the one in
-`tools/forms.ts:216` moved into `domain/forms/provider-data.ts` with the rest of the release
-check, where a plain `Error` used as a control-flow sentinel inside a `try` is fine.
+`tools/forms.ts:216` moved into `domain/forms/release.ts` with the rest of `stageRelease`,
+where a plain `Error` used as a control-flow sentinel inside a `try` is fine.
 
 ```bash
 pnpm arch
@@ -6136,15 +6239,18 @@ export { containsRestrictedPattern } from '@harness/core-tools';
 ```
 
 Confirm the two lists were identical before deleting, so this is a deduplication and not a
-behaviour change:
+behaviour change. Compare the regex bodies only — `RESTRICTED_PATTERNS` and
+`RESTRICTED_TEXT_PATTERNS` differ by name, so a diff of the full declarations always reports a
+difference on line 1 even though the regexes themselves are byte-identical:
 
 ```bash
-git show HEAD~8:harness/approvals/src/render.ts | sed -n '18,22p' > /tmp/a
-git show HEAD~8:harness/core-tools/src/tools/harness.ts | sed -n '62,66p' > /tmp/b
-diff /tmp/a /tmp/b && echo "identical"
+diff \
+  <(sed -n '19,21p' harness/approvals/src/render.ts) \
+  <(sed -n '63,65p' harness/core-tools/src/tools/harness.ts)
 ```
-Expected: `identical`. Adjust the `HEAD~8` to whatever commit precedes Task 4 in your branch;
-`git log --oneline` finds it.
+Expected: no output — no difference between the three regex lines. If your working copy's line
+numbers have drifted, `grep -n "RESTRICTED_.*_PATTERNS: RegExp\[\] = \["` both files and take
+the three lines after each match instead of the hard-coded ranges above.
 
 - [ ] **Step 2: Delete the local `numberFromEnv`**
 
@@ -6359,13 +6465,59 @@ Then fix by hand, guided by `pnpm -r typecheck`:
 | `domain/slack/handlers.ts` | `decideApproval`, `type DecisionDeps` from `../decisions.js`; the ids from `../render/types.js`; `editModalView`, `parseEditModalMetadata` from `../render/modal.js` |
 | `app/main.ts` | `outRoot` from `@harness/core-tools`; everything else from `../domain/...` |
 
-`domain/sinks.ts` is the one behavioural rewrite in this step. Its private `assertUnderRoot`
-(lines 47-69) becomes a call to the shared containment check, keeping both of its messages:
+`app/main.ts` also resolves the repository root from `import.meta.url`, and this is the
+highest runtime risk in this task: get it wrong and every approval execution fails silently,
+because nothing in the suite spawns this file the way `pnpm approvals` does. The file moved
+one level deeper, from `harness/approvals/src/` to `harness/approvals/src/app/`, so `repoRoot`
+gains one `..`:
+
+```ts
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../..');
+```
+
+`repoRoot` is read in exactly two places — `loadEnv({ path: path.join(repoRoot, '.env') })`
+just below it, and the `spawn('pnpm', ['--dir', repoRoot, '--filter', '@harness/core-tools',
+'start'], ...)` call that launches the core-tools MCP child — and both need the fix, which is
+why they share one constant instead of two literals. Left at `'../../..'`, `repoRoot` resolves
+to `harness/` instead of the repository root: `loadEnv` silently finds no `.env` to load, and
+the child process launches with `--dir harness`, which is not a pnpm workspace root, so pnpm
+fails before core-tools even starts.
+
+Verify it actually reaches the repository root rather than trusting the arithmetic: run the
+app with a required variable unset and confirm it fails on the **environment check**, not on
+`ENOENT` or a pnpm workspace error, which is what a wrong `repoRoot` produces instead:
+
+```bash
+env -u DATABASE_URL -u HARNESS_ENCRYPTION_KEY -u LITELLM_MASTER_KEY -u APPROVALS_SLACK_BOT_TOKEN \
+  -u APPROVALS_SLACK_SIGNING_SECRET -u APPROVALS_SLACK_CHANNEL_ID \
+  pnpm --filter @harness/approvals exec tsx src/app/main.ts
+```
+Expected: the process exits with `DATABASE_URL is not set` (or whichever of the required
+variables `.env` does not supply first), not a pnpm or filesystem error. If `.env` at the
+repository root already sets all of these, temporarily rename it, run the command, and put it
+back — the point is to prove `loadEnv` looked in the right place, not that the values are
+missing.
+
+`domain/sinks.ts`'s private `assertUnderRoot` (lines 47-69) becomes a call to the shared
+containment check, keeping both of its messages **and its exact resolution semantics** —
+this is deliberately not the behavioural rewrite it might look like. Today's
+`assertUnderRoot` resolves `candidate` against the process's current working directory
+(`path.resolve(candidate)`), so a relative `candidate` almost certainly fails the containment
+check. The shared `assertInsideRoot` resolves a relative `candidate` **inside `root`**
+(`path.resolve(resolvedRoot, candidate)`), which would let a relative path that used to be
+rejected now pass — a real loosening of a defence-in-depth guard on a path that reaches a
+Slack upload, even though `tool_effects.payload.path` is always absolute in practice today.
+Do not let the migration change this silently: pre-resolve `candidate` against the working
+directory before handing it to the shared helper, so a relative input is refused exactly as
+it is today, absolute inputs are unaffected, and the guard's strictness does not regress:
 
 ```ts
 async function assertUnderRoot(candidate: string, root: string, effectId: string): Promise<void> {
   await assertInsideRoot(
-    candidate,
+    // Resolve against the working directory first, matching today's `assertUnderRoot`
+    // exactly. `assertInsideRoot` resolves a relative candidate *inside `root`*, which would
+    // silently loosen this guard for a relative path — see the note above this function.
+    path.resolve(candidate),
     root,
     (reason) => {
       throw new Error(
@@ -6382,6 +6534,30 @@ async function assertUnderRoot(candidate: string, root: string, effectId: string
 ```
 
 `realOrNearestAncestor` is no longer imported here; `assertInsideRoot` calls it internally.
+`path` stays imported for this one call. Mention the preserved semantics in this task's
+commit message, since it is the kind of line a future reader could "simplify" away.
+
+Last, point `harness/approvals/package.json`'s `start` script at the file's new path — this is
+what `harness/compose/node.Dockerfile`'s `CMD ["pnpm", "--filter", "@harness/approvals",
+"start"]` and a bare `pnpm --filter @harness/approvals start` both invoke, and neither one is
+covered by the suite:
+
+```json
+    "start": "tsx src/app/main.ts"
+```
+
+`node.Dockerfile` itself needs no change: it never names `src/main.ts` directly, only the
+`pnpm ... start` script, which is exactly why fixing this one line is enough. Confirm the
+Compose file that bakes this image still renders before moving on — it does not build the
+image, but it does parse the compose file's `build`/`command`/`env_file` wiring for the
+`approvals` service and would fail loudly on a syntax problem introduced nearby:
+
+```bash
+docker compose --env-file .env -f harness/compose/docker-compose.yml config -q
+```
+Expected: no output, exit 0. This needs a real `.env` (or a copy of `.env.example` with
+placeholders filled in) — unlike `readComposeSurface`'s `--no-interpolate`, plain `config -q`
+requires every referenced variable to resolve.
 
 - [ ] **Step 8: Rewrite `index.ts` and `testing.ts`**
 
@@ -6531,7 +6707,8 @@ Expected: no output.
 
 ```bash
 git add -A harness/approvals eslint.config.js .dependency-cruiser.cjs
-git commit -m "refactor(approvals): adopt domain folders, the shared helpers and one redaction source"
+git commit -m "refactor(approvals): adopt domain folders, the shared helpers and one redaction source" \
+  -m "domain/sinks.ts now calls the shared assertInsideRoot, pre-resolved against the working directory so a relative candidate is refused exactly as it was before this refactor — see the comment on assertUnderRoot."
 ```
 
 ---
@@ -7610,7 +7787,7 @@ Then the three proofs that nothing changed:
 ```bash
 pnpm --filter @harness/core-tools exec vitest run src/app/surface.test.ts
 ```
-Expected: `Tests 3 passed` — the 22 tool names and both schemas, the environment variable set
+Expected: `Tests 3 passed` — the 23 tool names and both schemas, the environment variable set
 and the Compose config all match what Task 1 recorded, eleven tasks ago.
 
 ```bash
