@@ -76,15 +76,24 @@ export interface RunnerHandle {
   stop(): Promise<void>;
 }
 
+function emptyLoopStatus(): RunnerLoopStatus {
+  return { lastError: null, lastErrorAt: null, lastOkAt: null };
+}
+
+/** Where each loop records the time of its last successful tick. */
+const LAST_TICK_FIELD = {
+  poll: 'lastPollAt',
+  dispatch: 'lastDispatchAt',
+  reconcile: 'lastReconcileAt',
+} as const;
+
+type LoopName = keyof typeof LAST_TICK_FIELD;
+
 /**
  * Three independent loops. Each tick is guarded so a slow one never overlaps
  * itself, and every failure is logged and swallowed: a Slack outage must not
  * stop the dispatcher from retrying five seconds later.
  */
-function emptyLoopStatus(): RunnerLoopStatus {
-  return { lastError: null, lastErrorAt: null, lastOkAt: null };
-}
-
 export function startRunner(deps: RunnerDeps, intervals: RunnerIntervals): RunnerHandle {
   const status: RunnerStatus = {
     lastPollAt: null,
@@ -97,7 +106,7 @@ export function startRunner(deps: RunnerDeps, intervals: RunnerIntervals): Runne
   const inFlight = new Set<Promise<void>>();
   let stopped = false;
 
-  function loop(name: 'poll' | 'dispatch' | 'reconcile', everyMs: number, tick: () => Promise<unknown>): void {
+  function loop(name: LoopName, everyMs: number, tick: () => Promise<unknown>): void {
     let running = false;
     const timer = setInterval(() => {
       if (stopped || running) return;
@@ -106,9 +115,7 @@ export function startRunner(deps: RunnerDeps, intervals: RunnerIntervals): Runne
         const at = deps.now().toISOString();
         try {
           await tick();
-          if (name === 'poll') status.lastPollAt = at;
-          else if (name === 'dispatch') status.lastDispatchAt = at;
-          else status.lastReconcileAt = at;
+          status[LAST_TICK_FIELD[name]] = at;
           // A tick that succeeds clears this loop's own error: one transient
           // failure must never latch `/healthz` unhealthy until a restart.
           status.loops[name].lastError = null;
