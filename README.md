@@ -19,13 +19,37 @@ Design spec: `docs/superpowers/specs/2026-09-15-agent-harness-credentialing-desi
 ## Layout
 
 ```
-harness/     model gateway config, core tools MCP server, approvals app, db, compose
-packs/       healthcare/
-clients/     demo-practice/
-evals/       runner and judges
-scripts/     the client scaffolder behind `pnpm new-client`
-docs/        specs, ADRs, runbook
+harness/shared/      env, errors, paths, logging, subprocess, JSONL, CSV. No dependencies.
+harness/pack-api/    the Pack contract every pack implements and core loads
+harness/db/          schema, migrations, the pool, encryption
+harness/gateway/     the routing table and the LiteLLM config renderer
+harness/core-tools/  the MCP server: shared/, domain/, tools/, app/
+harness/approvals/   the Slack approval app and the effects dispatcher
+harness/compose/     the Docker stack
+packs/healthcare/    the credentialing pack: schema, forms, skills, eval sets, synthetic corpus
+clients/             one folder per deployment: SOUL, routing, policy, env
+evals/               the runner, scorers, judge and report
+scripts/             the client scaffolder
+docs/                specs, runbook, demo, promotion gate, architecture
 ```
+
+Every package has the same four layers — `shared` → `domain` → `tools` → `app` — with one
+public entry point. A **pack** is an area of the product core loads at runtime rather than
+imports: set `HARNESS_PACKS` to choose. **[ARCHITECTURE.md](ARCHITECTURE.md)** explains the
+layers, the packs, the path of one tool call and the three invariants;
+**[CONTRIBUTING.md](CONTRIBUTING.md)** is how to add a tool, a domain, a pack, a client, a
+migration or a test.
+
+## Documents
+
+|                                                  |                                                                                                                                                                                                                                                                                                                                           |
+| ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [ARCHITECTURE.md](ARCHITECTURE.md)               | the layers, the package map, the path of a tool call, the three invariants                                                                                                                                                                                                                                                                |
+| [CONTRIBUTING.md](CONTRIBUTING.md)               | how to add a tool, a domain, a pack, a client, a migration, a test                                                                                                                                                                                                                                                                        |
+| [docs/runbook.md](docs/runbook.md)               | operating it: audit, effects, reconciliation, storage, the Slack app, onboarding                                                                                                                                                                                                                                                          |
+| [docs/demo.md](docs/demo.md)                     | the five-minute demo script                                                                                                                                                                                                                                                                                                               |
+| [docs/promotion-gate.md](docs/promotion-gate.md) | what an eval run has to clear                                                                                                                                                                                                                                                                                                             |
+| package READMEs                                  | [shared](harness/shared/README.md), [pack-api](harness/pack-api/README.md), [db](harness/db/README.md), [gateway](harness/gateway/README.md), [core-tools](harness/core-tools/README.md), [approvals](harness/approvals/README.md), [evals](evals/README.md), [pack-healthcare](packs/healthcare/README.md), [scripts](scripts/README.md) |
 
 ## Run locally
 
@@ -38,6 +62,20 @@ pnpm gateway:config             # render clients/demo-practice/routing.yaml -> L
 pnpm gateway:up                 # LiteLLM proxy on 127.0.0.1:4000
 pnpm test
 pnpm --filter @harness/core-tools start   # core-tools MCP server on stdio
+```
+
+Every Compose command goes through a `pnpm` script so that it carries `--env-file .env`.
+Running `docker compose` by hand without it reads the wrong environment. Never source `.env`
+into your shell before running tests: one crypto test asserts what happens when
+`HARNESS_ENCRYPTION_KEY` is unset.
+
+The four gates. Run all of them before you push; `pnpm test` runs the first and the last:
+
+```bash
+pnpm lint            # eslint: layers, imports, the three project rules
+pnpm format:check    # prettier
+pnpm arch            # dependency-cruiser: the layer graph
+pnpm test            # lint, then every package's suite
 ```
 
 Inspect the tools interactively:

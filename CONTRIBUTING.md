@@ -1,11 +1,7 @@
 # Contributing
 
-> **Where the tree is today.** The maintainability revamp (`docs/superpowers/specs/2026-09-16-maintainability-revamp-design.md`)
-> is landing one package at a time. This guide describes the **target**, because the target is
-> what new work is judged against. Anything marked _(target state, landing in Tasks 4–8)_ is
-> not in the tree yet: the `shared/`, `domain/`, `tools/` and `app/` folders, the
-> `@harness/shared` and `@harness/pack-api` packages, and the pack contract arrive with those
-> tasks. Today's real path is given beside each one. `ARCHITECTURE.md` explains the layers.
+`ARCHITECTURE.md` explains the four layers, the packages and the pack contract. This is the
+how-to.
 
 ## Getting a working checkout
 
@@ -64,31 +60,57 @@ production adapter and the fake beside it. If the domain needs only one module, 
 
 ## Adding a pack
 
-A pack is the content that makes the harness specific to one area: the document kinds the
-classifier may return, the extraction manifest, `forms/` with its `templates.json` and PDFs,
-`skills/`, the action-class defaults in `policy.yaml`, an optional `evals/` case file and an
-optional `synthetic/` corpus generator.
+A pack is an area of the product — credentialing, document scanning, whatever comes next — that
+core loads through a contract instead of importing by name.
 
-Core never imports a pack by name. It loads one through the `@harness/pack-api` contract, so
-three steps add one:
+1. `mkdir -p packs/<name>/src` and give it a `package.json` named `@harness/pack-<name>`, with
+   `"." : "./src/index.ts"` in `exports` and `@harness/pack-api` and `@harness/shared` in
+   `dependencies`. **Never** depend on `@harness/core-tools`; `pnpm arch` fails the build on it.
+2. Export `pack` from `src/index.ts`:
 
-1. **Export `pack`.** Create `packs/<name>/` and export a `pack` from its entry module, built
-   with `definePack()` from `@harness/pack-api`. Declare in `package.json#exports` only what
-   anything outside the pack may read; anything not exported is unreachable, which is the
-   point.
-2. **Add the dependency.** Add `@harness/pack-<name>` to the `dependencies` of
-   `@harness/core-tools`, so that pnpm can resolve the dynamic `import()`. Do not add a
-   static import — `pnpm arch` forbids one, because the kernel has to compile and run with no
-   pack installed.
-3. **Switch it on.** Set `HARNESS_PACKS` in the client's `.env` to the comma-separated package
-   names to load. It defaults to `@harness/pack-healthcare`.
+   ```ts
+   import path from 'node:path';
+   import { fileURLToPath } from 'node:url';
+   import { definePack } from '@harness/pack-api';
 
-A pack depends on `@harness/pack-api` and `@harness/shared`, never on `@harness/core-tools`.
-If a pack needs something from core-tools, the contract is missing a field.
+   const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
-> The dependency-cruiser rule that forbids a static pack import from core-tools still runs in
-> warn mode; Task 12 of the maintainability revamp promotes it, along with every other rule
-> that had to survive a task where the code was still moving.
+   export const pack = definePack({
+     name: 'scanning',
+     version: '0.1.0',
+     documentKinds: extraction.document_kinds,
+     extraction, // the parsed schema/provider.json
+     formsDir: path.join(root, 'forms'),
+     skillsDir: path.join(root, 'skills'),
+     policy: { external: 'approval' },
+     evals: { injectionFile: path.join(root, 'evals', 'injection.jsonl') },
+   });
+   ```
+
+   `formsDir` and `skillsDir` must be absolute and resolved from `import.meta.url`:
+   `definePack` refuses a relative one, because it would resolve against whatever directory the
+   harness process started in.
+
+3. Write `schema/provider.json` — fields, credentials, `document_kinds`. Every field marked
+   `restricted` must be `source: 'redaction'` and must satisfy core's `isRestrictedName`, or
+   the value would be stored in plaintext; `loadPacks` validates this at startup and names the
+   field it rejected.
+4. Add the package to `@harness/core-tools`'s `dependencies` so pnpm can resolve the dynamic
+   import, and name it in `HARNESS_PACKS` in the client's `.env`:
+   `HARNESS_PACKS=@harness/pack-healthcare,@harness/pack-scanning`.
+5. Pack-specific tools are optional: `tools: (deps) => [...]` on the `Pack`. They receive core's
+   dependency bag as `unknown`, because a pack cannot see `ToolDeps`. Core's own tool names win
+   a collision.
+6. Run `pnpm surface:record` if the pack changes the published tool list, and say so in the
+   commit.
+
+The first pack named in `HARNESS_PACKS` answers `deps.packs.manifest()` and
+`deps.packs.formsDir()`; `documentKinds()` unions them all. If a second pack needs its own
+manifest per document, that is a feature to design, not a line to change.
+
+`Pack.policy` is declared but not yet merged into `deps.policy`: a pack's policy is carried,
+not applied. Set the client's `HARNESS_POLICY_FILE` if you need a different action-class table
+today.
 
 ## Adding a client
 
@@ -101,8 +123,7 @@ Then fill in `clients/acme-clinic/.env.example`, review `SOUL.md` and `policy.ya
 
 ## Adding a migration
 
-Edit `harness/db/src/domain/schema.ts` first _(target state, landing in Task 5; it is
-`harness/db/src/schema.ts` today)_, then, from `harness/db/`:
+Edit `harness/db/src/domain/schema.ts` first, then, from `harness/db/`:
 
 ```bash
 pnpm drizzle-kit generate
@@ -148,7 +169,8 @@ change, the file was edited without the formatter: run `pnpm format` and restage
 
 ```bash
 pnpm -r typecheck
-pnpm lint
-pnpm arch
+pnpm lint          # zero errors; the type-aware warnings are a known backlog, see pnpm lint:strict
+pnpm arch          # zero violations: every rule is an error
+pnpm format:check
 pnpm test
 ```
