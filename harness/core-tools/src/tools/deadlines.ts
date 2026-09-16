@@ -1,20 +1,8 @@
 import * as z from 'zod/v4';
-import { and, asc, eq, inArray, lte, sql } from 'drizzle-orm';
-import { credentials, deadlines, providers } from '@harness/db';
 import { defineTool } from '../domain/tooling/registry.js';
 import type { AnyToolDef } from '../domain/tooling/types.js';
-import {
-  computeDeadlines,
-  daysUntil,
-  addDays,
-  bucketFor,
-  digestKeyFor,
-  URGENCY_BUCKETS,
-} from '../domain/deadlines/compute.js';
-import { requireProvider } from '../domain/providers/repository.js';
-
-/** Identifies a deadline row within a provider, matching `deadlines_credential_kind_uq`. */
-const deadlineKey = (d: { credentialId: string; kind: string }) => `${d.credentialId}:${d.kind}`;
+import { URGENCY_BUCKETS } from '../domain/deadlines/compute.js';
+import { recomputeDeadlines, upcomingDeadlines } from '../domain/deadlines/repository.js';
 
 const deadlinesCompute = defineTool({
   name: 'deadlines_compute',
@@ -25,38 +13,7 @@ const deadlinesCompute = defineTool({
   output: z.object({
     deadlines: z.array(z.object({ credential_id: z.string(), kind: z.string(), due_at: z.string() })),
   }),
-  handler: async ({ provider_id }, deps) => {
-    await requireProvider(deps, provider_id);
-    const creds = await deps.db.select().from(credentials).where(eq(credentials.providerId, provider_id));
-    const computed = computeDeadlines(creds.map((c) => ({ id: c.id, kind: c.kind, expiresAt: c.expiresAt })));
-    for (const d of computed) {
-      await deps.db
-        .insert(deadlines)
-        .values({ providerId: provider_id, credentialId: d.credentialId, kind: d.kind, dueAt: d.dueAt })
-        .onConflictDoUpdate({
-          target: [deadlines.credentialId, deadlines.kind],
-          // A moved due date invalidates any notification already sent for the
-          // old one, so clear the marker; an unchanged date keeps it, so the
-          // same reminder is not sent twice.
-          set: {
-            dueAt: d.dueAt,
-            notifiedAt: sql`CASE WHEN ${deadlines.dueAt} = ${d.dueAt} THEN ${deadlines.notifiedAt} ELSE NULL END`,
-          },
-        });
-    }
-    // A credential that lost its expiry, or was removed, leaves deadlines
-    // behind that nothing recomputes. Retire whatever this run did not produce.
-    const computedKeys = new Set(computed.map(deadlineKey));
-    const existingRows = await deps.db
-      .select({ id: deadlines.id, credentialId: deadlines.credentialId, kind: deadlines.kind })
-      .from(deadlines)
-      .where(eq(deadlines.providerId, provider_id));
-    const staleIds = existingRows.filter((r) => !computedKeys.has(deadlineKey(r))).map((r) => r.id);
-    if (staleIds.length > 0) {
-      await deps.db.delete(deadlines).where(inArray(deadlines.id, staleIds));
-    }
-    return { deadlines: computed.map((d) => ({ credential_id: d.credentialId, kind: d.kind, due_at: d.dueAt })) };
-  },
+  handler: async ({ provider_id }, deps) => recomputeDeadlines(deps, provider_id),
   recordIds: ({ provider_id }) => [provider_id],
 });
 
@@ -98,44 +55,7 @@ const deadlinesUpcoming = defineTool({
      */
     digest_key: z.string(),
   }),
-  handler: async ({ window_days, today, limit }, deps) => {
-    const todayDate = today ? new Date(`${today}T00:00:00Z`) : deps.now();
-    const todayStr = todayDate.toISOString().slice(0, 10);
-    const horizon = addDays(todayStr, window_days);
-    const rows = await deps.db
-      .select({
-        providerId: deadlines.providerId,
-        providerName: providers.name,
-        credentialId: deadlines.credentialId,
-        credentialKind: credentials.kind,
-        kind: deadlines.kind,
-        dueAt: deadlines.dueAt,
-      })
-      .from(deadlines)
-      .innerJoin(credentials, eq(deadlines.credentialId, credentials.id))
-      .innerJoin(providers, eq(deadlines.providerId, providers.id))
-      .where(and(eq(providers.client, deps.client), lte(deadlines.dueAt, horizon)))
-      .orderBy(asc(deadlines.dueAt))
-      .limit(limit);
-    const items = rows.map((r) => {
-      const daysLeft = daysUntil(r.dueAt, todayDate);
-      return {
-        provider_id: r.providerId,
-        provider_name: r.providerName,
-        credential_id: r.credentialId,
-        credential_kind: r.credentialKind,
-        kind: r.kind,
-        due_at: r.dueAt,
-        days_left: daysLeft,
-        overdue: daysLeft < 0,
-        bucket: bucketFor(daysLeft),
-      };
-    });
-    const digest_key = digestKeyFor(
-      items.map((i) => ({ credentialId: i.credential_id, kind: i.kind, bucket: i.bucket })),
-    );
-    return { items, digest_key };
-  },
+  handler: async (args, deps) => upcomingDeadlines(deps, args),
 });
 
 export const deadlineTools: AnyToolDef[] = [deadlinesCompute, deadlinesUpcoming];

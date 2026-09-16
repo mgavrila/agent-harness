@@ -1,12 +1,7 @@
 import * as z from 'zod/v4';
-import { eq } from 'drizzle-orm';
-import { runs } from '@harness/db';
-import { ToolError } from '@harness/shared';
 import { defineTool } from '../domain/tooling/registry.js';
 import type { AnyToolDef } from '../domain/tooling/types.js';
-import { containsRestrictedPattern } from '../shared/redaction/patterns.js';
-import { reconcile } from '../domain/tooling/reconcile.js';
-import { stageEffect } from '../domain/effects/outbox.js';
+import { reconcileForClient, setRunContext, stageNotification } from '../domain/session/repository.js';
 
 const harnessReconcile = defineTool({
   name: 'harness_reconcile',
@@ -16,8 +11,7 @@ const harnessReconcile = defineTool({
   output: z.object({ approvals_expired: z.number(), dispatches_parked: z.number() }),
   // Scoped to the calling client: an agent repairs only its own tenant's rows.
   // Process startup runs reconcile unscoped, as an operator-level task.
-  handler: async ({ stale_after_minutes }, deps) =>
-    reconcile(deps.db, { now: deps.now, staleAfterMs: stale_after_minutes * 60_000, client: deps.client }),
+  handler: async ({ stale_after_minutes }, deps) => reconcileForClient(deps, stale_after_minutes),
 });
 
 const harnessSetContext = defineTool({
@@ -36,33 +30,7 @@ const harnessSetContext = defineTool({
     skill: z.string().nullable(),
     skill_version: z.string().nullable(),
   }),
-  handler: async ({ run_id, skill, skill_version }, deps) => {
-    // Validate before touching the shared context: a run id naming another
-    // client's run must not be adopted, and must not leave this session
-    // stamping that client's run onto its audit rows.
-    const nextRunId = run_id !== undefined ? (run_id ?? undefined) : deps.context.runId;
-    let runToCreate: string | undefined;
-    if (nextRunId) {
-      const existing = await deps.db.query.runs.findFirst({ where: eq(runs.id, nextRunId) });
-      if (existing && existing.client !== deps.client) {
-        throw new ToolError(`run ${nextRunId} belongs to another client`);
-      }
-      if (!existing) runToCreate = nextRunId;
-    }
-
-    // An omitted field leaves the context as it was; an explicit null clears it.
-    if (run_id !== undefined) deps.context.runId = run_id ?? undefined;
-    if (skill !== undefined) deps.context.skill = skill ?? undefined;
-    if (skill_version !== undefined) deps.context.skillVersion = skill_version ?? undefined;
-    if (runToCreate) {
-      await deps.db.insert(runs).values({ id: runToCreate, client: deps.client, caller: deps.caller });
-    }
-    return {
-      run_id: deps.context.runId ?? null,
-      skill: deps.context.skill ?? null,
-      skill_version: deps.context.skillVersion ?? null,
-    };
-  },
+  handler: async (args, deps) => setRunContext(deps, args),
 });
 
 const harnessNotify = defineTool({
@@ -82,21 +50,7 @@ const harnessNotify = defineTool({
       .optional(),
   }),
   output: z.object({ effect_id: z.string(), staged: z.boolean() }),
-  handler: async ({ text, idempotency_key, channel }, deps) => {
-    if (containsRestrictedPattern(text)) {
-      throw new ToolError(
-        'message refused: it looks like it contains a restricted identifier; restricted values never go to Slack',
-      );
-    }
-    // The text is the payload and is stored encrypted. The summary is a label
-    // only: tool_effects.summary is plaintext and operators read it freely.
-    return stageEffect(deps, {
-      sink: 'slack_message',
-      idempotencyKey: idempotency_key,
-      payload: { text, channel: channel ?? null },
-      summary: `Slack message (${text.length} characters)`,
-    });
-  },
+  handler: async (args, deps) => stageNotification(deps, args),
 });
 
 export const harnessTools: AnyToolDef[] = [harnessSetContext, harnessReconcile, harnessNotify];
