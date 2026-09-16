@@ -25,7 +25,7 @@ export function apiKeyEnvFor(model: string): string {
   const env = PROVIDER_KEY_ENV[provider];
   if (!env) {
     throw new Error(
-      `unknown provider prefix "${provider}"; add it to PROVIDER_KEY_ENV in harness/gateway/render-config.ts`,
+      `unknown provider prefix "${provider}"; add it to PROVIDER_KEY_ENV in harness/gateway/src/domain/routing/render.ts`,
     );
   }
   return env;
