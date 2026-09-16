@@ -1,23 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { parseRouting } from './parse.js';
+import { ROUTING } from './routing.test-helpers.js';
 import { ROUTES } from './types.js';
-
-const ROUTING = `
-routes:
-  chat:
-    model: gemini/gemini-3-flash-preview
-    fallbacks: [groq/openai/gpt-oss-120b]
-    daily_budget_usd: 2
-  extract:
-    model: gemini/gemini-3-flash-preview
-    daily_budget_usd: 5
-  reason:
-    model: gemini/gemini-3-flash-preview
-    daily_budget_usd: 2
-  judge:
-    model: groq/openai/gpt-oss-120b
-    daily_budget_usd: 1
-`;
 
 describe('routing.schema', () => {
   it('names exactly the four spec routes', () => {

@@ -2,23 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { parse as parseYaml } from 'yaml';
 import { parseRouting } from './parse.js';
 import { apiKeyEnvFor, renderLiteLlmConfig } from './render.js';
-
-const ROUTING = `
-routes:
-  chat:
-    model: gemini/gemini-3-flash-preview
-    fallbacks: [groq/openai/gpt-oss-120b]
-    daily_budget_usd: 2
-  extract:
-    model: gemini/gemini-3-flash-preview
-    daily_budget_usd: 5
-  reason:
-    model: gemini/gemini-3-flash-preview
-    daily_budget_usd: 2
-  judge:
-    model: groq/openai/gpt-oss-120b
-    daily_budget_usd: 1
-`;
+import { ROUTING } from './routing.test-helpers.js';
 
 describe('apiKeyEnvFor', () => {
   it('maps known provider prefixes', () => {
