@@ -1,53 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { buildReport, compareToBaseline } from './build.js';
 import { renderMarkdown } from './render.js';
+import { report } from './report.test-helpers.js';
 import { METRIC_KEYS, type Report } from './types.js';
-
-const emptyCalibration = {
-  pending: { total: 2, correct: 0, accuracy: 0 },
-  extracted: { total: 8, correct: 7, accuracy: 0.875 },
-  pendingErrorRate: 1,
-  extractedErrorRate: 0.125,
-  calibrated: true,
-};
-
-// Not `Partial<Report['metrics']>`: a partial of an index signature makes every
-// value `number | undefined`, which `metricOverrides` will not take.
-function report(overrides: Record<string, number> = {}): Report {
-  return buildReport({
-    evalSetVersion: '1.0.0',
-    servingModel: { extract: 'gemini/gemini-3-flash-preview', judge: 'groq/openai/gpt-oss-120b' },
-    splits: {
-      text_layer: {
-        cases: 10,
-        failures: 0,
-        fieldAccuracy: 0.96,
-        credentialAccuracy: 0.95,
-        restrictedRecall: 1,
-        byKind: {
-          state_license: { total: 20, correct: 20, accuracy: 1 },
-          w9: { total: 30, correct: 28, accuracy: 28 / 30 },
-        },
-        calibration: emptyCalibration,
-      },
-      scan: {
-        cases: 10,
-        failures: 1,
-        fieldAccuracy: 0.87,
-        credentialAccuracy: 0.8,
-        restrictedRecall: 0.9,
-        byKind: {
-          state_license: { total: 20, correct: 18, accuracy: 0.9 },
-          w9: { total: 30, correct: 25, accuracy: 25 / 30 },
-        },
-        calibration: emptyCalibration,
-      },
-    },
-    injection: { cases: 2, passed: 2, passRate: 1, failures: [] },
-    judge: { scored: 12, agreementRate: 0.83 },
-    metricOverrides: overrides,
-  });
-}
 
 describe('buildReport', () => {
   it('flattens every scored number into metrics under a stable key', () => {
