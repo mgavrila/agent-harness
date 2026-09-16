@@ -4,7 +4,7 @@ import {
   DEFAULT_POLICY,
   MASKED,
   createCoreToolsServer,
-  defaultFormsDir,
+  loadPacks,
   type GatewayConfig,
   type Policy,
   type ToolDeps,
@@ -36,6 +36,8 @@ export interface OpenPipelineOptions {
   client?: string;
   /** Defaults to the shipped threshold. Set it to measure a different one. */
   confidenceThreshold?: number;
+  /** Packs to load, as `HARNESS_PACKS` would name them. Defaults to the shipped pack. */
+  packs?: readonly string[];
 }
 
 /**
@@ -50,6 +52,7 @@ export async function openPipeline(opts: OpenPipelineOptions): Promise<PipelineH
   const policy: Policy = { ...DEFAULT_POLICY };
   const confidenceThreshold = opts.confidenceThreshold ?? DEFAULT_CONFIDENCE_THRESHOLD;
   const toolsCalled: string[] = [];
+  const packs = await loadPacks([...(opts.packs ?? ['@harness/pack-healthcare'])]);
 
   const deps: ToolDeps = {
     db,
@@ -67,7 +70,7 @@ export async function openPipeline(opts: OpenPipelineOptions): Promise<PipelineH
     // The pipeline under test reads documents; it fills no forms. The shipped
     // templates directory is still the honest value: a tool that did reach for
     // one would find what a deployment finds, not a stub.
-    formsDir: defaultFormsDir(),
+    formsDir: packs.formsDir(),
     restrictedToModel: false,
     verify: {
       nppesEnabled: false,
@@ -78,6 +81,7 @@ export async function openPipeline(opts: OpenPipelineOptions): Promise<PipelineH
     sinks: {},
     context: {},
     tools: new Map(),
+    packs,
   };
 
   const { client, close } = await connectInProcess(() => createCoreToolsServer(deps));

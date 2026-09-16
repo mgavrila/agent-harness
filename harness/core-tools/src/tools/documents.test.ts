@@ -62,7 +62,7 @@ beforeEach(() => {
   deps = makeTestDeps(db, { storageDir });
 });
 
-const connect = () => connectTools('documents-test', [...providerTools, ...documentTools], deps);
+const connect = () => connectTools('documents-test', [...providerTools, ...documentTools(deps.packs)], deps);
 
 async function seedProvider(client: Awaited<ReturnType<typeof connect>>): Promise<string> {
   const res = await client.callTool({
@@ -230,7 +230,7 @@ describe('documents_get and documents_list', () => {
     const providerId = await seedProvider(client);
     const other = await connectTools(
       'other-client',
-      [...providerTools, ...documentTools],
+      [...providerTools, ...documentTools(deps.packs)],
       makeTestDeps(db, { storageDir, client: 'other' }),
     );
     const res = await other.callTool({ name: 'documents_list', arguments: { provider_id: providerId } });
@@ -241,7 +241,7 @@ describe('documents_get and documents_list', () => {
     const owner = await connect();
     const otherClient = await connectTools(
       'other-clinic',
-      [...providerTools, ...documentTools],
+      [...providerTools, ...documentTools(deps.packs)],
       makeTestDeps(db, { storageDir, client: 'other-clinic' }),
     );
     const ingested = resultOf<IngestOut>(
@@ -261,7 +261,7 @@ describe('documents_get and documents_list', () => {
     const client = await connect();
     const otherClient = await connectTools(
       'other-clinic-2',
-      [...providerTools, ...documentTools],
+      [...providerTools, ...documentTools(deps.packs)],
       makeTestDeps(db, { storageDir, client: 'other-clinic-2' }),
     );
     const mine = resultOf<IngestOut>(
@@ -293,7 +293,7 @@ describe('documents_classify and documents_extract', () => {
       ...overrides,
     });
     deps = d;
-    return connectTools('documents-pipeline', [...providerTools, ...documentTools], d);
+    return connectTools('documents-pipeline', [...providerTools, ...documentTools(d.packs)], d);
   }
 
   const EXTRACTION_REPLY = JSON.stringify({

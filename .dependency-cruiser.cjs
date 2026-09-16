@@ -39,6 +39,7 @@ const path = require('node:path');
 /** @type {{ name: string, src: string, severity: 'warn' | 'error' }[]} */
 const PACKAGES = [
   { name: 'shared', src: 'harness/shared/src', severity: 'error' },
+  { name: 'pack-api', src: 'harness/pack-api/src', severity: 'error' },
   { name: 'db', src: 'harness/db/src', severity: 'error' },
   { name: 'gateway', src: 'harness/gateway/src', severity: 'error' },
   { name: 'core-tools', src: 'harness/core-tools/src', severity: 'error' },
@@ -94,6 +95,7 @@ function layerRules({ name, src, severity }) {
 /** Every workspace package directory, in the order pnpm-workspace.yaml lists them. */
 const WORKSPACE_DIRS = [
   'harness/shared',
+  'harness/pack-api',
   'harness/db',
   'harness/gateway',
   'harness/core-tools',
@@ -149,12 +151,15 @@ const GLOBAL_RULES = [
     to: { path: '\\.test\\.ts$' },
   },
   {
-    name: 'core-tools-does-not-statically-import-a-pack',
+    name: 'core-tools-never-statically-imports-a-pack',
     comment:
-      'A pack is a plug-in, not a dependency: app/ loads whatever HARNESS_PACKS names through the @harness/pack-api contract, so the kernel compiles and runs with no pack installed. A static import of @harness/pack-* from core-tools welds one pack back into the kernel. Warn until the pack contract lands (spec section 9, Tasks 4 to 8).',
+      'Packs are loaded at runtime from HARNESS_PACKS through a dynamic import in domain/packs/registry.ts. A static import would wire core to one pack by name, which is the coupling the contract exists to remove. src/testing.ts and *.test.ts build a registry from the healthcare pack directly and are exempt: they are not shipped and they need a registry synchronously.',
     severity: 'warn',
-    from: { path: '^harness/core-tools/src/' },
-    to: { path: '^packs/[^/]+/', dynamic: false },
+    from: {
+      path: '^harness/core-tools/src/',
+      pathNot: ['\\.test\\.ts$', '^harness/core-tools/src/testing\\.ts$'],
+    },
+    to: { path: '^packs/[^/]+/', dependencyTypesNot: ['dynamic-import'] },
   },
   {
     name: 'no-orphans',
@@ -172,6 +177,22 @@ const GLOBAL_RULES = [
       ],
     },
     to: {},
+  },
+  {
+    name: 'pack-api-imports-only-shared',
+    comment:
+      '@harness/pack-api is the contract a pack implements. It may import @harness/shared and zod, and no other workspace package: a contract that pulled in core-tools would defeat the point of having one.',
+    severity: 'error',
+    from: { path: '^harness/pack-api/src/' },
+    to: { path: '^(harness|packs|evals|scripts)/', pathNot: ['^harness/pack-api/src/', '^harness/shared/src/'] },
+  },
+  {
+    name: 'a-pack-never-imports-core-tools',
+    comment:
+      'A pack depends on @harness/pack-api and @harness/shared only. An edge back into core-tools would be a cycle and would make the pack unloadable by anything else.',
+    severity: 'error',
+    from: { path: '^packs/' },
+    to: { path: '^(harness|evals|scripts)/', pathNot: ['^harness/pack-api/src/', '^harness/shared/src/'] },
   },
   {
     name: 'shared-has-no-workspace-dependencies',

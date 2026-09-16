@@ -3,13 +3,15 @@ import { randomBytes } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { DEFAULT_POLICY, defaultFormsDir, isRestrictedName, type ToolDeps } from '@harness/core-tools';
+import { DEFAULT_POLICY, isRestrictedName, registryOf, type ToolDeps } from '@harness/core-tools';
+import { pack as healthcarePack } from '@harness/pack-healthcare';
 import { startFakeGateway, type FakeGateway } from '@harness/core-tools/fake-gateway';
 import { createDb, runMigrations } from '@harness/db';
 import { FREE_TEXT_FIELDS, judgeFreeText, type JudgeItem } from './judge.js';
 
 const DATABASE_URL = process.env.EVALS_DATABASE_URL ?? 'postgres://harness:harness@localhost:15432/harness_evals';
 const here = path.dirname(fileURLToPath(import.meta.url));
+const packs = registryOf([healthcarePack]);
 
 let gateway: FakeGateway;
 let deps: ToolDeps;
@@ -33,7 +35,7 @@ beforeAll(async () => {
     confidenceThreshold: 0.85,
     gateway: { baseUrl: gateway.url, apiKey: 'sk-eval', timeoutMs: 10_000, maxCallsPerRun: 100 },
     storageDir: here,
-    formsDir: defaultFormsDir(),
+    formsDir: packs.formsDir(),
     restrictedToModel: false,
     verify: {
       nppesEnabled: false,
@@ -44,6 +46,7 @@ beforeAll(async () => {
     sinks: {},
     context: {},
     tools: new Map(),
+    packs,
   };
 }, 120_000);
 

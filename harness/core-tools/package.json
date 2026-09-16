@@ -22,6 +22,7 @@
   "dependencies": {
     "@harness/db": "workspace:*",
     "@harness/gateway": "workspace:*",
+    "@harness/pack-api": "workspace:*",
     "@harness/pack-healthcare": "workspace:*",
     "@harness/shared": "workspace:*",
     "@modelcontextprotocol/server": "^2.0.0",

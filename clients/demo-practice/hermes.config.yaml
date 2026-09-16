@@ -95,6 +95,7 @@ mcp_servers:
       HARNESS_POLICY_FILE: '/srv/agent-harness/clients/demo-practice/policy.yaml'
       HARNESS_STORAGE_DIR: '/srv/harness-storage'
       HARNESS_FORMS_DIR: '/srv/agent-harness/packs/healthcare/forms'
+      HARNESS_PACKS: '@harness/pack-healthcare'
       CORE_TOOLS_CALLER: 'hermes'
       APPROVAL_TTL_HOURS: '24'
       # CONFIDENCE_THRESHOLD is left unset: core-tools applies DEFAULT_CONFIDENCE_THRESHOLD (0.85).

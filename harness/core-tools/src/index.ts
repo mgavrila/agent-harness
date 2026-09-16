@@ -37,7 +37,7 @@ export {
 } from './domain/tooling/types.js';
 
 // --- The tool catalogue -------------------------------------------------------------------
-export { ALL_TOOLS, createCoreToolsServer } from './tools/catalog.js';
+export { allTools, createCoreToolsServer } from './tools/catalog.js';
 
 // --- Domains ------------------------------------------------------------------------------
 export { createOrReuseApproval } from './domain/approvals/repository.js';
@@ -54,14 +54,8 @@ export {
   type CredentialKind,
   type UrgencyBucket,
 } from './domain/deadlines/compute.js';
-export {
-  DOCUMENT_KINDS,
-  type DocumentKind,
-  type ExtractedText,
-  type PageText,
-  type ParsedExtraction,
-} from './domain/documents/types.js';
-export { loadHealthcareManifest, parseManifest, type ProviderManifest } from './domain/documents/manifest.js';
+export { type ExtractedText, type PageText, type ParsedExtraction } from './domain/documents/types.js';
+export { parseManifest, type ProviderManifest } from './domain/documents/manifest.js';
 export { dispatchStagedEffects, stageEffect } from './domain/effects/outbox.js';
 export {
   type DispatchOptions,
@@ -70,7 +64,9 @@ export {
   type SinkRegistry,
   type StageEffectInput,
 } from './domain/effects/types.js';
-export { defaultFormsDir, getTemplate, loadManifest, mappingLabel } from './domain/forms/templates.js';
+export { getTemplate, loadManifest, mappingLabel } from './domain/forms/templates.js';
+export { loadPacks, registryOf } from './domain/packs/registry.js';
+export { type PackRegistry } from './domain/packs/types.js';
 export { fillTemplatePdf, latestCredential, resolveMappings } from './domain/forms/fill.js';
 export { buildRosterCsv } from './domain/forms/roster.js';
 export {
@@ -113,6 +109,9 @@ export { type Storage, type WriteFileInput, type WrittenFile } from './domain/st
 export { namesMatch } from './domain/verify/names.js';
 export { NPPES_DEFAULT_BASE_URL, nppesRegistry } from './domain/verify/nppes.js';
 export { type NppesRecord, type VerifyConfig, type VerifyRegistry } from './domain/verify/types.js';
+
+// --- The pack contract ----------------------------------------------------------------------
+export { definePack, type Pack } from '@harness/pack-api';
 
 // --- Shared helpers, for the packages above this one ---------------------------------------
 export { ConfigError, ModelOutputError, ToolError, describeError } from '@harness/shared';

@@ -2,6 +2,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { gatewayFromEnv, type GatewayConfig, type ToolDeps } from '@harness/core-tools';
+import { pack as healthcarePack } from '@harness/pack-healthcare';
 import { loadExtractionCases, loadInjectionCases, type ExtractionCase, type InjectionCase } from './cases.js';
 import { FREE_TEXT_FIELDS, judgeFreeText, type JudgeItem } from './judge.js';
 import { openPipeline, runCase } from './pipeline.js';
@@ -377,7 +378,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   const { report, markdown, exitCode } = await runEvals({
     corpusDir,
     casesFile: flag('cases') ?? path.join(corpusDir, 'cases.jsonl'),
-    injectionFile: flag('injection') ?? path.join(repoRoot, 'packs/healthcare/evals/injection.jsonl'),
+    injectionFile: flag('injection') ?? healthcarePack.evals?.injectionFile ?? path.join(corpusDir, 'injection.jsonl'),
     outDir: path.resolve(flag('out') ?? path.join(repoRoot, 'evals/results')),
     baselineFile,
     databaseUrl: process.env.EVALS_DATABASE_URL ?? 'postgres://harness:harness@localhost:15432/harness_evals',

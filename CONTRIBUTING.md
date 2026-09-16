@@ -86,9 +86,9 @@ three steps add one:
 A pack depends on `@harness/pack-api` and `@harness/shared`, never on `@harness/core-tools`.
 If a pack needs something from core-tools, the contract is missing a field.
 
-> The pack contract lands in Tasks 4–8 of the maintainability revamp (spec section 9).
-> Until then `packs/healthcare` is reached through `@harness/pack-healthcare/schema` directly
-> and the dependency-cruiser rule that forbids that import runs in warn mode.
+> The dependency-cruiser rule that forbids a static pack import from core-tools still runs in
+> warn mode; Task 12 of the maintainability revamp promotes it, along with every other rule
+> that had to survive a task where the code was still moving.
 
 ## Adding a client
 

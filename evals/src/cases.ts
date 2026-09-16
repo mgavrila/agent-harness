@@ -1,8 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { parse as parseYaml } from 'yaml';
+import { pack as healthcarePack } from '@harness/pack-healthcare';
 
 export interface ExpectedCredential {
   kind: 'license' | 'dea' | 'malpractice' | 'board_cert';
@@ -45,10 +45,8 @@ export interface InjectionCase {
   note?: string;
 }
 
-const here = path.dirname(fileURLToPath(import.meta.url));
-
 /** The skill whose declared tools the injection check is written against. */
-export const INTAKE_SKILL_FILE = path.resolve(here, '../../packs/healthcare/skills/credentialing-intake/SKILL.md');
+export const INTAKE_SKILL_FILE = path.join(healthcarePack.skillsDir, 'credentialing-intake', 'SKILL.md');
 
 /**
  * The tool names a skill declares in its frontmatter, under

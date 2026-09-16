@@ -1,21 +1,22 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { describe, it, expect } from 'vitest';
 import { parse } from 'yaml';
-import { ALL_TOOLS } from './catalog.js';
+import { pack as healthcarePack } from '@harness/pack-healthcare';
+import { registryOf } from '../domain/packs/registry.js';
+import { allTools } from './catalog.js';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const SKILLS_DIR = path.join(__dirname, '../../../../packs/healthcare/skills');
+const packs = registryOf([healthcarePack]);
+const SKILLS_DIR = packs.skillsDirs()[0];
 
 /**
  * Every tool a skill may name. This used to carry an allowlist for the
  * `documents_*` and `verify_nppes` names, which a skill declared while the
  * document-ingestion plan was still on its own branch; that plan has landed,
- * so those names are in `ALL_TOOLS` like any other and the escape hatch is
+ * so those names are in the catalogue like any other and the escape hatch is
  * gone. A skill naming a tool this server does not register is now a typo.
  */
-const KNOWN_TOOL_NAMES = new Set(ALL_TOOLS.map((t) => t.name));
+const KNOWN_TOOL_NAMES = new Set(allTools(packs).map((t) => t.name));
 
 const REQUIRED_HARNESS_KEYS = ['owner', 'eval_status', 'evals', 'action_classes', 'tools'] as const;
 

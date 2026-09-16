@@ -7,7 +7,8 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { PDFDocument, StandardFonts } from 'pdf-lib';
-import { DEFAULT_POLICY, defaultFormsDir, type ToolDeps } from '@harness/core-tools';
+import { DEFAULT_POLICY, registryOf, type ToolDeps } from '@harness/core-tools';
+import { pack as healthcarePack } from '@harness/pack-healthcare';
 import { startFakeGateway, type FakeGateway } from '@harness/core-tools/fake-gateway';
 import { createDb } from '@harness/db';
 import { runEvals, selectCases, injectionCasesFor, parseLimitFlag, parseUpdateBaselineFlag } from './run.js';
@@ -18,6 +19,7 @@ const DATABASE_URL = process.env.EVALS_DATABASE_URL ?? 'postgres://harness:harne
 
 const execFileAsync = promisify(execFile);
 const evalsDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const packs = registryOf([healthcarePack]);
 const tsxBin = path.join(evalsDir, 'node_modules', '.bin', 'tsx');
 const runScript = path.join(evalsDir, 'src', 'run.ts');
 
@@ -158,7 +160,7 @@ beforeAll(async () => {
     confidenceThreshold: 0.85,
     gateway: { baseUrl: gateway.url, apiKey: 'sk-eval', timeoutMs: 10_000, maxCallsPerRun: 100 },
     storageDir: corpus,
-    formsDir: defaultFormsDir(),
+    formsDir: packs.formsDir(),
     restrictedToModel: false,
     verify: {
       nppesEnabled: false,
@@ -169,6 +171,7 @@ beforeAll(async () => {
     sinks: {},
     context: {},
     tools: new Map(),
+    packs,
   };
 }, 120_000);
 

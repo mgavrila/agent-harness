@@ -43,7 +43,13 @@ const NO_BARE_THROW = {
  * own root here as it lands (e.g. 'harness/db/src'); Task 11 appends whatever is left. Adding a
  * root is the *only* edit a package task makes to this file.
  */
-const STRICT_LAYER_ROOTS = ['harness/db/src', 'harness/gateway/src', 'harness/shared/src', 'harness/core-tools/src'];
+const STRICT_LAYER_ROOTS = [
+  'harness/db/src',
+  'harness/gateway/src',
+  'harness/shared/src',
+  'harness/core-tools/src',
+  'harness/pack-api/src',
+];
 
 /** True for the two spellings of a disabled rule, bare or at the head of an options array. */
 const isOff = (severity) => severity === 'off' || severity === 0;

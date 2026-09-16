@@ -5,7 +5,7 @@ import { loadPolicy } from '../domain/tooling/policy.js';
 import { DEFAULT_CONFIDENCE_THRESHOLD, type ToolDeps } from '../domain/tooling/types.js';
 import { gatewayFromEnv } from '../domain/models/gateway.js';
 import { storageRoot } from '../domain/storage/layout.js';
-import { defaultFormsDir } from '../domain/forms/templates.js';
+import { loadPacks } from '../domain/packs/registry.js';
 import { NPPES_DEFAULT_BASE_URL } from '../domain/verify/nppes.js';
 
 /**
@@ -25,9 +25,21 @@ export function envOrDefault(name: string, fallback: string, env: NodeJS.Process
   return raw;
 }
 
+/**
+ * Which packs this process serves, comma-separated package names. Defaults to the only pack
+ * that exists today, so a deployment that sets nothing behaves exactly as it did.
+ */
+function packNames(): string[] {
+  return (optionalEnv('HARNESS_PACKS') ?? '@harness/pack-healthcare')
+    .split(',')
+    .map((name) => name.trim())
+    .filter((name) => name !== '');
+}
+
 export async function buildDepsFromEnv(): Promise<{ deps: ToolDeps; close: () => Promise<void> }> {
   const { db, close } = createDb();
   const formsDir = optionalEnv('HARNESS_FORMS_DIR');
+  const packs = await loadPacks(packNames());
   const deps: ToolDeps = {
     db,
     client: envOrDefault('HARNESS_CLIENT', 'default'),
@@ -42,7 +54,7 @@ export async function buildDepsFromEnv(): Promise<{ deps: ToolDeps; close: () =>
     // storageRoot). Ingested documents live under it as domain/storage lays
     // them out; generated output goes under `<root>/out`.
     storageDir: storageRoot(),
-    formsDir: formsDir ? path.resolve(formsDir) : defaultFormsDir(),
+    formsDir: formsDir ? path.resolve(formsDir) : packs.formsDir(),
     restrictedToModel: booleanFromEnv('HARNESS_RESTRICTED_TO_MODEL'),
     verify: {
       nppesEnabled: booleanFromEnv('VERIFY_NPPES_ENABLED'),
@@ -58,6 +70,7 @@ export async function buildDepsFromEnv(): Promise<{ deps: ToolDeps; close: () =>
     // id and skill would be stamped on another session's audit rows.
     context: {},
     tools: new Map(),
+    packs,
   };
   return { deps, close };
 }

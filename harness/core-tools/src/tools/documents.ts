@@ -1,7 +1,7 @@
 import * as z from 'zod/v4';
 import { defineTool } from '../domain/tooling/registry.js';
 import type { AnyToolDef } from '../domain/tooling/types.js';
-import { DOCUMENT_KINDS } from '../domain/documents/types.js';
+import type { PackRegistry } from '../domain/packs/types.js';
 import {
   classifyDocument,
   documentView,
@@ -23,31 +23,39 @@ const DocumentView = z.object({
   ingested_at: z.string(),
 });
 
-const documentsIngest = defineTool({
-  name: 'documents_ingest',
-  description:
-    'Register a file that is already under the harness storage directory: hash it, count its pages, and store a documents row. ' +
-    'Idempotent by content hash, so re-ingesting the same file returns the same document id. ' +
-    'Does not read the text; call documents_extract for that.',
-  actionClass: 'write.internal',
-  input: z.object({
-    path: z.string().min(1).describe('Path relative to the harness storage directory, e.g. incoming/license.pdf'),
-    provider_id: z.string().uuid().optional(),
-    kind: z
-      .enum(DOCUMENT_KINDS)
-      .optional()
-      .describe('Declare the kind when it is already known; otherwise documents_classify sets it'),
-  }),
-  output: z.object({
-    document_id: z.string(),
-    sha256: z.string(),
-    pages: z.number(),
-    storage_path: z.string(),
-    already_ingested: z.boolean(),
-  }),
-  handler: async (args, deps) => ingestDocument(deps, args),
-  recordIds: (_args, result) => [result.document_id],
-});
+/**
+ * `documents_ingest` is the one tool whose JSON Schema carries the document-kind list, so it is
+ * the one definition built from the loaded packs rather than declared as a constant. The cast
+ * is needed because `z.enum` wants a non-empty tuple: `definePack` and `loadPacks` both refuse
+ * a pack with no kinds, so the array is never empty.
+ */
+function documentsIngestFor(packs: PackRegistry) {
+  return defineTool({
+    name: 'documents_ingest',
+    description:
+      'Register a file that is already under the harness storage directory: hash it, count its pages, and store a documents row. ' +
+      'Idempotent by content hash, so re-ingesting the same file returns the same document id. ' +
+      'Does not read the text; call documents_extract for that.',
+    actionClass: 'write.internal',
+    input: z.object({
+      path: z.string().min(1).describe('Path relative to the harness storage directory, e.g. incoming/license.pdf'),
+      provider_id: z.string().uuid().optional(),
+      kind: z
+        .enum(packs.documentKinds() as [string, ...string[]])
+        .optional()
+        .describe('Declare the kind when it is already known; otherwise documents_classify sets it'),
+    }),
+    output: z.object({
+      document_id: z.string(),
+      sha256: z.string(),
+      pages: z.number(),
+      storage_path: z.string(),
+      already_ingested: z.boolean(),
+    }),
+    handler: async (args, deps) => ingestDocument(deps, args),
+    recordIds: (_args, result) => [result.document_id],
+  });
+}
 
 const documentsGet = defineTool({
   name: 'documents_get',
@@ -122,10 +130,6 @@ const documentsExtract = defineTool({
   recordIds: (args, result) => [args.document_id, result.provider_id],
 });
 
-export const documentTools: AnyToolDef[] = [
-  documentsIngest,
-  documentsClassify,
-  documentsExtract,
-  documentsGet,
-  documentsList,
-];
+export function documentTools(packs: PackRegistry): AnyToolDef[] {
+  return [documentsIngestFor(packs), documentsClassify, documentsExtract, documentsGet, documentsList];
+}

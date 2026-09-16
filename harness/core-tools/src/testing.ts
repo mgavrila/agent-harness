@@ -6,11 +6,15 @@ import { onTestFinished } from 'vitest';
 import type { Client } from '@modelcontextprotocol/client';
 import { McpServer } from '@modelcontextprotocol/server';
 import type { Db } from '@harness/db';
+import { pack as healthcarePack } from '@harness/pack-healthcare';
 import { connectInProcess } from './domain/tooling/in-process.js';
 import { registerTools } from './domain/tooling/registry.js';
 import { DEFAULT_POLICY } from './domain/tooling/policy.js';
 import { DEFAULT_CONFIDENCE_THRESHOLD, type AnyToolDef, type ToolDeps } from './domain/tooling/types.js';
-import { defaultFormsDir } from './domain/forms/templates.js';
+import { registryOf } from './domain/packs/registry.js';
+
+/** The packs a test runs against: the shipped one, with no environment involved. */
+const TEST_PACKS = registryOf([healthcarePack]);
 
 export function makeTestDeps(db: Db, overrides: Partial<ToolDeps> = {}): ToolDeps {
   return {
@@ -26,7 +30,7 @@ export function makeTestDeps(db: Db, overrides: Partial<ToolDeps> = {}): ToolDep
     // A throwaway directory per call, so a test that forgets to override it
     // still cannot write into the repository.
     storageDir: mkdtempSync(path.join(tmpdir(), 'harness-test-storage-')),
-    formsDir: defaultFormsDir(),
+    formsDir: TEST_PACKS.formsDir(),
     restrictedToModel: false,
     verify: {
       nppesEnabled: true,
@@ -39,6 +43,7 @@ export function makeTestDeps(db: Db, overrides: Partial<ToolDeps> = {}): ToolDep
     sinks: {},
     context: {},
     tools: new Map(),
+    packs: TEST_PACKS,
     ...overrides,
   };
 }

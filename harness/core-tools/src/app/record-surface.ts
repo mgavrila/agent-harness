@@ -6,6 +6,7 @@ import { promisify } from 'node:util';
 import { connectInProcess } from '../domain/tooling/in-process.js';
 import { DEFAULT_POLICY } from '../domain/tooling/policy.js';
 import { DEFAULT_CONFIDENCE_THRESHOLD, type ToolDeps } from '../domain/tooling/types.js';
+import { loadPacks } from '../domain/packs/registry.js';
 import { createCoreToolsServer } from '../tools/catalog.js';
 import { NPPES_DEFAULT_BASE_URL } from '../domain/verify/nppes.js';
 
@@ -26,7 +27,10 @@ export interface ToolSurfaceEntry {
  * nothing below is ever used. The database handle is a null cast on purpose: recording the
  * public surface must not need Postgres, or the snapshot could not be regenerated offline.
  */
-export function surfaceDeps(): ToolDeps {
+export async function surfaceDeps(): Promise<ToolDeps> {
+  // A literal rather than HARNESS_PACKS, deliberately: the committed snapshot has to describe
+  // the shipped default, not whatever the machine recording it happens to have configured.
+  const packs = await loadPacks(['@harness/pack-healthcare']);
   return {
     db: null as unknown as ToolDeps['db'],
     client: 'surface',
@@ -49,6 +53,7 @@ export function surfaceDeps(): ToolDeps {
     sinks: {},
     context: {},
     tools: new Map(),
+    packs,
   };
 }
 
@@ -58,7 +63,8 @@ export function surfaceDeps(): ToolDeps {
  * rename or a widened field would change.
  */
 export async function readToolSurface(): Promise<ToolSurfaceEntry[]> {
-  const { client, close } = await connectInProcess(() => createCoreToolsServer(surfaceDeps()));
+  const deps = await surfaceDeps();
+  const { client, close } = await connectInProcess(() => createCoreToolsServer(deps));
   try {
     const { tools } = await client.listTools();
     return (tools as { name: string; inputSchema: unknown; outputSchema?: unknown }[])

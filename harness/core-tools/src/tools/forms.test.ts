@@ -4,8 +4,8 @@ import path from 'node:path';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { and, eq } from 'drizzle-orm';
 import { auditLog, credentials, fields, providers, approvals, toolEffects } from '@harness/db';
+import { pack as healthcarePack } from '@harness/pack-healthcare';
 import { useTestDb, makeTestDeps, connectTools, resultOf, approvalIdOf } from '../testing.js';
-import { defaultFormsDir } from '../domain/forms/templates.js';
 import { ROSTER_COLUMNS } from '../domain/forms/types.js';
 import type { ToolDeps } from '../domain/tooling/types.js';
 import { approvalTools } from './approvals.js';
@@ -25,7 +25,7 @@ let deps: ToolDeps;
 
 beforeEach(async () => {
   storageDir = await mkdtemp(path.join(tmpdir(), 'harness-forms-'));
-  deps = makeTestDeps(db, { storageDir, formsDir: defaultFormsDir() });
+  deps = makeTestDeps(db, { storageDir, formsDir: healthcarePack.formsDir });
 });
 
 afterEach(async () => {
@@ -144,7 +144,7 @@ describe('forms_fill', () => {
     const providerId = await seedCompleteProvider();
     const badDir = await mkdtemp(path.join(tmpdir(), 'harness-badforms-'));
     await copyFile(
-      path.join(defaultFormsDir(), 'state-license-renewal-cover.pdf'),
+      path.join(healthcarePack.formsDir, 'state-license-renewal-cover.pdf'),
       path.join(badDir, 'state-license-renewal-cover.pdf'),
     );
     await writeFile(
@@ -219,7 +219,7 @@ describe('forms_fill', () => {
     const providerId = await seedCompleteProvider();
     const badDir = await mkdtemp(path.join(tmpdir(), 'harness-badforms-optional-'));
     await copyFile(
-      path.join(defaultFormsDir(), 'state-license-renewal-cover.pdf'),
+      path.join(healthcarePack.formsDir, 'state-license-renewal-cover.pdf'),
       path.join(badDir, 'state-license-renewal-cover.pdf'),
     );
     await writeFile(
@@ -394,7 +394,7 @@ describe('forms_release', () => {
   it('refuses a file id that escapes the output directory', async () => {
     const strict = makeTestDeps(db, {
       storageDir,
-      formsDir: defaultFormsDir(),
+      formsDir: healthcarePack.formsDir,
       policy: { ...deps.policy, external: 'auto' },
     });
     const client = await connectTools('forms-test', [...formTools, ...approvalTools], strict);
@@ -406,7 +406,7 @@ describe('forms_release', () => {
   it('refuses a file id that does not exist', async () => {
     const strict = makeTestDeps(db, {
       storageDir,
-      formsDir: defaultFormsDir(),
+      formsDir: healthcarePack.formsDir,
       policy: { ...deps.policy, external: 'auto' },
     });
     const client = await connectTools('forms-test', [...formTools, ...approvalTools], strict);

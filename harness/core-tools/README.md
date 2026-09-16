@@ -55,5 +55,5 @@ names and the rendered Compose config against `docs/architecture/`. Regenerate w
 ## Adding a tool
 
 See CONTRIBUTING.md. In one line: the logic goes in a domain, the `defineTool` block goes in
-`src/tools/<area>.ts` and into that file's exported array, and `ALL_TOOLS` in
+`src/tools/<area>.ts` and into that file's exported array, and `allTools(packs)` in
 `src/tools/catalog.ts` already spreads it.
