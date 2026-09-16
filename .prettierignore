@@ -1,0 +1,12 @@
+node_modules
+pnpm-lock.yaml
+harness/db/drizzle
+harness/gateway/litellm.config.yaml
+packs/healthcare/forms/*.pdf
+packs/healthcare/synthetic/out
+evals/results
+evals/baseline.json
+docs/architecture/tool-surface.json
+docs/architecture/compose-surface.yaml
+docs/
+storage

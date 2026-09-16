@@ -24,7 +24,9 @@ evals/results/
 # os / editors
 .DS_Store
 .idea/
-.vscode/
+# Personal editor state stays out; the shared extension recommendations are committed.
+.vscode/*
+!.vscode/extensions.json
 
 # superpowers scratch and worktrees
 .superpowers/
