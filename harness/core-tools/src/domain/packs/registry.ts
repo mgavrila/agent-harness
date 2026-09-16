@@ -1,7 +1,12 @@
-import { ConfigError } from '@harness/shared';
+import { ConfigError, createLogger } from '@harness/shared';
 import type { Pack } from '@harness/pack-api';
 import { parseManifest } from '../documents/manifest.js';
 import type { PackRegistry } from './types.js';
+
+const logger = createLogger('packs');
+
+/** Shared between `loadPacks` and `registryOf`, which both refuse an empty pack list the same way. */
+const NO_PACKS_MESSAGE = 'HARNESS_PACKS names no pack; at least one is required';
 
 /**
  * A registry over packs that are already in hand. `makeTestDeps` and the surface recorder use
@@ -16,8 +21,12 @@ import type { PackRegistry } from './types.js';
  * validating the manifest against *this build's* restricted-name rules rather than the pack's
  * matters too, because those rules decide what gets encrypted, so they belong to whoever does
  * the encrypting. A pack shipped against an older rule set fails here, at startup, named.
+ *
+ * Refuses an empty list up front: `manifest()` and `formsDir()` would otherwise answer for
+ * `all[0]` of an empty array, throwing a raw `TypeError` that names no variable and no pack.
  */
 export function registryOf(all: Pack[]): PackRegistry {
+  if (all.length === 0) throw new ConfigError(NO_PACKS_MESSAGE);
   const manifests = all.map((p) => parseManifest(p.extraction));
   return {
     all,
@@ -40,23 +49,44 @@ export function registryOf(all: Pack[]): PackRegistry {
  * all, and it reaches it the way a plug-in host does: by name, at startup, with no build-time
  * edge. `pnpm arch` forbids a static `@harness/pack-*` import anywhere else under `src/`.
  *
- * Every failure before `registryOf` is a `ConfigError` naming the module and nothing else. A
- * resolver error's message carries absolute filesystem paths and a node_modules layout, and
- * this message can end up in a container log an operator pastes into a ticket. `registryOf`
- * itself parses each pack's manifest — see its comment — so a malformed one fails here too,
- * named, rather than silently reaching `documents_extract` with its defaults missing.
+ * A dynamic `import()` can fail three different ways, and they are told apart so a pack's own
+ * startup error is never swallowed by the generic "cannot load" message:
+ *
+ *  - the specifier does not resolve (`ERR_MODULE_NOT_FOUND`) or resolves to a package with no
+ *    such subpath (`ERR_PACKAGE_PATH_NOT_EXPORTED`) — the resolver error's own message carries
+ *    absolute filesystem paths and a node_modules layout that does not belong in a container
+ *    log an operator pastes into a ticket, so it is replaced with a message naming only the
+ *    module;
+ *  - the module resolves and evaluates but throws a `ConfigError` while doing so — a pack
+ *    validating its own config, e.g. `definePack` rejecting a relative `formsDir`. A
+ *    `ConfigError`'s message is safe by construction (see `@harness/shared`'s `errors.ts`), so
+ *    it is re-raised, prefixed with the pack's name;
+ *  - anything else — logged in full through the shared logger, because it may carry a path or
+ *    other detail that should reach an operator's log but not a thrown message, and replaced
+ *    with a message naming only the pack.
+ *
+ * `registryOf` itself parses each pack's manifest — see its comment — so a malformed one fails
+ * here too, named, rather than silently reaching `documents_extract` with its defaults missing.
  */
 export async function loadPacks(names: string[]): Promise<PackRegistry> {
-  if (names.length === 0) throw new ConfigError('HARNESS_PACKS names no pack; at least one is required');
+  if (names.length === 0) throw new ConfigError(NO_PACKS_MESSAGE);
   const all: Pack[] = [];
   for (const name of names) {
     let module: { pack?: Pack };
     try {
       module = (await import(name)) as { pack?: Pack };
-    } catch {
-      throw new ConfigError(
-        `cannot load pack "${name}"; add it to @harness/core-tools dependencies and run pnpm install`,
-      );
+    } catch (err) {
+      const code = (err as { code?: unknown } | null)?.code;
+      if (code === 'ERR_MODULE_NOT_FOUND' || code === 'ERR_PACKAGE_PATH_NOT_EXPORTED') {
+        throw new ConfigError(
+          `cannot load pack "${name}"; add it to @harness/core-tools dependencies and run pnpm install`,
+        );
+      }
+      if (err instanceof ConfigError) {
+        throw new ConfigError(`pack "${name}": ${err.message}`);
+      }
+      logger.error(`pack "${name}" failed to initialise`, err);
+      throw new ConfigError(`pack "${name}" failed to initialise`);
     }
     if (!module.pack) throw new ConfigError(`module "${name}" exports no \`pack\``);
     all.push(module.pack);
