@@ -1,8 +1,8 @@
 import type * as z from 'zod/v4';
 import type { Db } from '@harness/db';
-import type { SinkRegistry } from '../../effects.js'; // until Task 7 moves it to ../effects/types.js
+import type { SinkRegistry } from '../effects/types.js';
 import type { GatewayConfig } from '../models/types.js';
-import type { VerifyConfig } from '../../tools/verify.js'; // until Task 7 moves it to ../verify/types.js
+import type { VerifyConfig } from '../verify/types.js';
 import type { ActionClass, Policy } from './policy.js';
 import type { AuditEntry } from './audit.js';
 
@@ -34,9 +34,14 @@ export const DEFAULT_CONFIDENCE_THRESHOLD = 0.85;
  * `makeTestDeps` and what keeps `process.env` out of the domain.
  *
  * Note what this carries and what it does not. `gateway`, `storageDir` and `verify` are
- * *configuration*, not constructed objects: the domain builds its adapter from them
- * (`httpGateway`, `fileStorage`, `nppesRegistry`), so a test overrides a URL rather than
+ * *configuration*, not constructed objects: a test overrides a URL or a directory rather than
  * assembling an interface. See ARCHITECTURE.md for why.
+ *
+ * Two of the three adapters are built by the domain from that configuration and are on the
+ * live path today: `httpGateway(deps.gateway)` inside `callModel`, and
+ * `nppesRegistry(deps.verify)` inside `verify_nppes`. The third, `fileStorage(root)`, is a
+ * declared seam with no caller yet: every storage call still goes through the free functions
+ * with `deps.storageDir` threaded in. Wiring it is a later task, not a behaviour change here.
  */
 export interface ToolDeps {
   /** Drizzle database handle; every handler runs inside a transaction opened on it. */

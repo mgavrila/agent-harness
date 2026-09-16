@@ -1,4 +1,4 @@
-import { CREDENTIAL_KINDS } from '../../deadlines/compute.js';
+import { CREDENTIAL_KINDS } from '../deadlines/compute.js';
 import { CREDENTIAL_PROPERTIES, type ManifestField, type ProviderManifest } from './manifest.js';
 
 /** One field's slot in the model-facing schema: the value plus how sure and from where. */

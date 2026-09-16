@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { ROSTER_COLUMNS, buildRosterCsv, type RosterRow } from './roster.js';
+import { buildRosterCsv } from './roster.js';
+import { ROSTER_COLUMNS, type RosterRow } from './types.js';
 
 function row(over: Partial<RosterRow> = {}): RosterRow {
   return {

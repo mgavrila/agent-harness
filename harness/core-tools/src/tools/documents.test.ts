@@ -7,8 +7,9 @@ import { PDFDocument, StandardFonts } from 'pdf-lib';
 import { documents, providers, fields as fieldsTable, credentials as credentialsTable, decrypt } from '@harness/db';
 import type { ToolDeps } from '../domain/tooling/types.js';
 import { connectTools, makeTestDeps, resultOf, useTestDb, startFakeGateway, type FakeGateway } from '../testing.js';
+import { documentTextPath } from '../domain/storage/layout.js';
 import { providerTools } from './providers.js';
-import { documentTools, documentTextPath } from './documents.js';
+import { documentTools } from './documents.js';
 
 const db = useTestDb();
 let storageDir: string;

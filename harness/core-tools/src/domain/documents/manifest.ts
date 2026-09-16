@@ -1,7 +1,7 @@
 import { createRequire } from 'node:module';
 import * as z from 'zod/v4';
 import { isRestrictedName } from '../../shared/redaction/names.js';
-import { CREDENTIAL_KINDS } from '../../deadlines/compute.js';
+import { CREDENTIAL_KINDS } from '../deadlines/compute.js';
 import { DOCUMENT_KINDS } from './types.js';
 
 // Deliberately ordered for the prompt rather than shared with the template

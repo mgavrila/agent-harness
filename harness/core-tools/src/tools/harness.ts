@@ -6,7 +6,7 @@ import { defineTool } from '../domain/tooling/registry.js';
 import type { AnyToolDef } from '../domain/tooling/types.js';
 import { containsRestrictedPattern } from '../shared/redaction/patterns.js';
 import { reconcile } from '../domain/tooling/reconcile.js';
-import { stageEffect } from '../effects.js';
+import { stageEffect } from '../domain/effects/outbox.js';
 
 const harnessReconcile = defineTool({
   name: 'harness_reconcile',

@@ -3,7 +3,7 @@ import { eq } from 'drizzle-orm';
 import { auditLog, runs, toolEffects } from '@harness/db';
 import { type ToolDeps } from '../domain/tooling/types.js';
 import { connectTestClient, makeTestDeps, resultOf, useTestDb } from '../testing.js';
-import { createCoreToolsServer } from '../server.js';
+import { createCoreToolsServer } from './catalog.js';
 
 const db = useTestDb();
 let deps: ToolDeps;

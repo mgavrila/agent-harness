@@ -1,41 +1,17 @@
 import { and, asc, eq, sql } from 'drizzle-orm';
 import { toolEffects, encrypt, decrypt, withTransaction, type Db } from '@harness/db';
 import { createLogger, describeError } from '@harness/shared';
-import type { ToolDeps } from './domain/tooling/types.js';
+import type { ToolDeps } from '../tooling/types.js';
+import type {
+  DispatchOptions,
+  DispatchOutcome,
+  DispatchResult,
+  SinkHandler,
+  SinkRegistry,
+  StageEffectInput,
+} from './types.js';
 
 const log = createLogger('effects');
-
-/**
- * Sends one staged effect. The second argument carries the row's context so a
- * sink can key its own idempotency, label the message, or back off on a retry.
- *
- * Anything returned is stored on the row in plaintext jsonb (`tool_effects.result`)
- * for operators to trace the effect to what it produced, so a sink must return
- * only non-restricted values — identifiers and timestamps, never payload
- * content. Return nothing when there is nothing to record.
- */
-export type SinkHandler = (
-  payload: unknown,
-  effect: {
-    id: string;
-    idempotencyKey: string;
-    tool: string;
-    client: string;
-    summary: string;
-    runId: string | null;
-    attempts: number;
-  },
-) => Promise<Record<string, unknown> | void>;
-
-export type SinkRegistry = Record<string, SinkHandler>;
-
-export interface StageEffectInput {
-  sink: string;
-  idempotencyKey: string;
-  payload: unknown;
-  /** A short human label. Never put restricted values here; it is stored in plaintext. */
-  summary: string;
-}
 
 /**
  * Stage an external side effect from inside a tool handler. The row commits
@@ -69,26 +45,7 @@ export async function stageEffect(
   return { effect_id: existing.id, staged: false };
 }
 
-export interface DispatchOptions {
-  key: Buffer;
-  limit?: number;
-  maxAttempts?: number;
-  now?: () => Date;
-}
-
-export interface DispatchResult {
-  dispatched: number;
-  failed: number;
-  retried: number;
-  skipped: number;
-  /** Rows that left `dispatching` while the sink was running, so the dispatcher did not write their outcome. */
-  conflicted: number;
-}
-
 type EffectRow = typeof toolEffects.$inferSelect;
-
-/** Which counter a single row's dispatch attempt lands in. */
-type DispatchOutcome = 'dispatched' | 'failed' | 'retried' | 'conflicted';
 
 /**
  * Take ownership of one staged row: FOR UPDATE SKIP LOCKED, then move it to
@@ -207,3 +164,8 @@ export async function dispatchStagedEffects(
   }
   return result;
 }
+
+// The `./effects` subpath serves @harness/approvals both the functions above and the types
+// they are written in terms of, so the types are re-exported here rather than asking that
+// package to reach a second path into this source tree.
+export type { DispatchOptions, DispatchResult, SinkHandler, SinkRegistry, StageEffectInput } from './types.js';

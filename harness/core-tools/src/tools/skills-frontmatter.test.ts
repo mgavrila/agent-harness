@@ -3,10 +3,10 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, it, expect } from 'vitest';
 import { parse } from 'yaml';
-import { ALL_TOOLS } from './server.js';
+import { ALL_TOOLS } from './catalog.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const SKILLS_DIR = path.join(__dirname, '../../../packs/healthcare/skills');
+const SKILLS_DIR = path.join(__dirname, '../../../../packs/healthcare/skills');
 
 /**
  * Every tool a skill may name. This used to carry an allowlist for the

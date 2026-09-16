@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { describe, it, expect } from 'vitest';
 import { PDFDocument } from 'pdf-lib';
-import { isRestrictedName } from '../tools/providers.js';
+import { isRestrictedName } from '../../shared/redaction/names.js';
 import { defaultFormsDir, loadManifest, getTemplate, mappingLabel } from './templates.js';
 
 const dir = defaultFormsDir();

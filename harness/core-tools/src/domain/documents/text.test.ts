@@ -68,6 +68,10 @@ async function checkOcrAvailable(): Promise<boolean> {
  */
 const ocrAvailable = await checkOcrAvailable();
 if (!ocrAvailable) {
+  // A skip reason for whoever is watching the run; a logger here would be prefixed as if it
+  // came from the code under test. core-tools is a promoted layer root, so no-console is an
+  // error even in a test file.
+  // eslint-disable-next-line no-console
   console.warn('tesseract/pdftoppm not installed; run `brew install tesseract poppler` — skipping OCR-dependent tests');
 }
 

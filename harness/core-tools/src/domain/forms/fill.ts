@@ -1,43 +1,15 @@
 import { PDFDocument } from 'pdf-lib';
 import { ToolError } from '@harness/shared';
-import { isRestrictedName } from '../shared/redaction/names.js';
-import { mappingLabel, type TemplateMapping } from './templates.js';
-
-/** Everything a template or a roster may read about one provider. */
-export interface ProviderData {
-  provider: { name: string; npi: string | null; status: string };
-  fields: { name: string; value: string | null; restricted: boolean; status: string }[];
-  credentials: {
-    kind: string;
-    issuer: string | null;
-    state: string | null;
-    issuedAt: string | null;
-    expiresAt: string | null;
-    /**
-     * Whether `number_encrypted` holds anything. The number itself is never
-     * loaded — the roster's `*_on_file` columns answer "is a number stored",
-     * and a credential row recorded from a document that showed an issuer and
-     * an expiry but no legible number must answer no.
-     */
-    hasNumber: boolean;
-  }[];
-}
-
-export interface ResolvedMapping {
-  pdf_field: string;
-  label: string;
-  required: boolean;
-  value: string | null;
-  /** Why there is no value: the field awaits a human, or there is no record at all. */
-  blocked: 'pending' | 'missing' | null;
-}
+import { isRestrictedName } from '../../shared/redaction/names.js';
+import { mappingLabel } from './templates.js';
+import type { ProviderData, ResolvedMapping, TemplateMapping } from './types.js';
 
 /** Only a field a model extracted confidently or a human confirmed may reach a form. */
 const USABLE_FIELD_STATUSES = new Set(['extracted', 'verified']);
 
 /**
  * The credential of a kind that a form should quote: the one that expires last.
- * Shared with the roster in tools/forms.ts, which must pick the same one: two
+ * Shared with the roster in provider-data.ts, which must pick the same one: two
  * copies of this rule is how a filled form and the roster built from the same
  * record come to name different licences.
  */

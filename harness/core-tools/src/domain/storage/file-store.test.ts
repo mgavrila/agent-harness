@@ -4,16 +4,7 @@ import path from 'node:path';
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import { ToolError } from '@harness/shared';
 import { contentTag, outRoot, storageRoot } from './layout.js';
-import { resolveOutFile, resolveStoragePath, sha256File, writeOutFile } from './file-store.js';
-
-let root: string;
-
-beforeEach(async () => {
-  root = await mkdtemp(path.join(tmpdir(), 'harness-storage-'));
-});
-afterEach(async () => {
-  await rm(root, { recursive: true, force: true });
-});
+import { fileStorage, resolveOutFile, resolveStoragePath, sha256File, writeOutFile } from './file-store.js';
 
 let dir: string;
 
@@ -27,6 +18,14 @@ afterAll(async () => {
 });
 
 describe('storage paths', () => {
+  let root: string;
+  beforeEach(async () => {
+    root = await mkdtemp(path.join(tmpdir(), 'harness-storage-'));
+  });
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+
   it('refuses to guess a storage root', () => {
     expect(() => storageRoot(undefined)).toThrow(/HARNESS_STORAGE_DIR/);
     expect(() => storageRoot('   ')).toThrow(/HARNESS_STORAGE_DIR/);
@@ -154,5 +153,37 @@ describe('sha256File', () => {
 
   it('throws a ToolError for a missing file', async () => {
     await expect(sha256File(path.join(dir, 'nope.pdf'))).rejects.toThrow(ToolError);
+  });
+});
+
+describe('fileStorage', () => {
+  let root: string;
+  beforeEach(async () => {
+    root = await mkdtemp(path.join(tmpdir(), 'harness-file-store-'));
+  });
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+
+  it('binds one root to the five operations a domain needs', async () => {
+    const store = fileStorage(root);
+    const written = await store.write({
+      dir: 'forms',
+      name: 'demo',
+      ext: 'pdf',
+      bytes: new Uint8Array([1, 2, 3]),
+    });
+    expect(written.path.startsWith(outRoot(root))).toBe(true);
+    expect(await store.resolveOut(written.file_id)).toBe(written.path);
+    expect(Array.from(await store.read(written.path))).toEqual([1, 2, 3]);
+    expect(store.textPathFor('/a/b.pdf')).toBe('/a/b.pdf.redacted.txt');
+    // The fifth: an incoming path, resolved against the same root.
+    await mkdir(path.join(root, 'incoming'), { recursive: true });
+    await writeFile(path.join(root, 'incoming', 'scan.pdf'), 'scan');
+    expect(await store.resolveIncoming('incoming/scan.pdf')).toBe(path.join(root, 'incoming', 'scan.pdf'));
+  });
+
+  it('refuses a file id that leaves the out tree', async () => {
+    await expect(fileStorage(root).resolveOut('../escape.pdf')).rejects.toThrow('outside the output directory');
   });
 });

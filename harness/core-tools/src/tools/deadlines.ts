@@ -10,8 +10,8 @@ import {
   bucketFor,
   digestKeyFor,
   URGENCY_BUCKETS,
-} from '../deadlines/compute.js';
-import { requireProvider } from './providers.js';
+} from '../domain/deadlines/compute.js';
+import { requireProvider } from '../domain/providers/repository.js';
 
 /** Identifies a deadline row within a provider, matching `deadlines_credential_kind_uq`. */
 const deadlineKey = (d: { credentialId: string; kind: string }) => `${d.credentialId}:${d.kind}`;

@@ -3,7 +3,7 @@ import { describe, it, expect } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { auditLog } from '@harness/db';
 import { connectTestClient, makeTestDeps, resultOf, useTestDb } from '../testing.js';
-import { createCoreToolsServer } from '../server.js';
+import { createCoreToolsServer } from './catalog.js';
 
 const db = useTestDb();
 const deps = makeTestDeps(db);

@@ -1,213 +1,15 @@
 import * as z from 'zod/v4';
-import { and, eq, ilike, or, sql } from 'drizzle-orm';
-import { providers, fields, credentials, encrypt } from '@harness/db';
-import { ToolError } from '@harness/shared';
 import { defineTool } from '../domain/tooling/registry.js';
-import type { AnyToolDef, ToolDeps } from '../domain/tooling/types.js';
+import type { AnyToolDef } from '../domain/tooling/types.js';
+import { CredentialInput, FieldInput } from '../domain/providers/types.js';
+import {
+  confirmField,
+  listPendingFields,
+  readProvider,
+  searchProviders,
+  upsertProviderRecord,
+} from '../domain/providers/repository.js';
 import { MASKED, isRestrictedName } from '../shared/redaction/names.js';
-import { CREDENTIAL_KINDS } from '../deadlines/compute.js';
-
-// Re-exported so `forms/templates.test.ts` keeps resolving through this module until Task 7
-// points its last caller at the shared redaction folder directly.
-export { MASKED, isRestrictedName };
-
-export const FieldInput = z.object({
-  name: z.string().min(1),
-  value: z.string(),
-  confidence: z.number().min(0).max(1).optional(),
-  restricted: z.boolean().optional(),
-  source_doc_id: z.string().uuid().optional(),
-  source_page: z.number().int().positive().optional(),
-});
-export type FieldInput = z.infer<typeof FieldInput>;
-
-export const CredentialInput = z.object({
-  kind: z.enum(CREDENTIAL_KINDS),
-  issuer: z.string().optional(),
-  number: z.string().optional(),
-  state: z.string().length(2).optional(),
-  issued_at: z
-    .string()
-    .regex(/^\d{4}-\d{2}-\d{2}$/)
-    .optional(),
-  expires_at: z
-    .string()
-    .regex(/^\d{4}-\d{2}-\d{2}$/)
-    .optional(),
-  source_doc_id: z.string().uuid().optional(),
-});
-export type CredentialInput = z.infer<typeof CredentialInput>;
-
-export async function requireProvider(deps: ToolDeps, providerId: string) {
-  const p = await deps.db.query.providers.findFirst({
-    where: and(eq(providers.id, providerId), eq(providers.client, deps.client)),
-  });
-  if (!p) throw new ToolError(`provider ${providerId} not found`);
-  return p;
-}
-
-/**
- * A field value belongs in exactly one column: plaintext when it may be read
- * back, encrypted when it may not. Never both, so that masking a value cannot
- * leave a readable copy behind.
- */
-function fieldValueColumns(value: string, restricted: boolean, key: Buffer) {
-  return {
-    value: restricted ? null : value,
-    valueEncrypted: restricted ? encrypt(value, key) : null,
-  };
-}
-
-/** A field as a caller sees it. A restricted value is reported as masked, never decrypted. */
-function maskField(f: typeof fields.$inferSelect) {
-  return {
-    name: f.name,
-    value: f.restricted ? MASKED : f.value,
-    restricted: f.restricted,
-    confidence: f.confidence,
-    status: f.status,
-    source_page: f.sourcePage,
-  };
-}
-
-/** A credential as a caller sees it. The number is never returned, only whether one is on file. */
-function maskCredential(c: typeof credentials.$inferSelect) {
-  return {
-    id: c.id,
-    kind: c.kind,
-    issuer: c.issuer,
-    number: c.numberEncrypted ? MASKED : null,
-    state: c.state,
-    expires_at: c.expiresAt,
-  };
-}
-
-async function findOrCreateProvider(deps: ToolDeps, name: string, npi?: string) {
-  const match = npi ? eq(providers.npi, npi) : eq(providers.name, name);
-  const existing = await deps.db.query.providers.findFirst({
-    where: and(eq(providers.client, deps.client), match),
-  });
-  if (existing) {
-    const [updated] = await deps.db
-      .update(providers)
-      .set({ name, npi: npi ?? existing.npi, updatedAt: deps.now() })
-      .where(eq(providers.id, existing.id))
-      .returning();
-    return updated;
-  }
-  const [created] = await deps.db
-    .insert(providers)
-    .values({ client: deps.client, name, npi: npi ?? null })
-    .returning();
-  return created;
-}
-
-async function upsertField(deps: ToolDeps, providerId: string, f: FieldInput) {
-  const existing = await deps.db.query.fields.findFirst({
-    where: and(eq(fields.providerId, providerId), eq(fields.name, f.name)),
-  });
-  if (existing?.status === 'verified') {
-    return 'verified' as const;
-  }
-  const restricted = f.restricted === true || isRestrictedName(f.name);
-  const confidence = f.confidence ?? 1;
-  const status = confidence >= deps.confidenceThreshold ? 'extracted' : 'pending';
-  const values = {
-    providerId,
-    name: f.name,
-    ...fieldValueColumns(f.value, restricted, deps.encryptionKey),
-    restricted,
-    confidence,
-    sourceDocId: f.source_doc_id ?? null,
-    sourcePage: f.source_page ?? null,
-    status,
-  };
-  await deps.db
-    .insert(fields)
-    .values(values)
-    .onConflictDoUpdate({
-      target: [fields.providerId, fields.name],
-      // A verified field returned above, so any confirmation recorded on the
-      // row being overwritten refers to a value this extraction replaces.
-      set: { ...values, confirmedBy: null, confirmedAt: null },
-    });
-  return status;
-}
-
-async function upsertCredential(deps: ToolDeps, providerId: string, c: CredentialInput) {
-  // A provider can hold one credential of a kind per state (two licences in
-  // two states), so the state — null included — is part of the match.
-  const existing = await deps.db.query.credentials.findFirst({
-    where: and(
-      eq(credentials.providerId, providerId),
-      eq(credentials.kind, c.kind),
-      sql`${credentials.state} IS NOT DISTINCT FROM ${c.state ?? null}`,
-    ),
-  });
-  const values = {
-    providerId,
-    kind: c.kind,
-    issuer: c.issuer ?? null,
-    numberEncrypted: c.number ? encrypt(c.number, deps.encryptionKey) : null,
-    state: c.state ?? null,
-    issuedAt: c.issued_at ?? null,
-    expiresAt: c.expires_at ?? null,
-    sourceDocId: c.source_doc_id ?? null,
-  };
-  if (existing) {
-    await deps.db.update(credentials).set(values).where(eq(credentials.id, existing.id));
-  } else {
-    await deps.db.insert(credentials).values(values);
-  }
-}
-
-export interface UpsertProviderInput {
-  name: string;
-  npi?: string;
-  fields: FieldInput[];
-  credentials: CredentialInput[];
-  /**
-   * Write to this provider row directly, skipping name/NPI matching entirely.
-   * The caller has already resolved and client-scoped this id (typically via
-   * `requireProvider`); re-deriving a match from `name`/`npi` here could
-   * silently attach to, rename, or duplicate a *different* provider of the
-   * same client — e.g. when the caller's provider has no NPI on file and the
-   * extracted NPI happens to belong to someone else. When set, `name` and
-   * `npi` are otherwise unused: the provider's own name and NPI are left
-   * untouched.
-   */
-  providerId?: string;
-}
-
-export interface UpsertProviderResult {
-  provider_id: string;
-  fields_pending: number;
-  fields_extracted: number;
-  credentials: number;
-}
-
-/**
- * The write behind `providers_upsert`, callable from another tool handler.
- * `documents_extract` uses it so the extraction path and the direct tool obey
- * exactly one set of rules about restricted names, confidence thresholds and
- * verified-field protection.
- */
-export async function upsertProviderRecord(deps: ToolDeps, args: UpsertProviderInput): Promise<UpsertProviderResult> {
-  const providerId = args.providerId ?? (await findOrCreateProvider(deps, args.name, args.npi)).id;
-  let pending = 0;
-  let extracted = 0;
-  for (const f of args.fields) {
-    // A field already verified by a human keeps its value and counts as neither.
-    const status = await upsertField(deps, providerId, f);
-    if (status === 'pending') pending += 1;
-    else if (status === 'extracted') extracted += 1;
-  }
-  for (const c of args.credentials) {
-    await upsertCredential(deps, providerId, c);
-  }
-  const credCount = await deps.db.$count(credentials, eq(credentials.providerId, providerId));
-  return { provider_id: providerId, fields_pending: pending, fields_extracted: extracted, credentials: credCount };
-}
 
 const providersUpsert = defineTool({
   name: 'providers_upsert',
@@ -271,16 +73,7 @@ const providersGet = defineTool({
       }),
     ),
   }),
-  handler: async ({ provider_id }, deps) => {
-    const p = await requireProvider(deps, provider_id);
-    const fieldRows = await deps.db.select().from(fields).where(eq(fields.providerId, provider_id));
-    const credentialRows = await deps.db.select().from(credentials).where(eq(credentials.providerId, provider_id));
-    return {
-      provider: { id: p.id, name: p.name, npi: p.npi, status: p.status },
-      fields: fieldRows.map(maskField),
-      credentials: credentialRows.map(maskCredential),
-    };
-  },
+  handler: async ({ provider_id }, deps) => readProvider(deps, provider_id),
   recordIds: ({ provider_id }) => [provider_id],
 });
 
@@ -292,14 +85,7 @@ const providersSearch = defineTool({
   output: z.object({
     providers: z.array(z.object({ provider_id: z.string(), name: z.string(), npi: z.string().nullable() })),
   }),
-  handler: async ({ query }, deps) => {
-    const rows = await deps.db
-      .select()
-      .from(providers)
-      .where(and(eq(providers.client, deps.client), or(ilike(providers.name, `%${query}%`), eq(providers.npi, query))))
-      .limit(20);
-    return { providers: rows.map((r) => ({ provider_id: r.id, name: r.name, npi: r.npi })) };
-  },
+  handler: async ({ query }, deps) => ({ providers: await searchProviders(deps, query) }),
 });
 
 const providersConfirmField = defineTool({
@@ -313,27 +99,9 @@ const providersConfirmField = defineTool({
     confirmed_by: z.string().optional(),
   }),
   output: z.object({ provider_id: z.string(), field: z.string(), status: z.literal('verified') }),
-  handler: async ({ provider_id, field, value, confirmed_by }, deps) => {
-    await requireProvider(deps, provider_id);
-    const existing = await deps.db.query.fields.findFirst({
-      where: and(eq(fields.providerId, provider_id), eq(fields.name, field)),
-    });
-    const restricted = existing?.restricted === true || isRestrictedName(field);
-    const values = {
-      providerId: provider_id,
-      name: field,
-      ...fieldValueColumns(value, restricted, deps.encryptionKey),
-      restricted,
-      confidence: 1,
-      status: 'verified',
-      confirmedBy: confirmed_by ?? deps.caller,
-      confirmedAt: deps.now(),
-    };
-    await deps.db
-      .insert(fields)
-      .values(values)
-      .onConflictDoUpdate({ target: [fields.providerId, fields.name], set: values });
-    return { provider_id, field, status: 'verified' as const };
+  handler: async (args, deps) => {
+    await confirmField(deps, args);
+    return { provider_id: args.provider_id, field: args.field, status: 'verified' as const };
   },
   recordIds: ({ provider_id }) => [provider_id],
   redact: (args) => (isRestrictedName(args.field) ? { ...args, value: MASKED } : args),
@@ -349,14 +117,7 @@ const providersListPending = defineTool({
       z.object({ name: z.string(), confidence: z.number().nullable(), source_page: z.number().nullable() }),
     ),
   }),
-  handler: async ({ provider_id }, deps) => {
-    await requireProvider(deps, provider_id);
-    const rows = await deps.db
-      .select()
-      .from(fields)
-      .where(and(eq(fields.providerId, provider_id), eq(fields.status, 'pending')));
-    return { fields: rows.map((r) => ({ name: r.name, confidence: r.confidence, source_page: r.sourcePage })) };
-  },
+  handler: async ({ provider_id }, deps) => ({ fields: await listPendingFields(deps, provider_id) }),
 });
 
 export const providerTools: AnyToolDef[] = [
