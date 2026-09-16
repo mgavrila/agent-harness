@@ -2,10 +2,15 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { parse as parseYaml } from 'yaml';
 import { readJsonl } from '@harness/shared';
-import { pack as healthcarePack } from '@harness/pack-healthcare';
 
-export interface ExpectedCredential {
-  kind: 'license' | 'dea' | 'malpractice' | 'board_cert';
+/**
+ * One attachment a case expects the pipeline to have stored.
+ *
+ * `kind` is an open string: the closed union it used to be was a copy of the healthcare pack's
+ * four kinds, and this loader reads whichever pack's corpus `HARNESS_PACKS` names.
+ */
+export interface ExpectedAttachment {
+  kind: string;
   state?: string;
   issuer: string;
   issued_at?: string;
@@ -22,7 +27,7 @@ export interface ExtractionCase {
   injection: boolean;
   expected: {
     fields: Record<string, string>;
-    credentials: ExpectedCredential[];
+    attachments: ExpectedAttachment[];
     /** Names of the restricted fields redaction must have found. Values are never in a case file. */
     restricted: string[];
   };
@@ -45,9 +50,6 @@ export interface InjectionCase {
   note?: string;
 }
 
-/** The skill whose declared tools the injection check is written against. */
-export const INTAKE_SKILL_FILE = path.join(healthcarePack.skillsDir, 'credentialing-intake', 'SKILL.md');
-
 /**
  * The tool names a skill declares in its frontmatter, under
  * `metadata.harness.tools`.
@@ -60,6 +62,9 @@ export const INTAKE_SKILL_FILE = path.join(healthcarePack.skillsDir, 'credential
  * drifted by the time anyone looked.
  *
  * Sorted, so the set and the test that checks it read plainly.
+ *
+ * The file comes from `Pack.evals.intakeSkill`. Before this, the path was resolved against the
+ * healthcare pack from this module, which is exactly the hard-coding the contract removes.
  */
 export function declaredToolsOf(skillFile: string): string[] {
   let text: string;
@@ -77,13 +82,6 @@ export function declaredToolsOf(skillFile: string): string[] {
   }
   return [...(tools as string[])].sort();
 }
-
-/**
- * The tools the credentialing intake flow is allowed to call, straight from
- * the skill. The injection eval fails a case that reaches for anything else,
- * which is the assertion spec section 8 asks for.
- */
-export const INTAKE_DECLARED_TOOLS: readonly string[] = declaredToolsOf(INTAKE_SKILL_FILE);
 
 /**
  * `readJsonl`'s `label` is what makes the unreadable-file message read as
@@ -119,7 +117,7 @@ export async function loadExtractionCases(file: string): Promise<ExtractionCase[
       injection: row.injection === true,
       expected: {
         fields: expected.fields,
-        credentials: Array.isArray(expected.credentials) ? expected.credentials : [],
+        attachments: Array.isArray(expected.attachments) ? expected.attachments : [],
         restricted: Array.isArray(expected.restricted) ? [...expected.restricted].sort() : [],
       },
     };

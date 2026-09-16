@@ -13,9 +13,10 @@ import {
 import { connectInProcess } from '@harness/core-tools/in-process';
 import { createDb, runMigrations, type Db } from '@harness/db';
 import { resetDatabase } from '@harness/db/testing';
+import type { EvalReadback } from '@harness/pack-api';
 import { describeError } from '@harness/shared';
 import type { ExtractionCase } from './cases.js';
-import type { CaseOutcome, StoredCredential, StoredField } from './score.js';
+import type { CaseOutcome, StoredAttachment, StoredField } from './score.js';
 
 /**
  * The environment every eval hands a pack, in place of the process's own.
@@ -52,8 +53,12 @@ export interface OpenPipelineOptions {
   client?: string;
   /** Defaults to the shipped threshold. Set it to measure a different one. */
   confidenceThreshold?: number;
-  /** Packs to load, as `HARNESS_PACKS` would name them. Defaults to the shipped pack. */
-  packs?: readonly string[];
+  /**
+   * Packs to load, as `HARNESS_PACKS` would name them, first one first. Required and not
+   * defaulted: the eval runner has no opinion about which pack it measures, and a default here
+   * would be one — the caller that knows is the CLI, which reads `HARNESS_PACKS`.
+   */
+  packs: readonly string[];
 }
 
 /**
@@ -68,7 +73,7 @@ export async function openPipeline(opts: OpenPipelineOptions): Promise<PipelineH
   const policy: Policy = { ...DEFAULT_POLICY };
   const confidenceThreshold = opts.confidenceThreshold ?? DEFAULT_CONFIDENCE_THRESHOLD;
   const toolsCalled: string[] = [];
-  const packs = await loadPacks([...(opts.packs ?? ['@harness/pack-healthcare'])]);
+  const packs = await loadPacks([...opts.packs]);
 
   const deps: ToolDeps = {
     db,
@@ -85,8 +90,9 @@ export async function openPipeline(opts: OpenPipelineOptions): Promise<PipelineH
     storageDir: opts.storageDir,
     // The pipeline under test reads documents; it fills no forms. The shipped
     // templates directory is still the honest value: a tool that did reach for
-    // one would find what a deployment finds, not a stub.
-    formsDir: packs.formsDir(),
+    // one would find what a deployment finds, not a stub. A pack that ships no
+    // forms directory is legal, and the pipeline fills no forms either way.
+    formsDir: packs.all[0].formsDir ?? opts.storageDir,
     restrictedToModel: false,
     sinks: {},
     context: {},
@@ -130,23 +136,12 @@ export async function openPipeline(opts: OpenPipelineOptions): Promise<PipelineH
   };
 }
 
-interface ExtractResult {
-  provider_id: string;
-  document_kind: string;
-  restricted_fields: string[];
-}
-
-interface ProviderResult {
-  fields: StoredField[];
-  credentials: StoredCredential[];
-}
-
 /**
- * `providers_get` masks a restricted field with the `MASKED` sentinel string,
+ * The pack's readback tool masks a restricted field with the `MASKED` sentinel string,
  * never the plaintext, but the eval's own contract is `null` for a masked
  * field — see `StoredField.value`. Normalize only that exact sentinel to
  * `null`; anything else stays untouched, restricted or not, so a real
- * plaintext leak through `providers_get` still reads as non-null and still
+ * plaintext leak through that tool still reads as non-null and still
  * fails `scoreInjection`'s `restricted_fields_still_redacted` check instead
  * of being silently swallowed here.
  */
@@ -154,13 +149,26 @@ export function normalizeMasking(fields: StoredField[]): StoredField[] {
   return fields.map((f) => (f.value === MASKED ? { ...f, value: null } : f));
 }
 
+/** The kernel's own three. A pack that ships no tools of its own needs no `readback` block. */
+export const DEFAULT_READBACK: EvalReadback = {
+  tool: 'records_get',
+  recordIdKey: 'record_id',
+  attachmentsKey: 'attachments',
+};
+
 /**
- * One case: ingest the document, extract it, then read the provider back. The
- * read matters — the eval scores what was *stored*, not what the model said, so
- * confidence thresholding, restricted masking and credential dedupe are all in
- * scope.
+ * One case: ingest the document, extract it, then read the record back. The read matters — the
+ * eval scores what was *stored*, not what the model said, so confidence thresholding, restricted
+ * masking and attachment dedupe are all in scope.
+ *
+ * The three tool names come from the pack: healthcare renames the readback to `providers_get`
+ * and carries the record id as `provider_id`, a pack that ships no tools uses the kernel's.
  */
-export async function runCase(handle: PipelineHandle, c: ExtractionCase): Promise<CaseOutcome> {
+export async function runCase(
+  handle: PipelineHandle,
+  c: ExtractionCase,
+  readback: EvalReadback = DEFAULT_READBACK,
+): Promise<CaseOutcome> {
   handle.toolsCalled.length = 0;
   const empty: CaseOutcome = {
     caseId: c.id,
@@ -168,7 +176,7 @@ export async function runCase(handle: PipelineHandle, c: ExtractionCase): Promis
     toolsCalled: [],
     documentKind: null,
     fields: [],
-    credentials: [],
+    attachments: [],
     restrictedFields: [],
     policyAfter: { ...handle.policy },
   };
@@ -177,15 +185,19 @@ export async function runCase(handle: PipelineHandle, c: ExtractionCase): Promis
     const ingested = (await handle.callTool('documents_ingest', { path: c.path })) as { document_id: string };
     const extracted = (await handle.callTool('documents_extract', {
       document_id: ingested.document_id,
-    })) as ExtractResult;
-    const provider = (await handle.callTool('providers_get', { provider_id: extracted.provider_id })) as ProviderResult;
+    })) as Record<string, unknown> & { document_kind: string; restricted_fields: string[] };
+    const recordId = extracted[readback.recordIdKey] as string;
+    const stored = (await handle.callTool(readback.tool, { [readback.recordIdKey]: recordId })) as Record<
+      string,
+      unknown
+    > & { fields: StoredField[] };
     return {
       caseId: c.id,
       ok: true,
       toolsCalled: [...handle.toolsCalled],
       documentKind: extracted.document_kind,
-      fields: normalizeMasking(provider.fields),
-      credentials: provider.credentials,
+      fields: normalizeMasking(stored.fields),
+      attachments: (stored[readback.attachmentsKey] ?? []) as StoredAttachment[],
       restrictedFields: [...extracted.restricted_fields].sort(),
       policyAfter: { ...handle.policy },
     };

@@ -1,11 +1,16 @@
 import { describe, it, expect } from 'vitest';
 import { isRestrictedName, parseRecordKindSpec } from '@harness/core-tools';
 import { pack as healthcarePack } from '@harness/pack-healthcare';
-import { FREE_TEXT_FIELDS } from './types.js';
 
-describe('FREE_TEXT_FIELDS', () => {
-  it('names no restricted field, so no restricted value can reach the judge', () => {
-    for (const field of FREE_TEXT_FIELDS) expect(isRestrictedName(field)).toBe(false);
+/**
+ * A pack is a fixture here, never an import of the shipping code: the judged list belongs to
+ * whichever pack is being measured, and the only way to assert on a real one is to name it.
+ */
+const judgedFields = healthcarePack.evals!.judgedFields;
+
+describe('Pack.evals.judgedFields', () => {
+  it('lists no restricted field, because a restricted value never leaves the database in plaintext', () => {
+    expect(judgedFields.filter((f) => isRestrictedName(f))).toEqual([]);
   });
 
   it('names no field the healthcare pack marks restricted', () => {
@@ -20,6 +25,6 @@ describe('FREE_TEXT_FIELDS', () => {
       .filter((f) => f.restricted === true)
       .map((f) => f.name);
     expect(restricted.length).toBeGreaterThan(0);
-    for (const field of FREE_TEXT_FIELDS) expect(restricted).not.toContain(field);
+    for (const field of judgedFields) expect(restricted).not.toContain(field);
   });
 });

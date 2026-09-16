@@ -156,6 +156,17 @@ const GLOBAL_RULES = [
     to: { path: '^packs/[^/]+/', dependencyTypesNot: ['dynamic-import'] },
   },
   {
+    name: 'evals-never-statically-imports-a-pack',
+    comment:
+      'The eval runner measures whichever pack HARNESS_PACKS names, loaded at runtime through loadPacks. A static import would wire it to one pack by name and put an opinion about what it measures back into the runner, which is the coupling this task removed. *.test.ts and *.test-helpers.ts are exempt: a test names a pack as a fixture because there is no other way to run against a real corpus, and neither is shipped.',
+    severity: 'error',
+    from: {
+      path: '^evals/src/',
+      pathNot: ['\\.test\\.ts$', '\\.test-helpers\\.ts$'],
+    },
+    to: { path: '^packs/[^/]+/', dependencyTypesNot: ['dynamic-import'] },
+  },
+  {
     name: 'no-unresolvable-workspace-import',
     comment:
       'An import the resolver cannot follow matches no other rule in this file, so a deep cross-package import written as a bare specifier (@harness/core-tools/src/domain/x.js) would pass every layer rule in silence. This catches it. Scoped to specifiers starting with `@harness/` or a relative `./` or `../`, deliberately: six third-party specifiers are unresolvable here for reasons that have nothing to do with the architecture (zod/v4, vitest and the @modelcontextprotocol subpaths resolve through export maps depcruise does not follow), and a rule that failed on those would have to be switched off rather than fixed. tsc --noEmit catches these too; this is the gate that says so at the architecture layer.',

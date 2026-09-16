@@ -3,14 +3,14 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { parse as parseYaml } from 'yaml';
-import {
-  INTAKE_DECLARED_TOOLS,
-  INTAKE_SKILL_FILE,
-  declaredToolsOf,
-  loadExtractionCases,
-  loadInjectionCases,
-  loadJsonl,
-} from './cases.js';
+import { pack as healthcarePack } from '@harness/pack-healthcare';
+import { declaredToolsOf, loadExtractionCases, loadInjectionCases, loadJsonl } from './cases.js';
+
+/**
+ * A pack is a fixture here, never an import of the shipping code: the loader is pack-agnostic
+ * from this task on, and the only way to test it against a real skill file is to name one.
+ */
+const intakeSkill = healthcarePack.evals!.intakeSkill;
 
 let dir: string;
 
@@ -27,7 +27,7 @@ beforeAll(async () => {
         injection: false,
         expected: {
           fields: { last_name: 'Lovelace' },
-          credentials: [{ kind: 'license', issuer: 'X', expires_at: '2027-03-31' }],
+          attachments: [{ kind: 'license', issuer: 'X', expires_at: '2027-03-31' }],
           restricted: [],
         },
       }),
@@ -39,7 +39,7 @@ beforeAll(async () => {
         split: 'scan',
         path: 'scan/b.pdf',
         injection: false,
-        expected: { fields: { last_name: 'Lovelace' }, credentials: [], restricted: ['ein', 'ssn'] },
+        expected: { fields: { last_name: 'Lovelace' }, attachments: [], restricted: ['ein', 'ssn'] },
       }),
     ].join('\n'),
     'utf8',
@@ -73,7 +73,7 @@ describe('loadExtractionCases', () => {
   it('validates the rows and keeps both splits', async () => {
     const cases = await loadExtractionCases(path.join(dir, 'cases.jsonl'));
     expect(cases.map((c) => c.split)).toEqual(['text_layer', 'scan']);
-    expect(cases[0].expected.credentials[0].expires_at).toBe('2027-03-31');
+    expect(cases[0].expected.attachments[0].expires_at).toBe('2027-03-31');
     expect(cases[1].expected.restricted).toEqual(['ein', 'ssn']);
   });
 
@@ -81,7 +81,7 @@ describe('loadExtractionCases', () => {
     const bad = path.join(dir, 'bad-split.jsonl');
     await writeFile(
       bad,
-      `${JSON.stringify({ id: 'x', kind: 'w9', split: 'photocopy', path: 'a.pdf', injection: false, expected: { fields: {}, credentials: [], restricted: [] } })}\n`,
+      `${JSON.stringify({ id: 'x', kind: 'w9', split: 'photocopy', path: 'a.pdf', injection: false, expected: { fields: {}, attachments: [], restricted: [] } })}\n`,
       'utf8',
     );
     await expect(loadExtractionCases(bad)).rejects.toThrow(/split/);
@@ -106,26 +106,31 @@ describe('loadInjectionCases', () => {
   });
 });
 
-describe('INTAKE_DECLARED_TOOLS', () => {
+describe('declaredToolsOf', () => {
+  it('reads the intake skill the pack declares, and the pack is the only thing that names it', () => {
+    const tools = declaredToolsOf(healthcarePack.evals!.intakeSkill);
+    expect(tools).toContain('documents_extract');
+    expect(tools).toContain('providers_upsert');
+    expect(tools).toEqual([...tools].sort());
+  });
+
   it('is exactly what the intake skill declares in its frontmatter', async () => {
     // Not a copy of the list: the same file the runtime reads. A hand-written
     // copy had already drifted to nine names while the skill declared twelve,
     // which quietly narrowed what the injection check was asserting.
-    const text = await readFile(INTAKE_SKILL_FILE, 'utf8');
+    const text = await readFile(intakeSkill, 'utf8');
     const frontmatter = parseYaml(/^---\n([\s\S]*?)\n---\n/.exec(text)![1]) as {
       metadata: { harness: { tools: string[] } };
     };
-    expect([...INTAKE_DECLARED_TOOLS]).toEqual([...frontmatter.metadata.harness.tools].sort());
-    expect(INTAKE_DECLARED_TOOLS.length).toBeGreaterThan(0);
+    expect(declaredToolsOf(intakeSkill)).toEqual([...frontmatter.metadata.harness.tools].sort());
+    expect(declaredToolsOf(intakeSkill).length).toBeGreaterThan(0);
   });
 
   it('does not include anything that leaves the building', () => {
-    expect(INTAKE_DECLARED_TOOLS).not.toContain('approvals_execute');
-    expect(INTAKE_DECLARED_TOOLS).not.toContain('forms_release');
+    expect(declaredToolsOf(intakeSkill)).not.toContain('approvals_execute');
+    expect(declaredToolsOf(intakeSkill)).not.toContain('forms_release');
   });
-});
 
-describe('declaredToolsOf', () => {
   it('rejects a skill file with no frontmatter', async () => {
     const bad = path.join(dir, 'NOFRONT.md');
     await writeFile(bad, '# just a heading\n', 'utf8');

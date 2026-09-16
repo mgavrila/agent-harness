@@ -1,18 +1,36 @@
 import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { gatewayFromEnv } from '@harness/core-tools';
-import { optionalEnv } from '@harness/shared';
-import { pack as healthcarePack } from '@harness/pack-healthcare';
+import { gatewayFromEnv, loadPacks, type Pack } from '@harness/core-tools';
+import { describeError, optionalEnv } from '@harness/shared';
 import { runEvals } from '../domain/orchestrate.js';
+import { DEFAULT_READBACK } from '../domain/pipeline.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 // evals/src/app -> the repository root
 const repoRoot = path.resolve(here, '../../..');
 
-function flagFrom(argv: readonly string[], name: string): string | undefined {
+/**
+ * `--name=value`, or `undefined`. Exported so `cli.test.ts` can check a flag's parsing without
+ * a database or a gateway; the flags with rules of their own get a parser each below.
+ */
+export function flagFrom(argv: readonly string[], name: string): string | undefined {
   const hit = argv.find((a) => a.startsWith(`--${name}=`));
   return hit?.slice(name.length + 3);
+}
+
+/**
+ * Which packs this run loads.
+ *
+ * `HARNESS_PACKS` names them, exactly as it does for a server; `--pack` picks one of them when
+ * several are. The default is the shipped pack, so a single-pack deployment needs neither flag
+ * nor variable and behaves as it always did.
+ */
+export function packNames(env: string | undefined): string[] {
+  return (env ?? '@harness/pack-healthcare')
+    .split(',')
+    .map((name) => name.trim())
+    .filter((name) => name !== '');
 }
 
 function flag(name: string): string | undefined {
@@ -61,10 +79,12 @@ export function parseUpdateBaselineFlag(argv: readonly string[]): UpdateBaseline
 /**
  * CLI usage: `pnpm --filter @harness/evals start -- [flags]`
  *
- *   --corpus=<dir>      Corpus root. Defaults to packs/healthcare/synthetic/out.
- *   --cases=<file>      Extraction cases file. Defaults to <corpus>/cases.jsonl.
+ *   --pack=<name>       Which loaded pack to measure, by Pack.name. Defaults to the first one
+ *                        HARNESS_PACKS names. Every path below defaults to that pack's evals block.
+ *   --corpus=<dir>      Corpus root. Defaults to the pack's `evals.corpusDir`.
+ *   --cases=<file>      Extraction cases file. Defaults to the pack's `evals.casesFile`.
  *   --injection=<file>  Injection cases file. Defaults to the pack's declared
- *                        `evals.injectionFile` (packs/healthcare/evals/injection.jsonl today).
+ *                        `evals.injectionFile`, then to <corpus>/injection.jsonl.
  *   --out=<dir>         Where report.json and report.md are written. Defaults to evals/results.
  *   --baseline=<file>   Baseline report to compare against. Defaults to evals/baseline.json.
  *   --version=<string>  Recorded as eval_set_version. Defaults to 1.0.0.
@@ -98,7 +118,28 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   const { config: loadEnv } = await import('dotenv');
   loadEnv({ path: path.join(repoRoot, '.env'), quiet: true });
 
-  const corpusDir = path.resolve(flag('corpus') ?? path.join(repoRoot, 'packs/healthcare/synthetic/out'));
+  // Everything the run measures comes off the loaded pack, which is what makes this runner
+  // pack-agnostic: it imports none, and `HARNESS_PACKS` names what it loads.
+  const names = packNames(optionalEnv('HARNESS_PACKS'));
+  const registry = await loadPacks(names);
+  const wanted = flag('pack');
+  let measured: Pack;
+  try {
+    measured = wanted === undefined ? registry.all[0] : registry.byName(wanted);
+  } catch (err) {
+    // `byName` throws a ConfigError naming the pack, which is the message an operator wants.
+    // Prefixed with the flag and exited 2, so an unknown --pack reads as the usage error it is
+    // rather than as a crash.
+    process.stderr.write(`--pack: ${describeError(err)}\n`);
+    process.exit(2);
+  }
+  const evals = measured.evals;
+  if (!evals) {
+    process.stderr.write(`pack "${measured.name}" declares no evals block; there is nothing to measure\n`);
+    process.exit(2);
+  }
+
+  const corpusDir = path.resolve(flag('corpus') ?? evals.corpusDir ?? path.dirname(evals.casesFile));
   const gateway = gatewayFromEnv();
   // `--gateway` overrides only the proxy's base URL, for pointing a run at a
   // gateway other than `HARNESS_GATEWAY_URL` (a staging proxy, a fake one in
@@ -113,8 +154,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
 
   const { report, markdown, exitCode } = await runEvals({
     corpusDir,
-    casesFile: flag('cases') ?? path.join(corpusDir, 'cases.jsonl'),
-    injectionFile: flag('injection') ?? healthcarePack.evals?.injectionFile ?? path.join(corpusDir, 'injection.jsonl'),
+    casesFile: flag('cases') ?? evals.casesFile,
+    injectionFile: flag('injection') ?? evals.injectionFile ?? path.join(corpusDir, 'injection.jsonl'),
     outDir: path.resolve(flag('out') ?? path.join(repoRoot, 'evals/results')),
     baselineFile,
     databaseUrl: optionalEnv('EVALS_DATABASE_URL') ?? 'postgres://harness:harness@localhost:15432/harness_evals',
@@ -126,6 +167,12 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
         : { extract: 'see clients/<name>/routing.yaml', judge: 'see clients/<name>/routing.yaml' },
     evalSetVersion: flag('version') ?? '1.0.0',
     limit,
+    packs: names,
+    packName: measured.name,
+    recordKinds: measured.records.map((r) => r.kind),
+    judgedFields: evals.judgedFields,
+    intakeSkillFile: evals.intakeSkill,
+    readback: evals.readback ?? DEFAULT_READBACK,
   });
 
   process.stdout.write(`${markdown}\n`);

@@ -33,13 +33,15 @@ const calibration = {
 export function report(overrides: Record<string, number> = {}): Report {
   return buildReport({
     evalSetVersion: '1.0.0',
+    pack: 'healthcare',
+    recordKinds: ['provider'],
     servingModel: { extract: 'gemini/gemini-3-flash-preview', judge: 'groq/openai/gpt-oss-120b' },
     splits: {
       text_layer: {
         cases: 10,
         failures: 0,
         fieldAccuracy: 0.96,
-        credentialAccuracy: 0.95,
+        attachmentAccuracy: 0.95,
         restrictedRecall: 1,
         byKind: {
           state_license: { total: 20, correct: 20, accuracy: 1 },
@@ -51,7 +53,7 @@ export function report(overrides: Record<string, number> = {}): Report {
         cases: 10,
         failures: 1,
         fieldAccuracy: 0.87,
-        credentialAccuracy: 0.8,
+        attachmentAccuracy: 0.8,
         restrictedRecall: 0.9,
         byKind: {
           state_license: { total: 20, correct: 18, accuracy: 0.9 },

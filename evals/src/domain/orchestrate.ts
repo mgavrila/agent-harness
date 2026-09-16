@@ -2,8 +2,15 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { createLogger } from '@harness/shared';
 import type { GatewayConfig, ToolDeps } from '@harness/core-tools';
-import { loadExtractionCases, loadInjectionCases, type ExtractionCase, type InjectionCase } from './cases.js';
-import { FREE_TEXT_FIELDS, type JudgeItem } from './judge/types.js';
+import type { EvalReadback } from '@harness/pack-api';
+import {
+  declaredToolsOf,
+  loadExtractionCases,
+  loadInjectionCases,
+  type ExtractionCase,
+  type InjectionCase,
+} from './cases.js';
+import type { JudgeItem } from './judge/types.js';
 import { judgeFreeText } from './judge/verdict.js';
 import { openPipeline, runCase } from './pipeline.js';
 import { scoreCalibration, scoreExtraction, scoreInjection, type CalibrationRow, type CaseOutcome } from './score.js';
@@ -28,11 +35,23 @@ export interface RunOptions {
   limit?: number;
   /** Threshold the pipeline applies and the scorers assert on. Defaults to the shipped one. */
   confidenceThreshold?: number;
+  /** Packs to load, as `HARNESS_PACKS` would name them. The first is the one being measured. */
+  packs: readonly string[];
+  /** The measured pack's `Pack.name`, recorded on the report. */
+  packName: string;
+  /** The measured pack's record kinds, recorded on the report. */
+  recordKinds: readonly string[];
+  /** The measured pack's `evals.judgedFields`. */
+  judgedFields: readonly string[];
+  /** The measured pack's `evals.intakeSkill`; the injection check is written against its tools. */
+  intakeSkillFile: string;
+  /** The measured pack's `evals.readback`, or `DEFAULT_READBACK`. */
+  readback: EvalReadback;
 }
 
 /**
  * Pick at most `limit` cases. A limited run is a sample, and a sample that
- * takes the first N rows of a file grouped by provider measures one split and
+ * takes the first N rows of a file grouped by record measures one split and
  * calls it the suite. So: the injection documents first, because
  * `injection.pass_rate` is a zero-tolerance gate metric and a sample that
  * drops them reports a perfect safety score it never measured; then round
@@ -106,19 +125,23 @@ export async function runEvals(opts: RunOptions): Promise<{ report: Report; mark
   const injectionCases = await loadInjectionCases(opts.injectionFile);
   warnOnUnmatchedInjectionRows(cases, injectionCases);
   const selected = selectCases(cases, opts.limit);
+  // Read once, not per case: the file is the measured pack's, and the injection check asserts
+  // against exactly what it declares.
+  const declaredTools = declaredToolsOf(opts.intakeSkillFile);
 
   const pipeline = await openPipeline({
     databaseUrl: opts.databaseUrl,
     storageDir: opts.corpusDir,
     gateway: opts.gateway,
     confidenceThreshold: opts.confidenceThreshold,
+    packs: opts.packs,
   });
 
   interface Bucket {
     fieldTotal: number;
     fieldCorrect: number;
-    credTotal: number;
-    credCorrect: number;
+    attachTotal: number;
+    attachCorrect: number;
     restTotal: number;
     restCorrect: number;
     cases: number;
@@ -130,8 +153,8 @@ export async function runEvals(opts: RunOptions): Promise<{ report: Report; mark
   const newBucket = (): Bucket => ({
     fieldTotal: 0,
     fieldCorrect: 0,
-    credTotal: 0,
-    credCorrect: 0,
+    attachTotal: 0,
+    attachCorrect: 0,
     restTotal: 0,
     restCorrect: 0,
     cases: 0,
@@ -148,7 +171,7 @@ export async function runEvals(opts: RunOptions): Promise<{ report: Report; mark
   try {
     for (const c of selected) {
       await pipeline.reset();
-      const outcome: CaseOutcome = await runCase(pipeline, c);
+      const outcome: CaseOutcome = await runCase(pipeline, c, opts.readback);
       const bucket = totals[c.split];
       bucket.cases += 1;
       if (!outcome.ok) {
@@ -159,8 +182,8 @@ export async function runEvals(opts: RunOptions): Promise<{ report: Report; mark
       const s = scoreExtraction(outcome, c);
       bucket.fieldTotal += s.fields.total;
       bucket.fieldCorrect += s.fields.correct;
-      bucket.credTotal += s.credentials.total;
-      bucket.credCorrect += s.credentials.correct;
+      bucket.attachTotal += s.attachments.total;
+      bucket.attachCorrect += s.attachments.correct;
       bucket.restTotal += s.restricted.total;
       bucket.restCorrect += s.restricted.correct;
 
@@ -181,7 +204,7 @@ export async function runEvals(opts: RunOptions): Promise<{ report: Report; mark
       // second opinion. The split travels with the item so the credit for an
       // agreed verdict goes back to the split the miss came from.
       for (const w of s.wrong) {
-        if ((FREE_TEXT_FIELDS as readonly string[]).includes(w.name)) {
+        if (opts.judgedFields.includes(w.name)) {
           judgeItems.push({ field: w.name, expected: w.expected, actual: w.actual, split: c.split });
         }
       }
@@ -189,7 +212,7 @@ export async function runEvals(opts: RunOptions): Promise<{ report: Report; mark
       if (c.injection) {
         for (const ic of injectionCasesFor(c, injectionCases)) {
           injectionRun += 1;
-          const verdict = scoreInjection(outcome, ic, pipeline.policy, pipeline.confidenceThreshold);
+          const verdict = scoreInjection(outcome, ic, pipeline.policy, pipeline.confidenceThreshold, declaredTools);
           if (verdict.passed) injectionPassed += 1;
           else injectionFailures.push(...verdict.failures.map((f) => `${c.id} / ${ic.id}: ${f}`));
         }
@@ -217,7 +240,7 @@ export async function runEvals(opts: RunOptions): Promise<{ report: Report; mark
         cases: b.cases,
         failures: b.failures,
         fieldAccuracy: b.fieldTotal === 0 ? 1 : Math.min(1, (b.fieldCorrect + judgeCredit) / b.fieldTotal),
-        credentialAccuracy: b.credTotal === 0 ? 1 : b.credCorrect / b.credTotal,
+        attachmentAccuracy: b.attachTotal === 0 ? 1 : b.attachCorrect / b.attachTotal,
         restrictedRecall: b.restTotal === 0 ? 1 : b.restCorrect / b.restTotal,
         // Per-kind numbers are raw: the judge scores a field name, and the same
         // field name shows up under several document kinds, so a verdict cannot
@@ -237,6 +260,8 @@ export async function runEvals(opts: RunOptions): Promise<{ report: Report; mark
 
     const report = buildReport({
       evalSetVersion: opts.evalSetVersion,
+      pack: opts.packName,
+      recordKinds: [...opts.recordKinds],
       servingModel: opts.servingModel,
       splits,
       injection: {

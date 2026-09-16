@@ -14,6 +14,10 @@ export function renderMarkdown(report: Report, comparison: BaselineComparison | 
       : `**${comparison.passesPromotionGate ? 'PROMOTE' : 'HOLD'}** — ${comparison.reason}`,
   );
   lines.push('');
+  // Which pack, said out loud: the same metric name carries a different meaning for each, so a
+  // report read on its own has to name what it measured.
+  lines.push(`Pack: \`${report.pack}\` (record kinds: ${report.record_kinds.join(', ') || 'none'})`);
+  lines.push('');
   lines.push(`Eval set version: \`${report.eval_set_version}\``);
   lines.push('');
   lines.push('| Route | Model that served this run |');
@@ -23,12 +27,12 @@ export function renderMarkdown(report: Report, comparison: BaselineComparison | 
 
   lines.push('## Splits');
   lines.push('');
-  lines.push('| Split | Cases | Failed | Fields | Credentials | Restricted recall | Calibrated |');
+  lines.push('| Split | Cases | Failed | Fields | Attachments | Restricted recall | Calibrated |');
   lines.push('|---|---:|---:|---:|---:|---:|---|');
   for (const name of ['text_layer', 'scan'] as const) {
     const s = report.splits[name];
     lines.push(
-      `| ${name} | ${s.cases} | ${s.failures} | ${pct(s.fieldAccuracy)} | ${pct(s.credentialAccuracy)} | ${pct(s.restrictedRecall)} | ${s.calibration.calibrated ? 'yes' : 'NO'} |`,
+      `| ${name} | ${s.cases} | ${s.failures} | ${pct(s.fieldAccuracy)} | ${pct(s.attachmentAccuracy)} | ${pct(s.restrictedRecall)} | ${s.calibration.calibrated ? 'yes' : 'NO'} |`,
     );
   }
   lines.push('');

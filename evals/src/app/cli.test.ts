@@ -8,7 +8,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { startFakeGateway, type FakeGateway } from '@harness/core-tools/fake-gateway';
 import { EVALS_DATABASE_URL, EXTRACTION, VERDICTS, writeEvalCorpus } from '../corpus.test-helpers.js';
 import type { Report } from '../domain/report/types.js';
-import { parseLimitFlag, parseUpdateBaselineFlag } from './cli.js';
+import { flagFrom, packNames, parseLimitFlag, parseUpdateBaselineFlag } from './cli.js';
 
 const execFileAsync = promisify(execFile);
 const evalsDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -30,6 +30,29 @@ beforeAll(async () => {
 afterAll(async () => {
   await gateway.close();
   await rm(dir, { recursive: true, force: true });
+});
+
+describe('--pack', () => {
+  it('reads the flag when it is given and leaves it undefined when it is not', () => {
+    // Undefined means "measure the first pack HARNESS_PACKS names", which is what a single-pack
+    // deployment gets without flag or variable.
+    expect(flagFrom(['node', 'cli.ts'], 'pack')).toBeUndefined();
+    expect(flagFrom(['node', 'cli.ts', '--pack=stories'], 'pack')).toBe('stories');
+    expect(flagFrom(['node', 'cli.ts', '--pack=healthcare', '--limit=3'], 'pack')).toBe('healthcare');
+  });
+});
+
+describe('packNames', () => {
+  it('splits HARNESS_PACKS, trims it, and falls back to the shipped pack', () => {
+    expect(packNames(undefined)).toEqual(['@harness/pack-healthcare']);
+    expect(packNames('@harness/pack-healthcare')).toEqual(['@harness/pack-healthcare']);
+    expect(packNames(' @harness/pack-healthcare , @harness/pack-stories ')).toEqual([
+      '@harness/pack-healthcare',
+      '@harness/pack-stories',
+    ]);
+    // A trailing comma is a typo, not a request to load a pack with no name.
+    expect(packNames('@harness/pack-healthcare,')).toEqual(['@harness/pack-healthcare']);
+  });
 });
 
 describe('parseUpdateBaselineFlag', () => {
@@ -100,6 +123,17 @@ describe('CLI', () => {
     ).rejects.toMatchObject({ code: 2, stderr: expect.stringContaining('--limit must be a positive integer') });
 
     await expect(readFile(path.join(outDir, 'report.json'), 'utf8')).rejects.toThrow();
+  }, 60_000);
+
+  it('exits 2 naming the flag when --pack does not match a loaded pack', async () => {
+    // Resolved before the gateway or the database is touched, like the other usage errors: an
+    // operator who mistypes the pack gets the flag back, not a connection failure.
+    await expect(
+      execFileAsync(tsxBin, [runScript, '--pack=no-such-pack', `--out=${path.join(dir, 'cli-bad-pack-out')}`], {
+        cwd: evalsDir,
+        env: { ...process.env, LITELLM_MASTER_KEY: '', HARNESS_GATEWAY_URL: '', EVALS_DATABASE_URL },
+      }),
+    ).rejects.toMatchObject({ code: 2, stderr: expect.stringContaining('--pack') });
   }, 60_000);
 
   it('writes the new baseline to the --baseline path when --update-baseline is given bare', async () => {

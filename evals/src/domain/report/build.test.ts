@@ -24,6 +24,8 @@ describe('buildReport with no judge', () => {
   function unjudged(): Report {
     return buildReport({
       evalSetVersion: '1.0.0',
+      pack: 'healthcare',
+      recordKinds: ['provider'],
       servingModel: { extract: 'x' },
       splits: report().splits,
       injection: { cases: 2, passed: 2, passRate: 1, failures: [] },
@@ -41,6 +43,8 @@ describe('buildReport with no judge', () => {
   it('omits it too when the judge ran but graded nothing', () => {
     const r = buildReport({
       evalSetVersion: '1.0.0',
+      pack: 'healthcare',
+      recordKinds: ['provider'],
       servingModel: { extract: 'x' },
       splits: report().splits,
       injection: { cases: 2, passed: 2, passRate: 1, failures: [] },
@@ -63,6 +67,8 @@ describe('buildReport with no judge', () => {
   it('refuses promotion when a real win comes with a judge that stopped reporting', () => {
     const better = buildReport({
       evalSetVersion: '1.0.0',
+      pack: 'healthcare',
+      recordKinds: ['provider'],
       servingModel: { extract: 'x' },
       splits: report().splits,
       injection: { cases: 2, passed: 2, passRate: 1, failures: [] },

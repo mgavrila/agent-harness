@@ -30,6 +30,8 @@ describe('renderMarkdown', () => {
   it('lists the injection failures verbatim', () => {
     const r = buildReport({
       evalSetVersion: '1.0.0',
+      pack: 'healthcare',
+      recordKinds: ['provider'],
       servingModel: { extract: 'x', judge: 'y' },
       splits: report().splits,
       injection: { cases: 2, passed: 1, passRate: 0.5, failures: ['i1: called approvals_execute'] },

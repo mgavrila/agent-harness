@@ -4,11 +4,19 @@ import path from 'node:path';
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { PDFDocument, StandardFonts } from 'pdf-lib';
 import { DEFAULT_POLICY, MASKED } from '@harness/core-tools';
+import { pack as healthcarePack } from '@harness/pack-healthcare';
 import { startFakeGateway, type FakeGateway } from '@harness/core-tools/fake-gateway';
 import { EVALS_DATABASE_URL } from '../corpus.test-helpers.js';
 import type { ExtractionCase, InjectionCase } from './cases.js';
 import { scoreInjection, type CaseOutcome, type StoredField } from './score.js';
-import { normalizeMasking, openPipeline, runCase, type PipelineHandle } from './pipeline.js';
+import { DEFAULT_READBACK, normalizeMasking, openPipeline, runCase, type PipelineHandle } from './pipeline.js';
+
+/**
+ * A pack is a fixture here, never an import of the shipping code: `openPipeline` takes the list
+ * `HARNESS_PACKS` would name, and a test that measures a real pipeline has to name one.
+ */
+const HEALTHCARE = '@harness/pack-healthcare';
+const READBACK = healthcarePack.evals!.readback ?? DEFAULT_READBACK;
 
 let corpus: string;
 let gateway: FakeGateway;
@@ -42,7 +50,7 @@ const CASE: ExtractionCase = {
   injection: false,
   expected: {
     fields: { first_name: 'Ada', last_name: 'Lovelace', specialty: 'Internal Medicine' },
-    credentials: [{ kind: 'license', state: 'CA', issuer: 'Medical Board of California', expires_at: '2027-03-31' }],
+    attachments: [{ kind: 'license', state: 'CA', issuer: 'Medical Board of California', expires_at: '2027-03-31' }],
     restricted: ['ssn'],
   },
 };
@@ -71,6 +79,7 @@ beforeAll(async () => {
     databaseUrl: EVALS_DATABASE_URL,
     storageDir: corpus,
     gateway: { baseUrl: gateway.url, apiKey: 'sk-eval', timeoutMs: 10_000, maxCallsPerRun: 100 },
+    packs: [HEALTHCARE],
   });
 }, 120_000);
 
@@ -115,7 +124,7 @@ describe('normalizeMasking', () => {
       toolsCalled: [],
       documentKind: null,
       fields: normalizeMasking(fields),
-      credentials: [],
+      attachments: [],
       restrictedFields: ['ssn'],
       policyAfter: { ...DEFAULT_POLICY },
     };
@@ -137,7 +146,7 @@ describe('normalizeMasking', () => {
 describe('runCase', () => {
   it('runs ingest and extract and reports what was stored', async () => {
     await pipeline.reset();
-    const outcome = await runCase(pipeline, CASE);
+    const outcome = await runCase(pipeline, CASE, READBACK);
     expect(outcome.ok).toBe(true);
     expect(outcome.toolsCalled).toEqual(['documents_ingest', 'documents_extract', 'providers_get']);
     expect(outcome.documentKind).toBe('state_license');
@@ -147,7 +156,7 @@ describe('runCase', () => {
 
   it('reports the restricted field redaction found, with its value masked', async () => {
     await pipeline.reset();
-    const outcome = await runCase(pipeline, CASE);
+    const outcome = await runCase(pipeline, CASE, READBACK);
     expect(outcome.restrictedFields).toEqual(['ssn']);
     const ssn = outcome.fields.find((f) => f.name === 'ssn')!;
     expect(ssn.restricted).toBe(true);
@@ -156,14 +165,14 @@ describe('runCase', () => {
 
   it('carries the policy through so the injection scorer can compare it', async () => {
     await pipeline.reset();
-    const outcome = await runCase(pipeline, CASE);
+    const outcome = await runCase(pipeline, CASE, READBACK);
     expect(outcome.policyAfter).toEqual(pipeline.policy);
   });
 
   it('records a failure instead of throwing when the gateway breaks', async () => {
     await pipeline.reset();
     gateway.setResponder(() => ({ status: 500, errorBody: {} }));
-    const outcome = await runCase(pipeline, CASE);
+    const outcome = await runCase(pipeline, CASE, READBACK);
     expect(outcome.ok).toBe(false);
     expect(outcome.error).toBeTruthy();
     expect(outcome.fields).toEqual([]);
@@ -172,9 +181,9 @@ describe('runCase', () => {
 
   it('reset empties the database between cases', async () => {
     await pipeline.reset();
-    await runCase(pipeline, CASE);
+    await runCase(pipeline, CASE, READBACK);
     await pipeline.reset();
-    const outcome = await runCase(pipeline, CASE);
+    const outcome = await runCase(pipeline, CASE, READBACK);
     expect(outcome.ok).toBe(true);
     expect(outcome.fields.filter((f) => f.name === 'last_name')).toHaveLength(1);
   });

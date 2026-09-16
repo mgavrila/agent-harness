@@ -49,7 +49,7 @@ export function openJudgeDeps(opts: { gatewayUrl: string; storageDir: string }):
       confidenceThreshold: 0.85,
       gateway: { baseUrl: opts.gatewayUrl, apiKey: 'sk-eval', timeoutMs: 10_000, maxCallsPerRun: 100 },
       storageDir: opts.storageDir,
-      formsDir: packs.formsDir(),
+      formsDir: packs.all[0].formsDir ?? opts.storageDir,
       restrictedToModel: false,
       sinks: {},
       context: {},
