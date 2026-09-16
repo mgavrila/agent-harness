@@ -1,6 +1,7 @@
 import type * as z from 'zod/v4';
 import type { Db } from '@harness/db';
 import type { AnyToolDef as PackAnyToolDef, PackKernel, ToolDef as PackToolDef } from '@harness/pack-api';
+import type { EnvSource } from '@harness/shared';
 import type { SinkRegistry } from '../effects/types.js';
 import type { GatewayConfig } from '../models/types.js';
 import type { PackRegistry } from '../packs/types.js';
@@ -103,6 +104,17 @@ export interface ToolDeps {
    * what lets one build serve credentialing today and a different area tomorrow.
    */
   packs: PackRegistry;
+  /**
+   * The environment a pack's `tools(deps)` reads its own configuration from, and the one member
+   * here that exists for the packs rather than for the kernel: core's own configuration is read
+   * in `app/` and arrives on this bag already parsed.
+   *
+   * Whoever builds the bag decides what a pack can see. `buildDepsFromEnv` hands over
+   * `process.env`, which is the deployment's answer. `makeTestDeps`, `surfaceDeps` and the eval
+   * pipeline hand over a small pinned map instead, so no suite can reach a live registry
+   * because the machine running it has a filled-in `.env`.
+   */
+  env: EnvSource;
 }
 
 /** A core-tools tool: the contract's `ToolDef` with this package's dependency bag filled in. */

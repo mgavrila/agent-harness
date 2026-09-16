@@ -17,6 +17,7 @@ import { DEFAULT_POLICY, PACK_KERNEL, registryOf, type ToolDeps } from '@harness
 import { createDb } from '@harness/db';
 import { pack as healthcarePack } from '@harness/pack-healthcare';
 import { EVALS_DATABASE_URL } from './corpus.test-helpers.js';
+import { EVAL_PACK_ENV } from './domain/pipeline.js';
 
 const packs = registryOf([healthcarePack]);
 
@@ -56,6 +57,8 @@ export function openJudgeDeps(opts: { gatewayUrl: string; storageDir: string }):
       kernelTools: new Map(),
       kernel: PACK_KERNEL,
       packs,
+      // The pipeline's pin, shared rather than copied: outbound registry lookups off.
+      env: EVAL_PACK_ENV,
     },
   };
 }

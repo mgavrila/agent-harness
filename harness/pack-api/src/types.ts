@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import type * as z from 'zod/v4';
+import type { EnvSource } from '@harness/shared';
 import type { PackEvals } from './evals.js';
 import type { ExtractionManifest } from './extraction.js';
 import type { ActionClass, Policy } from './policy.js';
@@ -113,6 +114,22 @@ export interface PackToolDeps {
    */
   readonly kernelTools: ReadonlyMap<string, CoreToolView>;
   readonly kernel: PackKernel;
+  /**
+   * The environment this process's configuration comes from. A pack reads **only** this — never
+   * the ambient `process.env`.
+   *
+   * The difference is not cosmetic. A pack's own variables are read when `tools(deps)` builds
+   * the catalogue, so a pack that reached for the ambient environment would pick up whatever
+   * the surrounding process happened to have: an eval run on a developer's filled-in `.env`
+   * would switch a registry lookup on and point it at the live endpoint, and the suite would
+   * make real outbound calls nobody asked for. Whoever builds the bag decides instead —
+   * `app/server.ts` hands over `process.env`, while `makeTestDeps`, the surface recorder and
+   * the eval pipeline hand over a small map that pins the outbound switches off.
+   *
+   * Parse it with `@harness/shared`'s env helpers, passing this as their last argument, so a
+   * pack's variables are validated and worded exactly like the kernel's.
+   */
+  readonly env: EnvSource;
 }
 
 /**

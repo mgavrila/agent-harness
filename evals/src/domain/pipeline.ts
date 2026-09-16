@@ -17,6 +17,20 @@ import { describeError } from '@harness/shared';
 import type { ExtractionCase } from './cases.js';
 import type { CaseOutcome, StoredCredential, StoredField } from './score.js';
 
+/**
+ * The environment every eval hands a pack, in place of the process's own.
+ *
+ * Exported so `judge-deps.test-helpers.ts` pins the same thing: the judge is a second caller of
+ * the same tools, and giving it a looser environment than the pipeline would measure a
+ * configuration nothing ships.
+ */
+export const EVAL_PACK_ENV: Readonly<Record<string, string>> = {
+  VERIFY_NPPES_ENABLED: 'false',
+  NPPES_BASE_URL: 'http://127.0.0.1:1/api/',
+  VERIFY_STATE_LICENSE_ENABLED: 'false',
+  VERIFY_TIMEOUT_MS: '5000',
+};
+
 export interface PipelineHandle {
   /** Calls a tool and records its name. Throws on an error envelope. */
   callTool(name: string, args: Record<string, unknown>): Promise<unknown>;
@@ -80,6 +94,12 @@ export async function openPipeline(opts: OpenPipelineOptions): Promise<PipelineH
     kernelTools: new Map(),
     kernel: PACK_KERNEL,
     packs,
+    // A fixed map, never the ambient environment. The eval runs on whatever machine happens to
+    // have a database, and the shipped `.env` carries `VERIFY_NPPES_ENABLED=true` and the live
+    // CMS endpoint — so a pack reading the ambient environment would have this suite making
+    // real outbound registry lookups. The flag is off and the endpoint is a port nothing
+    // listens on, which is the pin `ToolDeps.verify` used to carry before the pack owned it.
+    env: EVAL_PACK_ENV,
   };
 
   const { client, close } = await connectInProcess(() => createCoreToolsServer(deps));

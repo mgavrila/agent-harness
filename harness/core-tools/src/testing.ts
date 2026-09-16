@@ -18,6 +18,23 @@ import { kernelTools } from './tools/catalog.js';
 /** The packs a test runs against: the shipped one, with no environment involved. */
 const TEST_PACKS = registryOf([healthcarePack]);
 
+/**
+ * The environment a pack sees under test: a fixed map, never the ambient one.
+ *
+ * This is where the pin that used to live on `ToolDeps.verify` went. The shipped `.env` carries
+ * `VERIFY_NPPES_ENABLED=true` and the live CMS endpoint, so a pack that read the ambient
+ * environment would make real outbound lookups from the suite on any developer machine that has
+ * one. Both halves matter and neither is redundant: the flag is off, and the endpoint is a port
+ * nothing listens on, so a pack that somehow got past the flag still could not reach the real
+ * registry. A test that wants a lookup starts its own stub and overrides `env` with its URL.
+ */
+export const TEST_PACK_ENV: Readonly<Record<string, string>> = {
+  VERIFY_NPPES_ENABLED: 'false',
+  NPPES_BASE_URL: 'http://127.0.0.1:1/api/',
+  VERIFY_STATE_LICENSE_ENABLED: 'false',
+  VERIFY_TIMEOUT_MS: '5000',
+};
+
 export function makeTestDeps(db: Db, overrides: Partial<ToolDeps> = {}): ToolDeps {
   const deps: ToolDeps = {
     db,
@@ -40,6 +57,7 @@ export function makeTestDeps(db: Db, overrides: Partial<ToolDeps> = {}): ToolDep
     kernelTools: new Map(),
     kernel: PACK_KERNEL,
     packs: TEST_PACKS,
+    env: TEST_PACK_ENV,
     ...overrides,
   };
   // After the spread: a test that passes its own `packs` gets that registry's kernel tools, and

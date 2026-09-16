@@ -1,7 +1,7 @@
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { PDFDocument, StandardFonts } from 'pdf-lib';
 import { DEFAULT_POLICY, MASKED } from '@harness/core-tools';
 import { startFakeGateway, type FakeGateway } from '@harness/core-tools/fake-gateway';
@@ -48,6 +48,14 @@ const CASE: ExtractionCase = {
 };
 
 beforeAll(async () => {
+  // A hostile ambient environment, held for the whole file: this is what a developer's filled-in
+  // `.env` looks like, and before `deps.env` existed the healthcare pack read exactly these two
+  // names off the process when `openPipeline` built its catalogue. Every assertion in this file
+  // now runs against a pipeline opened under them, and the first one checks that the registry
+  // lookup stayed off regardless.
+  vi.stubEnv('VERIFY_NPPES_ENABLED', 'true');
+  vi.stubEnv('NPPES_BASE_URL', 'http://nppes.invalid/api/');
+
   corpus = await mkdtemp(path.join(tmpdir(), 'harness-eval-corpus-'));
   await mkdir(path.join(corpus, 'text'), { recursive: true });
   const doc = await PDFDocument.create();
@@ -70,6 +78,22 @@ afterAll(async () => {
   await pipeline.close();
   await gateway.close();
   await rm(corpus, { recursive: true, force: true });
+  vi.unstubAllEnvs();
+});
+
+describe('openPipeline', () => {
+  /**
+   * The eval runs the shipping catalogue, and the shipping catalogue includes a tool that calls
+   * a public registry over the network. Nothing about an eval should reach one: the corpus is
+   * synthetic, the NPIs in it are made up, and a suite that quietly queried CMS on every run
+   * would be doing it from whatever machine happened to have a database. `openPipeline` pins the
+   * pack's environment for exactly that reason, and the ambient variables stubbed above are the
+   * ones that would undo the pin if the pack ever read the process instead of `deps.env`.
+   */
+  it('keeps the registry lookup switched off however the ambient environment is set', async () => {
+    expect(process.env.VERIFY_NPPES_ENABLED).toBe('true');
+    await expect(pipeline.callTool('verify_nppes', { npi: '1063837144' })).rejects.toThrow(/VERIFY_NPPES_ENABLED/);
+  });
 });
 
 describe('normalizeMasking', () => {

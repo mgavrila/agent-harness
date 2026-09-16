@@ -82,6 +82,9 @@ export async function buildDepsFromEnv(): Promise<{ deps: ToolDeps; close: () =>
     kernelTools: new Map(),
     kernel: PACK_KERNEL,
     packs,
+    // The deployment's own environment, and the only bag that hands one over. A pack reads its
+    // variables from here; see `ToolDeps.env`.
+    env: process.env,
   };
   return { deps, close };
 }

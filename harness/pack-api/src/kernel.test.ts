@@ -31,6 +31,7 @@ const deps: PackToolDeps = {
   },
   kernelTools: new Map([['records_get', echo]]),
   kernel,
+  env: { EXAMPLE_FLAG: 'true' },
 };
 
 describe('PackToolDeps', () => {

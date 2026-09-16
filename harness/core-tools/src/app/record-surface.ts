@@ -51,6 +51,12 @@ export async function surfaceDeps(): Promise<ToolDeps> {
     kernelTools: new Map(),
     kernel: PACK_KERNEL,
     packs,
+    // Empty for the same reason the pack list above is a literal: the snapshot has to describe
+    // the shipped default, not the machine recording it. A pack builds its catalogue from this
+    // map, so an empty one is "nothing configured" — every flag a pack reads falls to its own
+    // default, and every one of those defaults to off. Recording calls no handler, so nothing
+    // here could reach a network in any case.
+    env: {},
   };
 }
 

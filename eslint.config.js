@@ -90,6 +90,13 @@ const CONSOLE_IS_FINE = [
  * `process.env.DATABASE_URL` at the package root, outside `src/` and outside any package's
  * lint-scoped source tree — a drizzle-kit config file, not a domain module, so it is exempted
  * by name rather than folded into the `harness/db/src` entry.
+ *
+ * No pack is on this list, on purpose. A pack's tools are built inside whatever process loaded
+ * the pack, so a pack that read the ambient environment would be configured by that process's
+ * `.env` — and the shipped one switches outbound registry lookups on and points them at a live
+ * endpoint, which is not what an eval or a test suite should be doing. A pack reads the map it
+ * is handed on `deps.env` instead, through the same `env.ts` helpers, and this rule is what
+ * says so.
  */
 const PROCESS_ENV_IS_FINE = [
   'harness/shared/src/env.ts',
@@ -98,8 +105,6 @@ const PROCESS_ENV_IS_FINE = [
   '**/*.test.ts',
   'harness/db/src/**/*.ts',
   '**/drizzle.config.ts',
-  // A pack reads its own configuration; it has no app/ layer for the glob above to match.
-  'packs/*/src/config.ts',
 ];
 
 export default tseslint.config(

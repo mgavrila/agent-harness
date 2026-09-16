@@ -9,6 +9,15 @@ import { ConfigError } from './errors.js';
  * bug that motivated `booleanFromEnv` is in its own comment below.
  */
 
+/**
+ * An environment to read from. The ambient process environment satisfies it and is the default
+ * everywhere below, and so does a plain map — which is what makes the last parameter of each
+ * helper useful: a pack is handed its environment on `deps.env` rather than reaching for the
+ * ambient one, so an eval or a test can pin a variable for the code under test without
+ * touching the process. Same parsing, same error wording, whichever source it is.
+ */
+export type EnvSource = Readonly<Record<string, string | undefined>>;
+
 export interface NumberEnvOptions {
   min: number;
   max: number;
@@ -24,9 +33,14 @@ export interface NumberEnvOptions {
  * becoming `NaN` — an unvalidated typo in a port makes `listen(NaN)` pick an arbitrary free
  * port, and the process then looks healthy while nothing can reach it.
  */
-export function numberFromEnv(name: string, fallback: number, options: NumberEnvOptions): number {
+export function numberFromEnv(
+  name: string,
+  fallback: number,
+  options: NumberEnvOptions,
+  env: EnvSource = process.env,
+): number {
   const { min, max, integer = false, unit } = options;
-  const raw = process.env[name];
+  const raw = env[name];
   if (raw === undefined || raw.trim() === '') return fallback;
   const value = Number(raw);
   const wellFormed = integer ? Number.isInteger(value) : Number.isFinite(value);
@@ -49,7 +63,7 @@ export function numberFromEnv(name: string, fallback: number, options: NumberEnv
  * one of these defaults to off: a deployment that sets nothing makes no outbound calls and
  * sends nothing restricted to a model.
  */
-export function booleanFromEnv(name: string, env: NodeJS.ProcessEnv = process.env): boolean {
+export function booleanFromEnv(name: string, env: EnvSource = process.env): boolean {
   const raw = env[name]?.trim().toLowerCase();
   return raw === 'true' || raw === '1';
 }
@@ -60,16 +74,17 @@ export function booleanFromEnv(name: string, env: NodeJS.ProcessEnv = process.en
  * the cause.
  *
  * `env` is a parameter because `coreToolsChildEnv` in @harness/approvals reads an environment
- * it is handed rather than its own, and its tests pass a fixture.
+ * it is handed rather than its own, its tests pass a fixture, and a pack reads the map on
+ * `deps.env`.
  */
-export function requiredEnv(name: string, hint = '', env: NodeJS.ProcessEnv = process.env): string {
+export function requiredEnv(name: string, hint = '', env: EnvSource = process.env): string {
   const value = env[name];
   if (!value || value.trim() === '') throw new ConfigError(`${name} is not set${hint}`);
   return value;
 }
 
 /** A variable with no default and no requirement. An empty string reads as absent. */
-export function optionalEnv(name: string, env: NodeJS.ProcessEnv = process.env): string | undefined {
+export function optionalEnv(name: string, env: EnvSource = process.env): string | undefined {
   const value = env[name];
   return value === undefined || value.trim() === '' ? undefined : value;
 }

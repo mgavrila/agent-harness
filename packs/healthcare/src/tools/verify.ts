@@ -17,8 +17,8 @@ async function readProvider(deps: PackToolDeps, providerId: string): Promise<{ n
  * The two registry tools, built once per server.
  *
  * `config` is what `ToolDeps.verify` used to carry; `tools/index.ts` reads it out of this
- * pack's own environment variables. `MASKED` comes off `deps.kernel` for the same reason the
- * aliases close over it: `redact` sees only the tool's arguments.
+ * pack's own four variables on `deps.env`. `MASKED` comes off `deps.kernel` for the same
+ * reason the aliases close over it: `redact` sees only the tool's arguments.
  */
 export function verifyTools(deps: PackToolDeps, config: VerifyConfig): AnyToolDef[] {
   const { MASKED } = deps.kernel;

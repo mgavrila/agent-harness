@@ -11,9 +11,10 @@ export { HEALTHCARE_REPLACES };
  * that keep the healthcare tool surface exactly what it was before core became pack-agnostic.
  *
  * Called once per server, from `createCoreToolsServer`, with the live dependency bag. The
- * registry configuration is read here rather than at module load so a test can point
- * `NPPES_BASE_URL` at its own stub before the catalogue is built.
+ * registry configuration is read here rather than at module load, and out of `deps.env` rather
+ * than out of the ambient process environment: a test points `NPPES_BASE_URL` at its own stub
+ * by building a bag that says so, and an eval gets the pinned-off map its pipeline hands over.
  */
 export function healthcareTools(deps: PackToolDeps): AnyToolDef[] {
-  return [...aliasTools(deps), ...formTools(deps), ...verifyTools(deps, verifyConfigFromEnv())];
+  return [...aliasTools(deps), ...formTools(deps), ...verifyTools(deps, verifyConfigFromEnv(deps.env))];
 }
