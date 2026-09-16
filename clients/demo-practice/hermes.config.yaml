@@ -97,7 +97,7 @@ mcp_servers:
       HARNESS_FORMS_DIR: "/srv/agent-harness/packs/healthcare/forms"
       CORE_TOOLS_CALLER: "hermes"
       APPROVAL_TTL_HOURS: "24"
-      CONFIDENCE_THRESHOLD: "0.85"
+      # CONFIDENCE_THRESHOLD is left unset: core-tools applies DEFAULT_CONFIDENCE_THRESHOLD (0.85).
       # Every model call goes through the proxy, and core-tools refuses to
       # start without the key. The provider keys never leave the proxy, so
       # this is the only model credential the child holds. The URL is the
