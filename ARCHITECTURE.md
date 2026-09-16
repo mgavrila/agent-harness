@@ -56,7 +56,7 @@ The target dependency graph, with every arrow pointing at something lower:
 ```
 shared  <-  pack-api  <-  { core-tools, packs/* }
 shared  <-  db        <-  core-tools  <-  { approvals, evals }
-shared  <-  gateway   <-  core-tools
+shared  <-  gateway   <-  { core-tools, evals }
 core-tools  ..>  packs/*        (runtime only: dynamic import, never a static one)
 ```
 

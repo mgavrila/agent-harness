@@ -138,6 +138,13 @@ export const ENV_READING_HELPERS = [
   'port',
 ] as const;
 
+/**
+ * The directories the environment scan walks. This is every place shipping TypeScript lives
+ * today. `clients/` and the repository root are absent because neither holds a `.ts` file —
+ * `clients/` is per-client configuration (`.env`, `policy.yaml`, `SOUL.md`, `hermes.config.yaml`)
+ * and the root holds only config. Add the directory here if you put source in either, or the
+ * variables it reads will go unrecorded and the `.env.example` check will pass while missing them.
+ */
 const SOURCE_ROOTS = ['harness', 'packs', 'evals', 'scripts'];
 const DIRECT_ENV = /process\.env\.([A-Z][A-Z0-9_]*)/g;
 const INDEXED_ENV = /process\.env\[\s*'([A-Z][A-Z0-9_]*)'\s*\]/g;

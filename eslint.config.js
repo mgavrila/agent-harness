@@ -58,11 +58,17 @@ function asWarning(value) {
   return isOff(value) ? value : 'warn';
 }
 
-/** console.* belongs in the logger and in process entrypoints, nowhere else. */
+/**
+ * console.* belongs in the logger and in process entrypoints, nowhere else.
+ *
+ * `synthetic/generate.ts` is the pack's corpus generator and its own CLI, so it prints.
+ * Task 10 splits the CLI out of it and renames that half to `synthetic/cli.ts`; rename this
+ * entry with it.
+ */
 const CONSOLE_IS_FINE = [
   '**/src/shared/log.ts',
   '**/src/app/**/*.ts',
-  'packs/healthcare/synthetic/cli.ts',
+  'packs/healthcare/synthetic/generate.ts',
   'packs/healthcare/forms/generate-templates.ts',
 ];
 
