@@ -1,5 +1,17 @@
 import { describe, it, expect } from 'vitest';
-import { daysUntil, addDays, computeDeadlines, LEAD_DAYS, bucketFor, digestKeyFor } from './compute.js';
+import { daysUntil, addDays, computeDeadlines, bucketFor, digestKeyFor } from './compute.js';
+
+/**
+ * The lead times the healthcare pack declares. They used to be a `LEAD_DAYS` table in
+ * `compute.ts`; the calculator takes a lookup function now, so the fixture holds them.
+ */
+const LEAD = new Map([
+  ['license', 90],
+  ['dea', 90],
+  ['malpractice', 60],
+  ['board_cert', 120],
+]);
+const leadDaysFor = (kind: string) => LEAD.get(kind) ?? 0;
 
 describe('deadline math', () => {
   it('daysUntil counts UTC calendar days', () => {
@@ -16,17 +28,25 @@ describe('deadline math', () => {
   });
 
   it('computeDeadlines produces expiration and renewal_start per credential with an expiry', () => {
-    const out = computeDeadlines([
-      { id: 'c1', kind: 'license', expiresAt: '2027-03-31' },
-      { id: 'c2', kind: 'malpractice', expiresAt: '2026-11-30' },
-      { id: 'c3', kind: 'dea', expiresAt: null },
-    ]);
+    const out = computeDeadlines(
+      [
+        { id: 'c1', kind: 'license', expiresAt: '2027-03-31' },
+        { id: 'c2', kind: 'malpractice', expiresAt: '2026-11-30' },
+        { id: 'c3', kind: 'dea', expiresAt: null },
+      ],
+      leadDaysFor,
+    );
     expect(out).toEqual([
-      { credentialId: 'c1', kind: 'expiration', dueAt: '2027-03-31' },
-      { credentialId: 'c1', kind: 'renewal_start', dueAt: addDays('2027-03-31', -LEAD_DAYS.license) },
-      { credentialId: 'c2', kind: 'expiration', dueAt: '2026-11-30' },
-      { credentialId: 'c2', kind: 'renewal_start', dueAt: addDays('2026-11-30', -LEAD_DAYS.malpractice) },
+      { attachmentId: 'c1', kind: 'expiration', dueAt: '2027-03-31' },
+      { attachmentId: 'c1', kind: 'renewal_start', dueAt: addDays('2027-03-31', -LEAD.get('license')!) },
+      { attachmentId: 'c2', kind: 'expiration', dueAt: '2026-11-30' },
+      { attachmentId: 'c2', kind: 'renewal_start', dueAt: addDays('2026-11-30', -LEAD.get('malpractice')!) },
     ]);
+  });
+
+  it('writes no renewal_start for a kind with no lead time, because it does not need renewing', () => {
+    const out = computeDeadlines([{ id: 'a1', kind: 'source_link', expiresAt: '2027-01-01' }], () => 0);
+    expect(out.map((d) => d.kind)).toEqual(['expiration']);
   });
 });
 
@@ -60,20 +80,20 @@ describe('digestKeyFor', () => {
 
   it('is stable regardless of item order', () => {
     const a = digestKeyFor([
-      { credentialId: 'c1', kind: 'expiration', bucket: 'due_7d' },
-      { credentialId: 'c2', kind: 'renewal_start', bucket: 'overdue' },
+      { attachmentId: 'c1', kind: 'expiration', bucket: 'due_7d' },
+      { attachmentId: 'c2', kind: 'renewal_start', bucket: 'overdue' },
     ]);
     const b = digestKeyFor([
-      { credentialId: 'c2', kind: 'renewal_start', bucket: 'overdue' },
-      { credentialId: 'c1', kind: 'expiration', bucket: 'due_7d' },
+      { attachmentId: 'c2', kind: 'renewal_start', bucket: 'overdue' },
+      { attachmentId: 'c1', kind: 'expiration', bucket: 'due_7d' },
     ]);
     expect(a).toBe(b);
     expect(a).toMatch(/^expirations:[0-9a-f]{12}$/);
   });
 
   it('changes when an item moves to a different bucket', () => {
-    const before = digestKeyFor([{ credentialId: 'c1', kind: 'expiration', bucket: 'due_7d' }]);
-    const after = digestKeyFor([{ credentialId: 'c1', kind: 'expiration', bucket: 'due_30d' }]);
+    const before = digestKeyFor([{ attachmentId: 'c1', kind: 'expiration', bucket: 'due_7d' }]);
+    const after = digestKeyFor([{ attachmentId: 'c1', kind: 'expiration', bucket: 'due_30d' }]);
     expect(before).not.toBe(after);
   });
 });

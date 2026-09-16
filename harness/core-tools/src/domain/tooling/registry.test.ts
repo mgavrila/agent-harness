@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { describe, it, expect } from 'vitest';
 import * as z from 'zod/v4';
 import { eq } from 'drizzle-orm';
-import { approvals, auditLog, decrypt, providers, runs } from '@harness/db';
+import { approvals, auditLog, decrypt, records, runs } from '@harness/db';
 import { ToolError } from '@harness/shared';
 import { approvalIdOf, connectTools, makeTestDeps, textOf, useTestDb } from '../../testing.js';
 import { defineTool } from './registry.js';
@@ -74,7 +74,7 @@ const writeThenThrow = defineTool({
   input: z.object({ name: z.string() }),
   output: z.object({}),
   handler: async ({ name }, deps) => {
-    await deps.db.insert(providers).values({ client: deps.client, pack: 'healthcare', kind: 'provider', name });
+    await deps.db.insert(records).values({ client: deps.client, pack: 'healthcare', kind: 'provider', name });
     throw new ToolError('rolled back on purpose');
   },
 });
@@ -101,7 +101,7 @@ const writeOk = defineTool({
   input: z.object({ name: z.string() }),
   output: z.object({ ok: z.boolean() }),
   handler: async ({ name }, deps) => {
-    await deps.db.insert(providers).values({ client: deps.client, pack: 'healthcare', kind: 'provider', name });
+    await deps.db.insert(records).values({ client: deps.client, pack: 'healthcare', kind: 'provider', name });
     return { ok: true };
   },
 });
@@ -253,7 +253,7 @@ describe('registerTools', () => {
     const res = await client.callTool({ name: 'write_then_throw', arguments: { name: 'Dr. Rollback' } });
     expect(res.isError).toBe(true);
     expect(textOf(res)).toContain('rolled back on purpose');
-    expect(await db.select().from(providers)).toHaveLength(0);
+    expect(await db.select().from(records)).toHaveLength(0);
     const audits = await db.select().from(auditLog);
     expect(audits).toHaveLength(1);
     expect(audits[0]).toMatchObject({ tool: 'write_then_throw', decision: 'error', error: 'rolled back on purpose' });
@@ -263,7 +263,7 @@ describe('registerTools', () => {
     const client = await connectDefault();
     const res = await client.callTool({ name: 'write_ok', arguments: { name: 'Dr. Commit' } });
     expect(res.structuredContent).toEqual({ status: 'ok', result: { ok: true } });
-    expect(await db.select().from(providers)).toHaveLength(1);
+    expect(await db.select().from(records)).toHaveLength(1);
     const audits = await db.select().from(auditLog);
     expect(audits).toHaveLength(1);
     expect(audits[0]).toMatchObject({ tool: 'write_ok', decision: 'auto' });

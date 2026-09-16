@@ -1,5 +1,5 @@
 import * as z from 'zod/v4';
-import { CREDENTIAL_KINDS } from '../deadlines/compute.js';
+import { CREDENTIAL_KINDS } from '@harness/pack-api';
 
 /**
  * Credential columns a template may print. `number` is deliberately absent:

@@ -6,9 +6,17 @@ import { buildClassificationSchema, buildExtractionSchema } from './schema.js';
 const manifest = healthcarePack.extraction;
 const provider = parseRecordKindSpec(healthcarePack.records[0]);
 const attachments = (healthcarePack.attachments ?? []).map((a) => parseAttachmentKindSpec(a));
+const [target] = manifest.targets;
 
 describe('buildExtractionSchema', () => {
-  const { name, schema } = buildExtractionSchema(manifest, provider, attachments);
+  const { name, schema } = buildExtractionSchema({
+    schemaName: target.schema_name,
+    documentKinds: manifest.document_kinds,
+    fields: provider.fields,
+    attachmentKinds: attachments,
+    attachmentsKey: target.attachments_key,
+    attachmentsDescription: target.attachment_schema_description,
+  });
   const props = schema.properties as Record<string, Record<string, unknown>>;
   const fieldProps = props.fields.properties as Record<string, unknown>;
 
@@ -72,7 +80,7 @@ describe('buildExtractionSchema', () => {
 
 describe('buildClassificationSchema', () => {
   it('asks only for a kind and a confidence', () => {
-    const { name, schema } = buildClassificationSchema(manifest);
+    const { name, schema } = buildClassificationSchema(manifest.document_kinds);
     expect(name).toBe('document_classification');
     expect(schema.required).toEqual(['document_kind', 'confidence']);
     const props = schema.properties as Record<string, { enum?: string[] }>;

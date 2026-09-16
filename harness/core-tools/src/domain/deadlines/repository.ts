@@ -1,106 +1,97 @@
 import { and, asc, eq, inArray, lte, sql } from 'drizzle-orm';
 import { attachments, deadlines, records } from '@harness/db';
+import type { DeadlineItem, DeadlinesComputeResult, DeadlinesUpcomingResult } from '@harness/pack-api';
 import type { ToolDeps } from '../tooling/types.js';
-import { requireProvider } from '../providers/repository.js';
-import { computeDeadlines, daysUntil, addDays, bucketFor, digestKeyFor, type UrgencyBucket } from './compute.js';
+import { requireRecord } from '../records/repository.js';
+import { addDays, bucketFor, computeDeadlines, daysUntil, digestKeyFor } from './compute.js';
 
-/** Identifies a deadline row within a provider, matching `deadlines_attachment_kind_uq`. */
-const deadlineKey = (d: { credentialId: string; kind: string }) => `${d.credentialId}:${d.kind}`;
+/** Identifies a deadline row within a record, matching `deadlines_attachment_kind_uq`. */
+const deadlineKey = (d: { attachmentId: string; kind: string }) => `${d.attachmentId}:${d.kind}`;
 
 interface UpcomingArgs {
-  window_days: number;
+  within_days: number;
   /** `YYYY-MM-DD`; `deps.now()` when absent. */
   today?: string;
   limit: number;
-}
-
-export interface UpcomingItem {
-  provider_id: string;
-  provider_name: string;
-  credential_id: string;
-  credential_kind: string;
-  kind: string;
-  due_at: string;
-  days_left: number;
-  overdue: boolean;
-  bucket: UrgencyBucket;
+  /** Only records of this kind. Absent lists every kind this client holds. */
+  record_kind?: string;
 }
 
 /**
- * `deadlines_compute`: recompute this provider's deadlines from its credentials
- * and reconcile the stored rows with the result. The dates themselves come from
- * `computeDeadlines`; this function only reads and writes them.
+ * `deadlines_compute`: recompute this record's deadlines from its attachments and reconcile the
+ * stored rows with the result. The dates come from `computeDeadlines`; this function only reads
+ * and writes them, and asks the registry how long each kind's lead time is.
  */
-export async function recomputeDeadlines(
-  deps: ToolDeps,
-  providerId: string,
-): Promise<{ deadlines: { credential_id: string; kind: string; due_at: string }[] }> {
-  await requireProvider(deps, providerId);
-  const creds = await deps.db.select().from(attachments).where(eq(attachments.recordId, providerId));
-  const computed = computeDeadlines(creds.map((c) => ({ id: c.id, kind: c.kind, expiresAt: c.expiresAt })));
+export async function recomputeDeadlines(deps: ToolDeps, recordId: string): Promise<DeadlinesComputeResult> {
+  await requireRecord(deps, recordId);
+  const rows = await deps.db.select().from(attachments).where(eq(attachments.recordId, recordId));
+  const computed = computeDeadlines(
+    rows.map((a) => ({ id: a.id, kind: a.kind, expiresAt: a.expiresAt })),
+    (kind) => deps.packs.attachmentKind(kind)?.leadDays ?? 0,
+  );
   for (const d of computed) {
     await deps.db
       .insert(deadlines)
-      .values({ recordId: providerId, attachmentId: d.credentialId, kind: d.kind, dueAt: d.dueAt })
+      .values({ recordId, attachmentId: d.attachmentId, kind: d.kind, dueAt: d.dueAt })
       .onConflictDoUpdate({
         target: [deadlines.attachmentId, deadlines.kind],
-        // A moved due date invalidates any notification already sent for the
-        // old one, so clear the marker; an unchanged date keeps it, so the
-        // same reminder is not sent twice.
+        // A moved due date invalidates any notification already sent for the old one, so clear
+        // the marker; an unchanged date keeps it, so the same reminder is not sent twice.
         set: {
           dueAt: d.dueAt,
           notifiedAt: sql`CASE WHEN ${deadlines.dueAt} = ${d.dueAt} THEN ${deadlines.notifiedAt} ELSE NULL END`,
         },
       });
   }
-  // A credential that lost its expiry, or was removed, leaves deadlines
-  // behind that nothing recomputes. Retire whatever this run did not produce.
+  // An attachment that lost its expiry, or was removed, leaves deadlines behind that nothing
+  // recomputes. Retire whatever this run did not produce.
   const computedKeys = new Set(computed.map(deadlineKey));
   const existingRows = await deps.db
-    .select({ id: deadlines.id, credentialId: deadlines.attachmentId, kind: deadlines.kind })
+    .select({ id: deadlines.id, attachmentId: deadlines.attachmentId, kind: deadlines.kind })
     .from(deadlines)
-    .where(eq(deadlines.recordId, providerId));
+    .where(eq(deadlines.recordId, recordId));
   const staleIds = existingRows.filter((r) => !computedKeys.has(deadlineKey(r))).map((r) => r.id);
   if (staleIds.length > 0) {
     await deps.db.delete(deadlines).where(inArray(deadlines.id, staleIds));
   }
-  return { deadlines: computed.map((d) => ({ credential_id: d.credentialId, kind: d.kind, due_at: d.dueAt })) };
+  return { deadlines: computed.map((d) => ({ attachment_id: d.attachmentId, kind: d.kind, due_at: d.dueAt })) };
 }
 
 /**
- * `deadlines_upcoming`: this client's deadlines due inside the window, overdue
- * ones included, sorted by due date. The urgency bucket and the digest key come
- * from `compute.ts`; this function reads the rows they are computed from.
+ * `deadlines_upcoming`: this client's deadlines due inside the window, overdue ones included,
+ * sorted by due date. The urgency bucket and the digest key come from `compute.ts`.
  */
 export async function upcomingDeadlines(
   deps: ToolDeps,
-  { window_days, today, limit }: UpcomingArgs,
-): Promise<{ items: UpcomingItem[]; digest_key: string }> {
+  { within_days, today, limit, record_kind }: UpcomingArgs,
+): Promise<DeadlinesUpcomingResult> {
   const todayDate = today ? new Date(`${today}T00:00:00Z`) : deps.now();
   const todayStr = todayDate.toISOString().slice(0, 10);
-  const horizon = addDays(todayStr, window_days);
+  const horizon = addDays(todayStr, within_days);
+  const scope = [eq(records.client, deps.client), lte(deadlines.dueAt, horizon)];
+  if (record_kind !== undefined) scope.push(eq(records.kind, record_kind));
   const rows = await deps.db
     .select({
-      providerId: deadlines.recordId,
-      providerName: records.name,
-      credentialId: deadlines.attachmentId,
-      credentialKind: attachments.kind,
+      recordId: deadlines.recordId,
+      recordName: records.name,
+      attachmentId: deadlines.attachmentId,
+      attachmentKind: attachments.kind,
       kind: deadlines.kind,
       dueAt: deadlines.dueAt,
     })
     .from(deadlines)
     .innerJoin(attachments, eq(deadlines.attachmentId, attachments.id))
     .innerJoin(records, eq(deadlines.recordId, records.id))
-    .where(and(eq(records.client, deps.client), lte(deadlines.dueAt, horizon)))
+    .where(and(...scope))
     .orderBy(asc(deadlines.dueAt))
     .limit(limit);
-  const items = rows.map((r) => {
+  const items: DeadlineItem[] = rows.map((r) => {
     const daysLeft = daysUntil(r.dueAt, todayDate);
     return {
-      provider_id: r.providerId,
-      provider_name: r.providerName,
-      credential_id: r.credentialId,
-      credential_kind: r.credentialKind,
+      record_id: r.recordId,
+      record_name: r.recordName,
+      attachment_id: r.attachmentId,
+      attachment_kind: r.attachmentKind,
       kind: r.kind,
       due_at: r.dueAt,
       days_left: daysLeft,
@@ -109,7 +100,7 @@ export async function upcomingDeadlines(
     };
   });
   const digest_key = digestKeyFor(
-    items.map((i) => ({ credentialId: i.credential_id, kind: i.kind, bucket: i.bucket })),
+    items.map((i) => ({ attachmentId: i.attachment_id, kind: i.kind, bucket: i.bucket as never })),
   );
   return { items, digest_key };
 }

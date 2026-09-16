@@ -2,13 +2,23 @@ import { describe, it, expect } from 'vitest';
 import { pack as healthcarePack } from '@harness/pack-healthcare';
 import { parseRecordKindSpec } from './manifest.js';
 import {
-  DATA_BLOCK_SYSTEM_PROMPT,
   buildClassificationMessages,
   buildExtractionMessages,
+  dataBlockSystemPrompt,
   wrapDocument,
 } from './prompts.js';
 
 const provider = parseRecordKindSpec(healthcarePack.records[0]);
+const [target] = healthcarePack.extraction.targets;
+const role = healthcarePack.extraction.role;
+
+/** The whole system turn for the shipped pack: its role line plus the kernel's injection rules. */
+const DATA_BLOCK_SYSTEM_PROMPT = dataBlockSystemPrompt(role);
+const prose = {
+  role,
+  instruction: target.instruction,
+  attachmentInstruction: target.attachment_instruction,
+};
 
 describe('wrapDocument and the prompts', () => {
   const pages = [
@@ -29,7 +39,7 @@ describe('wrapDocument and the prompts', () => {
   });
 
   it('puts the document in the user turn and the rule in the system turn', () => {
-    const messages = buildExtractionMessages(pages, provider);
+    const messages = buildExtractionMessages(pages, provider.fields, prose);
     expect(messages[0].role).toBe('system');
     expect(messages[0].content).toBe(DATA_BLOCK_SYSTEM_PROMPT);
     expect(messages.at(-1)!.role).toBe('user');
@@ -38,7 +48,7 @@ describe('wrapDocument and the prompts', () => {
   });
 
   it('classification also puts the document in the user turn and the rule in the system turn', () => {
-    const messages = buildClassificationMessages(pages);
+    const messages = buildClassificationMessages(pages, role);
     expect(messages[0].role).toBe('system');
     expect(messages[0].content).toBe(DATA_BLOCK_SYSTEM_PROMPT);
     expect(messages.at(-1)!.role).toBe('user');

@@ -1,6 +1,6 @@
 import type * as z from 'zod/v4';
 import type { Db } from '@harness/db';
-import type { AnyToolDef as PackAnyToolDef, ToolDef as PackToolDef } from '@harness/pack-api';
+import type { AnyToolDef as PackAnyToolDef, PackKernel, ToolDef as PackToolDef } from '@harness/pack-api';
 import type { SinkRegistry } from '../effects/types.js';
 import type { GatewayConfig } from '../models/types.js';
 import type { PackRegistry } from '../packs/types.js';
@@ -92,6 +92,15 @@ export interface ToolDeps {
   context: SessionContext;
   /** Every registered tool, keyed by name, so a parked action can be replayed by name. Filled by `registerTools`. */
   tools: Map<string, AnyToolDef>;
+  /**
+   * Every **kernel** tool, keyed by its kernel name, filled by `createCoreToolsServer` before any
+   * pack's replacement is applied. This is what a pack's wrapper calls: `deps.tools` is the
+   * published catalogue and after a replacement holds the pack's own tool under the kernel's
+   * name, so a wrapper that looked itself up there would recurse until the stack ran out.
+   */
+  kernelTools: Map<string, AnyToolDef>;
+  /** The kernel operations a pack may call that are not tools. Always `PACK_KERNEL`. */
+  kernel: PackKernel;
   /**
    * The packs this process loaded, from `HARNESS_PACKS`. Document kinds, the extraction
    * manifest and the forms directory all come from here rather than from an import, which is

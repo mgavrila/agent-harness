@@ -31,8 +31,8 @@ export interface ExtractedField {
   source_page?: number;
 }
 
-export interface ExtractedCredential {
-  kind: 'license' | 'dea' | 'malpractice' | 'board_cert';
+export interface ExtractedAttachment {
+  kind: string;
   issuer?: string;
   state?: string;
   issued_at?: string;
@@ -44,5 +44,5 @@ export interface ExtractedCredential {
 export interface ParsedExtraction {
   documentKind: string;
   fields: ExtractedField[];
-  credentials: ExtractedCredential[];
+  attachments: ExtractedAttachment[];
 }

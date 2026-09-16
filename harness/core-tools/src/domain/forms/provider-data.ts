@@ -1,7 +1,7 @@
 import { eq, sql } from 'drizzle-orm';
 import { attachments, fields } from '@harness/db';
 import type { ToolDeps } from '../tooling/types.js';
-import { requireProvider } from '../providers/repository.js';
+import { requireRecord } from '../records/repository.js';
 import { latestCredential } from './fill.js';
 import type { ProviderData, RosterRow } from './types.js';
 
@@ -14,7 +14,7 @@ import type { ProviderData, RosterRow } from './types.js';
  * number is on file without the bytes ever being in memory.
  */
 export async function loadProviderData(deps: ToolDeps, providerId: string): Promise<ProviderData> {
-  const provider = await requireProvider(deps, providerId);
+  const provider = await requireRecord(deps, providerId);
   const fieldRows = await deps.db
     .select({ name: fields.name, value: fields.value, restricted: fields.restricted, status: fields.status })
     .from(fields)
@@ -51,7 +51,7 @@ const fieldValue = (data: ProviderData, name: string): string | null => {
 export async function buildRoster(deps: ToolDeps, payerId: string, providerIds: string[]): Promise<RosterRow[]> {
   const rows: RosterRow[] = [];
   for (const providerId of providerIds) {
-    // requireProvider inside loadProviderData scopes this to deps.client, so
+    // requireRecord inside loadProviderData scopes this to deps.client, so
     // one unknown id aborts the whole roster rather than silently skipping.
     const data = await loadProviderData(deps, providerId);
     const license = latestCredential(data, 'license');
