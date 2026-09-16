@@ -1,53 +1,9 @@
 import path from 'node:path';
 import { ConfigError } from '@harness/shared';
-import { targetFor, type ExtractionManifest } from './extraction.js';
-import type { PackEvals } from './evals.js';
-import type { PackToolDeps } from './kernel.js';
-import type { Policy } from './policy.js';
-import type { AttachmentKindSpec, RecordKindSpec } from './records.js';
-import type { AnyToolDef } from './tool.js';
+import { targetFor } from './extraction.js';
+import type { Pack } from './types.js';
 
-/**
- * What core loads when it loads an area of the product.
- *
- * A pack is content plus a declaration: what it stores, which documents exist, what to pull out
- * of them, which forms and skills ship with them, what the default policy for its actions is,
- * and — since Plan 5 — which tools it contributes and which kernel tools those replace. It
- * depends on this package and on `@harness/shared`, and on nothing else in the workspace: never
- * on `@harness/core-tools` and never on `@harness/db`, which is what lets core load it by name.
- */
-export interface Pack {
-  /** Short, stable, lowercase. `deps.packs.byName('healthcare')`. */
-  name: string;
-  version: string;
-  /** What this pack stores. At least one. */
-  records: RecordKindSpec[];
-  /** What hangs off a record: a licence, a link. Omit for a pack that attaches nothing. */
-  attachments?: AttachmentKindSpec[];
-  /** What `documents_classify` may return and `documents_ingest` may be told. */
-  documentKinds: readonly string[];
-  /** Which document kinds feed which record kinds, and the prose the model reads. */
-  extraction: ExtractionManifest;
-  /** Absolute path to the directory holding `templates.json` and its PDFs. Omit for a pack with no forms. */
-  formsDir?: string;
-  /** Absolute path to the directory of `<skill>/SKILL.md` folders. */
-  skillsDir: string;
-  /** Action-class defaults this pack ships. A client's `policy.yaml` still wins. */
-  policy: Partial<Policy>;
-  /**
-   * Kernel tool names this pack's own tools supersede. A name listed here is not published; the
-   * pack's tool of that name takes its place. Two loaded packs may not replace the same name,
-   * and a name that is not a kernel tool is a startup failure, not a silent no-op.
-   */
-  replaces?: readonly string[];
-  /**
-   * Tools this pack adds to the catalogue, built once per server from the live dependency bag.
-   * A handler reaches a kernel handler through `deps.kernelTools` and the three non-tool kernel
-   * operations through `deps.kernel`.
-   */
-  tools?: (deps: PackToolDeps) => AnyToolDef[];
-  evals?: PackEvals;
-}
+export type { Pack } from './types.js';
 
 const NAME = /^[a-z][a-z0-9-]*$/;
 
