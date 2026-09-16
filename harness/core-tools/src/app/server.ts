@@ -6,6 +6,7 @@ import { DEFAULT_CONFIDENCE_THRESHOLD, type ToolDeps } from '../domain/tooling/t
 import { gatewayFromEnv } from '../domain/models/gateway.js';
 import { storageRoot } from '../domain/storage/layout.js';
 import { loadPacks } from '../domain/packs/registry.js';
+import type { PackRegistry } from '../domain/packs/types.js';
 import { NPPES_DEFAULT_BASE_URL } from '../domain/verify/nppes.js';
 
 /**
@@ -26,6 +27,22 @@ export function envOrDefault(name: string, fallback: string, env: NodeJS.Process
 }
 
 /**
+ * Where the form templates live.
+ *
+ * The pack owns them, so `packs.formsDir()` — the first pack named in `HARNESS_PACKS` — is the
+ * answer for every deployment that has not said otherwise, and swapping the pack swaps the
+ * templates with it. `HARNESS_FORMS_DIR` is an explicit override for a deployment that keeps
+ * its templates somewhere else; set, it wins and is resolved against the process working
+ * directory, exactly as it did before the registry existed.
+ */
+export function formsDirFrom(
+  packs: Pick<PackRegistry, 'formsDir'>,
+  raw: string | undefined = optionalEnv('HARNESS_FORMS_DIR'),
+): string {
+  return raw ? path.resolve(raw) : packs.formsDir();
+}
+
+/**
  * Which packs this process serves, comma-separated package names. Defaults to the only pack
  * that exists today, so a deployment that sets nothing behaves exactly as it did.
  */
@@ -38,7 +55,6 @@ function packNames(): string[] {
 
 export async function buildDepsFromEnv(): Promise<{ deps: ToolDeps; close: () => Promise<void> }> {
   const { db, close } = createDb();
-  const formsDir = optionalEnv('HARNESS_FORMS_DIR');
   const packs = await loadPacks(packNames());
   const deps: ToolDeps = {
     db,
@@ -54,7 +70,7 @@ export async function buildDepsFromEnv(): Promise<{ deps: ToolDeps; close: () =>
     // storageRoot). Ingested documents live under it as domain/storage lays
     // them out; generated output goes under `<root>/out`.
     storageDir: storageRoot(),
-    formsDir: formsDir ? path.resolve(formsDir) : packs.formsDir(),
+    formsDir: formsDirFrom(packs),
     restrictedToModel: booleanFromEnv('HARNESS_RESTRICTED_TO_MODEL'),
     verify: {
       nppesEnabled: booleanFromEnv('VERIFY_NPPES_ENABLED'),

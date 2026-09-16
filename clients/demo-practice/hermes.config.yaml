@@ -94,8 +94,16 @@ mcp_servers:
       HARNESS_CLIENT: 'demo-practice'
       HARNESS_POLICY_FILE: '/srv/agent-harness/clients/demo-practice/policy.yaml'
       HARNESS_STORAGE_DIR: '/srv/harness-storage'
+      # Optional. Unset, core-tools takes the forms directory from the first
+      # pack in HARNESS_PACKS, so swapping the pack swaps the templates with
+      # it. Set, it overrides the pack — clear or repoint this line when the
+      # new pack owns the forms.
       HARNESS_FORMS_DIR: '/srv/agent-harness/packs/healthcare/forms'
-      HARNESS_PACKS: '@harness/pack-healthcare'
+      # Interpolated, never hardcoded: the hermes container's own
+      # HARNESS_PACKS has to reach this child, or this core-tools process
+      # would serve a different pack set from the one the approvals app's
+      # core-tools child serves.
+      HARNESS_PACKS: '${HARNESS_PACKS}'
       CORE_TOOLS_CALLER: 'hermes'
       APPROVAL_TTL_HOURS: '24'
       # CONFIDENCE_THRESHOLD is left unset: core-tools applies DEFAULT_CONFIDENCE_THRESHOLD (0.85).

@@ -169,6 +169,10 @@ services:
       HERMES_GID: '${HERMES_GID:-1000}'
       DATABASE_URL: 'postgres://harness:harness@postgres:5432/harness'
       HARNESS_STORAGE_DIR: '/srv/harness-storage'
+      # An override, not a requirement: unset, core-tools takes the forms
+      # directory from the first pack in HARNESS_PACKS. It is pinned here
+      # because the demo mounts the pack read-only at this path. Clear it, or
+      # repoint it, when a different pack owns the forms.
       HARNESS_FORMS_DIR: '/srv/agent-harness/packs/healthcare/forms'
       HARNESS_PACKS: '${HARNESS_PACKS:-@harness/pack-healthcare}'
       HARNESS_POLICY_FILE: '/srv/agent-harness/clients/demo-practice/policy.yaml'
@@ -214,6 +218,9 @@ services:
       HARNESS_ENCRYPTION_KEY: '${HARNESS_ENCRYPTION_KEY:-}'
       HARNESS_CLIENT: '${HARNESS_CLIENT:-demo-practice}'
       HARNESS_STORAGE_DIR: '/srv/harness-storage'
+      # Same override as the hermes service: unset, the core-tools child takes
+      # the forms directory from the first pack in HARNESS_PACKS. Pinned here
+      # only because the demo mounts the pack read-only at this path.
       HARNESS_FORMS_DIR: '/srv/agent-harness/packs/healthcare/forms'
       HARNESS_PACKS: '${HARNESS_PACKS:-@harness/pack-healthcare}'
       HARNESS_POLICY_FILE: '/srv/agent-harness/clients/demo-practice/policy.yaml'

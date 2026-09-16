@@ -96,8 +96,24 @@ core loads through a contract instead of importing by name.
    the value would be stored in plaintext; `loadPacks` validates this at startup and names the
    field it rejected.
 4. Add the package to `@harness/core-tools`'s `dependencies` so pnpm can resolve the dynamic
-   import, and name it in `HARNESS_PACKS` in the client's `.env`:
-   `HARNESS_PACKS=@harness/pack-healthcare,@harness/pack-scanning`.
+   import, then name it everywhere a core-tools process is started. There are three places and
+   missing one leaves half the deployment on the old pack:
+
+   - the client's `.env`, which Compose interpolates into both services:
+     `HARNESS_PACKS=@harness/pack-healthcare,@harness/pack-scanning`;
+   - `clients/<name>/hermes.config.yaml`, in the `mcp_servers.core-tools.env` block. That block
+     is an allowlist — a variable core-tools reads has to be named there or the child never
+     sees it — so `HARNESS_PACKS` is written as `'${HARNESS_PACKS}'` and must stay
+     interpolated, never pinned to a pack name. The approvals app forwards the real value to
+     its own child already (`harness/approvals/src/app/child-env.ts`);
+   - `HARNESS_FORMS_DIR`, in that same `hermes.config.yaml` block and in both Compose services.
+     It is an **override**: unset, core-tools takes the forms directory from the first pack in
+     `HARNESS_PACKS`; set, it wins. Clear it, or repoint it, when the new pack owns the forms,
+     or the new pack's templates are never read.
+
+   Every scaffolded client inherits all three, because `pnpm new-client` copies
+   `clients/demo-practice/`.
+
 5. Pack-specific tools are optional: `tools: (deps) => [...]` on the `Pack`. They receive core's
    dependency bag as `unknown`, because a pack cannot see `ToolDeps`. Core's own tool names win
    a collision.
