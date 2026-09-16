@@ -1,5 +1,5 @@
 import { eq, sql } from 'drizzle-orm';
-import { credentials, fields } from '@harness/db';
+import { attachments, fields } from '@harness/db';
 import type { ToolDeps } from '../tooling/types.js';
 import { requireProvider } from '../providers/repository.js';
 import { latestCredential } from './fill.js';
@@ -18,20 +18,20 @@ export async function loadProviderData(deps: ToolDeps, providerId: string): Prom
   const fieldRows = await deps.db
     .select({ name: fields.name, value: fields.value, restricted: fields.restricted, status: fields.status })
     .from(fields)
-    .where(eq(fields.providerId, providerId));
+    .where(eq(fields.recordId, providerId));
   const credentialRows = await deps.db
     .select({
-      kind: credentials.kind,
-      issuer: credentials.issuer,
-      state: credentials.state,
-      issuedAt: credentials.issuedAt,
-      expiresAt: credentials.expiresAt,
-      hasNumber: sql<boolean>`${credentials.numberEncrypted} is not null`,
+      kind: attachments.kind,
+      issuer: attachments.issuer,
+      state: attachments.state,
+      issuedAt: attachments.issuedAt,
+      expiresAt: attachments.expiresAt,
+      hasNumber: sql<boolean>`${attachments.numberEncrypted} is not null`,
     })
-    .from(credentials)
-    .where(eq(credentials.providerId, providerId));
+    .from(attachments)
+    .where(eq(attachments.recordId, providerId));
   return {
-    provider: { name: provider.name, npi: provider.npi, status: provider.status },
+    provider: { name: provider.name, npi: provider.externalId, status: provider.status },
     fields: fieldRows,
     credentials: credentialRows,
   };

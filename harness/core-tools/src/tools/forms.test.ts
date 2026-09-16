@@ -11,7 +11,7 @@ import type { ToolDeps } from '../domain/tooling/types.js';
 import { approvalTools } from './approvals.js';
 import { formTools } from './forms.js';
 
-const eqField = (providerId: string, name: string) => and(eq(fields.providerId, providerId), eq(fields.name, name));
+const eqField = (providerId: string, name: string) => and(eq(fields.recordId, providerId), eq(fields.name, name));
 
 const db = useTestDb();
 let storageDir: string;
@@ -30,30 +30,30 @@ afterEach(async () => {
 async function seedCompleteProvider(): Promise<string> {
   const [p] = await db
     .insert(providers)
-    .values({ client: 'test', name: 'Dr. Ada Reyes', npi: '1234567893' })
+    .values({ client: 'test', pack: 'healthcare', kind: 'provider', name: 'Dr. Ada Reyes', externalId: '1234567893' })
     .returning();
   await db.insert(fields).values([
-    { providerId: p.id, name: 'primary_specialty', value: 'Family Medicine', status: 'verified', confidence: 1 },
+    { recordId: p.id, name: 'primary_specialty', value: 'Family Medicine', status: 'verified', confidence: 1 },
     {
-      providerId: p.id,
+      recordId: p.id,
       name: 'practice_address',
       value: '12 Elm St, Austin TX',
       status: 'extracted',
       confidence: 0.95,
     },
-    { providerId: p.id, name: 'practice_name', value: 'Elm Street Family Care', status: 'extracted', confidence: 0.92 },
+    { recordId: p.id, name: 'practice_name', value: 'Elm Street Family Care', status: 'extracted', confidence: 0.92 },
   ]);
   await db.insert(credentials).values([
     {
-      providerId: p.id,
+      recordId: p.id,
       kind: 'license',
       issuer: 'Texas Medical Board',
       state: 'TX',
       expiresAt: '2027-03-31',
       numberEncrypted: Buffer.from('enc'),
     },
-    { providerId: p.id, kind: 'malpractice', issuer: 'MedPro', expiresAt: '2027-01-15' },
-    { providerId: p.id, kind: 'board_cert', issuer: 'ABFM', expiresAt: '2029-06-30' },
+    { recordId: p.id, kind: 'malpractice', issuer: 'MedPro', expiresAt: '2027-01-15' },
+    { recordId: p.id, kind: 'board_cert', issuer: 'ABFM', expiresAt: '2029-06-30' },
   ]);
   return p.id;
 }
@@ -111,7 +111,10 @@ describe('forms_fill', () => {
   });
 
   it('refuses when a required credential is missing', async () => {
-    const [p] = await db.insert(providers).values({ client: 'test', name: 'Dr. Bare', npi: '1999999998' }).returning();
+    const [p] = await db
+      .insert(providers)
+      .values({ client: 'test', pack: 'healthcare', kind: 'provider', name: 'Dr. Bare', externalId: '1999999998' })
+      .returning();
     const client = await connectTools('forms-test', formTools, deps);
     const res = await client.callTool({
       name: 'forms_fill',
@@ -167,7 +170,10 @@ describe('forms_fill', () => {
   });
 
   it('refuses a provider that belongs to another client', async () => {
-    const [p] = await db.insert(providers).values({ client: 'other-clinic', name: 'Dr. Elsewhere' }).returning();
+    const [p] = await db
+      .insert(providers)
+      .values({ client: 'other-clinic', pack: 'healthcare', kind: 'provider', name: 'Dr. Elsewhere' })
+      .returning();
     const client = await connectTools('forms-test', formTools, deps);
     const res = await client.callTool({
       name: 'forms_fill',
@@ -251,7 +257,7 @@ describe('forms_roster', () => {
     const first = await seedCompleteProvider();
     const [second] = await db
       .insert(providers)
-      .values({ client: 'test', name: 'Dr. Bo Lin', npi: '1987654320' })
+      .values({ client: 'test', pack: 'healthcare', kind: 'provider', name: 'Dr. Bo Lin', externalId: '1987654320' })
       .returning();
     const client = await connectTools('forms-test', formTools, deps);
     const out = resultOf<{ file_id: string; rows: number; columns: string[] }>(
@@ -285,11 +291,11 @@ describe('forms_roster', () => {
     // expiry but no legible number: the row exists, number_encrypted is null.
     const [p] = await db
       .insert(providers)
-      .values({ client: 'test', name: 'Dr. No Number', npi: '1234567893' })
+      .values({ client: 'test', pack: 'healthcare', kind: 'provider', name: 'Dr. No Number', externalId: '1234567893' })
       .returning();
     await db.insert(credentials).values([
-      { providerId: p.id, kind: 'license', issuer: 'Texas Medical Board', state: 'TX', expiresAt: '2027-03-31' },
-      { providerId: p.id, kind: 'dea', issuer: 'DEA', expiresAt: '2028-02-28' },
+      { recordId: p.id, kind: 'license', issuer: 'Texas Medical Board', state: 'TX', expiresAt: '2027-03-31' },
+      { recordId: p.id, kind: 'dea', issuer: 'DEA', expiresAt: '2028-02-28' },
     ]);
     const client = await connectTools('forms-test', formTools, deps);
     const out = resultOf<{ file_id: string }>(
@@ -309,10 +315,16 @@ describe('forms_roster', () => {
   it('reports a DEA registration with a stored number as on file', async () => {
     const [p] = await db
       .insert(providers)
-      .values({ client: 'test', name: 'Dr. Has Number', npi: '1234567893' })
+      .values({
+        client: 'test',
+        pack: 'healthcare',
+        kind: 'provider',
+        name: 'Dr. Has Number',
+        externalId: '1234567893',
+      })
       .returning();
     await db.insert(credentials).values({
-      providerId: p.id,
+      recordId: p.id,
       kind: 'dea',
       issuer: 'DEA',
       expiresAt: '2028-02-28',
@@ -330,7 +342,10 @@ describe('forms_roster', () => {
 
   it('refuses a provider that belongs to another client and writes nothing', async () => {
     const mine = await seedCompleteProvider();
-    const [theirs] = await db.insert(providers).values({ client: 'other-clinic', name: 'Dr. Elsewhere' }).returning();
+    const [theirs] = await db
+      .insert(providers)
+      .values({ client: 'other-clinic', pack: 'healthcare', kind: 'provider', name: 'Dr. Elsewhere' })
+      .returning();
     const client = await connectTools('forms-test', formTools, deps);
     const res = await client.callTool({
       name: 'forms_roster',

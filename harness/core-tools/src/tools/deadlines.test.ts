@@ -106,13 +106,13 @@ describe('deadlines tools', () => {
     await client.callTool({ name: 'deadlines_compute', arguments: { provider_id: id } });
 
     const licenseCred = await db.query.credentials.findFirst({
-      where: and(eq(credentials.providerId, id), eq(credentials.kind, 'license')),
+      where: and(eq(credentials.recordId, id), eq(credentials.kind, 'license')),
     });
     if (!licenseCred) throw new Error('license credential missing');
     await db
       .update(deadlines)
       .set({ notifiedAt: new Date('2026-08-01T00:00:00Z') })
-      .where(and(eq(deadlines.credentialId, licenseCred.id), eq(deadlines.kind, 'expiration')));
+      .where(and(eq(deadlines.attachmentId, licenseCred.id), eq(deadlines.kind, 'expiration')));
 
     await client.callTool({
       name: 'providers_upsert',
@@ -128,16 +128,16 @@ describe('deadlines tools', () => {
     expect(secondDeadlines).toHaveLength(4);
 
     const malpracticeCred = await db.query.credentials.findFirst({
-      where: and(eq(credentials.providerId, id), eq(credentials.kind, 'malpractice')),
+      where: and(eq(credentials.recordId, id), eq(credentials.kind, 'malpractice')),
     });
     if (!malpracticeCred) throw new Error('malpractice credential missing');
     expect(secondDeadlines.every((d) => d.credential_id !== malpracticeCred.id)).toBe(true);
 
-    const rows = await db.select().from(deadlines).where(eq(deadlines.providerId, id));
+    const rows = await db.select().from(deadlines).where(eq(deadlines.recordId, id));
     expect(rows).toHaveLength(4);
-    expect(rows.every((r) => r.credentialId !== malpracticeCred.id)).toBe(true);
+    expect(rows.every((r) => r.attachmentId !== malpracticeCred.id)).toBe(true);
 
-    const licenseExpiration = rows.find((r) => r.credentialId === licenseCred.id && r.kind === 'expiration');
+    const licenseExpiration = rows.find((r) => r.attachmentId === licenseCred.id && r.kind === 'expiration');
     expect(licenseExpiration?.notifiedAt).toBeTruthy();
 
     // Moving the due date invalidates the notification that was sent for the
@@ -151,8 +151,8 @@ describe('deadlines tools', () => {
       },
     });
     await client.callTool({ name: 'deadlines_compute', arguments: { provider_id: id } });
-    const moved = (await db.select().from(deadlines).where(eq(deadlines.providerId, id))).find(
-      (r) => r.credentialId === licenseCred.id && r.kind === 'expiration',
+    const moved = (await db.select().from(deadlines).where(eq(deadlines.recordId, id))).find(
+      (r) => r.attachmentId === licenseCred.id && r.kind === 'expiration',
     );
     expect(moved?.dueAt).toBe('2027-01-31');
     expect(moved?.notifiedAt).toBeNull();

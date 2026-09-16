@@ -1,10 +1,10 @@
 import { and, asc, eq, inArray, lte, sql } from 'drizzle-orm';
-import { credentials, deadlines, providers } from '@harness/db';
+import { attachments, deadlines, records } from '@harness/db';
 import type { ToolDeps } from '../tooling/types.js';
 import { requireProvider } from '../providers/repository.js';
 import { computeDeadlines, daysUntil, addDays, bucketFor, digestKeyFor, type UrgencyBucket } from './compute.js';
 
-/** Identifies a deadline row within a provider, matching `deadlines_credential_kind_uq`. */
+/** Identifies a deadline row within a provider, matching `deadlines_attachment_kind_uq`. */
 const deadlineKey = (d: { credentialId: string; kind: string }) => `${d.credentialId}:${d.kind}`;
 
 interface UpcomingArgs {
@@ -36,14 +36,14 @@ export async function recomputeDeadlines(
   providerId: string,
 ): Promise<{ deadlines: { credential_id: string; kind: string; due_at: string }[] }> {
   await requireProvider(deps, providerId);
-  const creds = await deps.db.select().from(credentials).where(eq(credentials.providerId, providerId));
+  const creds = await deps.db.select().from(attachments).where(eq(attachments.recordId, providerId));
   const computed = computeDeadlines(creds.map((c) => ({ id: c.id, kind: c.kind, expiresAt: c.expiresAt })));
   for (const d of computed) {
     await deps.db
       .insert(deadlines)
-      .values({ providerId, credentialId: d.credentialId, kind: d.kind, dueAt: d.dueAt })
+      .values({ recordId: providerId, attachmentId: d.credentialId, kind: d.kind, dueAt: d.dueAt })
       .onConflictDoUpdate({
-        target: [deadlines.credentialId, deadlines.kind],
+        target: [deadlines.attachmentId, deadlines.kind],
         // A moved due date invalidates any notification already sent for the
         // old one, so clear the marker; an unchanged date keeps it, so the
         // same reminder is not sent twice.
@@ -57,9 +57,9 @@ export async function recomputeDeadlines(
   // behind that nothing recomputes. Retire whatever this run did not produce.
   const computedKeys = new Set(computed.map(deadlineKey));
   const existingRows = await deps.db
-    .select({ id: deadlines.id, credentialId: deadlines.credentialId, kind: deadlines.kind })
+    .select({ id: deadlines.id, credentialId: deadlines.attachmentId, kind: deadlines.kind })
     .from(deadlines)
-    .where(eq(deadlines.providerId, providerId));
+    .where(eq(deadlines.recordId, providerId));
   const staleIds = existingRows.filter((r) => !computedKeys.has(deadlineKey(r))).map((r) => r.id);
   if (staleIds.length > 0) {
     await deps.db.delete(deadlines).where(inArray(deadlines.id, staleIds));
@@ -81,17 +81,17 @@ export async function upcomingDeadlines(
   const horizon = addDays(todayStr, window_days);
   const rows = await deps.db
     .select({
-      providerId: deadlines.providerId,
-      providerName: providers.name,
-      credentialId: deadlines.credentialId,
-      credentialKind: credentials.kind,
+      providerId: deadlines.recordId,
+      providerName: records.name,
+      credentialId: deadlines.attachmentId,
+      credentialKind: attachments.kind,
       kind: deadlines.kind,
       dueAt: deadlines.dueAt,
     })
     .from(deadlines)
-    .innerJoin(credentials, eq(deadlines.credentialId, credentials.id))
-    .innerJoin(providers, eq(deadlines.providerId, providers.id))
-    .where(and(eq(providers.client, deps.client), lte(deadlines.dueAt, horizon)))
+    .innerJoin(attachments, eq(deadlines.attachmentId, attachments.id))
+    .innerJoin(records, eq(deadlines.recordId, records.id))
+    .where(and(eq(records.client, deps.client), lte(deadlines.dueAt, horizon)))
     .orderBy(asc(deadlines.dueAt))
     .limit(limit);
   const items = rows.map((r) => {

@@ -20,7 +20,7 @@ import { parseExtraction } from './parse.js';
 export function documentView(row: typeof documents.$inferSelect) {
   return {
     id: row.id,
-    provider_id: row.providerId,
+    provider_id: row.recordId,
     kind: row.kind,
     storage_path: row.storagePath,
     sha256: row.sha256,
@@ -42,7 +42,7 @@ export async function requireDocument(deps: ToolDeps, documentId: string) {
     where: and(eq(documents.id, documentId), eq(documents.client, deps.client)),
   });
   if (!row) throw new ToolError(`document ${documentId} not found`);
-  if (row.providerId) await requireProvider(deps, row.providerId);
+  if (row.recordId) await requireProvider(deps, row.recordId);
   return row;
 }
 
@@ -51,7 +51,7 @@ export async function listDocuments(deps: ToolDeps, providerId?: string) {
   const conditions = [eq(documents.client, deps.client)];
   if (providerId) {
     await requireProvider(deps, providerId);
-    conditions.push(eq(documents.providerId, providerId));
+    conditions.push(eq(documents.recordId, providerId));
   }
   const rows = await deps.db
     .select()
@@ -133,7 +133,7 @@ export async function ingestDocument(deps: ToolDeps, args: { path: string; provi
   if (existing) {
     // A second ingest may supply the provider or kind the first one lacked.
     const patch: Partial<typeof documents.$inferInsert> = {};
-    if (provider_id && !existing.providerId) patch.providerId = provider_id;
+    if (provider_id && !existing.recordId) patch.recordId = provider_id;
     if (kind && !existing.kind) patch.kind = kind;
     if (Object.keys(patch).length > 0) {
       await deps.db.update(documents).set(patch).where(eq(documents.id, existing.id));
@@ -152,7 +152,7 @@ export async function ingestDocument(deps: ToolDeps, args: { path: string; provi
     .insert(documents)
     .values({
       client: deps.client,
-      providerId: provider_id ?? null,
+      recordId: provider_id ?? null,
       kind: kind ?? null,
       storagePath: relative,
       sha256,
@@ -226,7 +226,7 @@ export async function extractDocument(deps: ToolDeps, args: { document_id: strin
     );
   }
   const npiValue = byName.get('npi')?.value?.replace(/\D/g, '');
-  const npi = named?.npi ?? (npiValue && npiValue.length === 10 ? npiValue : undefined);
+  const npi = named?.externalId ?? (npiValue && npiValue.length === 10 ? npiValue : undefined);
 
   const modelFields: FieldInput[] = parsed.fields.map((f) => ({
     name: f.name,
@@ -267,7 +267,7 @@ export async function extractDocument(deps: ToolDeps, args: { document_id: strin
   await deps.db
     .update(documents)
     .set({
-      providerId: upserted.provider_id,
+      recordId: upserted.provider_id,
       kind: row.kind ?? parsed.documentKind,
       ocrUsed,
       textPath: toStorageRelative(deps.storageDir, textAbs),

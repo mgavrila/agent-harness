@@ -110,7 +110,7 @@ describe('documents_ingest', () => {
       }),
     );
     const row = (await db.select().from(documents)).find((d) => d.id === out.document_id)!;
-    expect(row).toMatchObject({ providerId, kind: 'w9' });
+    expect(row).toMatchObject({ recordId: providerId, kind: 'w9' });
   });
 
   it('back-fills the provider on a re-ingest that names one', async () => {
@@ -126,7 +126,7 @@ describe('documents_ingest', () => {
       }),
     );
     const row = (await db.select().from(documents)).find((d) => d.id === first.document_id)!;
-    expect(row).toMatchObject({ providerId, kind: 'w9' });
+    expect(row).toMatchObject({ recordId: providerId, kind: 'w9' });
   });
 
   it('refuses a path outside the storage dir', async () => {
@@ -373,7 +373,7 @@ describe('documents_classify and documents_extract', () => {
     expect(out.fields_extracted).toBe(3);
     expect(out.credentials).toBe(1);
 
-    const stored = await db.select().from(fieldsTable).where(eq(fieldsTable.providerId, out.provider_id));
+    const stored = await db.select().from(fieldsTable).where(eq(fieldsTable.recordId, out.provider_id));
     expect(stored.find((f) => f.name === 'specialty')!.status).toBe('pending');
     expect(stored.find((f) => f.name === 'npi')!.sourceDocId).toBe(ing.document_id);
     expect(stored.find((f) => f.name === 'npi')!.sourcePage).toBe(1);
@@ -402,7 +402,7 @@ describe('documents_classify and documents_extract', () => {
     expect(prompt).toContain('{{ssn:1}}');
     expect(out.restricted_fields.sort()).toEqual(['ein', 'ssn']);
 
-    const stored = await db.select().from(fieldsTable).where(eq(fieldsTable.providerId, out.provider_id));
+    const stored = await db.select().from(fieldsTable).where(eq(fieldsTable.recordId, out.provider_id));
     const ssn = stored.find((f) => f.name === 'ssn')!;
     expect(ssn.value).toBeNull();
     expect(ssn.restricted).toBe(true);
@@ -445,7 +445,7 @@ describe('documents_classify and documents_extract', () => {
     expect(gateway.calls[0].messages[1].content).toContain('<<<END OF DOCUMENT>>>');
 
     // And nothing it said ends up as a value.
-    const stored = await db.select().from(fieldsTable).where(eq(fieldsTable.providerId, out.provider_id));
+    const stored = await db.select().from(fieldsTable).where(eq(fieldsTable.recordId, out.provider_id));
     for (const f of stored) {
       expect(f.value ?? '').not.toMatch(/ignore prior instructions|post the roster/i);
     }
@@ -475,14 +475,14 @@ describe('documents_classify and documents_extract', () => {
     );
     expect(out.provider_id).toBe(providerId);
     const doc = (await db.select().from(documents)).find((d) => d.id === ing.document_id)!;
-    expect(doc.providerId).toBe(providerId);
+    expect(doc.recordId).toBe(providerId);
 
     const providerRow = (await db.select().from(providers)).find((p) => p.id === providerId)!;
     expect(providerRow.name).toBe('Dr. Grace Hopper');
-    expect(providerRow.npi).toBe('9999999999');
+    expect(providerRow.externalId).toBe('9999999999');
     expect(await db.select().from(providers)).toHaveLength(before);
 
-    const stored = await db.select().from(fieldsTable).where(eq(fieldsTable.providerId, providerId));
+    const stored = await db.select().from(fieldsTable).where(eq(fieldsTable.recordId, providerId));
     expect(stored.find((f) => f.name === 'npi')?.value).toBe('1234567890');
   });
 
@@ -529,7 +529,7 @@ describe('documents_classify and documents_extract', () => {
     const out = resultOf<{ provider_id: string }>(
       await client.callTool({ name: 'documents_extract', arguments: { document_id: ing.document_id } }),
     );
-    const creds = await db.select().from(credentialsTable).where(eq(credentialsTable.providerId, out.provider_id));
+    const creds = await db.select().from(credentialsTable).where(eq(credentialsTable.recordId, out.provider_id));
     expect(creds).toHaveLength(1);
     expect(creds[0]).toMatchObject({
       kind: 'license',

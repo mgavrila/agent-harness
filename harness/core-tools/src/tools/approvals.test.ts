@@ -19,7 +19,10 @@ const createProviderExternal = defineTool({
   output: z.object({ provider_id: z.string() }),
   handler: async ({ name, explode }, d) => {
     if (explode) throw new ToolError('handler exploded');
-    const [row] = await d.db.insert(providers).values({ client: d.client, name }).returning();
+    const [row] = await d.db
+      .insert(providers)
+      .values({ client: d.client, pack: 'healthcare', kind: 'provider', name })
+      .returning();
     return { provider_id: row.id };
   },
   recordIds: (_a, r) => [r.provider_id],

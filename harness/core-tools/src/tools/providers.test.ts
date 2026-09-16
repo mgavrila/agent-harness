@@ -40,14 +40,14 @@ describe('providers tools', () => {
     expect(out.fields_extracted).toBe(2);
     expect(out.credentials).toBe(2);
 
-    const rows = await db.select().from(fields).where(eq(fields.providerId, out.provider_id));
+    const rows = await db.select().from(fields).where(eq(fields.recordId, out.provider_id));
     const ssn = rows.find((r) => r.name === 'ssn')!;
     expect(ssn.value).toBeNull();
     expect(decrypt(ssn.valueEncrypted!, deps.encryptionKey)).toBe('123-45-6789');
     expect(ssn.status).toBe('extracted');
     expect(rows.find((r) => r.name === 'malpractice_carrier')!.status).toBe('pending');
 
-    const creds = await db.select().from(credentials).where(eq(credentials.providerId, out.provider_id));
+    const creds = await db.select().from(credentials).where(eq(credentials.recordId, out.provider_id));
     expect(creds.every((cr) => cr.numberEncrypted !== null)).toBe(true);
   });
 
@@ -65,10 +65,10 @@ describe('providers tools', () => {
     const idA = resultOf<UpsertResult>(a).provider_id;
     const idB = resultOf<UpsertResult>(b).provider_id;
     expect(idA).toBe(idB);
-    const rows = await db.select().from(fields).where(eq(fields.providerId, idA));
+    const rows = await db.select().from(fields).where(eq(fields.recordId, idA));
     expect(rows.find((r) => r.name === 'first_name')!.value).toBe('Augusta');
     expect(rows).toHaveLength(3);
-    const creds = await db.select().from(credentials).where(eq(credentials.providerId, idA));
+    const creds = await db.select().from(credentials).where(eq(credentials.recordId, idA));
     expect(creds).toHaveLength(2);
   });
 
@@ -103,7 +103,7 @@ describe('providers tools', () => {
     });
     const id = resultOf<UpsertResult>(up).provider_id;
 
-    const rows = await db.select().from(fields).where(eq(fields.providerId, id));
+    const rows = await db.select().from(fields).where(eq(fields.recordId, id));
     const row = rows.find((r) => r.name === 'ssn_2')!;
     expect(row.restricted).toBe(true);
     expect(row.value).toBeNull();
@@ -135,7 +135,7 @@ describe('providers tools', () => {
       name: 'providers_confirm_field',
       arguments: { provider_id: id, field: 'malpractice_carrier', value: 'MedPro Group', confirmed_by: 'U123' },
     });
-    const row = (await db.select().from(fields).where(eq(fields.providerId, id))).find(
+    const row = (await db.select().from(fields).where(eq(fields.recordId, id))).find(
       (r) => r.name === 'malpractice_carrier',
     )!;
     expect(row).toMatchObject({ status: 'verified', value: 'MedPro Group', confirmedBy: 'U123' });
@@ -171,7 +171,7 @@ describe('providers tools', () => {
     });
     expect(confirmRes.isError).toBe(true);
 
-    const rows = await db.select().from(fields).where(eq(fields.providerId, id));
+    const rows = await db.select().from(fields).where(eq(fields.recordId, id));
     expect(rows.find((r) => r.name === 'malpractice_carrier')!.value).toBe('MedPro');
   });
 
@@ -196,7 +196,7 @@ describe('providers tools', () => {
     expect(out.fields_pending).toBe(0);
     expect(out.fields_extracted).toBe(0);
 
-    const row = (await db.select().from(fields).where(eq(fields.providerId, id))).find(
+    const row = (await db.select().from(fields).where(eq(fields.recordId, id))).find(
       (r) => r.name === 'malpractice_carrier',
     )!;
     expect(row.value).toBe('MedPro Group');
@@ -215,7 +215,7 @@ describe('providers tools', () => {
       },
     });
     const id = resultOf<UpsertResult>(res).provider_id;
-    const row = (await db.select().from(fields).where(eq(fields.providerId, id))).find((r) => r.name === 'ssn')!;
+    const row = (await db.select().from(fields).where(eq(fields.recordId, id))).find((r) => r.name === 'ssn')!;
     expect(row.value).toBeNull();
     expect(row.valueEncrypted).not.toBeNull();
     expect(row.restricted).toBe(true);
@@ -233,7 +233,7 @@ describe('providers tools', () => {
       name: 'providers_confirm_field',
       arguments: { provider_id: id, field: 'DEA-Number', value: 'BX1234563', confirmed_by: 'U9' },
     });
-    const row = (await db.select().from(fields).where(eq(fields.providerId, id))).find((r) => r.name === 'DEA-Number')!;
+    const row = (await db.select().from(fields).where(eq(fields.recordId, id))).find((r) => r.name === 'DEA-Number')!;
     expect(row.value).toBeNull();
     expect(row.restricted).toBe(true);
     expect(decrypt(row.valueEncrypted!, deps.encryptionKey)).toBe('BX1234563');

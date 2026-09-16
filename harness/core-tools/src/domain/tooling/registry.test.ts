@@ -74,7 +74,7 @@ const writeThenThrow = defineTool({
   input: z.object({ name: z.string() }),
   output: z.object({}),
   handler: async ({ name }, deps) => {
-    await deps.db.insert(providers).values({ client: deps.client, name });
+    await deps.db.insert(providers).values({ client: deps.client, pack: 'healthcare', kind: 'provider', name });
     throw new ToolError('rolled back on purpose');
   },
 });
@@ -101,7 +101,7 @@ const writeOk = defineTool({
   input: z.object({ name: z.string() }),
   output: z.object({ ok: z.boolean() }),
   handler: async ({ name }, deps) => {
-    await deps.db.insert(providers).values({ client: deps.client, name });
+    await deps.db.insert(providers).values({ client: deps.client, pack: 'healthcare', kind: 'provider', name });
     return { ok: true };
   },
 });
