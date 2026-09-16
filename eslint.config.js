@@ -45,6 +45,19 @@ const NO_BARE_THROW = {
  */
 const STRICT_LAYER_ROOTS = [];
 
+/** True for the two spellings of a disabled rule, bare or at the head of an options array. */
+const isOff = (severity) => severity === 'off' || severity === 0;
+
+/**
+ * Downgrade one rule entry to a warning, keeping its options. A rule that is already off is
+ * returned untouched: a preset switches a rule off on purpose, and "make everything a warning"
+ * must not be read as "turn everything on".
+ */
+function asWarning(value) {
+  if (Array.isArray(value)) return isOff(value[0]) ? value : ['warn', ...value.slice(1)];
+  return isOff(value) ? value : 'warn';
+}
+
 /** console.* belongs in the logger and in process entrypoints, nowhere else. */
 const CONSOLE_IS_FINE = [
   '**/src/shared/log.ts',
@@ -92,17 +105,17 @@ export default tseslint.config(
   // Type-aware rules. They run (projectService below switches them on) but land as warnings:
   // the existing code trips require-await and the no-unsafe-* family in places, and fixing
   // that is a separate piece of work from moving files. `pnpm lint` does not fail on warnings.
+  //
+  // A rule the preset deliberately turns OFF stays off. Rewriting every value to 'warn' would
+  // resurrect the ones typescript-eslint disables on purpose: the preset switches off each
+  // base ESLint rule it replaces with a type-aware version, so `no-redeclare` would start
+  // false-positiving on zod's const + type merging, `no-undef` on the `NodeJS` namespace, and
+  // the base `require-await` would double-report alongside its typescript-eslint counterpart.
   ...tseslint.configs.recommendedTypeChecked.map((entry) =>
     entry.rules
       ? {
           ...entry,
-          rules: Object.fromEntries(
-            Object.entries(entry.rules).map(([rule, value]) => [
-              rule,
-              // Keep each rule's own options; change only the severity.
-              Array.isArray(value) ? ['warn', ...value.slice(1)] : 'warn',
-            ]),
-          ),
+          rules: Object.fromEntries(Object.entries(entry.rules).map(([rule, value]) => [rule, asWarning(value)])),
         }
       : entry,
   ),

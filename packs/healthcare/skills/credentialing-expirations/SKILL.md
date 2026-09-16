@@ -45,7 +45,6 @@ Call `harness_set_context` with `skill: "credentialing-expirations"`,
 
    That is the scheduler's silence gate. Do not write "all clear", do not
    summarise what you checked, do not greet anyone.
-
 3. Otherwise, get the lineage: call `audit_query` with
    `tool: "deadlines_upcoming"` and `limit: 1`, and keep the `id` of the first
    entry. That is the audit row of the query you just ran.

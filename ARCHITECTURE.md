@@ -126,8 +126,12 @@ Break any of these and the harness is not safe to run against real data.
 
 ## The three error types
 
-Declared once, in `@harness/shared` _(target state, landing in Task 4; they live in
-`harness/core-tools/src/registry.ts` today)_:
+Declared once, in `@harness/shared` _(target state, landing in Task 4)_. Today they are
+scattered, and one of them does not exist yet: `ToolError` is in
+`harness/core-tools/src/registry.ts`, `ModelOutputError` in
+`harness/core-tools/src/models.ts`, and `ConfigError` is nowhere in the tree — it arrives
+with `@harness/shared` in Task 4, and until then a misconfigured process throws a plain
+`Error` at startup.
 
 | Type                               | Means                                                                                                 | Who sees the message     |
 | ---------------------------------- | ----------------------------------------------------------------------------------------------------- | ------------------------ |

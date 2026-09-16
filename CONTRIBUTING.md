@@ -1,5 +1,12 @@
 # Contributing
 
+> **Where the tree is today.** The maintainability revamp (`docs/superpowers/specs/2026-09-16-maintainability-revamp-design.md`)
+> is landing one package at a time. This guide describes the **target**, because the target is
+> what new work is judged against. Anything marked _(target state, landing in Tasks 4–8)_ is
+> not in the tree yet: the `shared/`, `domain/`, `tools/` and `app/` folders, the
+> `@harness/shared` and `@harness/pack-api` packages, and the pack contract arrive with those
+> tasks. Today's real path is given beside each one. `ARCHITECTURE.md` explains the layers.
+
 ## Getting a working checkout
 
 ```bash
@@ -22,7 +29,8 @@ wrong reason.
 ## Adding a tool
 
 1. Put the logic in a domain: a function in `src/domain/<name>/` that takes `ToolDeps` and
-   plain arguments. Write its test beside it.
+   plain arguments. Write its test beside it. _(target state, landing in Tasks 4–8; today the
+   domains sit one level up, as `src/documents/`, `src/forms/` and `src/deadlines/`.)_
 2. Add the definition to `src/tools/<area>.ts`:
 
    ```ts
@@ -38,7 +46,8 @@ wrong reason.
    ```
 
 3. Add it to the exported array at the bottom of that file. `ALL_TOOLS` in `app/server.ts`
-   already spreads it.
+   already spreads it. _(target state, landing in Task 7; `ALL_TOOLS` is in
+   `harness/core-tools/src/server.ts` today.)_
 4. Choose the action class honestly: `read`, `write.internal`, `external`, `financial`,
    `destructive`. `external` parks an approval; `financial` is blocked by default.
 5. Throw `ToolError` for anything the caller can fix. Never `throw new Error` in `tools/` —
@@ -94,7 +103,8 @@ Then fill in `clients/acme-clinic/.env.example`, review `SOUL.md` and `policy.ya
 
 ## Adding a migration
 
-Edit `harness/db/src/domain/schema.ts` first, then, from `harness/db/`:
+Edit `harness/db/src/domain/schema.ts` first _(target state, landing in Task 5; it is
+`harness/db/src/schema.ts` today)_, then, from `harness/db/`:
 
 ```bash
 pnpm drizzle-kit generate
