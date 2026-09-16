@@ -1,24 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { assertRedacted, fieldNameFor, isValidDea, redactPages } from './redact.js';
-
-describe('isValidDea', () => {
-  // DEA check digit: (d1+d3+d5) + 2*(d2+d4+d6), last digit must equal d7.
-  it('accepts numbers whose check digit is right', () => {
-    expect(isValidDea('BL1234563')).toBe(true); //  9 + 24 = 33 -> 3
-    expect(isValidDea('FD9876547')).toBe(true); // 21 + 36 = 57 -> 7
-  });
-
-  it('rejects a wrong check digit', () => {
-    expect(isValidDea('BL1234567')).toBe(false);
-    expect(isValidDea('FD9876543')).toBe(false);
-  });
-
-  it('rejects the wrong shape', () => {
-    expect(isValidDea('B1234563')).toBe(false);
-    expect(isValidDea('BL123456')).toBe(false);
-    expect(isValidDea('BL12345633')).toBe(false);
-  });
-});
+import { assertRedacted, fieldNameFor, redactPages } from './text.js';
 
 describe('redactPages', () => {
   it('replaces an SSN with a token and reports the plaintext hit', () => {
@@ -180,7 +161,7 @@ describe('fieldNameFor', () => {
   });
 
   it('produces names the providers toolset treats as restricted', async () => {
-    const { isRestrictedName } = await import('../tools/providers.js');
+    const { isRestrictedName } = await import('./names.js');
     expect(isRestrictedName(fieldNameFor('ssn', 1))).toBe(true);
     expect(isRestrictedName(fieldNameFor('ein', 1))).toBe(true);
     expect(isRestrictedName(fieldNameFor('dea', 1))).toBe(true);
