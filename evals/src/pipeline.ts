@@ -69,7 +69,12 @@ export async function openPipeline(opts: OpenPipelineOptions): Promise<PipelineH
     // one would find what a deployment finds, not a stub.
     formsDir: defaultFormsDir(),
     restrictedToModel: false,
-    verify: { nppesEnabled: false, nppesBaseUrl: 'http://127.0.0.1:1/api/', stateLicenseEnabled: false, timeoutMs: 5_000 },
+    verify: {
+      nppesEnabled: false,
+      nppesBaseUrl: 'http://127.0.0.1:1/api/',
+      stateLicenseEnabled: false,
+      timeoutMs: 5_000,
+    },
     sinks: {},
     context: {},
     tools: new Map(),
@@ -148,7 +153,9 @@ export async function runCase(handle: PipelineHandle, c: ExtractionCase): Promis
 
   try {
     const ingested = (await handle.callTool('documents_ingest', { path: c.path })) as { document_id: string };
-    const extracted = (await handle.callTool('documents_extract', { document_id: ingested.document_id })) as ExtractResult;
+    const extracted = (await handle.callTool('documents_extract', {
+      document_id: ingested.document_id,
+    })) as ExtractResult;
     const provider = (await handle.callTool('providers_get', { provider_id: extracted.provider_id })) as ProviderResult;
     return {
       caseId: c.id,

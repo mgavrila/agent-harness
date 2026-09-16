@@ -48,10 +48,7 @@ export interface InjectionCase {
 const here = path.dirname(fileURLToPath(import.meta.url));
 
 /** The skill whose declared tools the injection check is written against. */
-export const INTAKE_SKILL_FILE = path.resolve(
-  here,
-  '../../packs/healthcare/skills/credentialing-intake/SKILL.md',
-);
+export const INTAKE_SKILL_FILE = path.resolve(here, '../../packs/healthcare/skills/credentialing-intake/SKILL.md');
 
 /**
  * The tool names a skill declares in its frontmatter, under
@@ -140,7 +137,7 @@ export async function loadExtractionCases(file: string): Promise<ExtractionCase[
     return {
       id: row.id,
       kind: typeof row.kind === 'string' ? row.kind : 'other',
-      split: row.split as ExtractionCase['split'],
+      split: row.split,
       path: row.path,
       injection: row.injection === true,
       expected: {

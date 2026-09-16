@@ -1,7 +1,7 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtemp, mkdir, rm, writeFile, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { newClient, titleCase } from './new-client.js';
 
 let root: string;
@@ -12,7 +12,10 @@ async function scaffold(): Promise<void> {
   const template = path.join(root, 'clients', 'demo-practice');
   await mkdir(path.join(template, 'cron'), { recursive: true });
   await mkdir(path.join(template, 'scripts'), { recursive: true });
-  await writeFile(path.join(template, 'SOUL.md'), '# Demo Practice credentialing assistant\nYou work for Demo Practice.\n');
+  await writeFile(
+    path.join(template, 'SOUL.md'),
+    '# Demo Practice credentialing assistant\nYou work for Demo Practice.\n',
+  );
   await writeFile(
     path.join(template, 'hermes.config.yaml'),
     'mcp_servers:\n  core-tools:\n    env:\n      HARNESS_CLIENT: "demo-practice"\n      HARNESS_POLICY_FILE: "/srv/agent-harness/clients/demo-practice/policy.yaml"\n',
@@ -43,7 +46,14 @@ describe('newClient', () => {
     const out = await newClient({ pack: 'healthcare', name: 'river-clinic', root });
     expect(out.dir).toBe(path.join(root, 'clients', 'river-clinic'));
     expect(out.files.sort()).toEqual(
-      ['.env.example', 'SOUL.md', 'cron/playbooks.sh', 'hermes.config.yaml', 'policy.yaml', 'scripts/harness-outbox-watchdog.sh'].sort(),
+      [
+        '.env.example',
+        'SOUL.md',
+        'cron/playbooks.sh',
+        'hermes.config.yaml',
+        'policy.yaml',
+        'scripts/harness-outbox-watchdog.sh',
+      ].sort(),
     );
 
     const soul = await readFile(path.join(out.dir, 'SOUL.md'), 'utf8');
@@ -65,7 +75,10 @@ describe('newClient', () => {
   });
 
   it('copies routing.yaml when it exists', async () => {
-    await writeFile(path.join(root, 'clients', 'demo-practice', 'routing.yaml'), 'routes:\n  chat: demo-practice-chat\n');
+    await writeFile(
+      path.join(root, 'clients', 'demo-practice', 'routing.yaml'),
+      'routes:\n  chat: demo-practice-chat\n',
+    );
     const out = await newClient({ pack: 'healthcare', name: 'river-clinic', root });
     expect(out.files).toContain('routing.yaml');
     expect(out.skipped).not.toContain('routing.yaml');
@@ -80,7 +93,9 @@ describe('newClient', () => {
   });
 
   it('refuses a pack that is not installed', async () => {
-    await expect(newClient({ pack: 'dentistry', name: 'river-clinic', root })).rejects.toThrow(/no pack named "dentistry"/);
+    await expect(newClient({ pack: 'dentistry', name: 'river-clinic', root })).rejects.toThrow(
+      /no pack named "dentistry"/,
+    );
   });
 
   it('refuses to overwrite an existing client', async () => {

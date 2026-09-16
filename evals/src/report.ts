@@ -258,7 +258,9 @@ export function renderMarkdown(report: Report, comparison: BaselineComparison | 
   lines.push('');
   lines.push('### Field accuracy by document kind');
   lines.push('');
-  const kinds = [...new Set([...Object.keys(report.splits.text_layer.byKind), ...Object.keys(report.splits.scan.byKind)])].sort();
+  const kinds = [
+    ...new Set([...Object.keys(report.splits.text_layer.byKind), ...Object.keys(report.splits.scan.byKind)]),
+  ].sort();
   lines.push('| Document kind | text_layer | scan |');
   lines.push('|---|---:|---:|');
   for (const kind of kinds) {
@@ -289,7 +291,9 @@ export function renderMarkdown(report: Report, comparison: BaselineComparison | 
   } else if (report.judge.scored === 0) {
     lines.push('No free-text field missed an exact comparison, so the judge had nothing to grade.');
   } else {
-    lines.push(`${report.judge.scored} free-text values judged; ${pct(report.judge.agreementRate)} matched the expected value.`);
+    lines.push(
+      `${report.judge.scored} free-text values judged; ${pct(report.judge.agreementRate)} matched the expected value.`,
+    );
   }
   lines.push('');
 
@@ -310,8 +314,12 @@ export function renderMarkdown(report: Report, comparison: BaselineComparison | 
         : comparison.improvements.some((d) => d.metric === m)
           ? 'improved'
           : '';
-    for (const d of [...comparison.regressions, ...comparison.improvements, ...comparison.unchanged].sort((a, b) => a.metric.localeCompare(b.metric))) {
-      lines.push(`| ${d.metric} | ${d.baseline.toFixed(4)} | ${d.current.toFixed(4)} | ${d.delta >= 0 ? '+' : ''}${d.delta.toFixed(4)} | ${label(d.metric)} |`);
+    for (const d of [...comparison.regressions, ...comparison.improvements, ...comparison.unchanged].sort((a, b) =>
+      a.metric.localeCompare(b.metric),
+    )) {
+      lines.push(
+        `| ${d.metric} | ${d.baseline.toFixed(4)} | ${d.current.toFixed(4)} | ${d.delta >= 0 ? '+' : ''}${d.delta.toFixed(4)} | ${label(d.metric)} |`,
+      );
     }
     if (comparison.notComparable.length > 0) {
       lines.push('');

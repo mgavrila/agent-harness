@@ -163,7 +163,9 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   for (const file of result.skipped) console.log(`  - ${file} (not in the template)`);
   console.log('');
   console.log('Next:');
-  console.log(`  1. cp ${path.relative(process.cwd(), path.join(result.dir, '.env.example'))} .env   # then fill in the blanks`);
+  console.log(
+    `  1. cp ${path.relative(process.cwd(), path.join(result.dir, '.env.example'))} .env   # then fill in the blanks`,
+  );
   console.log(`     Set HARNESS_CLIENT=${values.name} and a storage directory this client does not share.`);
   console.log('  2. Create the two Slack apps — one for the Hermes gateway, one for the approvals');
   console.log('     app — with Socket Mode on both and Interactivity on the approver, then paste');

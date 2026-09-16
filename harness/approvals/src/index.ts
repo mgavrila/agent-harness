@@ -12,7 +12,13 @@ export {
   type EditModalMetadata,
 } from './render.js';
 export { createMcpCoreToolsClient, type CoreToolsClient, type ExecuteOutcome, type McpLauncher } from './execute.js';
-export { decideApproval, threadReplyText, type DecisionDeps, type DecisionInput, type DecisionResult } from './decisions.js';
+export {
+  decideApproval,
+  threadReplyText,
+  type DecisionDeps,
+  type DecisionInput,
+  type DecisionResult,
+} from './decisions.js';
 export {
   registerApprovalHandlers,
   parseAllowedUsers,

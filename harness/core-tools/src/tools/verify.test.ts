@@ -1,6 +1,6 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import type { ToolDeps } from '../registry.js';
 import { connectTools, makeTestDeps, resultOf, useTestDb } from '../testing.js';
 import { providerTools } from './providers.js';
@@ -15,7 +15,10 @@ const db = useTestDb();
  */
 let registry: Server;
 let registryUrl: string;
-let reply: { status: number; body: unknown; location?: string } = { status: 200, body: { result_count: 0, results: [] } };
+let reply: { status: number; body: unknown; location?: string } = {
+  status: 200,
+  body: { result_count: 0, results: [] },
+};
 
 const INDIVIDUAL = {
   result_count: 1,
@@ -49,7 +52,10 @@ const UNREADABLE_RECORD = { result_count: 1, results: [{ basic: {}, addresses: [
 
 beforeAll(async () => {
   registry = createServer((_req, res) => {
-    res.writeHead(reply.status, { 'content-type': 'application/json', ...(reply.location ? { location: reply.location } : {}) });
+    res.writeHead(reply.status, {
+      'content-type': 'application/json',
+      ...(reply.location ? { location: reply.location } : {}),
+    });
     res.end(JSON.stringify(reply.body));
   });
   await new Promise<void>((r) => registry.listen(0, '127.0.0.1', r));
@@ -195,7 +201,9 @@ describe('verify_nppes', () => {
 
   it('refuses when the lookup is switched off for the client', async () => {
     const client = await connect(
-      deps({ verify: { nppesEnabled: false, nppesBaseUrl: registryUrl, stateLicenseEnabled: false, timeoutMs: 5_000 } }),
+      deps({
+        verify: { nppesEnabled: false, nppesBaseUrl: registryUrl, stateLicenseEnabled: false, timeoutMs: 5_000 },
+      }),
     );
     const res = await client.callTool({ name: 'verify_nppes', arguments: { npi: '1063837144' } });
     expect(res.isError).toBe(true);
@@ -209,7 +217,10 @@ describe('verify_nppes', () => {
       await client.callTool({ name: 'providers_upsert', arguments: { name: 'Jackelyn Kelley', npi: '1063837144' } }),
     );
     const other = await connectTools('other', [...providerTools, ...verifyTools], deps({ client: 'other' }));
-    const res = await other.callTool({ name: 'verify_nppes', arguments: { npi: '1063837144', provider_id: p.provider_id } });
+    const res = await other.callTool({
+      name: 'verify_nppes',
+      arguments: { npi: '1063837144', provider_id: p.provider_id },
+    });
     expect(res.isError).toBe(true);
   });
 });
@@ -237,7 +248,10 @@ describe('verify_state_license', () => {
 
   it('rejects a state code that is not two letters', async () => {
     const client = await connect();
-    const res = await client.callTool({ name: 'verify_state_license', arguments: { state: 'California', number: 'A1' } });
+    const res = await client.callTool({
+      name: 'verify_state_license',
+      arguments: { state: 'California', number: 'A1' },
+    });
     expect(res.isError).toBe(true);
   });
 });

@@ -24,9 +24,7 @@ describe('redactPages', () => {
   it('replaces an SSN with a token and reports the plaintext hit', () => {
     const out = redactPages([{ num: 1, text: 'Name: Ada\nSSN: 123-45-6789\n' }]);
     expect(out.pages[0].text).toBe('Name: Ada\nSSN: {{ssn:1}}\n');
-    expect(out.hits).toEqual([
-      { kind: 'ssn', value: '123-45-6789', token: '{{ssn:1}}', fieldName: 'ssn', page: 1 },
-    ]);
+    expect(out.hits).toEqual([{ kind: 'ssn', value: '123-45-6789', token: '{{ssn:1}}', fieldName: 'ssn', page: 1 }]);
   });
 
   it('replaces an EIN and a valid DEA number', () => {
@@ -90,9 +88,7 @@ describe('redactPages', () => {
   it('redacts a bare nine-digit SSN with no punctuation', () => {
     const out = redactPages([{ num: 1, text: 'SSN 123456789 filed' }]);
     expect(out.pages[0].text).toBe('SSN {{ssn:1}} filed');
-    expect(out.hits).toEqual([
-      { kind: 'ssn', value: '123456789', token: '{{ssn:1}}', fieldName: 'ssn', page: 1 },
-    ]);
+    expect(out.hits).toEqual([{ kind: 'ssn', value: '123456789', token: '{{ssn:1}}', fieldName: 'ssn', page: 1 }]);
   });
 
   it('does not redact nine bare digits that are part of a longer, ten-digit NPI', () => {

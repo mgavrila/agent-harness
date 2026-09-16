@@ -1,7 +1,7 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { PDFDocument, StandardFonts } from 'pdf-lib';
 import { DEFAULT_POLICY, MASKED } from '@harness/core-tools';
 import { startFakeGateway, type FakeGateway } from '@harness/core-tools/fake-gateway';
@@ -23,7 +23,15 @@ const REPLY = JSON.stringify({
     specialty: { value: 'Cardiology', confidence: 0.4, source_page: 1 },
   },
   credentials: [
-    { kind: 'license', state: 'CA', issuer: 'Medical Board of California', issued_at: '2020-04-01', expires_at: '2027-03-31', confidence: 0.9, source_page: 1 },
+    {
+      kind: 'license',
+      state: 'CA',
+      issuer: 'Medical Board of California',
+      issued_at: '2020-04-01',
+      expires_at: '2027-03-31',
+      confidence: 0.9,
+      source_page: 1,
+    },
   ],
 });
 

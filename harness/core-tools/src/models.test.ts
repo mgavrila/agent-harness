@@ -40,7 +40,13 @@ describe('callModel', () => {
   it('records one model_calls row per call, with the run id from the session context', async () => {
     const [run] = await db.insert(runs).values({ client: 'test', caller: 'test-caller' }).returning();
     const d = deps({ context: { runId: run.id } });
-    gateway.setResponder(() => ({ content: 'x', inputTokens: 5, outputTokens: 2, costHeader: '0.5', modelName: 'gemini/gemini-3-flash-preview' }));
+    gateway.setResponder(() => ({
+      content: 'x',
+      inputTokens: 5,
+      outputTokens: 2,
+      costHeader: '0.5',
+      modelName: 'gemini/gemini-3-flash-preview',
+    }));
     await callModel(d, { route: 'extract', messages: [{ role: 'user', content: 'go' }] });
     const rows = await db.select().from(modelCalls).where(eq(modelCalls.runId, run.id));
     expect(rows).toHaveLength(1);
@@ -68,7 +74,10 @@ describe('callModel', () => {
   });
 
   it('throws a ToolError naming the route and status, never echoing the prompt', async () => {
-    gateway.setResponder(() => ({ status: 500, errorBody: { error: { message: 'upstream said: SECRET PROMPT TEXT', type: 'api_error' } } }));
+    gateway.setResponder(() => ({
+      status: 500,
+      errorBody: { error: { message: 'upstream said: SECRET PROMPT TEXT', type: 'api_error' } },
+    }));
     await expect(
       callModel(deps(), { route: 'judge', messages: [{ role: 'user', content: 'SECRET PROMPT TEXT' }] }),
     ).rejects.toThrow(ToolError);
@@ -84,7 +93,9 @@ describe('callModel', () => {
   it('reports a budget refusal in plain words', async () => {
     gateway.setResponder(() => ({
       status: 400,
-      errorBody: { error: { message: 'Budget has been exceeded! Current cost: 5.1, Max budget: 5.0', type: 'budget_exceeded' } },
+      errorBody: {
+        error: { message: 'Budget has been exceeded! Current cost: 5.1, Max budget: 5.0', type: 'budget_exceeded' },
+      },
     }));
     await expect(callModel(deps(), { route: 'extract', messages: [{ role: 'user', content: 'go' }] })).rejects.toThrow(
       /daily budget/,
@@ -95,7 +106,7 @@ describe('callModel', () => {
     const before = (await db.select().from(modelCalls)).length;
     gateway.setResponder(() => ({ status: 503, errorBody: {} }));
     await callModel(deps(), { route: 'chat', messages: [{ role: 'user', content: 'go' }] }).catch(() => undefined);
-    expect((await db.select().from(modelCalls))).toHaveLength(before);
+    expect(await db.select().from(modelCalls)).toHaveLength(before);
   });
 
   it('trips the per-run breaker once a run has made its limit of calls', async () => {
@@ -113,7 +124,7 @@ describe('callModel', () => {
     expect(await db.select().from(modelCalls).where(eq(modelCalls.runId, run.id))).toHaveLength(2);
   });
 
-  it('counts only this client\'s calls against the breaker', async () => {
+  it("counts only this client's calls against the breaker", async () => {
     // Every query carries the client. Run ids are uuids so a collision is not
     // the worry; the rule is that no client's counter can be moved by another
     // client's rows, and this was the one new query that omitted the column.
@@ -153,10 +164,13 @@ describe('callModel', () => {
       return { content: 'late' };
     });
     await expect(
-      callModel(deps({ gateway: { baseUrl: gateway.url, apiKey: 'sk-test-key', timeoutMs: 30, maxCallsPerRun: 100 } }), {
-        route: 'chat',
-        messages: [{ role: 'user', content: 'go' }],
-      }),
+      callModel(
+        deps({ gateway: { baseUrl: gateway.url, apiKey: 'sk-test-key', timeoutMs: 30, maxCallsPerRun: 100 } }),
+        {
+          route: 'chat',
+          messages: [{ role: 'user', content: 'go' }],
+        },
+      ),
     ).rejects.toThrow(/timed out/);
   });
 });
@@ -236,7 +250,7 @@ describe('callModelJson', () => {
     // validates the text, since a valid HTTP response was received; a later
     // validation failure does not roll it back. Pinning that here, not just
     // asserting it does not throw, is the point of this test.
-    expect((await db.select().from(modelCalls))).toHaveLength(before + 1);
+    expect(await db.select().from(modelCalls)).toHaveLength(before + 1);
   });
 });
 

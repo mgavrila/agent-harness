@@ -22,12 +22,12 @@ services:
       POSTGRES_PASSWORD: harness
       POSTGRES_DB: harness
     ports:
-      - "127.0.0.1:15432:5432"
+      - '127.0.0.1:15432:5432'
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./postgres/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U harness -d harness"]
+      test: ['CMD-SHELL', 'pg_isready -U harness -d harness']
       interval: 5s
       timeout: 3s
       retries: 10
@@ -37,7 +37,7 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    command: ["--config", "/app/config.yaml", "--port", "4000"]
+    command: ['--config', '/app/config.yaml', '--port', '4000']
     environment:
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?set LITELLM_MASTER_KEY in .env}
       DATABASE_URL: postgres://harness:harness@postgres:5432/litellm
@@ -50,10 +50,14 @@ services:
     ports:
       # Loopback only. The gateway holds every provider key; nothing outside
       # this host may reach it.
-      - "127.0.0.1:4000:4000"
+      - '127.0.0.1:4000:4000'
     healthcheck:
       # /health/liveliness is the unauthenticated probe. /health needs a key.
-      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:4000/health/liveliness').status==200 else 1)\""]
+      test:
+        [
+          'CMD-SHELL',
+          'python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen(''http://127.0.0.1:4000/health/liveliness'').status==200 else 1)"',
+        ]
       interval: 10s
       timeout: 5s
       retries: 12
@@ -65,7 +69,7 @@ services:
     build:
       context: ../..
       dockerfile: harness/compose/core-tools.Dockerfile
-    profiles: ["build-only"]
+    profiles: ['build-only']
     environment:
       DATABASE_URL: postgres://harness:harness@postgres:5432/harness
       HARNESS_GATEWAY_URL: http://litellm:4000
@@ -86,8 +90,8 @@ services:
   # own and is only ever added to, so its job records survive a redeploy.
   hermes-init:
     image: busybox:1.37
-    profiles: ["demo"]
-    user: "0:0"
+    profiles: ['demo']
+    user: '0:0'
     volumes:
       - hermesdata:/data
       # The shared file store, mounted here only to create and chown it.
@@ -99,8 +103,8 @@ services:
       - ../../clients/demo-practice:/srv/client:ro
       - ../../.env:/srv/env/.env:ro
     environment:
-      HERMES_UID: "${HERMES_UID:-1000}"
-      HERMES_GID: "${HERMES_GID:-1000}"
+      HERMES_UID: '${HERMES_UID:-1000}'
+      HERMES_GID: '${HERMES_GID:-1000}'
     command:
       - sh
       - -c
@@ -143,7 +147,7 @@ services:
       context: ../..
       dockerfile: harness/compose/hermes.Dockerfile
     image: harness-hermes
-    profiles: ["demo"]
+    profiles: ['demo']
     restart: unless-stopped
     depends_on:
       postgres:
@@ -158,21 +162,21 @@ services:
       # Hermes has its own Slack app (SLACK_BOT_TOKEN / SLACK_APP_TOKEN). The
       # approver's app is a different one and its tokens have no business
       # here, so they are blanked out of what env_file brought in.
-      APPROVALS_SLACK_BOT_TOKEN: ""
-      APPROVALS_SLACK_APP_TOKEN: ""
+      APPROVALS_SLACK_BOT_TOKEN: ''
+      APPROVALS_SLACK_APP_TOKEN: ''
       # These override the .env values, which point at the host from a shell.
-      HERMES_UID: "${HERMES_UID:-1000}"
-      HERMES_GID: "${HERMES_GID:-1000}"
-      DATABASE_URL: "postgres://harness:harness@postgres:5432/harness"
-      HARNESS_STORAGE_DIR: "/srv/harness-storage"
-      HARNESS_FORMS_DIR: "/srv/agent-harness/packs/healthcare/forms"
-      HARNESS_POLICY_FILE: "/srv/agent-harness/clients/demo-practice/policy.yaml"
+      HERMES_UID: '${HERMES_UID:-1000}'
+      HERMES_GID: '${HERMES_GID:-1000}'
+      DATABASE_URL: 'postgres://harness:harness@postgres:5432/harness'
+      HARNESS_STORAGE_DIR: '/srv/harness-storage'
+      HARNESS_FORMS_DIR: '/srv/agent-harness/packs/healthcare/forms'
+      HARNESS_POLICY_FILE: '/srv/agent-harness/clients/demo-practice/policy.yaml'
       # The core-tools child Hermes launches reaches the proxy on the compose
       # network, not on the host loopback the .env value names. The master key
       # comes from .env: it is the only credential this container needs for
       # models, because the provider keys never leave the proxy.
-      HARNESS_GATEWAY_URL: "http://litellm:4000"
-      LITELLM_MASTER_KEY: "${LITELLM_MASTER_KEY:?set LITELLM_MASTER_KEY in .env}"
+      HARNESS_GATEWAY_URL: 'http://litellm:4000'
+      LITELLM_MASTER_KEY: '${LITELLM_MASTER_KEY:?set LITELLM_MASTER_KEY in .env}'
     volumes:
       - hermesdata:/opt/data
       - storage:/srv/harness-storage
@@ -188,14 +192,14 @@ services:
       # it, but the process that could use this socket runs as HERMES_UID —
       # see hermes.Dockerfile.
       - /var/run/docker.sock:/var/run/docker.sock
-    command: ["gateway", "run"]
+    command: ['gateway', 'run']
 
   approvals:
     build:
       context: ../..
       dockerfile: harness/compose/node.Dockerfile
     image: harness-approvals
-    profiles: ["demo"]
+    profiles: ['demo']
     restart: unless-stopped
     depends_on:
       postgres:
@@ -205,34 +209,34 @@ services:
     # approver's container and the approver's tokens never enter Hermes's.
     # Anything main.ts or its core-tools child reads must be listed here.
     environment:
-      DATABASE_URL: "postgres://harness:harness@postgres:5432/harness"
-      HARNESS_ENCRYPTION_KEY: "${HARNESS_ENCRYPTION_KEY:-}"
-      HARNESS_CLIENT: "${HARNESS_CLIENT:-demo-practice}"
-      HARNESS_STORAGE_DIR: "/srv/harness-storage"
-      HARNESS_FORMS_DIR: "/srv/agent-harness/packs/healthcare/forms"
-      HARNESS_POLICY_FILE: "/srv/agent-harness/clients/demo-practice/policy.yaml"
+      DATABASE_URL: 'postgres://harness:harness@postgres:5432/harness'
+      HARNESS_ENCRYPTION_KEY: '${HARNESS_ENCRYPTION_KEY:-}'
+      HARNESS_CLIENT: '${HARNESS_CLIENT:-demo-practice}'
+      HARNESS_STORAGE_DIR: '/srv/harness-storage'
+      HARNESS_FORMS_DIR: '/srv/agent-harness/packs/healthcare/forms'
+      HARNESS_POLICY_FILE: '/srv/agent-harness/clients/demo-practice/policy.yaml'
       # Passed to the core-tools child this app spawns, which refuses to start
       # without a gateway key. Same proxy as Hermes, reached on the compose
       # network rather than the host loopback the .env value names.
-      HARNESS_GATEWAY_URL: "http://litellm:4000"
-      LITELLM_MASTER_KEY: "${LITELLM_MASTER_KEY:?set LITELLM_MASTER_KEY in .env}"
+      HARNESS_GATEWAY_URL: 'http://litellm:4000'
+      LITELLM_MASTER_KEY: '${LITELLM_MASTER_KEY:?set LITELLM_MASTER_KEY in .env}'
       # The approver's own Slack app — a second app, not Hermes's. One app
       # token cannot serve two Socket Mode connections: Slack delivers each
       # event to exactly one of them, so the buttons would work half the time.
-      APPROVALS_SLACK_BOT_TOKEN: "${APPROVALS_SLACK_BOT_TOKEN:-}"
-      APPROVALS_SLACK_APP_TOKEN: "${APPROVALS_SLACK_APP_TOKEN:-}"
-      SLACK_APPROVALS_CHANNEL: "${SLACK_APPROVALS_CHANNEL:-}"
-      SLACK_ALLOWED_USERS: "${SLACK_ALLOWED_USERS:-}"
-      APPROVALS_POLL_SECONDS: "${APPROVALS_POLL_SECONDS:-5}"
-      EFFECTS_DISPATCH_SECONDS: "${EFFECTS_DISPATCH_SECONDS:-5}"
-      RECONCILE_SECONDS: "${RECONCILE_SECONDS:-300}"
-      APPROVALS_HEALTH_PORT: "8787"
-      APPROVALS_HEALTH_BIND: "${APPROVALS_HEALTH_BIND:-0.0.0.0}"
+      APPROVALS_SLACK_BOT_TOKEN: '${APPROVALS_SLACK_BOT_TOKEN:-}'
+      APPROVALS_SLACK_APP_TOKEN: '${APPROVALS_SLACK_APP_TOKEN:-}'
+      SLACK_APPROVALS_CHANNEL: '${SLACK_APPROVALS_CHANNEL:-}'
+      SLACK_ALLOWED_USERS: '${SLACK_ALLOWED_USERS:-}'
+      APPROVALS_POLL_SECONDS: '${APPROVALS_POLL_SECONDS:-5}'
+      EFFECTS_DISPATCH_SECONDS: '${EFFECTS_DISPATCH_SECONDS:-5}'
+      RECONCILE_SECONDS: '${RECONCILE_SECONDS:-300}'
+      APPROVALS_HEALTH_PORT: '8787'
+      APPROVALS_HEALTH_BIND: '${APPROVALS_HEALTH_BIND:-0.0.0.0}'
     ports:
       # Localhost only: the health endpoint is for the watchdogs, not the LAN.
       # The host side is configurable because 8787 is not always free on the
       # operator's machine; the container always listens on 8787.
-      - "127.0.0.1:${APPROVALS_HEALTH_HOST_PORT:-8787}:8787"
+      - '127.0.0.1:${APPROVALS_HEALTH_HOST_PORT:-8787}:8787'
     volumes:
       # The same named volume as hermes: core-tools writes the file there and
       # the Slack sink reads it back. Drifting mounts are the usual cause of an

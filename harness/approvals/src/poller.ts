@@ -107,7 +107,9 @@ export async function postPendingApprovals(deps: PollDeps, limit = 20): Promise<
         blocks: approvalBlocks(row),
       });
     } catch (err) {
-      console.error(`approvals: could not post the card for ${row.id}: ${err instanceof Error ? err.message : String(err)}`);
+      console.error(
+        `approvals: could not post the card for ${row.id}: ${err instanceof Error ? err.message : String(err)}`,
+      );
       await deps.db
         .update(approvals)
         .set({ slackChannel: null, claimedAt: null })

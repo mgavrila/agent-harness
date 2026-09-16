@@ -107,13 +107,17 @@ function executionFailureLine(error: string | undefined): string {
   return `Execution failed: ${capped}. Nothing was sent.`;
 }
 
-export function decidedBlocks(row: ApprovalRow, outcome: { executed: boolean; tool?: string; error?: string }): unknown[] {
+export function decidedBlocks(
+  row: ApprovalRow,
+  outcome: { executed: boolean; tool?: string; error?: string },
+): unknown[] {
   const who = row.decidedBy ? `<@${row.decidedBy}>` : 'someone';
   const when = row.decidedAt ? ` at ${slackDate(row.decidedAt)}` : '';
   const lines: string[] = [];
   if (row.status === 'approved') {
     lines.push(`:white_check_mark: Approved by ${who}${when}.`);
-    if (outcome.executed) lines.push(`Executed \`${outcome.tool ?? row.action}\`. Delivery is queued in the effects outbox.`);
+    if (outcome.executed)
+      lines.push(`Executed \`${outcome.tool ?? row.action}\`. Delivery is queued in the effects outbox.`);
     else lines.push(executionFailureLine(outcome.error));
   } else {
     lines.push(`:no_entry: Declined by ${who}${when}. Nothing was sent.`);

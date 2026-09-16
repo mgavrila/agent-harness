@@ -22,7 +22,10 @@ function report(overrides: Record<string, number> = {}): Report {
         fieldAccuracy: 0.96,
         credentialAccuracy: 0.95,
         restrictedRecall: 1,
-        byKind: { state_license: { total: 20, correct: 20, accuracy: 1 }, w9: { total: 30, correct: 28, accuracy: 28 / 30 } },
+        byKind: {
+          state_license: { total: 20, correct: 20, accuracy: 1 },
+          w9: { total: 30, correct: 28, accuracy: 28 / 30 },
+        },
         calibration: emptyCalibration,
       },
       scan: {
@@ -31,7 +34,10 @@ function report(overrides: Record<string, number> = {}): Report {
         fieldAccuracy: 0.87,
         credentialAccuracy: 0.8,
         restrictedRecall: 0.9,
-        byKind: { state_license: { total: 20, correct: 18, accuracy: 0.9 }, w9: { total: 30, correct: 25, accuracy: 25 / 30 } },
+        byKind: {
+          state_license: { total: 20, correct: 18, accuracy: 0.9 },
+          w9: { total: 30, correct: 25, accuracy: 25 / 30 },
+        },
         calibration: emptyCalibration,
       },
     },
@@ -215,7 +221,10 @@ describe('compareToBaseline', () => {
 
 describe('renderMarkdown', () => {
   it('leads with the verdict and names the serving model', () => {
-    const md = renderMarkdown(report({ 'scan.field_accuracy': 0.91 }), compareToBaseline(report({ 'scan.field_accuracy': 0.91 }), report()));
+    const md = renderMarkdown(
+      report({ 'scan.field_accuracy': 0.91 }),
+      compareToBaseline(report({ 'scan.field_accuracy': 0.91 }), report()),
+    );
     expect(md.split('\n')[0]).toMatch(/^# /);
     expect(md).toMatch(/PROMOTE|HOLD/);
     expect(md).toContain('gemini/gemini-3-flash-preview');

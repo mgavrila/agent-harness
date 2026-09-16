@@ -5,8 +5,12 @@ import {
   buildExtractionSchema,
   loadHealthcareManifest,
   parseManifest,
+  DATA_BLOCK_SYSTEM_PROMPT,
+  buildClassificationMessages,
+  buildExtractionMessages,
+  parseExtraction,
+  wrapDocument,
 } from './extract.js';
-import { DATA_BLOCK_SYSTEM_PROMPT, buildClassificationMessages, buildExtractionMessages, parseExtraction, wrapDocument } from './extract.js';
 
 const manifest = loadHealthcareManifest();
 
@@ -77,8 +81,14 @@ describe('buildExtractionSchema', () => {
       required: ['value', 'confidence', 'source_page'],
       description: 'Ten-digit National Provider Identifier. Digits only, no spaces.',
       properties: {
-        value: { type: 'string', description: 'The value as printed, or an empty string when the document does not state it.' },
-        confidence: { type: 'number', description: 'How sure you are, from 0 to 1. Use a low number when you are guessing.' },
+        value: {
+          type: 'string',
+          description: 'The value as printed, or an empty string when the document does not state it.',
+        },
+        confidence: {
+          type: 'number',
+          description: 'How sure you are, from 0 to 1. Use a low number when you are guessing.',
+        },
         source_page: { type: 'integer', description: 'The 1-based page this value came from, or 0 when it is absent.' },
       },
     });
@@ -89,7 +99,15 @@ describe('buildExtractionSchema', () => {
     const itemProps = items.properties as Record<string, Record<string, unknown>>;
     expect(itemProps.kind.enum).toEqual(['license', 'dea', 'malpractice', 'board_cert']);
     expect(Object.keys(itemProps)).not.toContain('number');
-    expect(Object.keys(itemProps).sort()).toEqual(['confidence', 'expires_at', 'issued_at', 'issuer', 'kind', 'source_page', 'state']);
+    expect(Object.keys(itemProps).sort()).toEqual([
+      'confidence',
+      'expires_at',
+      'issued_at',
+      'issuer',
+      'kind',
+      'source_page',
+      'state',
+    ]);
   });
 
   it('inlines everything, so no provider has to resolve a $ref', () => {
@@ -105,7 +123,13 @@ describe('buildClassificationSchema', () => {
     expect(name).toBe('document_classification');
     expect(schema.required).toEqual(['document_kind', 'confidence']);
     const props = schema.properties as Record<string, { enum?: string[] }>;
-    expect(props.document_kind.enum).toEqual(['state_license', 'dea_certificate', 'malpractice_certificate', 'w9', 'other']);
+    expect(props.document_kind.enum).toEqual([
+      'state_license',
+      'dea_certificate',
+      'malpractice_certificate',
+      'w9',
+      'other',
+    ]);
   });
 });
 
@@ -157,7 +181,15 @@ describe('parseExtraction', () => {
       specialty: { value: 'Internal Medicine', confidence: 1.4, source_page: 2 },
     },
     credentials: [
-      { kind: 'license', state: 'CA', issuer: 'Medical Board of California', issued_at: '2020-04-01', expires_at: '2027-03-31', confidence: 0.95, source_page: 1 },
+      {
+        kind: 'license',
+        state: 'CA',
+        issuer: 'Medical Board of California',
+        issued_at: '2020-04-01',
+        expires_at: '2027-03-31',
+        confidence: 0.95,
+        source_page: 1,
+      },
       { kind: 'dea', state: '', issuer: '', issued_at: '', expires_at: 'not printed', confidence: 0.3, source_page: 2 },
     ],
   };
@@ -169,7 +201,12 @@ describe('parseExtraction', () => {
 
   it('carries confidence and source page, clamping confidence and dropping page 0', () => {
     const out = parseExtraction(raw, manifest);
-    expect(out.fields.find((f) => f.name === 'npi')).toEqual({ name: 'npi', value: '1234567890', confidence: 0.62, source_page: 1 });
+    expect(out.fields.find((f) => f.name === 'npi')).toEqual({
+      name: 'npi',
+      value: '1234567890',
+      confidence: 0.62,
+      source_page: 1,
+    });
     expect(out.fields.find((f) => f.name === 'specialty')!.confidence).toBe(1);
   });
 

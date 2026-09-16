@@ -68,12 +68,16 @@ export function resolveMappings(mappings: TemplateMapping[], data: ProviderData)
 
     if (m.source === 'field') {
       if (isRestrictedName(m.name)) {
-        throw new ToolError(`form template maps the restricted identifier ${label}; restricted values are never printed on a form`);
+        throw new ToolError(
+          `form template maps the restricted identifier ${label}; restricted values are never printed on a form`,
+        );
       }
       const row = data.fields.find((f) => f.name === m.name);
       if (!row) return { ...base, value: null, blocked: 'missing' };
       if (row.restricted) {
-        throw new ToolError(`form template maps ${label}, which is stored as a restricted value and is never printed on a form`);
+        throw new ToolError(
+          `form template maps ${label}, which is stored as a restricted value and is never printed on a form`,
+        );
       }
       if (!USABLE_FIELD_STATUSES.has(row.status)) return { ...base, value: null, blocked: 'pending' };
       const value = present(row.value);
@@ -83,10 +87,13 @@ export function resolveMappings(mappings: TemplateMapping[], data: ProviderData)
     const credential = latestCredential(data, m.kind);
     if (!credential) return { ...base, value: null, blocked: 'missing' };
     const raw =
-      m.property === 'issuer' ? credential.issuer
-      : m.property === 'state' ? credential.state
-      : m.property === 'issued_at' ? credential.issuedAt
-      : credential.expiresAt;
+      m.property === 'issuer'
+        ? credential.issuer
+        : m.property === 'state'
+          ? credential.state
+          : m.property === 'issued_at'
+            ? credential.issuedAt
+            : credential.expiresAt;
     const value = present(raw);
     return { ...base, value, blocked: value ? null : 'missing' };
   });
@@ -112,7 +119,9 @@ export async function fillTemplatePdf(
   const known = new Set(form.getFields().map((f) => f.getName()));
   for (const { pdf_field, value } of values) {
     if (!known.has(pdf_field)) {
-      throw new ToolError(`form template has no field named "${pdf_field}"; regenerate the templates or fix templates.json`);
+      throw new ToolError(
+        `form template has no field named "${pdf_field}"; regenerate the templates or fix templates.json`,
+      );
     }
     form.getTextField(pdf_field).setText(value);
   }

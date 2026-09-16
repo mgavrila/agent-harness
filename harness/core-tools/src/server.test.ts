@@ -23,20 +23,14 @@ describe('numberFromEnv', () => {
 
   it('rejects a value that is not a number', () => {
     process.env[NAME] = 'soon';
-    expect(() => numberFromEnv(NAME, 24, { min: 1, max: 720 })).toThrow(
-      `${NAME} must be a number between 1 and 720`,
-    );
+    expect(() => numberFromEnv(NAME, 24, { min: 1, max: 720 })).toThrow(`${NAME} must be a number between 1 and 720`);
   });
 
   it('rejects a value outside the range', () => {
     process.env[NAME] = '0';
-    expect(() => numberFromEnv(NAME, 24, { min: 1, max: 720 })).toThrow(
-      `${NAME} must be a number between 1 and 720`,
-    );
+    expect(() => numberFromEnv(NAME, 24, { min: 1, max: 720 })).toThrow(`${NAME} must be a number between 1 and 720`);
     process.env[NAME] = '1000';
-    expect(() => numberFromEnv(NAME, 24, { min: 1, max: 720 })).toThrow(
-      `${NAME} must be a number between 1 and 720`,
-    );
+    expect(() => numberFromEnv(NAME, 24, { min: 1, max: 720 })).toThrow(`${NAME} must be a number between 1 and 720`);
   });
 });
 

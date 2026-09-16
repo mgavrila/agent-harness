@@ -1,9 +1,9 @@
-import { describe, it, expect } from 'vitest';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
+import { describe, it, expect } from 'vitest';
 import { PDFDocument } from 'pdf-lib';
-import { defaultFormsDir, loadManifest, getTemplate, mappingLabel } from './templates.js';
 import { isRestrictedName } from '../tools/providers.js';
+import { defaultFormsDir, loadManifest, getTemplate, mappingLabel } from './templates.js';
 
 const dir = defaultFormsDir();
 
@@ -21,7 +21,12 @@ describe('form template manifest', () => {
     for (const template of manifest.templates) {
       const bytes = await readFile(path.join(dir, template.file));
       const pdf = await PDFDocument.load(bytes);
-      const names = new Set(pdf.getForm().getFields().map((f) => f.getName()));
+      const names = new Set(
+        pdf
+          .getForm()
+          .getFields()
+          .map((f) => f.getName()),
+      );
       for (const mapping of template.mappings) {
         expect(names, `${template.id} -> ${mapping.pdf_field}`).toContain(mapping.pdf_field);
       }

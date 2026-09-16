@@ -1,10 +1,17 @@
-import { describe, it, expect } from 'vitest';
 import { mkdtemp, rm, writeFile, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
+import { describe, it, expect } from 'vitest';
 import { approvals, encrypt, toolEffects } from '@harness/db';
-import { runPollTick, runDispatchTick, runReconcileTick, collectHealth, startRunner, type RunnerDeps } from './runner.js';
+import {
+  runPollTick,
+  runDispatchTick,
+  runReconcileTick,
+  collectHealth,
+  startRunner,
+  type RunnerDeps,
+} from './runner.js';
 import { slackSinks } from './sinks.js';
 import { FakeCoreToolsClient, FakeSlack, useTestDb } from './testing.js';
 
@@ -53,7 +60,12 @@ describe('runner ticks', () => {
     expect(await runDispatchTick(deps)).toMatchObject({ dispatched: 1 });
     expect(api.posts.map((p) => p.text)).toContain('2 credentials expire within 90 days.');
 
-    const handle = startRunner(deps, { pollMs: 3_600_000, dispatchMs: 3_600_000, reconcileMs: 3_600_000, staleAfterMinutes: 10 });
+    const handle = startRunner(deps, {
+      pollMs: 3_600_000,
+      dispatchMs: 3_600_000,
+      reconcileMs: 3_600_000,
+      staleAfterMinutes: 10,
+    });
     try {
       const health = await collectHealth(db, 'demo-practice', handle, now);
       expect(health.ok).toBe(true);
@@ -135,7 +147,12 @@ describe('runner ticks', () => {
     const core = new FakeCoreToolsClient();
     core.failReconcileWith = 'boom';
     const deps = makeDeps(api, core);
-    const handle = startRunner(deps, { pollMs: 3_600_000, dispatchMs: 3_600_000, reconcileMs: 10, staleAfterMinutes: 10 });
+    const handle = startRunner(deps, {
+      pollMs: 3_600_000,
+      dispatchMs: 3_600_000,
+      reconcileMs: 10,
+      staleAfterMinutes: 10,
+    });
     try {
       await new Promise((resolve) => setTimeout(resolve, 40));
       const unhealthy = await collectHealth(db, 'demo-practice', handle, now);

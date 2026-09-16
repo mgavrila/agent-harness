@@ -2,7 +2,14 @@ import * as z from 'zod/v4';
 import { and, asc, eq, inArray, lte, sql } from 'drizzle-orm';
 import { credentials, deadlines, providers } from '@harness/db';
 import { defineTool, type AnyToolDef } from '../registry.js';
-import { computeDeadlines, daysUntil, addDays, bucketFor, digestKeyFor, URGENCY_BUCKETS } from '../deadlines/compute.js';
+import {
+  computeDeadlines,
+  daysUntil,
+  addDays,
+  bucketFor,
+  digestKeyFor,
+  URGENCY_BUCKETS,
+} from '../deadlines/compute.js';
 import { requireProvider } from './providers.js';
 
 /** Identifies a deadline row within a provider, matching `deadlines_credential_kind_uq`. */
@@ -10,7 +17,8 @@ const deadlineKey = (d: { credentialId: string; kind: string }) => `${d.credenti
 
 const deadlinesCompute = defineTool({
   name: 'deadlines_compute',
-  description: 'Recompute expiration and renewal-start deadlines for a provider from its credentials. Deterministic, no model call.',
+  description:
+    'Recompute expiration and renewal-start deadlines for a provider from its credentials. Deterministic, no model call.',
   actionClass: 'write.internal',
   input: z.object({ provider_id: z.string().uuid() }),
   output: z.object({
@@ -59,7 +67,10 @@ const deadlinesUpcoming = defineTool({
   actionClass: 'read',
   input: z.object({
     window_days: z.number().int().min(1).max(730).default(90),
-    today: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+    today: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/)
+      .optional(),
     limit: z.number().int().min(1).max(1000).default(200),
   }),
   output: z.object({
@@ -119,7 +130,9 @@ const deadlinesUpcoming = defineTool({
         bucket: bucketFor(daysLeft),
       };
     });
-    const digest_key = digestKeyFor(items.map((i) => ({ credentialId: i.credential_id, kind: i.kind, bucket: i.bucket })));
+    const digest_key = digestKeyFor(
+      items.map((i) => ({ credentialId: i.credential_id, kind: i.kind, bucket: i.bucket })),
+    );
     return { items, digest_key };
   },
 });

@@ -1,7 +1,7 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdir, mkdtemp, rm, readFile, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { storageRoot, outRoot, contentTag, resolveOutFile, writeOutFile } from './storage.js';
 
 let root: string;

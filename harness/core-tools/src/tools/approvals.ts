@@ -36,7 +36,10 @@ const approvalsExecute = defineTool({
     if (!row) throw new ToolError(`approval ${approval_id} is not executable: it must be approved and unexpired`);
     if (!row.payloadEncrypted) throw new ToolError(`approval ${approval_id} has no executable payload`);
 
-    const parsed = JSON.parse(decrypt(row.payloadEncrypted, deps.encryptionKey)) as { tool: string; args: Record<string, unknown> };
+    const parsed = JSON.parse(decrypt(row.payloadEncrypted, deps.encryptionKey)) as {
+      tool: string;
+      args: Record<string, unknown>;
+    };
     const target = deps.tools.get(parsed.tool);
     if (!target) throw new ToolError(`approval ${approval_id} references unknown tool ${parsed.tool}`);
     // Policy is re-read at replay time: an approval granted before the class

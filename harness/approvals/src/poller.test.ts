@@ -20,9 +20,7 @@ function dbWithFailingSlackTsWrite(real: Db): Db {
       const builder = real.update(table);
       return {
         set: (values: Record<string, unknown>) =>
-          'slackTs' in values
-            ? { where: () => Promise.reject(new Error('statement timeout')) }
-            : builder.set(values as never),
+          'slackTs' in values ? { where: () => Promise.reject(new Error('statement timeout')) } : builder.set(values),
       };
     },
   } as unknown as Db;

@@ -50,7 +50,12 @@ const formsListTemplates = defineTool({
   input: z.object({}),
   output: z.object({
     templates: z.array(
-      z.object({ id: z.string(), title: z.string(), required_inputs: z.array(z.string()), optional_inputs: z.array(z.string()) }),
+      z.object({
+        id: z.string(),
+        title: z.string(),
+        required_inputs: z.array(z.string()),
+        optional_inputs: z.array(z.string()),
+      }),
     ),
   }),
   handler: async (_args, deps) => {
@@ -199,7 +204,10 @@ const formsRelease = defineTool({
   actionClass: 'external',
   input: z.object({
     file_id: z.string().min(1).max(300),
-    channel: z.string().regex(/^[CGD][A-Z0-9]{2,}$/, 'channel must be a Slack channel id').optional(),
+    channel: z
+      .string()
+      .regex(/^[CGD][A-Z0-9]{2,}$/, 'channel must be a Slack channel id')
+      .optional(),
   }),
   output: z.object({
     effect_id: z.string(),

@@ -1,10 +1,10 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { PDFDocument, StandardFonts } from 'pdf-lib';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { PDFDocument, StandardFonts } from 'pdf-lib';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { ToolError } from '../registry.js';
 import { assertBinary, extractDocumentText, extractPdfText, isPdf, ocrImage, ocrPdf, pdfPageCount } from './text.js';
 

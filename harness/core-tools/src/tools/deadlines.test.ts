@@ -173,7 +173,10 @@ describe('deadlines tools', () => {
     const client = await connectDeadlines();
     const id = await seed(client);
     await client.callTool({ name: 'deadlines_compute', arguments: { provider_id: id } });
-    const res = await client.callTool({ name: 'deadlines_upcoming', arguments: { window_days: 30, today: '2027-06-15' } });
+    const res = await client.callTool({
+      name: 'deadlines_upcoming',
+      arguments: { window_days: 30, today: '2027-06-15' },
+    });
     const { items } = resultOf<{ items: UpcomingItem[] }>(res);
     expect(items.some((i) => i.credential_kind === 'dea' && i.kind === 'expiration')).toBe(true);
   });

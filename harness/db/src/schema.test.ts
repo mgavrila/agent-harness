@@ -19,7 +19,10 @@ beforeEach(async () => {
 
 describe('schema', () => {
   it('inserts and reads a provider', async () => {
-    const [row] = await db.insert(providers).values({ client: 'test', name: 'Dr. Ada Lovelace', npi: '1234567890' }).returning();
+    const [row] = await db
+      .insert(providers)
+      .values({ client: 'test', name: 'Dr. Ada Lovelace', npi: '1234567890' })
+      .returning();
     const found = await db.query.providers.findFirst({ where: eq(providers.id, row.id) });
     expect(found?.name).toBe('Dr. Ada Lovelace');
     expect(found?.status).toBe('active');
@@ -31,20 +34,40 @@ describe('schema', () => {
   });
 
   it('audit_log rejects UPDATE and DELETE', async () => {
-    const [row] = await db.insert(auditLog).values({
-      client: 'test', caller: 'test', tool: 't', actionClass: 'read', argsHash: 'h', decision: 'auto',
-    }).returning();
+    const [row] = await db
+      .insert(auditLog)
+      .values({
+        client: 'test',
+        caller: 'test',
+        tool: 't',
+        actionClass: 'read',
+        argsHash: 'h',
+        decision: 'auto',
+      })
+      .returning();
     // drizzle-orm wraps the driver error as "Failed query: ..." and puts the
     // underlying Postgres error (our RAISE EXCEPTION message) on `.cause`.
-    const updateErr: any = await db.update(auditLog).set({ decision: 'blocked' }).where(eq(auditLog.id, row.id)).catch((e) => e);
+    const updateErr: any = await db
+      .update(auditLog)
+      .set({ decision: 'blocked' })
+      .where(eq(auditLog.id, row.id))
+      .catch((e) => e);
     expect(String(updateErr?.cause?.message ?? updateErr)).toMatch(/append-only/);
-    const deleteErr: any = await db.delete(auditLog).where(eq(auditLog.id, row.id)).catch((e) => e);
+    const deleteErr: any = await db
+      .delete(auditLog)
+      .where(eq(auditLog.id, row.id))
+      .catch((e) => e);
     expect(String(deleteErr?.cause?.message ?? deleteErr)).toMatch(/append-only/);
   });
 
   it('audit_log rejects TRUNCATE', async () => {
     await db.insert(auditLog).values({
-      client: 'test', caller: 'test', tool: 't', actionClass: 'read', argsHash: 'h', decision: 'auto',
+      client: 'test',
+      caller: 'test',
+      tool: 't',
+      actionClass: 'read',
+      argsHash: 'h',
+      decision: 'auto',
     });
     const err: any = await db.execute(sql`TRUNCATE TABLE audit_log`).catch((e) => e);
     expect(String(err?.cause?.message ?? err?.message ?? err)).toMatch(/append-only/);
@@ -52,16 +75,36 @@ describe('schema', () => {
   });
 
   it('stores a tool effect and an audit row with lineage fields', async () => {
-    const [effect] = await db.insert(toolEffects).values({
-      client: 'test', tool: 'send_file', sink: 'slack', idempotencyKey: 'k1',
-      payloadEncrypted: Buffer.from('x'), summary: 'send roster',
-    }).returning();
+    const [effect] = await db
+      .insert(toolEffects)
+      .values({
+        client: 'test',
+        tool: 'send_file',
+        sink: 'slack',
+        idempotencyKey: 'k1',
+        payloadEncrypted: Buffer.from('x'),
+        summary: 'send roster',
+      })
+      .returning();
     expect(effect.status).toBe('staged');
     expect(effect.attempts).toBe(0);
-    const [row] = await db.insert(auditLog).values({
-      client: 'test', caller: 'c', tool: 't', actionClass: 'read', argsHash: 'h', decision: 'auto',
-      skill: 'credentialing-intake', skillVersion: '1.0.0', derivedFrom: [effect.id], inputTokens: 10, outputTokens: 5, costUsd: 0.001,
-    }).returning();
+    const [row] = await db
+      .insert(auditLog)
+      .values({
+        client: 'test',
+        caller: 'c',
+        tool: 't',
+        actionClass: 'read',
+        argsHash: 'h',
+        decision: 'auto',
+        skill: 'credentialing-intake',
+        skillVersion: '1.0.0',
+        derivedFrom: [effect.id],
+        inputTokens: 10,
+        outputTokens: 5,
+        costUsd: 0.001,
+      })
+      .returning();
     expect(row.derivedFrom).toEqual([effect.id]);
     expect(row.skill).toBe('credentialing-intake');
   });

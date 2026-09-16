@@ -85,7 +85,9 @@ export async function startFakeGateway(responder: Responder = () => ({})): Promi
           id: 'chatcmpl-fake',
           object: 'chat.completion',
           model: reply.modelName ?? body.model,
-          choices: [{ index: 0, finish_reason: 'stop', message: { role: 'assistant', content: reply.content ?? 'ok' } }],
+          choices: [
+            { index: 0, finish_reason: 'stop', message: { role: 'assistant', content: reply.content ?? 'ok' } },
+          ],
           usage: {
             prompt_tokens: reply.inputTokens ?? 11,
             completion_tokens: reply.outputTokens ?? 7,

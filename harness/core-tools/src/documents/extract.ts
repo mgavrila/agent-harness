@@ -2,8 +2,8 @@ import { createRequire } from 'node:module';
 import * as z from 'zod/v4';
 import { isRestrictedName } from '../tools/providers.js';
 import { CREDENTIAL_KINDS } from '../deadlines/compute.js';
-import { DOCUMENT_KINDS, type DocumentKind } from './storage.js';
 import type { ModelMessage } from '../models.js';
+import { DOCUMENT_KINDS, type DocumentKind } from './storage.js';
 import type { PageText } from './text.js';
 
 // Deliberately ordered for the prompt rather than shared with the template
@@ -94,8 +94,14 @@ function fieldSlot(field: ManifestField): Record<string, unknown> {
     required: ['value', 'confidence', 'source_page'],
     description: field.description,
     properties: {
-      value: { type: field.type, description: 'The value as printed, or an empty string when the document does not state it.' },
-      confidence: { type: 'number', description: 'How sure you are, from 0 to 1. Use a low number when you are guessing.' },
+      value: {
+        type: field.type,
+        description: 'The value as printed, or an empty string when the document does not state it.',
+      },
+      confidence: {
+        type: 'number',
+        description: 'How sure you are, from 0 to 1. Use a low number when you are guessing.',
+      },
       source_page: { type: 'integer', description: 'The 1-based page this value came from, or 0 when it is absent.' },
     },
   };
@@ -116,7 +122,10 @@ export function buildExtractionSchema(manifest: ProviderManifest): { name: strin
 
   const credentialProperties: Record<string, unknown> = {
     kind: { type: 'string', enum: [...CREDENTIAL_KINDS], description: 'Which kind of credential this is.' },
-    confidence: { type: 'number', description: 'How sure you are that this credential is present in the document, from 0 to 1.' },
+    confidence: {
+      type: 'number',
+      description: 'How sure you are that this credential is present in the document, from 0 to 1.',
+    },
     source_page: { type: 'integer', description: 'The 1-based page this credential was read from.' },
   };
   for (const prop of CREDENTIAL_PROPERTIES) {
@@ -138,7 +147,11 @@ export function buildExtractionSchema(manifest: ProviderManifest): { name: strin
       additionalProperties: false,
       required: ['document_kind', 'fields', 'credentials'],
       properties: {
-        document_kind: { type: 'string', enum: [...manifest.document_kinds], description: 'What kind of document this is.' },
+        document_kind: {
+          type: 'string',
+          enum: [...manifest.document_kinds],
+          description: 'What kind of document this is.',
+        },
         fields: {
           type: 'object',
           additionalProperties: false,
@@ -161,7 +174,10 @@ export function buildExtractionSchema(manifest: ProviderManifest): { name: strin
   };
 }
 
-export function buildClassificationSchema(manifest: ProviderManifest): { name: string; schema: Record<string, unknown> } {
+export function buildClassificationSchema(manifest: ProviderManifest): {
+  name: string;
+  schema: Record<string, unknown>;
+} {
   return {
     name: 'document_classification',
     schema: {
@@ -169,7 +185,11 @@ export function buildClassificationSchema(manifest: ProviderManifest): { name: s
       additionalProperties: false,
       required: ['document_kind', 'confidence'],
       properties: {
-        document_kind: { type: 'string', enum: [...manifest.document_kinds], description: 'What kind of document this is.' },
+        document_kind: {
+          type: 'string',
+          enum: [...manifest.document_kinds],
+          description: 'What kind of document this is.',
+        },
         confidence: { type: 'number', description: 'How sure you are, from 0 to 1.' },
       },
     },
@@ -302,7 +322,10 @@ export function parseExtraction(raw: unknown, manifest: ProviderManifest): Parse
     : ('other' as DocumentKind);
 
   const allowed = new Map(manifest.fields.filter((f) => f.source === 'model').map((f) => [f.name, f]));
-  const rawFields = (typeof reply.fields === 'object' && reply.fields !== null ? reply.fields : {}) as Record<string, unknown>;
+  const rawFields = (typeof reply.fields === 'object' && reply.fields !== null ? reply.fields : {}) as Record<
+    string,
+    unknown
+  >;
 
   const fields: ExtractedField[] = [];
   for (const [name, slot] of Object.entries(rawFields)) {
@@ -311,7 +334,12 @@ export function parseExtraction(raw: unknown, manifest: ProviderManifest): Parse
     const s = slot as Record<string, unknown>;
     const value = textOrUndefined(s.value);
     if (value === undefined) continue;
-    fields.push({ name, value, confidence: clampConfidence(s.confidence), source_page: pageOrUndefined(s.source_page) });
+    fields.push({
+      name,
+      value,
+      confidence: clampConfidence(s.confidence),
+      source_page: pageOrUndefined(s.source_page),
+    });
   }
   fields.sort((a, b) => a.name.localeCompare(b.name));
 

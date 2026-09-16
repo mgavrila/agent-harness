@@ -87,7 +87,9 @@ async function tellUser(deps: AppDeps, channel: string, userId: string, text: st
   try {
     await deps.api.chat.postEphemeral({ channel, user: userId, text });
   } catch (err) {
-    console.error(`approvals: could not post an ephemeral notice to ${userId}: ${err instanceof Error ? err.message : String(err)}`);
+    console.error(
+      `approvals: could not post an ephemeral notice to ${userId}: ${err instanceof Error ? err.message : String(err)}`,
+    );
   }
 }
 

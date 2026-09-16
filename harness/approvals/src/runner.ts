@@ -43,7 +43,13 @@ export interface RunnerStatus {
 }
 
 export function runPollTick(deps: RunnerDeps): Promise<PollResult> {
-  return postPendingApprovals({ db: deps.db, api: deps.api, client: deps.client, channel: deps.channel, now: deps.now });
+  return postPendingApprovals({
+    db: deps.db,
+    api: deps.api,
+    client: deps.client,
+    channel: deps.channel,
+    now: deps.now,
+  });
 }
 
 export function runDispatchTick(deps: RunnerDeps): Promise<DispatchResult> {
@@ -163,7 +169,12 @@ function countEffects(db: Db, client: string, status: string): Promise<number> {
  * never consulted here. A backlog of `staged` rows is normal between ticks
  * and does not fail health either.
  */
-export async function collectHealth(db: Db, client: string, runner: RunnerHandle, now: () => Date): Promise<HealthSnapshot> {
+export async function collectHealth(
+  db: Db,
+  client: string,
+  runner: RunnerHandle,
+  now: () => Date,
+): Promise<HealthSnapshot> {
   const [staged, failed, needsReview] = await Promise.all([
     countEffects(db, client, 'staged'),
     countEffects(db, client, 'failed'),

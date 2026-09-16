@@ -74,9 +74,7 @@ const JUDGE_SCHEMA = {
  * with no verdicts is an unhelpful judge, not a malformed one.
  */
 const JudgeReply = z.object({
-  verdicts: z
-    .array(z.object({ index: z.number().int(), same: z.boolean(), why: z.string() }))
-    .optional(),
+  verdicts: z.array(z.object({ index: z.number().int(), same: z.boolean(), why: z.string() })).optional(),
 });
 
 const SYSTEM = [
@@ -119,7 +117,10 @@ export async function judgeFreeText(deps: ToolDeps, items: JudgeItem[]): Promise
   if (safe.length === 0) return NOTHING_TO_JUDGE;
 
   const listing = safe
-    .map((it, i) => `${i}. field=${it.field}\n   expected: ${JSON.stringify(it.expected)}\n   actual:   ${JSON.stringify(it.actual)}`)
+    .map(
+      (it, i) =>
+        `${i}. field=${it.field}\n   expected: ${JSON.stringify(it.expected)}\n   actual:   ${JSON.stringify(it.actual)}`,
+    )
     .join('\n');
 
   const messages = [
@@ -148,7 +149,9 @@ export async function judgeFreeText(deps: ToolDeps, items: JudgeItem[]): Promise
   } catch (err) {
     // The gateway's error messages carry a route and an HTTP status and never
     // a prompt, so this is safe to print.
-    process.stderr.write(`judge unavailable, reporting no agreement rate: ${err instanceof Error ? err.message : String(err)}\n`);
+    process.stderr.write(
+      `judge unavailable, reporting no agreement rate: ${err instanceof Error ? err.message : String(err)}\n`,
+    );
     return null;
   }
 
@@ -157,5 +160,10 @@ export async function judgeFreeText(deps: ToolDeps, items: JudgeItem[]): Promise
     return { field: it.field, split: it.split, same: hit?.same === true, why: hit?.why ?? 'no verdict returned' };
   });
   const agreed = verdicts.filter((v) => v.same).length;
-  return { scored: verdicts.length, agreed, agreementRate: verdicts.length === 0 ? 1 : agreed / verdicts.length, verdicts };
+  return {
+    scored: verdicts.length,
+    agreed,
+    agreementRate: verdicts.length === 0 ? 1 : agreed / verdicts.length,
+    verdicts,
+  };
 }

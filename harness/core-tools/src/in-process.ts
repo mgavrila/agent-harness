@@ -6,7 +6,9 @@ import { createMcpHandler, type McpServer } from '@modelcontextprotocol/server';
  * Used by the test fixtures and by the eval runner, which is not a vitest
  * process and so cannot rely on `onTestFinished` to clean up.
  */
-export async function connectInProcess(factory: () => McpServer): Promise<{ client: Client; close: () => Promise<void> }> {
+export async function connectInProcess(
+  factory: () => McpServer,
+): Promise<{ client: Client; close: () => Promise<void> }> {
   const handler = createMcpHandler(factory);
   const transport = new StreamableHTTPClientTransport(new URL('http://test.local/mcp'), {
     fetch: (url, init) => handler.fetch(new Request(url, init)),

@@ -24,7 +24,10 @@ interface CallResult {
 }
 
 function textOf(res: CallResult): string {
-  return (res.content ?? []).map((c) => c.text ?? '').join(' ').trim();
+  return (res.content ?? [])
+    .map((c) => c.text ?? '')
+    .join(' ')
+    .trim();
 }
 
 /**
@@ -58,7 +61,9 @@ export function createMcpCoreToolsClient(launcher: McpLauncher): CoreToolsClient
       return (await client.callTool({ name, arguments: args })) as CallResult;
     } catch (err) {
       // A dead child looks like a transport error; drop it and try once more.
-      console.error(`approvals: core-tools call ${name} failed, reconnecting: ${err instanceof Error ? err.message : String(err)}`);
+      console.error(
+        `approvals: core-tools call ${name} failed, reconnecting: ${err instanceof Error ? err.message : String(err)}`,
+      );
       try {
         await client.close();
       } catch {
@@ -79,7 +84,8 @@ export function createMcpCoreToolsClient(launcher: McpLauncher): CoreToolsClient
     async reconcile(staleAfterMinutes) {
       const res = await call('harness_reconcile', { stale_after_minutes: staleAfterMinutes });
       if (res.isError) throw new Error(textOf(res) || 'harness_reconcile returned an error');
-      const result = res.structuredContent?.result as { approvals_expired?: number; dispatches_parked?: number } | undefined;
+      const result = res.structuredContent?.result as
+        { approvals_expired?: number; dispatches_parked?: number } | undefined;
       return { approvals_expired: result?.approvals_expired ?? 0, dispatches_parked: result?.dispatches_parked ?? 0 };
     },
     async close() {

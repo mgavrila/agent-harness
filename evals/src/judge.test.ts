@@ -1,8 +1,8 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { readFile } from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { DEFAULT_POLICY, defaultFormsDir, isRestrictedName, type ToolDeps } from '@harness/core-tools';
 import { startFakeGateway, type FakeGateway } from '@harness/core-tools/fake-gateway';
 import { createDb, runMigrations } from '@harness/db';
@@ -35,7 +35,12 @@ beforeAll(async () => {
     storageDir: here,
     formsDir: defaultFormsDir(),
     restrictedToModel: false,
-    verify: { nppesEnabled: false, nppesBaseUrl: 'http://127.0.0.1:1/api/', stateLicenseEnabled: false, timeoutMs: 5_000 },
+    verify: {
+      nppesEnabled: false,
+      nppesBaseUrl: 'http://127.0.0.1:1/api/',
+      stateLicenseEnabled: false,
+      timeoutMs: 5_000,
+    },
     sinks: {},
     context: {},
     tools: new Map(),

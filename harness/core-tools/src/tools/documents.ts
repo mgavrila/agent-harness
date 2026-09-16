@@ -1,9 +1,8 @@
-import * as z from 'zod/v4';
-import { and, eq } from 'drizzle-orm';
 import { unlink, writeFile } from 'node:fs/promises';
+import { and, eq } from 'drizzle-orm';
+import * as z from 'zod/v4';
 import { documents } from '@harness/db';
 import { defineTool, ToolError, type AnyToolDef, type ToolDeps } from '../registry.js';
-import { requireProvider, upsertProviderRecord, type CredentialInput, type FieldInput } from './providers.js';
 import {
   DOCUMENT_KINDS,
   documentTextPath,
@@ -23,6 +22,7 @@ import {
   loadHealthcareManifest,
   parseExtraction,
 } from '../documents/extract.js';
+import { requireProvider, upsertProviderRecord, type CredentialInput, type FieldInput } from './providers.js';
 
 export { DOCUMENT_KINDS, documentTextPath };
 
@@ -77,7 +77,10 @@ const documentsIngest = defineTool({
   input: z.object({
     path: z.string().min(1).describe('Path relative to the harness storage directory, e.g. incoming/license.pdf'),
     provider_id: z.string().uuid().optional(),
-    kind: z.enum(DOCUMENT_KINDS).optional().describe('Declare the kind when it is already known; otherwise documents_classify sets it'),
+    kind: z
+      .enum(DOCUMENT_KINDS)
+      .optional()
+      .describe('Declare the kind when it is already known; otherwise documents_classify sets it'),
   }),
   output: z.object({
     document_id: z.string(),
@@ -117,7 +120,14 @@ const documentsIngest = defineTool({
     const pages = await pdfPageCount(await readDocumentBytes(abs));
     const [row] = await deps.db
       .insert(documents)
-      .values({ client: deps.client, providerId: provider_id ?? null, kind: kind ?? null, storagePath: relative, sha256, pages })
+      .values({
+        client: deps.client,
+        providerId: provider_id ?? null,
+        kind: kind ?? null,
+        storagePath: relative,
+        sha256,
+        pages,
+      })
       .returning();
     return { document_id: row.id, sha256, pages, storage_path: relative, already_ingested: false };
   },
@@ -148,7 +158,10 @@ const documentsList = defineTool({
       await requireProvider(deps, provider_id);
       conditions.push(eq(documents.providerId, provider_id));
     }
-    const rows = await deps.db.select().from(documents).where(and(...conditions));
+    const rows = await deps.db
+      .select()
+      .from(documents)
+      .where(and(...conditions));
     rows.sort((a, b) => b.ingestedAt.getTime() - a.ingestedAt.getTime());
     return { documents: rows.map(viewOf) };
   },
@@ -216,14 +229,16 @@ const documentsClassify = defineTool({
   description:
     'Decide what kind of credentialing document this is (state licence, DEA certificate, malpractice certificate, W-9 or other) and record it, ' +
     'unless a kind is already on file: a kind declared at ingest, or set by an earlier classification, is authoritative and is never overwritten ' +
-    'by a disagreeing model reply — the model\'s own answer is still returned as model_kind so a human can see the disagreement. ' +
+    "by a disagreeing model reply — the model's own answer is still returned as model_kind so a human can see the disagreement. " +
     'Reads the document text, redacting restricted identifiers first.',
   actionClass: 'write.internal',
   input: z.object({ document_id: z.string().uuid() }),
   output: z.object({
     document_id: z.string(),
     document_kind: z.string(),
-    model_kind: z.string().describe("What the model said. Differs from document_kind only when a declared kind was already on file."),
+    model_kind: z
+      .string()
+      .describe('What the model said. Differs from document_kind only when a declared kind was already on file.'),
     confidence: z.number(),
   }),
   handler: async ({ document_id }, deps) => {
@@ -263,7 +278,11 @@ const documentsExtract = defineTool({
   actionClass: 'write.internal',
   input: z.object({
     document_id: z.string().uuid(),
-    provider_id: z.string().uuid().optional().describe('Attach to this provider instead of matching on the extracted name'),
+    provider_id: z
+      .string()
+      .uuid()
+      .optional()
+      .describe('Attach to this provider instead of matching on the extracted name'),
   }),
   output: z.object({
     document_id: z.string(),
@@ -303,7 +322,9 @@ const documentsExtract = defineTool({
         .filter((part) => part !== undefined && part !== '')
         .join(' ');
     if (!name) {
-      throw new ToolError('extraction found no provider name; pass provider_id to attach this document to a known provider');
+      throw new ToolError(
+        'extraction found no provider name; pass provider_id to attach this document to a known provider',
+      );
     }
     const npiValue = byName.get('npi')?.value?.replace(/\D/g, '');
     const npi = named?.npi ?? (npiValue && npiValue.length === 10 ? npiValue : undefined);

@@ -48,7 +48,12 @@ function wire(allowedUsers: ReadonlySet<string> = new Set(['U012'])) {
 
 const acked = () => {
   let count = 0;
-  return { ack: async () => { count += 1; }, calls: () => count };
+  return {
+    ack: async () => {
+      count += 1;
+    },
+    calls: () => count,
+  };
 };
 
 describe('approval handlers', () => {
@@ -83,10 +88,19 @@ describe('approval handlers', () => {
     const row = await seed();
     const { registry, api } = wire();
     const a = acked();
-    await registry.actions.get(EDIT_ACTION_ID)!({ ack: a.ack, userId: 'U012', channel: 'C0DEMO', value: row.id, triggerId: 'T1' });
+    await registry.actions.get(EDIT_ACTION_ID)!({
+      ack: a.ack,
+      userId: 'U012',
+      channel: 'C0DEMO',
+      value: row.id,
+      triggerId: 'T1',
+    });
     expect(api.opened).toHaveLength(1);
     expect(api.opened[0].trigger_id).toBe('T1');
-    expect(JSON.parse(api.opened[0].view.private_metadata as string)).toEqual({ approval_id: row.id, channel: 'C0DEMO' });
+    expect(JSON.parse(api.opened[0].view.private_metadata as string)).toEqual({
+      approval_id: row.id,
+      channel: 'C0DEMO',
+    });
     const [after] = await db.select().from(approvals).where(eq(approvals.id, row.id));
     expect(after.status).toBe('pending');
   });
@@ -135,7 +149,11 @@ describe('approval handlers', () => {
       note: '',
     });
     expect(api.ephemeral).toHaveLength(1);
-    expect(api.ephemeral[0]).toMatchObject({ channel: 'C0DEMO', user: 'U012', text: 'That approval no longer exists.' });
+    expect(api.ephemeral[0]).toMatchObject({
+      channel: 'C0DEMO',
+      user: 'U012',
+      text: 'That approval no longer exists.',
+    });
   });
 
   it('acknowledges and posts nothing when the button names an unknown approval', async () => {
@@ -192,6 +210,10 @@ describe('approval handlers', () => {
     expect(a.calls()).toBe(1);
     expect(core.executed).toEqual([]);
     expect(api.ephemeral).toHaveLength(1);
-    expect(api.ephemeral[0]).toMatchObject({ channel: 'C0DEMO', user: 'U012', text: 'That approval no longer exists.' });
+    expect(api.ephemeral[0]).toMatchObject({
+      channel: 'C0DEMO',
+      user: 'U012',
+      text: 'That approval no longer exists.',
+    });
   });
 });

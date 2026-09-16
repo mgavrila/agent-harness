@@ -1,15 +1,15 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtemp, rm, writeFile, access, readFile, copyFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { and, eq } from 'drizzle-orm';
 import { auditLog, credentials, fields, providers, approvals, toolEffects } from '@harness/db';
 import { useTestDb, makeTestDeps, connectTools, resultOf, approvalIdOf } from '../testing.js';
 import { defaultFormsDir } from '../forms/templates.js';
-import { formTools } from './forms.js';
-import { approvalTools } from './approvals.js';
 import { ROSTER_COLUMNS } from '../forms/roster.js';
 import type { ToolDeps } from '../registry.js';
+import { approvalTools } from './approvals.js';
+import { formTools } from './forms.js';
 
 const eqField = (providerId: string, name: string) => and(eq(fields.providerId, providerId), eq(fields.name, name));
 
@@ -34,14 +34,30 @@ afterEach(async () => {
 
 /** A provider whose non-restricted fields and credentials are complete enough to fill. */
 async function seedCompleteProvider(): Promise<string> {
-  const [p] = await db.insert(providers).values({ client: 'test', name: 'Dr. Ada Reyes', npi: '1234567893' }).returning();
+  const [p] = await db
+    .insert(providers)
+    .values({ client: 'test', name: 'Dr. Ada Reyes', npi: '1234567893' })
+    .returning();
   await db.insert(fields).values([
     { providerId: p.id, name: 'primary_specialty', value: 'Family Medicine', status: 'verified', confidence: 1 },
-    { providerId: p.id, name: 'practice_address', value: '12 Elm St, Austin TX', status: 'extracted', confidence: 0.95 },
+    {
+      providerId: p.id,
+      name: 'practice_address',
+      value: '12 Elm St, Austin TX',
+      status: 'extracted',
+      confidence: 0.95,
+    },
     { providerId: p.id, name: 'practice_name', value: 'Elm Street Family Care', status: 'extracted', confidence: 0.92 },
   ]);
   await db.insert(credentials).values([
-    { providerId: p.id, kind: 'license', issuer: 'Texas Medical Board', state: 'TX', expiresAt: '2027-03-31', numberEncrypted: Buffer.from('enc') },
+    {
+      providerId: p.id,
+      kind: 'license',
+      issuer: 'Texas Medical Board',
+      state: 'TX',
+      expiresAt: '2027-03-31',
+      numberEncrypted: Buffer.from('enc'),
+    },
     { providerId: p.id, kind: 'malpractice', issuer: 'MedPro', expiresAt: '2027-01-15' },
     { providerId: p.id, kind: 'board_cert', issuer: 'ABFM', expiresAt: '2029-06-30' },
   ]);
@@ -147,7 +163,10 @@ describe('forms_fill', () => {
     );
     const leaky = makeTestDeps(db, { storageDir, formsDir: badDir });
     const client = await connectTools('forms-test', formTools, leaky);
-    const res = await client.callTool({ name: 'forms_fill', arguments: { template_id: 'leaky', provider_id: providerId } });
+    const res = await client.callTool({
+      name: 'forms_fill',
+      arguments: { template_id: 'leaky', provider_id: providerId },
+    });
     expect(res.isError).toBe(true);
     expect(textOf(res)).toContain('restricted');
     await rm(badDir, { recursive: true, force: true });
@@ -236,10 +255,16 @@ describe('forms_fill', () => {
 describe('forms_roster', () => {
   it('writes a CSV with the documented columns and one row per provider', async () => {
     const first = await seedCompleteProvider();
-    const [second] = await db.insert(providers).values({ client: 'test', name: 'Dr. Bo Lin', npi: '1987654320' }).returning();
+    const [second] = await db
+      .insert(providers)
+      .values({ client: 'test', name: 'Dr. Bo Lin', npi: '1987654320' })
+      .returning();
     const client = await connectTools('forms-test', formTools, deps);
     const out = resultOf<{ file_id: string; rows: number; columns: string[] }>(
-      await client.callTool({ name: 'forms_roster', arguments: { payer_id: 'aetna', provider_ids: [first, second.id] } }),
+      await client.callTool({
+        name: 'forms_roster',
+        arguments: { payer_id: 'aetna', provider_ids: [first, second.id] },
+      }),
     );
     expect(out.rows).toBe(2);
     expect(out.columns).toEqual([...ROSTER_COLUMNS]);
@@ -264,7 +289,10 @@ describe('forms_roster', () => {
   it('reports a licence with no stored number as not on file', async () => {
     // A licence read off a document that showed an issuer, a state and an
     // expiry but no legible number: the row exists, number_encrypted is null.
-    const [p] = await db.insert(providers).values({ client: 'test', name: 'Dr. No Number', npi: '1234567893' }).returning();
+    const [p] = await db
+      .insert(providers)
+      .values({ client: 'test', name: 'Dr. No Number', npi: '1234567893' })
+      .returning();
     await db.insert(credentials).values([
       { providerId: p.id, kind: 'license', issuer: 'Texas Medical Board', state: 'TX', expiresAt: '2027-03-31' },
       { providerId: p.id, kind: 'dea', issuer: 'DEA', expiresAt: '2028-02-28' },
@@ -285,7 +313,10 @@ describe('forms_roster', () => {
   });
 
   it('reports a DEA registration with a stored number as on file', async () => {
-    const [p] = await db.insert(providers).values({ client: 'test', name: 'Dr. Has Number', npi: '1234567893' }).returning();
+    const [p] = await db
+      .insert(providers)
+      .values({ client: 'test', name: 'Dr. Has Number', npi: '1234567893' })
+      .returning();
     await db.insert(credentials).values({
       providerId: p.id,
       kind: 'dea',
@@ -344,8 +375,13 @@ describe('forms_release', () => {
         arguments: { template_id: 'state-license-renewal-cover', provider_id: providerId },
       }),
     );
-    const approvalId = approvalIdOf(await client.callTool({ name: 'forms_release', arguments: { file_id: filled.file_id } }));
-    await db.update(approvals).set({ status: 'approved', decidedBy: 'U1', decidedAt: deps.now() }).where(eq(approvals.id, approvalId));
+    const approvalId = approvalIdOf(
+      await client.callTool({ name: 'forms_release', arguments: { file_id: filled.file_id } }),
+    );
+    await db
+      .update(approvals)
+      .set({ status: 'approved', decidedBy: 'U1', decidedAt: deps.now() })
+      .where(eq(approvals.id, approvalId));
 
     await client.callTool({ name: 'approvals_execute', arguments: { approval_id: approvalId } });
     const effects = await db.select().from(toolEffects);
@@ -356,7 +392,11 @@ describe('forms_release', () => {
   });
 
   it('refuses a file id that escapes the output directory', async () => {
-    const strict = makeTestDeps(db, { storageDir, formsDir: defaultFormsDir(), policy: { ...deps.policy, external: 'auto' } });
+    const strict = makeTestDeps(db, {
+      storageDir,
+      formsDir: defaultFormsDir(),
+      policy: { ...deps.policy, external: 'auto' },
+    });
     const client = await connectTools('forms-test', [...formTools, ...approvalTools], strict);
     const res = await client.callTool({ name: 'forms_release', arguments: { file_id: '../../etc/passwd' } });
     expect(res.isError).toBe(true);
@@ -364,9 +404,16 @@ describe('forms_release', () => {
   });
 
   it('refuses a file id that does not exist', async () => {
-    const strict = makeTestDeps(db, { storageDir, formsDir: defaultFormsDir(), policy: { ...deps.policy, external: 'auto' } });
+    const strict = makeTestDeps(db, {
+      storageDir,
+      formsDir: defaultFormsDir(),
+      policy: { ...deps.policy, external: 'auto' },
+    });
     const client = await connectTools('forms-test', [...formTools, ...approvalTools], strict);
-    const res = await client.callTool({ name: 'forms_release', arguments: { file_id: 'forms/never-written-000000000000.pdf' } });
+    const res = await client.callTool({
+      name: 'forms_release',
+      arguments: { file_id: 'forms/never-written-000000000000.pdf' },
+    });
     expect(res.isError).toBe(true);
   });
 });

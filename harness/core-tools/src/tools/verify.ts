@@ -95,7 +95,8 @@ export function namesMatch(a: string, b: string): boolean {
  * cannot be read come back null so the reviewer sees a record with gaps.
  */
 function recordFrom(result: NppesResult): NppesRecord {
-  const enumerationType = result.enumeration_type === 'NPI-2' ? 'NPI-2' : result.enumeration_type === 'NPI-1' ? 'NPI-1' : null;
+  const enumerationType =
+    result.enumeration_type === 'NPI-2' ? 'NPI-2' : result.enumeration_type === 'NPI-1' ? 'NPI-1' : null;
   const basic = result.basic ?? {};
   const name =
     enumerationType === 'NPI-2'
@@ -174,7 +175,10 @@ const verifyNppes = defineTool({
   output: z.object({
     npi: z.string(),
     found: z.boolean(),
-    match: z.boolean().nullable().describe('Null when there is nothing to compare against: no provider given, or an organisation record'),
+    match: z
+      .boolean()
+      .nullable()
+      .describe('Null when there is nothing to compare against: no provider given, or an organisation record'),
     registry_name: z.string().nullable(),
     registry_status: z.string().nullable(),
     registry_state: z.string().nullable(),

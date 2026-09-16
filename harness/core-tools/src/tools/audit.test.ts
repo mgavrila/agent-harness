@@ -63,8 +63,13 @@ describe('audit_query', () => {
     const stamp = new Date('2026-09-15T12:00:00Z');
     for (const tool of ['a', 'b', 'c']) {
       await db.insert(auditLog).values({
-        client: deps.client, caller: 'test', tool, actionClass: 'read', argsHash: 'h',
-        decision: 'auto', createdAt: stamp,
+        client: deps.client,
+        caller: 'test',
+        tool,
+        actionClass: 'read',
+        argsHash: 'h',
+        decision: 'auto',
+        createdAt: stamp,
       });
     }
     const res = await client.callTool({ name: 'audit_query', arguments: {} });

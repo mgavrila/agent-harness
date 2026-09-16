@@ -16,7 +16,12 @@ export async function expireApprovals(db: Db, now: Date, client?: string): Promi
   return rows.length;
 }
 
-export async function parkStuckDispatches(db: Db, now: Date, staleAfterMs = 10 * 60_000, client?: string): Promise<number> {
+export async function parkStuckDispatches(
+  db: Db,
+  now: Date,
+  staleAfterMs = 10 * 60_000,
+  client?: string,
+): Promise<number> {
   const cutoff = new Date(now.getTime() - staleAfterMs);
   const rows = await db
     .update(toolEffects)

@@ -80,7 +80,9 @@ function gatewayError(route: Route, status: number, body: string): ToolError {
     return new ToolError(`model route "${route}" is over its daily budget; raise it in clients/<name>/routing.yaml`);
   }
   if (status === 401 || status === 403) {
-    return new ToolError(`model route "${route}" was rejected by the gateway (HTTP ${status}); check LITELLM_MASTER_KEY`);
+    return new ToolError(
+      `model route "${route}" was rejected by the gateway (HTTP ${status}); check LITELLM_MASTER_KEY`,
+    );
   }
   return new ToolError(`model route "${route}" failed at the gateway (HTTP ${status})`);
 }
@@ -93,7 +95,10 @@ export async function callModel(deps: ToolDeps, opts: ModelCallOptions): Promise
   // gateway's daily budget.
   const runId = deps.context.runId;
   if (runId) {
-    const spent = await deps.db.$count(modelCalls, and(eq(modelCalls.runId, runId), eq(modelCalls.client, deps.client)));
+    const spent = await deps.db.$count(
+      modelCalls,
+      and(eq(modelCalls.runId, runId), eq(modelCalls.client, deps.client)),
+    );
     if (spent >= deps.gateway.maxCallsPerRun) {
       throw new ToolError(
         `run has already made ${spent} model calls, which is its limit; stop and report rather than retrying`,

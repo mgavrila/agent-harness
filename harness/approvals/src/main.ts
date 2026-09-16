@@ -8,7 +8,13 @@ import { slackSinks } from './sinks.js';
 import { webClientApi } from './slack.js';
 import { createMcpCoreToolsClient } from './execute.js';
 import { coreToolsChildEnv, requiredFrom } from './child-env.js';
-import { registerApprovalHandlers, parseAllowedUsers, type ActionArgs, type HandlerRegistry, type ViewArgs } from './app.js';
+import {
+  registerApprovalHandlers,
+  parseAllowedUsers,
+  type ActionArgs,
+  type HandlerRegistry,
+  type ViewArgs,
+} from './app.js';
 import {
   EDIT_MODAL_CALLBACK_ID,
   EDIT_NOTE_ACTION_ID,
@@ -25,7 +31,9 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../
 loadEnv({ path: path.join(repoRoot, '.env'), quiet: true });
 
 function required(name: string): string {
-  const hint = name.startsWith('APPROVALS_SLACK_') ? ' (the approvals app needs its own Slack app; see docs/runbook.md)' : '';
+  const hint = name.startsWith('APPROVALS_SLACK_')
+    ? ' (the approvals app needs its own Slack app; see docs/runbook.md)'
+    : '';
   return requiredFrom(process.env, name, hint);
 }
 
@@ -39,7 +47,11 @@ function required(name: string): string {
  * One reader for every number this file takes from the environment, so no
  * variable can be range-checked more loosely than its neighbour.
  */
-function numberFromEnv(name: string, fallback: number, spec: { min: number; max: number; integer?: boolean; unit?: string }): number {
+function numberFromEnv(
+  name: string,
+  fallback: number,
+  spec: { min: number; max: number; integer?: boolean; unit?: string },
+): number {
   const raw = process.env[name];
   if (!raw || raw.trim() === '') return fallback;
   const value = Number(raw);
@@ -51,9 +63,11 @@ function numberFromEnv(name: string, fallback: number, spec: { min: number; max:
   return value;
 }
 
-const seconds = (name: string, fallback: number): number => numberFromEnv(name, fallback, { min: 1, max: 86_400, unit: 'seconds' });
+const seconds = (name: string, fallback: number): number =>
+  numberFromEnv(name, fallback, { min: 1, max: 86_400, unit: 'seconds' });
 
-const port = (name: string, fallback: number): number => numberFromEnv(name, fallback, { min: 1, max: 65_535, integer: true });
+const port = (name: string, fallback: number): number =>
+  numberFromEnv(name, fallback, { min: 1, max: 65_535, integer: true });
 
 const client = process.env.HARNESS_CLIENT ?? 'default';
 const channel = required('SLACK_APPROVALS_CHANNEL');

@@ -1,7 +1,7 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { parse as parseYaml } from 'yaml';
 import {
   INTAKE_DECLARED_TOOLS,
@@ -25,7 +25,11 @@ beforeAll(async () => {
         split: 'text_layer',
         path: 'text/a.pdf',
         injection: false,
-        expected: { fields: { last_name: 'Lovelace' }, credentials: [{ kind: 'license', issuer: 'X', expires_at: '2027-03-31' }], restricted: [] },
+        expected: {
+          fields: { last_name: 'Lovelace' },
+          credentials: [{ kind: 'license', issuer: 'X', expires_at: '2027-03-31' }],
+          restricted: [],
+        },
       }),
       '',
       '  ',
@@ -75,7 +79,11 @@ describe('loadExtractionCases', () => {
 
   it('rejects an unknown split', async () => {
     const bad = path.join(dir, 'bad-split.jsonl');
-    await writeFile(bad, `${JSON.stringify({ id: 'x', kind: 'w9', split: 'photocopy', path: 'a.pdf', injection: false, expected: { fields: {}, credentials: [], restricted: [] } })}\n`, 'utf8');
+    await writeFile(
+      bad,
+      `${JSON.stringify({ id: 'x', kind: 'w9', split: 'photocopy', path: 'a.pdf', injection: false, expected: { fields: {}, credentials: [], restricted: [] } })}\n`,
+      'utf8',
+    );
     await expect(loadExtractionCases(bad)).rejects.toThrow(/split/);
   });
 

@@ -28,7 +28,11 @@ const harnessSetContext = defineTool({
     skill: z.string().min(1).nullable().optional(),
     skill_version: z.string().min(1).nullable().optional(),
   }),
-  output: z.object({ run_id: z.string().nullable(), skill: z.string().nullable(), skill_version: z.string().nullable() }),
+  output: z.object({
+    run_id: z.string().nullable(),
+    skill: z.string().nullable(),
+    skill_version: z.string().nullable(),
+  }),
   handler: async ({ run_id, skill, skill_version }, deps) => {
     // Validate before touching the shared context: a run id naming another
     // client's run must not be adopted, and must not leave this session
@@ -50,7 +54,11 @@ const harnessSetContext = defineTool({
     if (runToCreate) {
       await deps.db.insert(runs).values({ id: runToCreate, client: deps.client, caller: deps.caller });
     }
-    return { run_id: deps.context.runId ?? null, skill: deps.context.skill ?? null, skill_version: deps.context.skillVersion ?? null };
+    return {
+      run_id: deps.context.runId ?? null,
+      skill: deps.context.skill ?? null,
+      skill_version: deps.context.skillVersion ?? null,
+    };
   },
 });
 
@@ -76,12 +84,17 @@ const harnessNotify = defineTool({
     text: z.string().min(1).max(3000),
     /** Scoped to the client by stageEffect. Make it identify the content, e.g. `expirations:2026-09-15:overdue`. */
     idempotency_key: z.string().regex(/^[a-z0-9][a-z0-9:_-]{0,199}$/, 'idempotency_key must be a lowercase slug'),
-    channel: z.string().regex(/^[CGD][A-Z0-9]{2,}$/, 'channel must be a Slack channel id').optional(),
+    channel: z
+      .string()
+      .regex(/^[CGD][A-Z0-9]{2,}$/, 'channel must be a Slack channel id')
+      .optional(),
   }),
   output: z.object({ effect_id: z.string(), staged: z.boolean() }),
   handler: async ({ text, idempotency_key, channel }, deps) => {
     if (RESTRICTED_TEXT_PATTERNS.some((re) => re.test(text))) {
-      throw new ToolError('message refused: it looks like it contains a restricted identifier; restricted values never go to Slack');
+      throw new ToolError(
+        'message refused: it looks like it contains a restricted identifier; restricted values never go to Slack',
+      );
     }
     // The text is the payload and is stored encrypted. The summary is a label
     // only: tool_effects.summary is plaintext and operators read it freely.

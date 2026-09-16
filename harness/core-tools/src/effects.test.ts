@@ -41,7 +41,13 @@ describe('effects outbox', () => {
     const out = resultOf<StageResult>(res);
     expect(out.staged).toBe(true);
     const [row] = await db.select().from(toolEffects).where(eq(toolEffects.id, out.effect_id));
-    expect(row).toMatchObject({ status: 'staged', sink: 'slack', idempotencyKey: 'test:roster:aetna', client: 'test', tool: 'send_roster' });
+    expect(row).toMatchObject({
+      status: 'staged',
+      sink: 'slack',
+      idempotencyKey: 'test:roster:aetna',
+      client: 'test',
+      tool: 'send_roster',
+    });
     expect(row.payloadEncrypted.toString()).not.toContain('123-45-6789');
   });
 
@@ -79,7 +85,11 @@ describe('effects outbox', () => {
     const client = await connectSender();
     await client.callTool({ name: 'send_roster', arguments: { payer: 'aetna' } });
     const calls: unknown[] = [];
-    const sinks: SinkRegistry = { slack: async (payload) => { calls.push(payload); } };
+    const sinks: SinkRegistry = {
+      slack: async (payload) => {
+        calls.push(payload);
+      },
+    };
     const first = await dispatchStagedEffects(db, sinks, { key: deps.encryptionKey });
     expect(first).toMatchObject({ dispatched: 1, failed: 0, retried: 0 });
     expect(calls).toEqual([{ payer: 'aetna', ssn: '123-45-6789' }]);
@@ -94,7 +104,11 @@ describe('effects outbox', () => {
   it('retries a failing sink up to maxAttempts, then marks failed', async () => {
     const client = await connectSender();
     await client.callTool({ name: 'send_roster', arguments: { payer: 'aetna' } });
-    const sinks: SinkRegistry = { slack: async () => { throw new Error('slack down'); } };
+    const sinks: SinkRegistry = {
+      slack: async () => {
+        throw new Error('slack down');
+      },
+    };
     const r1 = await dispatchStagedEffects(db, sinks, { key: deps.encryptionKey, maxAttempts: 2 });
     expect(r1).toMatchObject({ retried: 1, failed: 0 });
     let [row] = await db.select().from(toolEffects);

@@ -86,12 +86,16 @@ function isTimeoutError(err: unknown): boolean {
  * inspected, only the exit. Bounded by `timeoutMs` so a wedged binary cannot
  * hang the check itself.
  */
-export async function assertBinary(name: 'tesseract' | 'pdftoppm', timeoutMs = DEFAULT_ASSERT_TIMEOUT_MS): Promise<void> {
+export async function assertBinary(
+  name: 'tesseract' | 'pdftoppm',
+  timeoutMs = DEFAULT_ASSERT_TIMEOUT_MS,
+): Promise<void> {
   const args = name === 'tesseract' ? ['--version'] : ['-v'];
   try {
     await run(name, args, { timeout: timeoutMs, killSignal: 'SIGKILL' });
   } catch (err) {
-    if (isTimeoutError(err)) throw new ToolError(`${name} did not respond within ${timeoutMs}ms while checking it is installed`);
+    if (isTimeoutError(err))
+      throw new ToolError(`${name} did not respond within ${timeoutMs}ms while checking it is installed`);
     throw new ToolError(`${name} is not installed; OCR is unavailable. Install it: ${INSTALL_HINT[name]}`);
   }
 }

@@ -40,7 +40,9 @@ function canonicalize(value: unknown): unknown {
  * semantically identical calls share an approval idempotency key.
  */
 export function hashArgs(args: unknown): string {
-  return createHash('sha256').update(JSON.stringify(canonicalize(args ?? null))).digest('hex');
+  return createHash('sha256')
+    .update(JSON.stringify(canonicalize(args ?? null)))
+    .digest('hex');
 }
 
 export async function writeAudit(db: Db, entry: AuditEntry): Promise<void> {

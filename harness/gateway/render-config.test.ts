@@ -42,7 +42,12 @@ describe('routing.schema', () => {
 
   it('rejects an unknown key on a route', () => {
     expect(() =>
-      parseRouting(ROUTING.replace('  chat:\n    model: gemini/gemini-3-flash-preview\n', '  chat:\n    model: gemini/gemini-3-flash-preview\n    apikey: sk-inline-not-allowed\n')),
+      parseRouting(
+        ROUTING.replace(
+          '  chat:\n    model: gemini/gemini-3-flash-preview\n',
+          '  chat:\n    model: gemini/gemini-3-flash-preview\n    apikey: sk-inline-not-allowed\n',
+        ),
+      ),
     ).toThrow(/apikey/);
   });
 });
@@ -117,7 +122,9 @@ describe('renderLiteLlmConfig', () => {
         '  judge:\n    model: hosted_vllm/Qwen/Qwen3-8B\n    api_base: http://vllm:8000/v1\n',
       ),
     );
-    const out = parseYaml(renderLiteLlmConfig(local)) as { model_list: { model_name: string; litellm_params: Record<string, unknown> }[] };
+    const out = parseYaml(renderLiteLlmConfig(local)) as {
+      model_list: { model_name: string; litellm_params: Record<string, unknown> }[];
+    };
     const judge = out.model_list.find((m) => m.model_name === 'judge')!;
     expect(judge.litellm_params).toMatchObject({ model: 'hosted_vllm/Qwen/Qwen3-8B', api_base: 'http://vllm:8000/v1' });
   });

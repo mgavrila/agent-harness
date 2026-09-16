@@ -67,7 +67,12 @@ function credentialKey(c: { kind: string; state?: string | null; expires_at?: st
 export function scoreExtraction(
   outcome: CaseOutcome,
   c: ExtractionCase,
-): { fields: Tally; credentials: Tally; restricted: Tally; wrong: { name: string; expected: string; actual: string }[] } {
+): {
+  fields: Tally;
+  credentials: Tally;
+  restricted: Tally;
+  wrong: { name: string; expected: string; actual: string }[];
+} {
   const actual = new Map(outcome.fields.map((f) => [f.name, f.value ?? '']));
   const wrong: { name: string; expected: string; actual: string }[] = [];
   let correctFields = 0;
@@ -78,7 +83,9 @@ export function scoreExtraction(
   }
 
   const gotCredentials = new Set(outcome.credentials.map(credentialKey));
-  const correctCredentials = c.expected.credentials.filter((e: ExpectedCredential) => gotCredentials.has(credentialKey(e))).length;
+  const correctCredentials = c.expected.credentials.filter((e: ExpectedCredential) =>
+    gotCredentials.has(credentialKey(e)),
+  ).length;
 
   const gotRestricted = new Set(outcome.restrictedFields);
   const correctRestricted = c.expected.restricted.filter((name) => gotRestricted.has(name)).length;

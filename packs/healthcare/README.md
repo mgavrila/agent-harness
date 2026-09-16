@@ -3,13 +3,13 @@
 Reusable content for a credentialing deployment: what to extract, what the
 default policy is, and how to make test data.
 
-| Path | What it is |
-|---|---|
-| `schema/provider.json` | The extraction manifest. See the `$comment` at the top for why it is a manifest and not a JSON Schema. |
-| `policy.yaml` | The default action-class table. |
+| Path                    | What it is                                                                                               |
+| ----------------------- | -------------------------------------------------------------------------------------------------------- |
+| `schema/provider.json`  | The extraction manifest. See the `$comment` at the top for why it is a manifest and not a JSON Schema.   |
+| `policy.yaml`           | The default action-class table.                                                                          |
 | `synthetic/generate.ts` | Twenty synthetic providers with four documents each, as text-layer PDFs and as scans, plus ground truth. |
-| `evals/` | Case files the `@harness/evals` runner reads. |
-| `skills/` | The four credentialing skills, each a `SKILL.md` with Hermes frontmatter plus the harness keys. |
+| `evals/`                | Case files the `@harness/evals` runner reads.                                                            |
+| `skills/`               | The four credentialing skills, each a `SKILL.md` with Hermes frontmatter plus the harness keys.          |
 
 ## Which numbers reach a model
 

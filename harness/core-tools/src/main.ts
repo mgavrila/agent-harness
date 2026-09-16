@@ -30,7 +30,9 @@ try {
     });
   }
 } catch (err) {
-  console.error(`core-tools: reconcile at startup failed: ${err instanceof Error ? err.message : String(err)}; continuing`);
+  console.error(
+    `core-tools: reconcile at startup failed: ${err instanceof Error ? err.message : String(err)}; continuing`,
+  );
 }
 
 serveStdio(() => createCoreToolsServer(deps));

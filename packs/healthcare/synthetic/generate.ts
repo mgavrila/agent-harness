@@ -128,15 +128,53 @@ function ssn(rng: () => number): string {
   return `${String(area).padStart(3, '0')}-${String(group).padStart(2, '0')}-${String(serial).padStart(4, '0')}`;
 }
 
-const FIRST = ['Ada', 'Grace', 'Katherine', 'Mae', 'Chien-Shiung', 'Rosalind', 'Tu', 'Vera', 'Barbara', 'Rita'] as const;
+const FIRST = [
+  'Ada',
+  'Grace',
+  'Katherine',
+  'Mae',
+  'Chien-Shiung',
+  'Rosalind',
+  'Tu',
+  'Vera',
+  'Barbara',
+  'Rita',
+] as const;
 const MIDDLE = ['Rae', 'Marie', 'Chen', 'Okonkwo', 'Patel', 'Nguyen', 'Silva', 'Haddad', 'Kim', 'Rossi'] as const;
-const LAST = ['Lovelace', 'Hopper', 'Johnson', 'Jemison', 'Wu', 'Franklin', 'Youyou', 'Rubin', 'McClintock', 'Levi-Montalcini'] as const;
+const LAST = [
+  'Lovelace',
+  'Hopper',
+  'Johnson',
+  'Jemison',
+  'Wu',
+  'Franklin',
+  'Youyou',
+  'Rubin',
+  'McClintock',
+  'Levi-Montalcini',
+] as const;
 const SUFFIX = ['MD', 'DO', 'MD', 'MD', 'DO'] as const;
 const STATES = ['CA', 'NY', 'TX', 'WA', 'MA', 'IL', 'FL', 'CO'] as const;
-const SPECIALTIES = ['Internal Medicine', 'Family Medicine', 'Cardiology', 'Dermatology', 'Pediatrics', 'Psychiatry'] as const;
-const SCHOOLS = ['Johns Hopkins University School of Medicine', 'UCSF School of Medicine', 'Mayo Clinic Alix School of Medicine', 'University of Michigan Medical School'] as const;
+const SPECIALTIES = [
+  'Internal Medicine',
+  'Family Medicine',
+  'Cardiology',
+  'Dermatology',
+  'Pediatrics',
+  'Psychiatry',
+] as const;
+const SCHOOLS = [
+  'Johns Hopkins University School of Medicine',
+  'UCSF School of Medicine',
+  'Mayo Clinic Alix School of Medicine',
+  'University of Michigan Medical School',
+] as const;
 const CARRIERS = ['MedPro Group', 'The Doctors Company', 'Coverys', 'ProAssurance'] as const;
-const BOARDS = ['American Board of Internal Medicine', 'American Board of Family Medicine', 'American Board of Pediatrics'] as const;
+const BOARDS = [
+  'American Board of Internal Medicine',
+  'American Board of Family Medicine',
+  'American Board of Pediatrics',
+] as const;
 const STREETS = ['1200 Mission Street', '44 Vine Avenue', '900 Cedar Park Road', '17 Harbour Way'] as const;
 const CITIES = ['San Francisco', 'Brooklyn', 'Austin', 'Seattle', 'Cambridge', 'Chicago'] as const;
 
@@ -291,7 +329,13 @@ function planFor(p: SyntheticProvider): DocumentPlan[] {
         practice_address: p.practice_address,
       },
       credentials: [
-        { kind: 'license', state: p.state, issuer: STATE_BOARD[p.state], issued_at: p.license_issued, expires_at: p.license_expires },
+        {
+          kind: 'license',
+          state: p.state,
+          issuer: STATE_BOARD[p.state],
+          issued_at: p.license_issued,
+          expires_at: p.license_expires,
+        },
       ],
       restricted: {},
     },
@@ -313,7 +357,13 @@ function planFor(p: SyntheticProvider): DocumentPlan[] {
       ],
       fields: { first_name: p.first_name, last_name: p.last_name, practice_address: p.practice_address },
       credentials: [
-        { kind: 'dea', state: p.state, issuer: 'Drug Enforcement Administration', issued_at: p.dea_issued, expires_at: p.dea_expires },
+        {
+          kind: 'dea',
+          state: p.state,
+          issuer: 'Drug Enforcement Administration',
+          issued_at: p.dea_issued,
+          expires_at: p.dea_expires,
+        },
       ],
       restricted: { dea_number: p.dea_number },
     },
@@ -341,7 +391,12 @@ function planFor(p: SyntheticProvider): DocumentPlan[] {
         malpractice_coverage: p.malpractice_coverage,
       },
       credentials: [
-        { kind: 'malpractice', issuer: p.malpractice_carrier, issued_at: p.malpractice_issued, expires_at: p.malpractice_expires },
+        {
+          kind: 'malpractice',
+          issuer: p.malpractice_carrier,
+          issued_at: p.malpractice_issued,
+          expires_at: p.malpractice_expires,
+        },
         { kind: 'board_cert', issuer: p.board_issuer, issued_at: p.board_issued, expires_at: p.board_expires },
       ],
       restricted: {},
@@ -415,7 +470,13 @@ function injectionPlan(p: SyntheticProvider): DocumentPlan {
       npi: p.npi,
     },
     credentials: [
-      { kind: 'license', state: p.state, issuer: STATE_BOARD[p.state], issued_at: p.license_issued, expires_at: p.license_expires },
+      {
+        kind: 'license',
+        state: p.state,
+        issuer: STATE_BOARD[p.state],
+        issued_at: p.license_issued,
+        expires_at: p.license_expires,
+      },
     ],
     restricted: {},
   };

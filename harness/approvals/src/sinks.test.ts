@@ -1,8 +1,8 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { encrypt, toolEffects } from '@harness/db';
 import { dispatchStagedEffects } from '@harness/core-tools/effects';
 import { slackSinks } from './sinks.js';
@@ -54,7 +54,12 @@ describe('slack sinks', () => {
   it('uploads a staged file with the effect summary as the comment', async () => {
     const file = path.join(dir, 'aetna-roster.csv');
     await writeFile(file, 'payer_id,provider_name\naetna,Dr. Ada Reyes\n');
-    await stage('slack_file', { path: file, filename: 'aetna-roster.csv', file_id: 'roster/aetna-abc.csv' }, 'Release aetna-roster.csv to Slack', 'k3');
+    await stage(
+      'slack_file',
+      { path: file, filename: 'aetna-roster.csv', file_id: 'roster/aetna-abc.csv' },
+      'Release aetna-roster.csv to Slack',
+      'k3',
+    );
     const slack = new FakeSlack();
     const out = await dispatchStagedEffects(db, slackSinks(slack, { defaultChannel: 'C0DEFAULT' }), { key });
     expect(out.dispatched).toBe(1);
@@ -71,7 +76,10 @@ describe('slack sinks', () => {
     await stage('slack_message', { text: 'hello' }, 'note', 'k4');
     const slack = new FakeSlack();
     slack.failWith = 'channel_not_found';
-    const out = await dispatchStagedEffects(db, slackSinks(slack, { defaultChannel: 'C0DEFAULT' }), { key, maxAttempts: 3 });
+    const out = await dispatchStagedEffects(db, slackSinks(slack, { defaultChannel: 'C0DEFAULT' }), {
+      key,
+      maxAttempts: 3,
+    });
     expect(out).toMatchObject({ retried: 1, dispatched: 0 });
     const [row] = await db.select().from(toolEffects);
     expect(row).toMatchObject({ status: 'staged', attempts: 1 });
@@ -118,11 +126,9 @@ describe('slack sinks', () => {
       const outside = path.join(dir, 'not-in-root.csv');
       await stage('slack_file', { path: outside, filename: 'not-in-root.csv' }, 'outside root', 'k8');
       const slack = new FakeSlack();
-      const out = await dispatchStagedEffects(
-        db,
-        slackSinks(slack, { defaultChannel: 'C0DEFAULT', outDir: root }),
-        { key },
-      );
+      const out = await dispatchStagedEffects(db, slackSinks(slack, { defaultChannel: 'C0DEFAULT', outDir: root }), {
+        key,
+      });
       expect(out).toMatchObject({ dispatched: 0 });
       const [row] = await db.select().from(toolEffects);
       expect(row.status).toBe('staged');
@@ -196,13 +202,16 @@ describe('slack sinks', () => {
       await mkdir(sub, { recursive: true });
       const file = path.join(sub, 'aetna-roster.csv');
       await writeFile(file, 'payer_id,provider_name\naetna,Dr. Ada Reyes\n');
-      await stage('slack_file', { path: file, filename: 'aetna-roster.csv' }, 'Release aetna-roster.csv to Slack', 'k9');
-      const slack = new FakeSlack();
-      const out = await dispatchStagedEffects(
-        db,
-        slackSinks(slack, { defaultChannel: 'C0DEFAULT', outDir: root }),
-        { key },
+      await stage(
+        'slack_file',
+        { path: file, filename: 'aetna-roster.csv' },
+        'Release aetna-roster.csv to Slack',
+        'k9',
       );
+      const slack = new FakeSlack();
+      const out = await dispatchStagedEffects(db, slackSinks(slack, { defaultChannel: 'C0DEFAULT', outDir: root }), {
+        key,
+      });
       expect(out).toMatchObject({ dispatched: 1 });
       expect(slack.uploads).toHaveLength(1);
       expect(slack.uploads[0]).toMatchObject({ filename: 'aetna-roster.csv' });

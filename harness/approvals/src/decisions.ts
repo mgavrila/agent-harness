@@ -20,8 +20,7 @@ export interface DecisionInput {
 }
 
 export type DecisionResult =
-  | { outcome: 'not_actionable' }
-  | { outcome: 'decided'; status: 'approved' | 'declined'; execution?: ExecuteOutcome };
+  { outcome: 'not_actionable' } | { outcome: 'decided'; status: 'approved' | 'declined'; execution?: ExecuteOutcome };
 
 /** A human-written note may contain anything; the same guard as the card applies. */
 function safeText(text: string | null): string | null {
@@ -67,7 +66,9 @@ async function tellSlack(deps: DecisionDeps, row: ApprovalRow, execution: Execut
       blocks: decidedBlocks(row, outcome),
     });
   } catch (err) {
-    console.error(`approvals: could not edit the card for ${row.id}: ${err instanceof Error ? err.message : String(err)}`);
+    console.error(
+      `approvals: could not edit the card for ${row.id}: ${err instanceof Error ? err.message : String(err)}`,
+    );
   }
   try {
     await deps.api.chat.postMessage({
@@ -76,7 +77,9 @@ async function tellSlack(deps: DecisionDeps, row: ApprovalRow, execution: Execut
       text: threadReplyText(row, execution),
     });
   } catch (err) {
-    console.error(`approvals: could not post the thread reply for ${row.id}: ${err instanceof Error ? err.message : String(err)}`);
+    console.error(
+      `approvals: could not post the thread reply for ${row.id}: ${err instanceof Error ? err.message : String(err)}`,
+    );
   }
 }
 

@@ -146,10 +146,7 @@ async function createOrReuseApproval(db: Db, deps: ToolDeps, tool: AnyToolDef, a
   const existing = await db.query.approvals.findFirst({ where: pendingRow });
   if (existing) {
     if (existing.expiresAt > deps.now()) return existing;
-    await db
-      .update(approvals)
-      .set({ status: 'expired', decidedAt: deps.now() })
-      .where(eq(approvals.id, existing.id));
+    await db.update(approvals).set({ status: 'expired', decidedAt: deps.now() }).where(eq(approvals.id, existing.id));
   }
 
   const summary = `${tool.name} (${tool.actionClass}) requested by ${deps.caller}`;
@@ -185,7 +182,12 @@ export type AuditBase = Pick<
  * replay in `approvals_execute` — cannot drift from the rows the registry
  * writes. `derivedFrom` is the caller's lineage claim, not read from context.
  */
-export function auditBaseFor(deps: ToolDeps, tool: AnyToolDef, argsHash: string, derivedFrom: string[] = []): AuditBase {
+export function auditBaseFor(
+  deps: ToolDeps,
+  tool: AnyToolDef,
+  argsHash: string,
+  derivedFrom: string[] = [],
+): AuditBase {
   return {
     client: deps.client,
     caller: deps.caller,

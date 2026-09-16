@@ -3,13 +3,7 @@ import { readFile, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { ToolError } from '../registry.js';
 
-export const DOCUMENT_KINDS = [
-  'state_license',
-  'dea_certificate',
-  'malpractice_certificate',
-  'w9',
-  'other',
-] as const;
+export const DOCUMENT_KINDS = ['state_license', 'dea_certificate', 'malpractice_certificate', 'w9', 'other'] as const;
 export type DocumentKind = (typeof DOCUMENT_KINDS)[number];
 
 /**

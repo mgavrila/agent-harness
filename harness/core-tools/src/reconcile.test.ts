@@ -25,7 +25,13 @@ describe('reconcile', () => {
   });
 
   it('expires only the given client when one is passed, and the rest when none is', async () => {
-    const base = { action: 't', payload: {}, summary: 's', requestedBy: 'r', expiresAt: new Date('2026-09-15T11:00:00Z') };
+    const base = {
+      action: 't',
+      payload: {},
+      summary: 's',
+      requestedBy: 'r',
+      expiresAt: new Date('2026-09-15T11:00:00Z'),
+    };
     await db.insert(approvals).values([
       { ...base, client: 'test', idempotencyKey: 'mine', status: 'pending' },
       { ...base, client: 'other-clinic', idempotencyKey: 'theirs', status: 'pending' },
@@ -48,8 +54,15 @@ describe('reconcile', () => {
     });
   });
 
-  it('parks only the given client\'s stuck dispatches when one is passed', async () => {
-    const base = { tool: 't', sink: 'slack', payloadEncrypted: Buffer.from('x'), summary: 's', status: 'dispatching', updatedAt: new Date('2026-09-15T11:30:00Z') };
+  it("parks only the given client's stuck dispatches when one is passed", async () => {
+    const base = {
+      tool: 't',
+      sink: 'slack',
+      payloadEncrypted: Buffer.from('x'),
+      summary: 's',
+      status: 'dispatching',
+      updatedAt: new Date('2026-09-15T11:30:00Z'),
+    };
     await db.insert(toolEffects).values([
       { ...base, client: 'test', idempotencyKey: 'mine' },
       { ...base, client: 'other-clinic', idempotencyKey: 'theirs' },

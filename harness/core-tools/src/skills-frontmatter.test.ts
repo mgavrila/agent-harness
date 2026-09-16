@@ -48,7 +48,8 @@ describe('healthcare pack skill frontmatter', () => {
       expect(fm[key], `${name}: missing ${key}`).toBeTruthy();
     }
 
-    const harness = (fm.metadata as Record<string, unknown> | undefined)?.harness as Record<string, unknown> | undefined;
+    const harness = (fm.metadata as Record<string, unknown> | undefined)?.harness as
+      Record<string, unknown> | undefined;
     expect(harness, `${name}: missing metadata.harness`).toBeTruthy();
     for (const key of REQUIRED_HARNESS_KEYS) {
       expect(harness?.[key], `${name}: missing metadata.harness.${key}`).not.toBeUndefined();

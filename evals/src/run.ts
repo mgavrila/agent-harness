@@ -223,7 +223,10 @@ export async function runEvals(opts: RunOptions): Promise<{ report: Report; mark
         byKind: Object.fromEntries(
           [...b.byKind.entries()]
             .sort(([a], [z]) => a.localeCompare(z))
-            .map(([k, v]) => [k, { total: v.total, correct: v.correct, accuracy: v.total === 0 ? 1 : v.correct / v.total }]),
+            .map(([k, v]) => [
+              k,
+              { total: v.total, correct: v.correct, accuracy: v.total === 0 ? 1 : v.correct / v.total },
+            ]),
         ),
         calibration: scoreCalibration(b.calibration),
       };
@@ -380,7 +383,10 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     databaseUrl: process.env.EVALS_DATABASE_URL ?? 'postgres://harness:harness@localhost:15432/harness_evals',
     gateway,
     judgeDeps: null,
-    servingModel: Object.keys(routing).length > 0 ? routing : { extract: 'see clients/<name>/routing.yaml', judge: 'see clients/<name>/routing.yaml' },
+    servingModel:
+      Object.keys(routing).length > 0
+        ? routing
+        : { extract: 'see clients/<name>/routing.yaml', judge: 'see clients/<name>/routing.yaml' },
     evalSetVersion: flag('version') ?? '1.0.0',
     limit,
   });

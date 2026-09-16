@@ -40,7 +40,10 @@ export interface StageEffectInput {
  * behind, and a committed handler always has its effect recorded before
  * anything is sent. The payload is stored encrypted only.
  */
-export async function stageEffect(deps: ToolDeps, input: StageEffectInput): Promise<{ effect_id: string; staged: boolean }> {
+export async function stageEffect(
+  deps: ToolDeps,
+  input: StageEffectInput,
+): Promise<{ effect_id: string; staged: boolean }> {
   // Idempotency keys are caller-supplied and only meaningful within a client;
   // two clients computing the same key (e.g. `roster:aetna`) must not collide.
   const scopedKey = `${deps.client}:${input.idempotencyKey}`;
@@ -172,7 +175,11 @@ async function sendClaimedEffect(
  * is an external call), between claiming the row and recording the outcome. A
  * sink that is not registered leaves the row `staged` and counts as skipped.
  */
-export async function dispatchStagedEffects(db: Db, sinks: SinkRegistry, opts: DispatchOptions): Promise<DispatchResult> {
+export async function dispatchStagedEffects(
+  db: Db,
+  sinks: SinkRegistry,
+  opts: DispatchOptions,
+): Promise<DispatchResult> {
   const { key, limit = 50, maxAttempts = 3 } = opts;
   const now = opts.now ?? (() => new Date());
   const result: DispatchResult = { dispatched: 0, failed: 0, retried: 0, skipped: 0, conflicted: 0 };

@@ -101,7 +101,14 @@ export async function buildDepsFromEnv(): Promise<{ deps: ToolDeps; close: () =>
   return { deps, close };
 }
 
-export { registerTools, defineTool, ToolError, DEFAULT_CONFIDENCE_THRESHOLD, type ToolDeps, type AnyToolDef } from './registry.js';
+export {
+  registerTools,
+  defineTool,
+  ToolError,
+  DEFAULT_CONFIDENCE_THRESHOLD,
+  type ToolDeps,
+  type AnyToolDef,
+} from './registry.js';
 export {
   callModel,
   callModelJson,

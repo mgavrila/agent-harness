@@ -95,4 +95,10 @@ export function approvalIdOf(res: { structuredContent?: unknown }): string {
   return envelope.approval_id;
 }
 
-export { startFakeGateway, type FakeGateway, type FakeGatewayCall, type FakeReply, type Responder } from './fake-gateway.js';
+export {
+  startFakeGateway,
+  type FakeGateway,
+  type FakeGatewayCall,
+  type FakeReply,
+  type Responder,
+} from './fake-gateway.js';

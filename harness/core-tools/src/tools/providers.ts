@@ -19,8 +19,14 @@ export const CredentialInput = z.object({
   issuer: z.string().optional(),
   number: z.string().optional(),
   state: z.string().length(2).optional(),
-  issued_at: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-  expires_at: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  issued_at: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional(),
+  expires_at: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional(),
   source_doc_id: z.string().uuid().optional(),
 });
 export type CredentialInput = z.infer<typeof CredentialInput>;
@@ -48,14 +54,17 @@ const RESTRICTED_NAME_SUFFIXES = ['', 'number', 'no', 'id', 'registration'] as c
  */
 export function isRestrictedName(name: string): boolean {
   // Separators are already gone, so the ordinal is a bare digit run at the end.
-  const stem = name.toLowerCase().replace(/[^a-z0-9]/g, '').replace(/\d+$/, '');
-  return RESTRICTED_NAME_KEYS.some((key) =>
-    RESTRICTED_NAME_SUFFIXES.some((suffix) => stem === `${key}${suffix}`),
-  );
+  const stem = name
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '')
+    .replace(/\d+$/, '');
+  return RESTRICTED_NAME_KEYS.some((key) => RESTRICTED_NAME_SUFFIXES.some((suffix) => stem === `${key}${suffix}`));
 }
 
 export async function requireProvider(deps: ToolDeps, providerId: string) {
-  const p = await deps.db.query.providers.findFirst({ where: and(eq(providers.id, providerId), eq(providers.client, deps.client)) });
+  const p = await deps.db.query.providers.findFirst({
+    where: and(eq(providers.id, providerId), eq(providers.client, deps.client)),
+  });
   if (!p) throw new ToolError(`provider ${providerId} not found`);
   return p;
 }
@@ -112,12 +121,17 @@ async function findOrCreateProvider(deps: ToolDeps, name: string, npi?: string) 
       .returning();
     return updated;
   }
-  const [created] = await deps.db.insert(providers).values({ client: deps.client, name, npi: npi ?? null }).returning();
+  const [created] = await deps.db
+    .insert(providers)
+    .values({ client: deps.client, name, npi: npi ?? null })
+    .returning();
   return created;
 }
 
 async function upsertField(deps: ToolDeps, providerId: string, f: FieldInput) {
-  const existing = await deps.db.query.fields.findFirst({ where: and(eq(fields.providerId, providerId), eq(fields.name, f.name)) });
+  const existing = await deps.db.query.fields.findFirst({
+    where: and(eq(fields.providerId, providerId), eq(fields.name, f.name)),
+  });
   if (existing?.status === 'verified') {
     return 'verified' as const;
   }
@@ -230,7 +244,10 @@ const providersUpsert = defineTool({
   actionClass: 'write.internal',
   input: z.object({
     name: z.string().min(1),
-    npi: z.string().regex(/^\d{10}$/).optional(),
+    npi: z
+      .string()
+      .regex(/^\d{10}$/)
+      .optional(),
     fields: z.array(FieldInput).default([]),
     credentials: z.array(CredentialInput).default([]),
   }),
@@ -247,9 +264,7 @@ const providersUpsert = defineTool({
   // arguments remain available, encrypted, in approvals.payload_encrypted.
   redact: (args) => ({
     ...args,
-    fields: args.fields.map((f) =>
-      f.restricted === true || isRestrictedName(f.name) ? { ...f, value: MASKED } : f,
-    ),
+    fields: args.fields.map((f) => (f.restricted === true || isRestrictedName(f.name) ? { ...f, value: MASKED } : f)),
     credentials: args.credentials.map((c) => (c.number === undefined ? c : { ...c, number: MASKED })),
   }),
 });
@@ -300,7 +315,9 @@ const providersSearch = defineTool({
   description: 'Search providers by name fragment or exact NPI.',
   actionClass: 'read',
   input: z.object({ query: z.string().min(1) }),
-  output: z.object({ providers: z.array(z.object({ provider_id: z.string(), name: z.string(), npi: z.string().nullable() })) }),
+  output: z.object({
+    providers: z.array(z.object({ provider_id: z.string(), name: z.string(), npi: z.string().nullable() })),
+  }),
   handler: async ({ query }, deps) => {
     const rows = await deps.db
       .select()
@@ -324,7 +341,9 @@ const providersConfirmField = defineTool({
   output: z.object({ provider_id: z.string(), field: z.string(), status: z.literal('verified') }),
   handler: async ({ provider_id, field, value, confirmed_by }, deps) => {
     await requireProvider(deps, provider_id);
-    const existing = await deps.db.query.fields.findFirst({ where: and(eq(fields.providerId, provider_id), eq(fields.name, field)) });
+    const existing = await deps.db.query.fields.findFirst({
+      where: and(eq(fields.providerId, provider_id), eq(fields.name, field)),
+    });
     const restricted = existing?.restricted === true || isRestrictedName(field);
     const values = {
       providerId: provider_id,
@@ -352,7 +371,9 @@ const providersListPending = defineTool({
   actionClass: 'read',
   input: z.object({ provider_id: z.string().uuid() }),
   output: z.object({
-    fields: z.array(z.object({ name: z.string(), confidence: z.number().nullable(), source_page: z.number().nullable() })),
+    fields: z.array(
+      z.object({ name: z.string(), confidence: z.number().nullable(), source_page: z.number().nullable() }),
+    ),
   }),
   handler: async ({ provider_id }, deps) => {
     await requireProvider(deps, provider_id);
@@ -364,4 +385,10 @@ const providersListPending = defineTool({
   },
 });
 
-export const providerTools: AnyToolDef[] = [providersUpsert, providersGet, providersSearch, providersConfirmField, providersListPending];
+export const providerTools: AnyToolDef[] = [
+  providersUpsert,
+  providersGet,
+  providersSearch,
+  providersConfirmField,
+  providersListPending,
+];
