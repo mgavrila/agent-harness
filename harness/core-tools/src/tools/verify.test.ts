@@ -1,7 +1,7 @@
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import type { ToolDeps } from '../registry.js';
+import type { ToolDeps } from '../domain/tooling/types.js';
 import { connectTools, makeTestDeps, resultOf, useTestDb } from '../testing.js';
 import { providerTools } from './providers.js';
 import { namesMatch, verifyTools } from './verify.js';

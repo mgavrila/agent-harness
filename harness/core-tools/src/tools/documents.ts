@@ -2,7 +2,9 @@ import { unlink, writeFile } from 'node:fs/promises';
 import { and, eq } from 'drizzle-orm';
 import * as z from 'zod/v4';
 import { documents } from '@harness/db';
-import { defineTool, ToolError, type AnyToolDef, type ToolDeps } from '../registry.js';
+import { ToolError } from '@harness/shared';
+import { defineTool } from '../domain/tooling/registry.js';
+import type { AnyToolDef, ToolDeps } from '../domain/tooling/types.js';
 import {
   DOCUMENT_KINDS,
   documentTextPath,

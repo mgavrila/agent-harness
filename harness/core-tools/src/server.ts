@@ -2,8 +2,9 @@ import path from 'node:path';
 import { McpServer } from '@modelcontextprotocol/server';
 import { createDb, loadKey } from '@harness/db';
 import { booleanFromEnv, numberFromEnv } from '@harness/shared';
-import { DEFAULT_CONFIDENCE_THRESHOLD, registerTools, type ToolDeps } from './registry.js';
-import { loadPolicy } from './policy.js';
+import { registerTools } from './domain/tooling/registry.js';
+import { DEFAULT_CONFIDENCE_THRESHOLD, type ToolDeps } from './domain/tooling/types.js';
+import { loadPolicy } from './domain/tooling/policy.js';
 import { gatewayFromEnv } from './models.js';
 import { storageRoot } from './storage.js';
 import { defaultFormsDir } from './forms/templates.js';
@@ -103,7 +104,8 @@ export {
   type RedactedText,
   type RedactionHit,
 } from './shared/redaction/text.js';
-export { registerTools, defineTool, DEFAULT_CONFIDENCE_THRESHOLD, type ToolDeps, type AnyToolDef } from './registry.js';
+export { registerTools, defineTool } from './domain/tooling/registry.js';
+export { DEFAULT_CONFIDENCE_THRESHOLD, type ToolDeps, type AnyToolDef } from './domain/tooling/types.js';
 export {
   callModel,
   callModelJson,
@@ -113,8 +115,8 @@ export {
   type GatewayConfig,
   type ModelCallResult,
 } from './models.js';
-export { DEFAULT_POLICY, decide, type Policy, type ActionClass, type Behavior } from './policy.js';
-export { connectInProcess } from './in-process.js';
+export { DEFAULT_POLICY, decide, type Policy, type ActionClass, type Behavior } from './domain/tooling/policy.js';
+export { connectInProcess } from './domain/tooling/in-process.js';
 export {
   startFakeGateway,
   type FakeGateway,

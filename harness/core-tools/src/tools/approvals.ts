@@ -1,9 +1,12 @@
 import * as z from 'zod/v4';
 import { and, eq, gt } from 'drizzle-orm';
 import { approvals, auditLog, decrypt } from '@harness/db';
-import { auditBaseFor, defineTool, ToolError, withCurrentTool, type AnyToolDef } from '../registry.js';
-import { writeAudit, hashArgs } from '../audit.js';
-import { decide } from '../policy.js';
+import { ToolError } from '@harness/shared';
+import { auditBaseFor, withCurrentTool } from '../domain/tooling/context.js';
+import { defineTool } from '../domain/tooling/registry.js';
+import type { AnyToolDef } from '../domain/tooling/types.js';
+import { writeAudit, hashArgs } from '../domain/tooling/audit.js';
+import { decide } from '../domain/tooling/policy.js';
 
 const approvalsExecute = defineTool({
   name: 'approvals_execute',

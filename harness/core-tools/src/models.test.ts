@@ -2,7 +2,8 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import * as z from 'zod/v4';
 import { eq } from 'drizzle-orm';
 import { modelCalls, runs } from '@harness/db';
-import { ToolError, type ToolDeps } from './registry.js';
+import { ToolError } from '@harness/shared';
+import type { ToolDeps } from './domain/tooling/types.js';
 import { callModel, callModelJson, gatewayFromEnv, ModelOutputError } from './models.js';
 import { makeTestDeps, useTestDb, startFakeGateway, type FakeGateway } from './testing.js';
 

@@ -5,7 +5,7 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { PDFDocument, StandardFonts } from 'pdf-lib';
 import { documents, providers, fields as fieldsTable, credentials as credentialsTable, decrypt } from '@harness/db';
-import type { ToolDeps } from '../registry.js';
+import type { ToolDeps } from '../domain/tooling/types.js';
 import { connectTools, makeTestDeps, resultOf, useTestDb, startFakeGateway, type FakeGateway } from '../testing.js';
 import { providerTools } from './providers.js';
 import { documentTools, documentTextPath } from './documents.js';

@@ -1,7 +1,8 @@
 import * as z from 'zod/v4';
 import { and, asc, eq, inArray, lte, sql } from 'drizzle-orm';
 import { credentials, deadlines, providers } from '@harness/db';
-import { defineTool, type AnyToolDef } from '../registry.js';
+import { defineTool } from '../domain/tooling/registry.js';
+import type { AnyToolDef } from '../domain/tooling/types.js';
 import {
   computeDeadlines,
   daysUntil,

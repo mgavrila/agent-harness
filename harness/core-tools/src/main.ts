@@ -3,8 +3,8 @@ import { fileURLToPath } from 'node:url';
 import { config as loadEnv } from 'dotenv';
 import { serveStdio } from '@modelcontextprotocol/server/stdio';
 import { buildDepsFromEnv, createCoreToolsServer } from './server.js';
-import { reconcile } from './reconcile.js';
-import { writeAudit, hashArgs } from './audit.js';
+import { reconcile } from './domain/tooling/reconcile.js';
+import { writeAudit, hashArgs } from './domain/tooling/audit.js';
 
 // The repository root .env, resolved from this file rather than from the
 // process working directory, which is whatever launched the MCP server.

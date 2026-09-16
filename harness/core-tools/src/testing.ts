@@ -6,10 +6,11 @@ import { onTestFinished } from 'vitest';
 import type { Client } from '@modelcontextprotocol/client';
 import { McpServer } from '@modelcontextprotocol/server';
 import type { Db } from '@harness/db';
-import { DEFAULT_POLICY } from './policy.js';
-import { connectInProcess } from './in-process.js';
+import { DEFAULT_POLICY } from './domain/tooling/policy.js';
+import { connectInProcess } from './domain/tooling/in-process.js';
 import { defaultFormsDir } from './forms/templates.js';
-import { DEFAULT_CONFIDENCE_THRESHOLD, registerTools, type AnyToolDef, type ToolDeps } from './registry.js';
+import { registerTools } from './domain/tooling/registry.js';
+import { DEFAULT_CONFIDENCE_THRESHOLD, type AnyToolDef, type ToolDeps } from './domain/tooling/types.js';
 
 export function makeTestDeps(db: Db, overrides: Partial<ToolDeps> = {}): ToolDeps {
   return {

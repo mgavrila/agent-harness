@@ -3,9 +3,9 @@ import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
-import { connectInProcess } from './in-process.js';
-import { DEFAULT_POLICY } from './policy.js';
-import { DEFAULT_CONFIDENCE_THRESHOLD, type ToolDeps } from './registry.js';
+import { connectInProcess } from './domain/tooling/in-process.js';
+import { DEFAULT_POLICY } from './domain/tooling/policy.js';
+import { DEFAULT_CONFIDENCE_THRESHOLD, type ToolDeps } from './domain/tooling/types.js';
 import { createCoreToolsServer } from './server.js';
 import { NPPES_DEFAULT_BASE_URL } from './tools/verify.js';
 

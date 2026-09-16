@@ -1,7 +1,8 @@
 import * as z from 'zod/v4';
 import { and, desc, eq, gte, type SQL } from 'drizzle-orm';
 import { auditLog } from '@harness/db';
-import { defineTool, type AnyToolDef } from '../registry.js';
+import { defineTool } from '../domain/tooling/registry.js';
+import type { AnyToolDef } from '../domain/tooling/types.js';
 
 const auditQuery = defineTool({
   name: 'audit_query',

@@ -3,7 +3,7 @@ import { and, eq } from 'drizzle-orm';
 import { modelCalls } from '@harness/db';
 import { ROUTES, type Route } from '@harness/gateway/routing';
 import { ModelOutputError, ToolError, requiredEnv } from '@harness/shared';
-import type { ToolDeps } from './registry.js';
+import type { ToolDeps } from './domain/tooling/types.js';
 
 export { ROUTES, type Route };
 export { ModelOutputError };

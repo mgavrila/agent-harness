@@ -5,7 +5,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { PDFDocument, StandardFonts } from 'pdf-lib';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { ToolError } from '../registry.js';
+import { ToolError } from '@harness/shared';
 import { assertBinary, extractDocumentText, extractPdfText, isPdf, ocrImage, ocrPdf, pdfPageCount } from './text.js';
 
 const run = promisify(execFile);

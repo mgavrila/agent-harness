@@ -8,9 +8,9 @@
     "./testing": "./src/testing.ts",
     "./effects": "./src/effects.ts",
     "./fake-gateway": "./src/fake-gateway.ts",
-    "./in-process": "./src/in-process.ts",
+    "./in-process": "./src/domain/tooling/in-process.ts",
     "./models": "./src/models.ts",
-    "./reconcile": "./src/reconcile.ts",
+    "./reconcile": "./src/domain/tooling/reconcile.ts",
     "./storage": "./src/storage.ts"
   },
   "scripts": {

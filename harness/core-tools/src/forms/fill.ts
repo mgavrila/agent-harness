@@ -1,5 +1,5 @@
 import { PDFDocument } from 'pdf-lib';
-import { ToolError } from '../registry.js';
+import { ToolError } from '@harness/shared';
 import { isRestrictedName } from '../shared/redaction/names.js';
 import { mappingLabel, type TemplateMapping } from './templates.js';
 

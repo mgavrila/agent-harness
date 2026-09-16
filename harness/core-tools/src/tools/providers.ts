@@ -1,7 +1,9 @@
 import * as z from 'zod/v4';
 import { and, eq, ilike, or, sql } from 'drizzle-orm';
 import { providers, fields, credentials, encrypt } from '@harness/db';
-import { defineTool, ToolError, type AnyToolDef, type ToolDeps } from '../registry.js';
+import { ToolError } from '@harness/shared';
+import { defineTool } from '../domain/tooling/registry.js';
+import type { AnyToolDef, ToolDeps } from '../domain/tooling/types.js';
 import { MASKED, isRestrictedName } from '../shared/redaction/names.js';
 import { CREDENTIAL_KINDS } from '../deadlines/compute.js';
 

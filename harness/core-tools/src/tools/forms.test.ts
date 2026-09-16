@@ -7,7 +7,7 @@ import { auditLog, credentials, fields, providers, approvals, toolEffects } from
 import { useTestDb, makeTestDeps, connectTools, resultOf, approvalIdOf } from '../testing.js';
 import { defaultFormsDir } from '../forms/templates.js';
 import { ROSTER_COLUMNS } from '../forms/roster.js';
-import type { ToolDeps } from '../registry.js';
+import type { ToolDeps } from '../domain/tooling/types.js';
 import { approvalTools } from './approvals.js';
 import { formTools } from './forms.js';
 

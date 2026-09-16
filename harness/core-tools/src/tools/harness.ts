@@ -1,9 +1,11 @@
 import * as z from 'zod/v4';
 import { eq } from 'drizzle-orm';
 import { runs } from '@harness/db';
-import { defineTool, ToolError, type AnyToolDef } from '../registry.js';
+import { ToolError } from '@harness/shared';
+import { defineTool } from '../domain/tooling/registry.js';
+import type { AnyToolDef } from '../domain/tooling/types.js';
 import { containsRestrictedPattern } from '../shared/redaction/patterns.js';
-import { reconcile } from '../reconcile.js';
+import { reconcile } from '../domain/tooling/reconcile.js';
 import { stageEffect } from '../effects.js';
 
 const harnessReconcile = defineTool({

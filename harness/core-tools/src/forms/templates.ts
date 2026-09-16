@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as z from 'zod/v4';
-import { ToolError } from '../registry.js';
+import { ToolError } from '@harness/shared';
 import { CREDENTIAL_KINDS } from '../deadlines/compute.js';
 
 /**

@@ -1,7 +1,7 @@
 import { and, asc, eq, sql } from 'drizzle-orm';
 import { toolEffects, encrypt, decrypt, withTransaction, type Db } from '@harness/db';
 import { createLogger, describeError } from '@harness/shared';
-import type { ToolDeps } from './registry.js';
+import type { ToolDeps } from './domain/tooling/types.js';
 
 const log = createLogger('effects');
 

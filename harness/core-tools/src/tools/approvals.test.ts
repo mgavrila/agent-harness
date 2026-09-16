@@ -2,9 +2,10 @@ import { describe, it, expect } from 'vitest';
 import * as z from 'zod/v4';
 import { eq } from 'drizzle-orm';
 import { approvals, auditLog, providers } from '@harness/db';
-import { defineTool, ToolError } from '../registry.js';
+import { ToolError } from '@harness/shared';
+import { defineTool } from '../domain/tooling/registry.js';
 import { approvalIdOf, connectTools, makeTestDeps, resultOf, useTestDb, type TestClient } from '../testing.js';
-import { DEFAULT_POLICY } from '../policy.js';
+import { DEFAULT_POLICY } from '../domain/tooling/policy.js';
 import { approvalTools } from './approvals.js';
 
 const db = useTestDb();

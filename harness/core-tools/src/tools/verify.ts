@@ -1,5 +1,7 @@
 import * as z from 'zod/v4';
-import { defineTool, ToolError, type AnyToolDef } from '../registry.js';
+import { ToolError } from '@harness/shared';
+import { defineTool } from '../domain/tooling/registry.js';
+import type { AnyToolDef } from '../domain/tooling/types.js';
 import { requireProvider } from './providers.js';
 
 export interface VerifyConfig {

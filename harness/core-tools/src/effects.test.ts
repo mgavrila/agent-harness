@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import * as z from 'zod/v4';
 import { eq } from 'drizzle-orm';
 import { toolEffects } from '@harness/db';
-import { defineTool } from './registry.js';
+import { defineTool } from './domain/tooling/registry.js';
 import { stageEffect, dispatchStagedEffects, type SinkRegistry } from './effects.js';
 import { connectTools, makeTestDeps, resultOf, useTestDb } from './testing.js';
 

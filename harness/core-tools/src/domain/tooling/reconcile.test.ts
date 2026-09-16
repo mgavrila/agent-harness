@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { approvals, toolEffects } from '@harness/db';
+import { useTestDb } from '../../testing.js';
 import { reconcile } from './reconcile.js';
-import { useTestDb } from './testing.js';
 
 const db = useTestDb();
 const now = () => new Date('2026-09-15T12:00:00Z');
