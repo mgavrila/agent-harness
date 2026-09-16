@@ -33,7 +33,7 @@ deliberately no fallback to `SLACK_BOT_TOKEN`.
 - Write `approvals.status` anywhere but `decideApproval`.
 - Call a tool handler directly. Execution goes through `approvals_execute` over MCP, so it
   lands in `audit_log` like any other call.
-- Put a restricted value on a card. `containsRestrictedPattern` from `@harness/core-tools`
+- Put a restricted value on a card. `containsRestrictedPattern` from `@harness/core-tools/redaction`
   guards the payload, the decision note and a tool's error text, and the file sink checks
   containment again before it uploads anything.
 

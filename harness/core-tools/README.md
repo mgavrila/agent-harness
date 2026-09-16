@@ -9,7 +9,7 @@ expose them; and the shared helpers the packages above this one import instead o
 ```
 src/shared/redaction/  patterns, names, text — domain knowledge; the generic env, errors, paths,
                        log, subprocess, jsonl and csv helpers live in @harness/shared instead
-src/domain/        tooling, approvals, deadlines, documents, effects, forms, models, providers, storage, verify
+src/domain/        tooling, approvals, audit, deadlines, documents, effects, forms, models, packs, providers, session, storage, verify
 src/tools/         23 defineTool blocks in 8 files, plus catalog.ts
 src/app/           server.ts (deps from the environment), main.ts (stdio entrypoint), record-surface.ts
 src/index.ts       the public API

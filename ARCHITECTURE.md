@@ -53,7 +53,7 @@ The dependency graph in one line per layer, with every arrow pointing at somethi
 ```
 shared  <-  pack-api  <-  { core-tools, packs/* }
 shared  <-  db        <-  core-tools  <-  { approvals, evals }
-shared  <-  gateway   <-  { core-tools, evals }
+shared  <-  gateway   <-  core-tools
 core-tools  ..>  packs/*        (runtime only: dynamic import, never a static one)
 ```
 

@@ -10,8 +10,8 @@ import { ConfigError, createLogger, requiredEnv } from '@harness/shared';
 ```
 
 `@harness/core-tools` re-exports every name below from its own public API, so a module that
-already imports one of them from `@harness/core-tools` is not wrong, only indirect; Tasks 9–11
-switch approvals, evals, the pack and scripts onto `@harness/shared` directly.
+already imports one of them from `@harness/core-tools` is not wrong, only indirect. Approvals,
+evals and the healthcare pack import `@harness/shared` directly; `scripts` needs none of it.
 
 ## What is not here
 
