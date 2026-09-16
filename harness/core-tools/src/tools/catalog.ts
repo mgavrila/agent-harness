@@ -12,12 +12,13 @@ import { providerTools } from './providers.js';
 import { verifyTools } from './verify.js';
 
 /**
- * Every tool this server publishes, in the order they are registered. The order is not
- * meaningful to MCP but it is what `docs/architecture/tool-surface.json` is sorted against, so
- * adding a toolset here and forgetting to re-record the snapshot fails the suite.
+ * Core's own tools, in the order they are registered. The order is not meaningful to MCP but
+ * it is what `docs/architecture/tool-surface.json` is sorted against, so adding a toolset here
+ * and forgetting to re-record the snapshot fails the suite.
  *
  * A function rather than a constant because `documents_ingest` declares the loaded packs'
- * document kinds in its input schema, and because a pack may contribute tools of its own.
+ * document kinds in its input schema. A pack's own tools are not in this list — see
+ * `createCoreToolsServer`, which is where `ToolDeps` is in scope to hand them.
  */
 export function allTools(packs: PackRegistry): AnyToolDef[] {
   return [
@@ -29,8 +30,6 @@ export function allTools(packs: PackRegistry): AnyToolDef[] {
     ...documentTools(packs),
     ...formTools,
     ...verifyTools,
-    // A pack's own tools, last, so core's names always win a collision. No pack ships any today.
-    ...packs.all.flatMap((pack) => pack.tools?.(packs) ?? []),
   ];
 }
 
@@ -38,9 +37,15 @@ export function allTools(packs: PackRegistry): AnyToolDef[] {
  * An MCP server serving every tool against one set of dependencies. It reads no environment
  * and opens no connection — `app/server.ts` builds the dependencies — which is what lets the
  * eval runner and the surface recorder construct one in-process.
+ *
+ * A pack's own tools are appended here, last, so core's names always win a collision, and
+ * handed `deps` itself: the `Pack.tools` contract types its argument `unknown` because a pack
+ * cannot see `ToolDeps`, but the value it actually receives is core's dependency bag, the same
+ * one every core tool's handler runs against. No pack ships any tools today.
  */
 export function createCoreToolsServer(deps: ToolDeps): McpServer {
   const server = new McpServer({ name: 'core-tools', version: '0.1.0' });
-  registerTools(server, allTools(deps.packs), deps);
+  const tools = [...allTools(deps.packs), ...deps.packs.all.flatMap((pack) => pack.tools?.(deps) ?? [])];
+  registerTools(server, tools, deps);
   return server;
 }
