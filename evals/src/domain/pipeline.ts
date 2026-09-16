@@ -12,6 +12,7 @@ import {
 import { connectInProcess } from '@harness/core-tools/in-process';
 import { createDb, runMigrations, type Db } from '@harness/db';
 import { resetDatabase } from '@harness/db/testing';
+import { describeError } from '@harness/shared';
 import type { ExtractionCase } from './cases.js';
 import type { CaseOutcome, StoredCredential, StoredField } from './score.js';
 
@@ -172,6 +173,6 @@ export async function runCase(handle: PipelineHandle, c: ExtractionCase): Promis
       policyAfter: { ...handle.policy },
     };
   } catch (err) {
-    return { ...empty, toolsCalled: [...handle.toolsCalled], error: err instanceof Error ? err.message : String(err) };
+    return { ...empty, toolsCalled: [...handle.toolsCalled], error: describeError(err) };
   }
 }
