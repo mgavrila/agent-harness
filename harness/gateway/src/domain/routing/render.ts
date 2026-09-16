@@ -48,7 +48,7 @@ function deployment(name: string, model: string, budget: number, apiBase?: strin
 }
 
 const HEADER = `# GENERATED FILE - do not edit by hand.
-# Rendered from clients/<name>/routing.yaml by harness/gateway/render-config.ts.
+# Rendered from clients/<name>/routing.yaml by harness/gateway/src/app/render-config.ts.
 # Regenerate with: pnpm gateway:config
 `;
 
