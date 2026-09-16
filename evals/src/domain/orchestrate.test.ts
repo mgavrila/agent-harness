@@ -1,18 +1,14 @@
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { randomBytes } from 'node:crypto';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { DEFAULT_POLICY, registryOf, type ToolDeps } from '@harness/core-tools';
-import { pack as healthcarePack } from '@harness/pack-healthcare';
+import type { ToolDeps } from '@harness/core-tools';
 import { startFakeGateway, type FakeGateway } from '@harness/core-tools/fake-gateway';
-import { createDb } from '@harness/db';
 import { EVALS_DATABASE_URL, EXTRACTION, VERDICTS, writeEvalCorpus } from '../corpus.test-helpers.js';
+import { openJudgeDeps } from '../judge-deps.test-helpers.js';
 import { runEvals, selectCases, injectionCasesFor } from './orchestrate.js';
 import type { ExtractionCase, InjectionCase } from './cases.js';
 import type { Report } from './report/types.js';
-
-const packs = registryOf([healthcarePack]);
 
 let dir: string;
 let corpus: string;
@@ -59,32 +55,7 @@ beforeAll(async () => {
 
   gateway = await startFakeGateway((call) => ({ content: call.model === 'judge' ? VERDICTS : EXTRACTION }));
 
-  const handle = createDb(EVALS_DATABASE_URL);
-  closeDb = handle.close;
-  judgeDeps = {
-    db: handle.db,
-    client: 'evals',
-    caller: 'judge',
-    policy: { ...DEFAULT_POLICY },
-    encryptionKey: randomBytes(32),
-    now: () => new Date(),
-    approvalTtlHours: 24,
-    confidenceThreshold: 0.85,
-    gateway: { baseUrl: gateway.url, apiKey: 'sk-eval', timeoutMs: 10_000, maxCallsPerRun: 100 },
-    storageDir: corpus,
-    formsDir: packs.formsDir(),
-    restrictedToModel: false,
-    verify: {
-      nppesEnabled: false,
-      nppesBaseUrl: 'http://127.0.0.1:1/api/',
-      stateLicenseEnabled: false,
-      timeoutMs: 5_000,
-    },
-    sinks: {},
-    context: {},
-    tools: new Map(),
-    packs,
-  };
+  ({ deps: judgeDeps, close: closeDb } = openJudgeDeps({ gatewayUrl: gateway.url, storageDir: corpus }));
 }, 120_000);
 
 afterAll(async () => {

@@ -1,17 +1,15 @@
-import { randomBytes } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { DEFAULT_POLICY, registryOf, type ToolDeps } from '@harness/core-tools';
-import { pack as healthcarePack } from '@harness/pack-healthcare';
+import type { ToolDeps } from '@harness/core-tools';
 import { startFakeGateway, type FakeGateway } from '@harness/core-tools/fake-gateway';
-import { createDb, runMigrations } from '@harness/db';
+import { runMigrations } from '@harness/db';
 import { EVALS_DATABASE_URL } from '../../corpus.test-helpers.js';
+import { openJudgeDeps } from '../../judge-deps.test-helpers.js';
 import type { JudgeItem } from './types.js';
 import { judgeFreeText } from './verdict.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const packs = registryOf([healthcarePack]);
 
 let gateway: FakeGateway;
 let deps: ToolDeps;
@@ -22,32 +20,7 @@ const VERDICT = (index: number, same: boolean) => ({ index, same, why: 'because'
 beforeAll(async () => {
   await runMigrations(EVALS_DATABASE_URL);
   gateway = await startFakeGateway(() => ({ content: JSON.stringify({ verdicts: [VERDICT(0, true)] }) }));
-  const handle = createDb(EVALS_DATABASE_URL);
-  closeDb = handle.close;
-  deps = {
-    db: handle.db,
-    client: 'evals',
-    caller: 'judge',
-    policy: { ...DEFAULT_POLICY },
-    encryptionKey: randomBytes(32),
-    now: () => new Date(),
-    approvalTtlHours: 24,
-    confidenceThreshold: 0.85,
-    gateway: { baseUrl: gateway.url, apiKey: 'sk-eval', timeoutMs: 10_000, maxCallsPerRun: 100 },
-    storageDir: here,
-    formsDir: packs.formsDir(),
-    restrictedToModel: false,
-    verify: {
-      nppesEnabled: false,
-      nppesBaseUrl: 'http://127.0.0.1:1/api/',
-      stateLicenseEnabled: false,
-      timeoutMs: 5_000,
-    },
-    sinks: {},
-    context: {},
-    tools: new Map(),
-    packs,
-  };
+  ({ deps, close: closeDb } = openJudgeDeps({ gatewayUrl: gateway.url, storageDir: here }));
 }, 120_000);
 
 afterAll(async () => {
