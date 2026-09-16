@@ -30,14 +30,16 @@ export async function writeTextPdf(target: string, pages: PageSpec[]): Promise<v
  * `scan` eval split measures.
  */
 export async function writeScanPdf(sourcePdf: string, target: string, scratchDir: string): Promise<void> {
-  const prefix = path.join(scratchDir, path.basename(target, '.pdf'));
-  const outcome = await runBounded('pdftoppm', ['-r', '200', '-png', sourcePdf, prefix], { timeoutMs: 60_000 });
+  // pdftoppm appends a zero-padded page suffix to this stem, so the same stem
+  // names the output prefix and matches the files it produced.
+  const stem = path.basename(target, '.pdf');
+  const outcome = await runBounded('pdftoppm', ['-r', '200', '-png', sourcePdf, path.join(scratchDir, stem)], {
+    timeoutMs: 60_000,
+  });
   if (!outcome.ok) {
     throw new Error(`pdftoppm ${outcome.reason} while rasterising ${path.basename(sourcePdf)}`);
   }
-  const produced = (await readdir(scratchDir))
-    .filter((f) => f.startsWith(`${path.basename(target, '.pdf')}-`) && f.endsWith('.png'))
-    .sort();
+  const produced = (await readdir(scratchDir)).filter((f) => f.startsWith(`${stem}-`) && f.endsWith('.png')).sort();
   if (produced.length === 0) throw new Error(`pdftoppm produced no pages for ${sourcePdf}`);
   const doc = await PDFDocument.create();
   for (const file of produced) {
