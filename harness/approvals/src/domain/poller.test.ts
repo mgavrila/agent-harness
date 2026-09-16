@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { approvals, type Db } from '@harness/db';
-import { FakeSlack, useTestDb } from '../testing.js';
+import { FakeSlack, pendingApproval, useTestDb } from '../testing.js';
 import { postPendingApprovals } from './poller.js';
 
 const db = useTestDb();
@@ -26,20 +26,9 @@ function dbWithFailingSlackTsWrite(real: Db): Db {
   } as unknown as Db;
 }
 
-const base = {
-  client: 'demo-practice',
-  action: 'forms_release',
-  payload: { tool: 'forms_release', args: { file_id: 'roster/aetna-abc123def456.csv' } },
-  summary: 'forms_release (external) requested by hermes',
-  requestedBy: 'hermes',
-};
-
 describe('postPendingApprovals', () => {
   it('posts one card per unposted pending approval and records where it went', async () => {
-    await db.insert(approvals).values([
-      { ...base, idempotencyKey: 'k1', expiresAt: new Date('2026-09-16T12:00:00Z') },
-      { ...base, idempotencyKey: 'k2', expiresAt: new Date('2026-09-16T12:00:00Z') },
-    ]);
+    await db.insert(approvals).values([pendingApproval(), pendingApproval({ idempotencyKey: 'k2' })]);
     const slack = new FakeSlack();
     const out = await postPendingApprovals({ db, api: slack, client: 'demo-practice', channel: 'C0DEMO', now });
     expect(out).toMatchObject({ posted: 2, orphaned: 0 });
@@ -51,7 +40,7 @@ describe('postPendingApprovals', () => {
   });
 
   it('posts nothing on a second pass', async () => {
-    await db.insert(approvals).values({ ...base, idempotencyKey: 'k1', expiresAt: new Date('2026-09-16T12:00:00Z') });
+    await db.insert(approvals).values(pendingApproval());
     const slack = new FakeSlack();
     const deps = { db, api: slack, client: 'demo-practice', channel: 'C0DEMO', now };
     await postPendingApprovals(deps);
@@ -60,11 +49,13 @@ describe('postPendingApprovals', () => {
   });
 
   it('skips decided, expired and other-client rows', async () => {
-    await db.insert(approvals).values([
-      { ...base, idempotencyKey: 'k1', status: 'approved', expiresAt: new Date('2026-09-16T12:00:00Z') },
-      { ...base, idempotencyKey: 'k2', expiresAt: new Date('2026-09-15T11:00:00Z') },
-      { ...base, idempotencyKey: 'k3', client: 'other-clinic', expiresAt: new Date('2026-09-16T12:00:00Z') },
-    ]);
+    await db
+      .insert(approvals)
+      .values([
+        pendingApproval({ status: 'approved' }),
+        pendingApproval({ idempotencyKey: 'k2', expiresAt: new Date('2026-09-15T11:00:00Z') }),
+        pendingApproval({ idempotencyKey: 'k3', client: 'other-clinic' }),
+      ]);
     const slack = new FakeSlack();
     const out = await postPendingApprovals({ db, api: slack, client: 'demo-practice', channel: 'C0DEMO', now });
     expect(out.posted).toBe(0);
@@ -72,7 +63,7 @@ describe('postPendingApprovals', () => {
   });
 
   it('releases the claim when Slack rejects the post, and posts it on the next run', async () => {
-    await db.insert(approvals).values({ ...base, idempotencyKey: 'k1', expiresAt: new Date('2026-09-16T12:00:00Z') });
+    await db.insert(approvals).values(pendingApproval());
     const slack = new FakeSlack();
     slack.failWith = 'channel_not_found';
     const deps = { db, api: slack, client: 'demo-practice', channel: 'C0DEMO', now };
@@ -92,14 +83,9 @@ describe('postPendingApprovals', () => {
 
   it('releases a stale claim (claimed more than 2 minutes ago) and posts it', async () => {
     const staleClaimedAt = new Date(now().getTime() - 3 * 60 * 1000);
-    await db.insert(approvals).values({
-      ...base,
-      idempotencyKey: 'k1',
-      expiresAt: new Date('2026-09-16T12:00:00Z'),
-      slackChannel: 'C0STALE',
-      claimedAt: staleClaimedAt,
-      createdAt: staleClaimedAt,
-    });
+    await db
+      .insert(approvals)
+      .values(pendingApproval({ slackChannel: 'C0STALE', claimedAt: staleClaimedAt, createdAt: staleClaimedAt }));
     const slack = new FakeSlack();
     const out = await postPendingApprovals({ db, api: slack, client: 'demo-practice', channel: 'C0DEMO', now });
     expect(out.posted).toBe(1);
@@ -111,14 +97,9 @@ describe('postPendingApprovals', () => {
 
   it('leaves a fresh claim on an old row alone: the window runs from the claim, not from creation', async () => {
     const createdLongAgo = new Date(now().getTime() - 30 * 60 * 1000);
-    await db.insert(approvals).values({
-      ...base,
-      idempotencyKey: 'k1',
-      expiresAt: new Date('2026-09-16T12:00:00Z'),
-      slackChannel: 'C0OTHER',
-      claimedAt: now(),
-      createdAt: createdLongAgo,
-    });
+    await db
+      .insert(approvals)
+      .values(pendingApproval({ slackChannel: 'C0OTHER', claimedAt: now(), createdAt: createdLongAgo }));
     const slack = new FakeSlack();
     const out = await postPendingApprovals({ db, api: slack, client: 'demo-practice', channel: 'C0DEMO', now });
     expect(out.posted).toBe(0);
@@ -129,7 +110,7 @@ describe('postPendingApprovals', () => {
   });
 
   it('keeps the claim when the post succeeded but recording slack_ts failed, so the next tick posts nothing', async () => {
-    await db.insert(approvals).values({ ...base, idempotencyKey: 'k1', expiresAt: new Date('2026-09-16T12:00:00Z') });
+    await db.insert(approvals).values(pendingApproval());
     const slack = new FakeSlack();
     const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
 
@@ -157,7 +138,7 @@ describe('postPendingApprovals', () => {
   });
 
   it('produces exactly one post when a second poll run starts while the first is posting', async () => {
-    await db.insert(approvals).values({ ...base, idempotencyKey: 'k1', expiresAt: new Date('2026-09-16T12:00:00Z') });
+    await db.insert(approvals).values(pendingApproval());
     const slack = new FakeSlack();
     let secondRun: Awaited<ReturnType<typeof postPendingApprovals>> | undefined;
     const racing = {

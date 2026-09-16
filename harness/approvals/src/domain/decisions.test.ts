@@ -1,27 +1,18 @@
 import { describe, it, expect } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { approvals } from '@harness/db';
-import { FakeCoreToolsClient, FakeSlack, useTestDb } from '../testing.js';
+import { FakeCoreToolsClient, FakeSlack, pendingApproval, useTestDb } from '../testing.js';
 import { decideApproval, threadReplyText } from './decisions.js';
 import type { ApprovalRow } from './render/types.js';
 
 const db = useTestDb();
 const now = () => new Date('2026-09-15T12:00:00Z');
 
-const base = {
-  client: 'demo-practice',
-  action: 'forms_release',
-  payload: { tool: 'forms_release', args: { file_id: 'roster/aetna-abc123def456.csv' } },
-  summary: 'forms_release (external) requested by hermes',
-  requestedBy: 'hermes',
-  slackChannel: 'C0DEMO',
-  slackTs: '1789000000.000001',
-};
-
+/** One posted, pending approval on file, with `over` applied last. */
 async function seed(over: Record<string, unknown> = {}): Promise<ApprovalRow> {
   const [row] = await db
     .insert(approvals)
-    .values({ ...base, idempotencyKey: 'k1', expiresAt: new Date('2026-09-16T12:00:00Z'), ...over })
+    .values(pendingApproval({ slackChannel: 'C0DEMO', slackTs: '1789000000.000001', ...over }))
     .returning();
   return row;
 }

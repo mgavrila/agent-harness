@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { approvals } from '@harness/db';
 import { APPROVE_ACTION_ID, DECLINE_ACTION_ID, EDIT_ACTION_ID, EDIT_MODAL_CALLBACK_ID } from '../render/types.js';
-import { FakeCoreToolsClient, FakeSlack, useTestDb } from '../../testing.js';
+import { FakeCoreToolsClient, FakeSlack, pendingApproval, useTestDb } from '../../testing.js';
 import { registerApprovalHandlers, type ActionArgs, type HandlerRegistry, type ViewArgs } from './handlers.js';
 
 const db = useTestDb();
@@ -23,17 +23,7 @@ class Registry implements HandlerRegistry {
 async function seed() {
   const [row] = await db
     .insert(approvals)
-    .values({
-      client: 'demo-practice',
-      action: 'forms_release',
-      payload: { tool: 'forms_release', args: { file_id: 'roster/aetna-abc123def456.csv' } },
-      summary: 'forms_release (external) requested by hermes',
-      requestedBy: 'hermes',
-      idempotencyKey: 'k1',
-      expiresAt: new Date('2026-09-16T12:00:00Z'),
-      slackChannel: 'C0DEMO',
-      slackTs: '1789000000.000001',
-    })
+    .values(pendingApproval({ slackChannel: 'C0DEMO', slackTs: '1789000000.000001' }))
     .returning();
   return row;
 }

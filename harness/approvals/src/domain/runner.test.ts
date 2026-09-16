@@ -4,7 +4,7 @@ import path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { describe, it, expect } from 'vitest';
 import { approvals, encrypt, toolEffects } from '@harness/db';
-import { FakeCoreToolsClient, FakeSlack, useTestDb } from '../testing.js';
+import { FakeCoreToolsClient, FakeSlack, pendingApproval, useTestDb } from '../testing.js';
 import {
   runPollTick,
   runDispatchTick,
@@ -34,15 +34,7 @@ function makeDeps(api: FakeSlack, core: FakeCoreToolsClient): RunnerDeps {
 
 describe('runner ticks', () => {
   it('posts a card, then drains a staged message, then reports both in health', async () => {
-    await db.insert(approvals).values({
-      client: 'demo-practice',
-      action: 'forms_release',
-      payload: { tool: 'forms_release', args: { file_id: 'roster/aetna-abc123def456.csv' } },
-      summary: 'forms_release (external) requested by hermes',
-      requestedBy: 'hermes',
-      idempotencyKey: 'k1',
-      expiresAt: new Date('2026-09-16T12:00:00Z'),
-    });
+    await db.insert(approvals).values(pendingApproval());
     await db.insert(toolEffects).values({
       client: 'demo-practice',
       tool: 'credentialing_expirations',
