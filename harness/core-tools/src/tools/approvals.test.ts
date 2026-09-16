@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import * as z from 'zod/v4';
 import { eq } from 'drizzle-orm';
-import { approvals, auditLog, providers } from '@harness/db';
+import { approvals, auditLog, records } from '@harness/db';
 import { ToolError } from '@harness/shared';
 import { defineTool } from '../domain/tooling/registry.js';
 import { approvalIdOf, connectTools, makeTestDeps, resultOf, useTestDb, type TestClient } from '../testing.js';
@@ -20,7 +20,7 @@ const createProviderExternal = defineTool({
   handler: async ({ name, explode }, d) => {
     if (explode) throw new ToolError('handler exploded');
     const [row] = await d.db
-      .insert(providers)
+      .insert(records)
       .values({ client: d.client, pack: 'healthcare', kind: 'provider', name })
       .returning();
     return { provider_id: row.id };
@@ -51,7 +51,7 @@ describe('approvals_execute', () => {
     const out = resultOf<{ status: string; tool: string; result: { provider_id: string } }>(res);
     expect(out.status).toBe('executed');
     expect(out.tool).toBe('create_provider_external');
-    expect(await db.select().from(providers)).toHaveLength(1);
+    expect(await db.select().from(records)).toHaveLength(1);
     const [row] = await db.select().from(approvals).where(eq(approvals.id, id));
     expect(row.status).toBe('executed');
     expect(row.executedAt).not.toBeNull();
@@ -63,7 +63,7 @@ describe('approvals_execute', () => {
 
     const again = await client.callTool({ name: 'approvals_execute', arguments: { approval_id: id } });
     expect(again.isError).toBe(true);
-    expect(await db.select().from(providers)).toHaveLength(1);
+    expect(await db.select().from(records)).toHaveLength(1);
   });
 
   it('refuses pending, declined, and expired approvals', async () => {
@@ -80,7 +80,7 @@ describe('approvals_execute', () => {
       const res = await client.callTool({ name: 'approvals_execute', arguments: { approval_id: id } });
       expect(res.isError).toBe(true);
     }
-    expect(await db.select().from(providers)).toHaveLength(0);
+    expect(await db.select().from(records)).toHaveLength(0);
   });
 
   it('rolls back to approved when the replayed handler throws', async () => {
@@ -141,7 +141,7 @@ describe('approvals_execute', () => {
     const [row] = await db.select().from(approvals).where(eq(approvals.id, id));
     expect(row.status).toBe('approved');
     expect(row.executedAt).toBeNull();
-    expect(await db.select().from(providers)).toHaveLength(0);
+    expect(await db.select().from(records)).toHaveLength(0);
   });
 
   it('refuses an approval that belongs to another client', async () => {

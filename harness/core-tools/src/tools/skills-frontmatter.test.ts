@@ -2,39 +2,59 @@ import { readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import { describe, it, expect } from 'vitest';
 import { parse } from 'yaml';
+import type { Db } from '@harness/db';
 import { pack as healthcarePack } from '@harness/pack-healthcare';
 import { registryOf } from '../domain/packs/registry.js';
-import { allTools } from './catalog.js';
+import { makeTestDeps } from '../testing.js';
+import { publishedTools } from './catalog.js';
 
 const packs = registryOf([healthcarePack]);
-const SKILLS_DIR = packs.skillsDirs()[0];
 
 /**
- * Every tool a skill may name. This used to carry an allowlist for the
- * `documents_*` and `verify_nppes` names, which a skill declared while the
- * document-ingestion plan was still on its own branch; that plan has landed,
- * so those names are in the catalogue like any other and the escape hatch is
- * gone. A skill naming a tool this server does not register is now a typo.
+ * Every tool a skill may name: the **published** catalogue, the list an MCP client receives.
+ *
+ * It used to be `allTools(packs)`, the kernel's own definitions. Those two were the same list
+ * until the kernel became pack-agnostic; they are not any more. The kernel defines `records_*`
+ * and the healthcare pack publishes `providers_*` over them, so a skill checked against the
+ * kernel list would fail on every name it can actually call, and a skill naming a kernel tool
+ * the loaded packs replaced would wrongly pass. `publishedTools` is the same function
+ * `createCoreToolsServer` registers from, so this set is exactly what the server serves.
+ *
+ * The null database is safe and deliberate: `publishedTools` builds and filters definitions and
+ * never calls a handler, so this test needs no Postgres — the same trick `app/record-surface.ts`
+ * uses to record the surface offline.
  */
-const KNOWN_TOOL_NAMES = new Set(allTools(packs).map((t) => t.name));
+function publishedNames(registry: typeof packs): Set<string> {
+  const deps = makeTestDeps(null as unknown as Db, { packs: registry });
+  return new Set(publishedTools(deps).map((t) => t.name));
+}
+
+const KNOWN_TOOL_NAMES = publishedNames(packs);
 
 const REQUIRED_HARNESS_KEYS = ['owner', 'eval_status', 'evals', 'action_classes', 'tools'] as const;
 
-function readFrontmatter(name: string): Record<string, unknown> {
-  const text = readFileSync(path.join(SKILLS_DIR, name, 'SKILL.md'), 'utf8');
+/** Every skill directory of every loaded pack, as `[skillsDir, skillName]` pairs. */
+function skillsOf(dirs: string[]): [string, string][] {
+  return dirs.flatMap((dir) =>
+    readdirSync(dir, { withFileTypes: true })
+      // Directories only: a stray file beside the skills is not a skill.
+      .filter((e) => e.isDirectory())
+      .map((e) => [dir, e.name] as [string, string]),
+  );
+}
+
+function readFrontmatter(dir: string, name: string): Record<string, unknown> {
+  const text = readFileSync(path.join(dir, name, 'SKILL.md'), 'utf8');
   const match = /^---\n([\s\S]*?)\n---\n/.exec(text);
   if (!match) throw new Error(`${name}: SKILL.md has no frontmatter block`);
   return parse(match[1]) as Record<string, unknown>;
 }
 
-describe('healthcare pack skill frontmatter', () => {
-  // Directories only: a stray file beside the skills is not a skill.
-  const skillNames = readdirSync(SKILLS_DIR, { withFileTypes: true })
-    .filter((e) => e.isDirectory())
-    .map((e) => e.name);
+describe('loaded pack skill frontmatter', () => {
+  const skills = skillsOf(packs.skillsDirs());
 
   it('discovers the four credentialing skills', () => {
-    expect(skillNames.sort()).toEqual([
+    expect(skills.map(([, name]) => name).sort()).toEqual([
       'credentialing-expirations',
       'credentialing-fill-form',
       'credentialing-intake',
@@ -42,8 +62,8 @@ describe('healthcare pack skill frontmatter', () => {
     ]);
   });
 
-  it.each(skillNames)('%s has valid frontmatter', (name) => {
-    const fm = readFrontmatter(name);
+  it.each(skills)('%s/%s has valid frontmatter', (dir, name) => {
+    const fm = readFrontmatter(dir, name);
     expect(fm.name).toBe(name);
     for (const key of ['description', 'version']) {
       expect(fm[key], `${name}: missing ${key}`).toBeTruthy();

@@ -7,6 +7,7 @@ import { describeError } from '@harness/shared';
 import { connectInProcess } from '../domain/tooling/in-process.js';
 import { DEFAULT_POLICY } from '../domain/tooling/policy.js';
 import { DEFAULT_CONFIDENCE_THRESHOLD, type ToolDeps } from '../domain/tooling/types.js';
+import { PACK_KERNEL } from '../domain/packs/kernel.js';
 import { loadPacks } from '../domain/packs/registry.js';
 import { createCoreToolsServer } from '../tools/catalog.js';
 import { NPPES_DEFAULT_BASE_URL } from '../domain/verify/nppes.js';
@@ -54,6 +55,8 @@ export async function surfaceDeps(): Promise<ToolDeps> {
     sinks: {},
     context: {},
     tools: new Map(),
+    kernelTools: new Map(),
+    kernel: PACK_KERNEL,
     packs,
   };
 }

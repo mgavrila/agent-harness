@@ -3,7 +3,7 @@ import type { AddressInfo } from 'node:net';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import type { ToolDeps } from '../domain/tooling/types.js';
 import { connectTools, makeTestDeps, resultOf, useTestDb } from '../testing.js';
-import { providerTools } from './providers.js';
+import { compatTools } from './compat.js';
 import { verifyTools } from './verify.js';
 
 const db = useTestDb();
@@ -72,7 +72,7 @@ function deps(overrides: Partial<ToolDeps> = {}): ToolDeps {
   });
 }
 
-const connect = (d: ToolDeps = deps()) => connectTools('verify-test', [...providerTools, ...verifyTools], d);
+const connect = (d: ToolDeps = deps()) => connectTools('verify-test', [...compatTools(d), ...verifyTools], d);
 
 interface NppesOut {
   npi: string;
@@ -203,7 +203,8 @@ describe('verify_nppes', () => {
     const p = resultOf<{ provider_id: string }>(
       await client.callTool({ name: 'providers_upsert', arguments: { name: 'Jackelyn Kelley', npi: '1063837144' } }),
     );
-    const other = await connectTools('other', [...providerTools, ...verifyTools], deps({ client: 'other' }));
+    const otherDeps = deps({ client: 'other' });
+    const other = await connectTools('other', [...compatTools(otherDeps), ...verifyTools], otherDeps);
     const res = await other.callTool({
       name: 'verify_nppes',
       arguments: { npi: '1063837144', provider_id: p.provider_id },

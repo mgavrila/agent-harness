@@ -5,6 +5,7 @@ import { loadPolicy } from '../domain/tooling/policy.js';
 import { DEFAULT_CONFIDENCE_THRESHOLD, type ToolDeps } from '../domain/tooling/types.js';
 import { gatewayFromEnv } from '../domain/models/gateway.js';
 import { storageRoot } from '../domain/storage/layout.js';
+import { PACK_KERNEL } from '../domain/packs/kernel.js';
 import { loadPacks } from '../domain/packs/registry.js';
 import type { PackRegistry } from '../domain/packs/types.js';
 import { NPPES_DEFAULT_BASE_URL } from '../domain/verify/nppes.js';
@@ -86,6 +87,8 @@ export async function buildDepsFromEnv(): Promise<{ deps: ToolDeps; close: () =>
     // id and skill would be stamped on another session's audit rows.
     context: {},
     tools: new Map(),
+    kernelTools: new Map(),
+    kernel: PACK_KERNEL,
     packs,
   };
   return { deps, close };

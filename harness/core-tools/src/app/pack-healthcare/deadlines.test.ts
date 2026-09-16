@@ -1,15 +1,14 @@
 import { randomUUID } from 'node:crypto';
 import { describe, it, expect } from 'vitest';
 import { and, eq } from 'drizzle-orm';
-import { credentials, deadlines } from '@harness/db';
-import { connectTools, makeTestDeps, resultOf, useTestDb, type TestClient } from '../testing.js';
-import { providerTools } from './providers.js';
-import { deadlineTools } from './deadlines.js';
+import { attachments, deadlines } from '@harness/db';
+import { connectTools, makeTestDeps, resultOf, useTestDb, type TestClient } from '../../testing.js';
+import { compatTools } from '../../tools/compat.js';
 
 const db = useTestDb();
 const deps = makeTestDeps(db, { now: () => new Date('2026-09-15T12:00:00Z') });
 
-const connectDeadlines = () => connectTools('deadlines-test', [...providerTools, ...deadlineTools], deps);
+const connectDeadlines = () => connectTools('deadlines-test', compatTools(deps), deps);
 
 interface ComputedDeadline {
   credential_id: string;
@@ -105,8 +104,8 @@ describe('deadlines tools', () => {
     const id = await seed(client);
     await client.callTool({ name: 'deadlines_compute', arguments: { provider_id: id } });
 
-    const licenseCred = await db.query.credentials.findFirst({
-      where: and(eq(credentials.recordId, id), eq(credentials.kind, 'license')),
+    const licenseCred = await db.query.attachments.findFirst({
+      where: and(eq(attachments.recordId, id), eq(attachments.kind, 'license')),
     });
     if (!licenseCred) throw new Error('license credential missing');
     await db
@@ -127,8 +126,8 @@ describe('deadlines tools', () => {
     const secondDeadlines = resultOf<{ deadlines: ComputedDeadline[] }>(second).deadlines;
     expect(secondDeadlines).toHaveLength(4);
 
-    const malpracticeCred = await db.query.credentials.findFirst({
-      where: and(eq(credentials.recordId, id), eq(credentials.kind, 'malpractice')),
+    const malpracticeCred = await db.query.attachments.findFirst({
+      where: and(eq(attachments.recordId, id), eq(attachments.kind, 'malpractice')),
     });
     if (!malpracticeCred) throw new Error('malpractice credential missing');
     expect(secondDeadlines.every((d) => d.credential_id !== malpracticeCred.id)).toBe(true);

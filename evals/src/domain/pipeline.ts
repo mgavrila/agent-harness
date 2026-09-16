@@ -3,6 +3,7 @@ import {
   DEFAULT_CONFIDENCE_THRESHOLD,
   DEFAULT_POLICY,
   MASKED,
+  PACK_KERNEL,
   createCoreToolsServer,
   loadPacks,
   type GatewayConfig,
@@ -82,6 +83,8 @@ export async function openPipeline(opts: OpenPipelineOptions): Promise<PipelineH
     sinks: {},
     context: {},
     tools: new Map(),
+    kernelTools: new Map(),
+    kernel: PACK_KERNEL,
     packs,
   };
 

@@ -37,21 +37,18 @@ export {
 } from './domain/tooling/types.js';
 
 // --- The tool catalogue -------------------------------------------------------------------
-export { allTools, createCoreToolsServer } from './tools/catalog.js';
+export { allTools, createCoreToolsServer, kernelTools, publishedTools } from './tools/catalog.js';
 
 // --- Domains ------------------------------------------------------------------------------
 export { createOrReuseApproval } from './domain/approvals/repository.js';
 export { executeApproval, type ExecutedApproval } from './domain/approvals/execute.js';
 export {
-  CREDENTIAL_KINDS,
-  LEAD_DAYS,
   URGENCY_BUCKETS,
   addDays,
   bucketFor,
   computeDeadlines,
   daysUntil,
   digestKeyFor,
-  type CredentialKind,
   type UrgencyBucket,
 } from './domain/deadlines/compute.js';
 export { type ExtractedText, type PageText, type ParsedExtraction } from './domain/documents/types.js';
@@ -70,8 +67,9 @@ export {
   type StageEffectInput,
 } from './domain/effects/types.js';
 export { getTemplate, loadManifest, mappingLabel } from './domain/forms/templates.js';
+export { PACK_KERNEL } from './domain/packs/kernel.js';
 export { loadPacks, registryOf } from './domain/packs/registry.js';
-export { type PackRegistry } from './domain/packs/types.js';
+export { type PackRegistry, type ResolvedTarget } from './domain/packs/types.js';
 export { fillTemplatePdf, latestCredential, resolveMappings } from './domain/forms/fill.js';
 export { buildRosterCsv } from './domain/forms/roster.js';
 export {
@@ -94,13 +92,9 @@ export {
   type ModelMessage,
   type Route,
 } from './domain/models/types.js';
-export { requireProvider, upsertProviderRecord } from './domain/providers/repository.js';
-export {
-  CredentialInput,
-  FieldInput,
-  type UpsertProviderInput,
-  type UpsertProviderResult,
-} from './domain/providers/types.js';
+export { requireRecord, upsertRecord } from './domain/records/repository.js';
+export { AttachmentInput, FieldInput, type UpsertRecordInput } from './domain/records/types.js';
+export { stageRelease, type StagedRelease } from './domain/files/release.js';
 export { contentTag, documentTextPath, outRoot, storageRoot, toStorageRelative } from './domain/storage/layout.js';
 export {
   fileStorage,

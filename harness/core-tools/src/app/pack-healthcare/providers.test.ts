@@ -1,13 +1,13 @@
 import { describe, it, expect } from 'vitest';
 import { eq } from 'drizzle-orm';
-import { fields, credentials, decrypt } from '@harness/db';
-import { connectTools, makeTestDeps, resultOf, useTestDb } from '../testing.js';
-import { providerTools } from './providers.js';
+import { fields, attachments, decrypt } from '@harness/db';
+import { connectTools, makeTestDeps, resultOf, useTestDb } from '../../testing.js';
+import { compatTools } from '../../tools/compat.js';
 
 const db = useTestDb();
 const deps = makeTestDeps(db);
 
-const connectProviders = () => connectTools('providers-test', providerTools, deps);
+const connectProviders = () => connectTools('providers-test', compatTools(deps), deps);
 
 /** `providers_upsert`'s result, which most of these tests read the id out of. */
 interface UpsertResult {
@@ -47,7 +47,7 @@ describe('providers tools', () => {
     expect(ssn.status).toBe('extracted');
     expect(rows.find((r) => r.name === 'malpractice_carrier')!.status).toBe('pending');
 
-    const creds = await db.select().from(credentials).where(eq(credentials.recordId, out.provider_id));
+    const creds = await db.select().from(attachments).where(eq(attachments.recordId, out.provider_id));
     expect(creds.every((cr) => cr.numberEncrypted !== null)).toBe(true);
   });
 
@@ -68,7 +68,7 @@ describe('providers tools', () => {
     const rows = await db.select().from(fields).where(eq(fields.recordId, idA));
     expect(rows.find((r) => r.name === 'first_name')!.value).toBe('Augusta');
     expect(rows).toHaveLength(3);
-    const creds = await db.select().from(credentials).where(eq(credentials.recordId, idA));
+    const creds = await db.select().from(attachments).where(eq(attachments.recordId, idA));
     expect(creds).toHaveLength(2);
   });
 
@@ -156,7 +156,7 @@ describe('providers tools', () => {
 
   it('rejects cross-tenant access to a provider by id', async () => {
     const otherDeps = makeTestDeps(db, { client: 'other-clinic' });
-    const otherClient = await connectTools('providers-test-other', providerTools, otherDeps);
+    const otherClient = await connectTools('providers-test-other', compatTools(otherDeps), otherDeps);
     const up = await otherClient.callTool({ name: 'providers_upsert', arguments: upsertArgs });
     const id = resultOf<UpsertResult>(up).provider_id;
 
@@ -242,7 +242,7 @@ describe('providers tools', () => {
 
 describe('approval payload redaction', () => {
   const redactOf = (name: string) => {
-    const tool = providerTools.find((t) => t.name === name)!;
+    const tool = compatTools(deps).find((t) => t.name === name)!;
     if (!tool.redact) throw new Error(`${name} defines no redact`);
     return tool.redact;
   };

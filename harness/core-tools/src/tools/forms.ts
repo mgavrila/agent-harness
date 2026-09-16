@@ -8,7 +8,7 @@ import { writeOutFile } from '../domain/storage/file-store.js';
 import { getTemplate, loadManifest, mappingLabel } from '../domain/forms/templates.js';
 import { fillTemplatePdf, resolveMappings } from '../domain/forms/fill.js';
 import { buildRoster, loadProviderData } from '../domain/forms/provider-data.js';
-import { stageRelease } from '../domain/forms/release.js';
+import { stageRelease } from '../domain/files/release.js';
 import { buildRosterCsv } from '../domain/forms/roster.js';
 import { ROSTER_COLUMNS } from '../domain/forms/types.js';
 

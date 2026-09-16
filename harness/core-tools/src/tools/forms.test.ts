@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { and, eq } from 'drizzle-orm';
-import { auditLog, credentials, fields, providers, approvals, toolEffects } from '@harness/db';
+import { auditLog, attachments, fields, records, approvals, toolEffects } from '@harness/db';
 import { pack as healthcarePack } from '@harness/pack-healthcare';
 import { useTestDb, makeTestDeps, connectTools, resultOf, approvalIdOf, textOf } from '../testing.js';
 import { ROSTER_COLUMNS } from '../domain/forms/types.js';
@@ -29,7 +29,7 @@ afterEach(async () => {
 /** A provider whose non-restricted fields and credentials are complete enough to fill. */
 async function seedCompleteProvider(): Promise<string> {
   const [p] = await db
-    .insert(providers)
+    .insert(records)
     .values({ client: 'test', pack: 'healthcare', kind: 'provider', name: 'Dr. Ada Reyes', externalId: '1234567893' })
     .returning();
   await db.insert(fields).values([
@@ -43,7 +43,7 @@ async function seedCompleteProvider(): Promise<string> {
     },
     { recordId: p.id, name: 'practice_name', value: 'Elm Street Family Care', status: 'extracted', confidence: 0.92 },
   ]);
-  await db.insert(credentials).values([
+  await db.insert(attachments).values([
     {
       recordId: p.id,
       kind: 'license',
@@ -112,7 +112,7 @@ describe('forms_fill', () => {
 
   it('refuses when a required credential is missing', async () => {
     const [p] = await db
-      .insert(providers)
+      .insert(records)
       .values({ client: 'test', pack: 'healthcare', kind: 'provider', name: 'Dr. Bare', externalId: '1999999998' })
       .returning();
     const client = await connectTools('forms-test', formTools, deps);
@@ -171,7 +171,7 @@ describe('forms_fill', () => {
 
   it('refuses a provider that belongs to another client', async () => {
     const [p] = await db
-      .insert(providers)
+      .insert(records)
       .values({ client: 'other-clinic', pack: 'healthcare', kind: 'provider', name: 'Dr. Elsewhere' })
       .returning();
     const client = await connectTools('forms-test', formTools, deps);
@@ -256,7 +256,7 @@ describe('forms_roster', () => {
   it('writes a CSV with the documented columns and one row per provider', async () => {
     const first = await seedCompleteProvider();
     const [second] = await db
-      .insert(providers)
+      .insert(records)
       .values({ client: 'test', pack: 'healthcare', kind: 'provider', name: 'Dr. Bo Lin', externalId: '1987654320' })
       .returning();
     const client = await connectTools('forms-test', formTools, deps);
@@ -290,10 +290,10 @@ describe('forms_roster', () => {
     // A licence read off a document that showed an issuer, a state and an
     // expiry but no legible number: the row exists, number_encrypted is null.
     const [p] = await db
-      .insert(providers)
+      .insert(records)
       .values({ client: 'test', pack: 'healthcare', kind: 'provider', name: 'Dr. No Number', externalId: '1234567893' })
       .returning();
-    await db.insert(credentials).values([
+    await db.insert(attachments).values([
       { recordId: p.id, kind: 'license', issuer: 'Texas Medical Board', state: 'TX', expiresAt: '2027-03-31' },
       { recordId: p.id, kind: 'dea', issuer: 'DEA', expiresAt: '2028-02-28' },
     ]);
@@ -314,7 +314,7 @@ describe('forms_roster', () => {
 
   it('reports a DEA registration with a stored number as on file', async () => {
     const [p] = await db
-      .insert(providers)
+      .insert(records)
       .values({
         client: 'test',
         pack: 'healthcare',
@@ -323,7 +323,7 @@ describe('forms_roster', () => {
         externalId: '1234567893',
       })
       .returning();
-    await db.insert(credentials).values({
+    await db.insert(attachments).values({
       recordId: p.id,
       kind: 'dea',
       issuer: 'DEA',
@@ -343,7 +343,7 @@ describe('forms_roster', () => {
   it('refuses a provider that belongs to another client and writes nothing', async () => {
     const mine = await seedCompleteProvider();
     const [theirs] = await db
-      .insert(providers)
+      .insert(records)
       .values({ client: 'other-clinic', pack: 'healthcare', kind: 'provider', name: 'Dr. Elsewhere' })
       .returning();
     const client = await connectTools('forms-test', formTools, deps);

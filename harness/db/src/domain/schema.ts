@@ -259,15 +259,3 @@ export const auditLog = pgTable(
     index('audit_log_client_created_idx').on(t.client, t.createdAt.desc()),
   ],
 );
-
-/**
- * Transitional aliases for the two tables migration 0008 replaced.
- *
- * `@harness/core-tools` names `providers` and `credentials` in five modules and Plan 5's Task 3
- * is what rewrites them. Until it does, these keep the package compiling against the new tables
- * — the column names in `records` and `attachments` are the ones the old code reads, except
- * `npi` and `provider_id`, which Task 3 is the first thing to touch. **Delete both lines in
- * Task 3 Step 13.** Nothing outside core-tools ever imported them.
- */
-export const providers = records;
-export const credentials = attachments;

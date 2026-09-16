@@ -1,63 +1,84 @@
 import { McpServer } from '@modelcontextprotocol/server';
-import type { PackToolDeps } from '@harness/pack-api';
 import { registerTools } from '../domain/tooling/registry.js';
 import type { AnyToolDef, ToolDeps } from '../domain/tooling/types.js';
+import { publishedCatalogue, type ToolSource } from '../domain/packs/publication.js';
 import type { PackRegistry } from '../domain/packs/types.js';
 import { approvalTools } from './approvals.js';
 import { auditTools } from './audit.js';
+import { COMPAT_REPLACES, compatTools } from './compat.js';
 import { deadlineTools } from './deadlines.js';
 import { documentTools } from './documents.js';
 import { formTools } from './forms.js';
 import { harnessTools } from './harness.js';
-import { providerTools } from './providers.js';
+import { GENERIC_RECORD_TOOLS, recordTools } from './records.js';
 import { verifyTools } from './verify.js';
 
 /**
- * Core's own tools, in the order they are registered. The order is not meaningful to MCP but
- * it is what `docs/architecture/tool-surface.json` is sorted against, so adding a toolset here
- * and forgetting to re-record the snapshot fails the suite.
+ * Every tool the kernel itself defines, whatever any pack replaces.
  *
- * A function rather than a constant because `documents_ingest` declares the loaded packs'
- * document kinds in its input schema. A pack's own tools are not in this list — see
- * `createCoreToolsServer`, which is where `ToolDeps` is in scope to hand them.
+ * This is what fills `deps.kernelTools`, so a pack's wrapper can reach the handler behind the
+ * name it took over. It is not what is published — see `publishedTools`.
  */
-export function allTools(packs: PackRegistry): AnyToolDef[] {
+export function kernelTools(packs: PackRegistry): AnyToolDef[] {
   return [
-    ...providerTools,
+    ...recordTools(packs),
     ...deadlineTools,
     ...auditTools,
     ...approvalTools,
     ...harnessTools,
     ...documentTools(packs),
+    // Still the kernel's in Task 3; Plan 5 Task 4 moves both sets into the healthcare pack.
     ...formTools,
     ...verifyTools,
   ];
 }
 
 /**
- * An MCP server serving every tool against one set of dependencies. It reads no environment
- * and opens no connection — `app/server.ts` builds the dependencies — which is what lets the
- * eval runner and the surface recorder construct one in-process.
+ * Kept for `src/index.ts`, which re-exports it.
  *
- * A pack's own tools are appended here, last, so core's names always win a collision, and
- * handed `deps` itself: the `Pack.tools` contract types its argument `PackToolDeps`, the
- * structural view of `ToolDeps` a pack can see without importing core-tools, and the value it
- * actually receives is core's dependency bag, the same one every core tool's handler runs
- * against. No pack ships any tools today.
+ * It is **not** what a skill's declared tools are checked against any more: that has to be the
+ * published catalogue, because from this task onwards the kernel list and the published list
+ * differ. `tools/skills-frontmatter.test.ts` uses `publishedTools`.
+ */
+export const allTools = kernelTools;
+
+/**
+ * What the MCP server publishes: the kernel's tools, less the ones a source replaced and the
+ * generic `records_*` tools when no loaded record kind wants them, plus every source's own.
+ * `publishedCatalogue` is where those rules live and where each of them fails loudly.
+ */
+export function publishedTools(deps: ToolDeps): AnyToolDef[] {
+  const sources: ToolSource[] = [
+    // Transitional: the kernel's own healthcare-shaped wrappers, so tool-surface.json stays
+    // byte-identical while the kernel is rebuilt. Plan 5 Task 4 deletes this entry, and
+    // `compat.ts` with it; the healthcare pack contributes the same twelve tools from then on.
+    { label: 'tools/compat.ts', replaces: COMPAT_REPLACES, tools: compatTools(deps) },
+    ...deps.packs.all.map((pack) => ({
+      label: `pack "${pack.name}"`,
+      replaces: pack.replaces ?? [],
+      tools: pack.tools?.(deps) ?? [],
+    })),
+  ];
+  // A deployment whose every kind is served by a pack's own tools publishes none of the five,
+  // and its catalogue is exactly what the packs named.
+  const anyGenericKind = deps.packs.recordKinds().some((r) => r.genericTools !== false);
+  const hidden = anyGenericKind ? new Set<string>() : new Set<string>(GENERIC_RECORD_TOOLS);
+  return publishedCatalogue(kernelTools(deps.packs), sources, hidden);
+}
+
+/**
+ * An MCP server serving every published tool against one set of dependencies. It reads no
+ * environment and opens no connection — `app/server.ts` builds the dependencies — which is what
+ * lets the eval runner and the surface recorder construct one in-process.
  *
- * The cast is a bridge. `ToolDeps` will satisfy `PackToolDeps` structurally once it carries
- * `kernelTools` and `kernel`, which is what Plan 5 Task 3 adds along with the one `PackKernel`
- * implementation; until then the two members are missing and the compiler is right to say so.
- * Task 3 asserts the assignability and deletes both casts.
+ * `deps.kernelTools` is filled first and with every kernel tool, replaced or not, because a
+ * pack's wrapper reaches the handler it wraps through it. `deps.tools`, which `registerTools`
+ * fills, stays what it always was: the published catalogue, which `approvals_execute` replays a
+ * parked action from — pack tools included, since `forms_release` is `external`.
  */
 export function createCoreToolsServer(deps: ToolDeps): McpServer {
   const server = new McpServer({ name: 'core-tools', version: '0.1.0' });
-  const tools: AnyToolDef[] = [
-    ...allTools(deps.packs),
-    ...deps.packs.all.flatMap(
-      (pack) => (pack.tools?.(deps as unknown as PackToolDeps) ?? []) as unknown as AnyToolDef[],
-    ),
-  ];
-  registerTools(server, tools, deps);
+  for (const tool of kernelTools(deps.packs)) deps.kernelTools.set(tool.name, tool);
+  registerTools(server, publishedTools(deps), deps);
   return server;
 }

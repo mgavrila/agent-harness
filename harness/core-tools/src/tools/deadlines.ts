@@ -7,14 +7,14 @@ import { recomputeDeadlines, upcomingDeadlines } from '../domain/deadlines/repos
 const deadlinesCompute = defineTool({
   name: 'deadlines_compute',
   description:
-    'Recompute expiration and renewal-start deadlines for a provider from its credentials. Deterministic, no model call.',
+    'Recompute expiration and renewal-start deadlines for a record from its attachments. Deterministic, no model call.',
   actionClass: 'write.internal',
-  input: z.object({ provider_id: z.string().uuid() }),
+  input: z.object({ record_id: z.string().uuid() }),
   output: z.object({
-    deadlines: z.array(z.object({ credential_id: z.string(), kind: z.string(), due_at: z.string() })),
+    deadlines: z.array(z.object({ attachment_id: z.string(), kind: z.string(), due_at: z.string() })),
   }),
-  handler: async ({ provider_id }, deps) => recomputeDeadlines(deps, provider_id),
-  recordIds: ({ provider_id }) => [provider_id],
+  handler: async ({ record_id }, deps) => recomputeDeadlines(deps, record_id),
+  recordIds: ({ record_id }) => [record_id],
 });
 
 const deadlinesUpcoming = defineTool({
@@ -24,20 +24,21 @@ const deadlinesUpcoming = defineTool({
     'At most `limit` rows (default 200).',
   actionClass: 'read',
   input: z.object({
-    window_days: z.number().int().min(1).max(730).default(90),
+    within_days: z.number().int().min(1).max(730).default(90),
     today: z
       .string()
       .regex(/^\d{4}-\d{2}-\d{2}$/)
       .optional(),
     limit: z.number().int().min(1).max(1000).default(200),
+    record_kind: z.string().min(1).optional().describe('Only records of this kind; omit for every kind'),
   }),
   output: z.object({
     items: z.array(
       z.object({
-        provider_id: z.string(),
-        provider_name: z.string(),
-        credential_id: z.string(),
-        credential_kind: z.string(),
+        record_id: z.string(),
+        record_name: z.string(),
+        attachment_id: z.string(),
+        attachment_kind: z.string(),
         kind: z.string(),
         due_at: z.string(),
         days_left: z.number(),
@@ -46,16 +47,20 @@ const deadlinesUpcoming = defineTool({
       }),
     ),
     /**
-     * Fingerprint of this exact set of (credential, deadline kind, bucket)
-     * triples, independent of item order. A playbook passes this straight
-     * through as `harness_notify`'s idempotency key: the same set of items in
-     * the same buckets produces the same key, so a re-run digest is a no-op,
-     * and an item moving to a tighter bucket changes the key so the next run
-     * speaks again. `expirations:none` when there are no items.
+     * Fingerprint of this exact set of (attachment, deadline kind, bucket) triples, independent
+     * of item order. A playbook passes this straight through as `harness_notify`'s idempotency
+     * key: the same set of items in the same buckets produces the same key, so a re-run digest
+     * is a no-op, and an item moving to a tighter bucket changes the key so the next run speaks
+     * again. `expirations:none` when there are no items.
      */
     digest_key: z.string(),
   }),
-  handler: async (args, deps) => upcomingDeadlines(deps, args),
+  handler: async (args, deps) => {
+    const { items, digest_key } = await upcomingDeadlines(deps, args);
+    // `DeadlineItem.bucket` is a plain string in the contract, because a pack cannot import the
+    // kernel's bucket list. Every value came from `bucketFor`, which returns one of them.
+    return { items: items.map((i) => ({ ...i, bucket: i.bucket as (typeof URGENCY_BUCKETS)[number] })), digest_key };
+  },
 });
 
 export const deadlineTools: AnyToolDef[] = [deadlinesCompute, deadlinesUpcoming];

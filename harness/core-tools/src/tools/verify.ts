@@ -2,7 +2,7 @@ import * as z from 'zod/v4';
 import { ToolError } from '@harness/shared';
 import { defineTool } from '../domain/tooling/registry.js';
 import type { AnyToolDef } from '../domain/tooling/types.js';
-import { requireProvider } from '../domain/providers/repository.js';
+import { requireRecord } from '../domain/records/repository.js';
 import { namesMatch } from '../domain/verify/names.js';
 import { nppesRegistry } from '../domain/verify/nppes.js';
 import { MASKED } from '../shared/redaction/names.js';
@@ -36,7 +36,7 @@ const verifyNppes = defineTool({
     if (!deps.verify.nppesEnabled) {
       throw new ToolError('NPPES lookups are disabled for this client; set VERIFY_NPPES_ENABLED=true to allow them');
     }
-    const provider = provider_id ? await requireProvider(deps, provider_id) : undefined;
+    const provider = provider_id ? await requireRecord(deps, provider_id) : undefined;
     const record = await nppesRegistry(deps.verify).lookupNpi(npi);
     const checkedAt = deps.now().toISOString();
 

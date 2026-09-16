@@ -12,12 +12,14 @@ import { registerTools } from './domain/tooling/registry.js';
 import { DEFAULT_POLICY } from './domain/tooling/policy.js';
 import { DEFAULT_CONFIDENCE_THRESHOLD, type AnyToolDef, type ToolDeps } from './domain/tooling/types.js';
 import { registryOf } from './domain/packs/registry.js';
+import { PACK_KERNEL } from './domain/packs/kernel.js';
+import { kernelTools } from './tools/catalog.js';
 
 /** The packs a test runs against: the shipped one, with no environment involved. */
 const TEST_PACKS = registryOf([healthcarePack]);
 
 export function makeTestDeps(db: Db, overrides: Partial<ToolDeps> = {}): ToolDeps {
-  return {
+  const deps: ToolDeps = {
     db,
     client: 'test',
     caller: 'test-caller',
@@ -43,9 +45,18 @@ export function makeTestDeps(db: Db, overrides: Partial<ToolDeps> = {}): ToolDep
     sinks: {},
     context: {},
     tools: new Map(),
+    kernelTools: new Map(),
+    kernel: PACK_KERNEL,
     packs: TEST_PACKS,
     ...overrides,
   };
+  // After the spread: a test that passes its own `packs` gets that registry's kernel tools, and
+  // one that passes its own `kernelTools` keeps them. `createCoreToolsServer` fills the same map
+  // again with the same definitions, which is a no-op.
+  if (deps.kernelTools.size === 0) {
+    for (const tool of kernelTools(deps.packs)) deps.kernelTools.set(tool.name, tool);
+  }
+  return deps;
 }
 
 export type TestClient = Client;
