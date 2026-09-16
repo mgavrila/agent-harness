@@ -8,6 +8,20 @@ import { stageEffect } from '../effects/outbox.js';
 /** Slack rejects very large uploads and a 25 MB roster is a bug, not a roster. */
 const MAX_RELEASE_BYTES = 25 * 1024 * 1024;
 
+/**
+ * The prefix every release idempotency key has ever carried.
+ *
+ * **Legacy value, kept deliberately.** `forms_release` is a pack tool name and the kernel has no
+ * business knowing it; the kernel's own word for what this does is a release. But the prefix is
+ * one half of `toolEffects.idempotencyKey`, and rows already staged in a deployment's outbox are
+ * keyed with it. Renaming it would not rename those: the same file released again would hash to
+ * a key nothing matches, and the deduplication that makes a repeated release one delivery would
+ * silently stop working across the upgrade. So the name is wrong and the value stays, and this
+ * constant exists so the vocabulary rule can exempt exactly this one string by name rather than
+ * the file or the folder around it.
+ */
+const RELEASE_KEY_PREFIX = 'forms_release:';
+
 export interface StagedRelease {
   effect_id: string;
   staged: boolean;
@@ -50,7 +64,7 @@ export async function stageRelease(
   // a new id and therefore a new delivery.
   const staged = await stageEffect(deps, {
     sink: 'slack_file',
-    idempotencyKey: `forms_release:${file_id}${channel ? `:${channel}` : ''}`,
+    idempotencyKey: `${RELEASE_KEY_PREFIX}${file_id}${channel ? `:${channel}` : ''}`,
     payload: { file_id, path: absolute, filename, channel: channel ?? null },
     summary: `Release ${filename} to Slack`,
   });

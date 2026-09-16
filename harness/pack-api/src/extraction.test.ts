@@ -27,6 +27,30 @@ describe('parseExtractionManifest', () => {
     expect(() => parseExtractionManifest({ ...manifest, targets: [] })).toThrow(/declares no extraction targets/);
   });
 
+  /**
+   * The slot names are checked here rather than by an enum-keyed `z.record`, which zod reads as
+   * "every key required" and would refuse the partial map a pack is meant to be able to write.
+   * The cost of checking by hand is that a typo would otherwise be silent: the description would
+   * simply never be used, and the model would read the kernel's colourless default while the
+   * pack author believed their own wording had gone out.
+   */
+  it('names the slot when a target describes one no attachment object has', () => {
+    const typo = {
+      ...manifest,
+      targets: [
+        { ...manifest.targets[0], attachment_descriptions: { issuer: 'Who filed it.', ticket: 'The ticket.' } },
+      ],
+    };
+    expect(() => parseExtractionManifest(typo)).toThrow(
+      'extraction manifest: target "epic_extraction" describes unknown attachment slot "ticket"',
+    );
+    const partial = {
+      ...manifest,
+      targets: [{ ...manifest.targets[0], attachment_descriptions: { issuer: 'Who filed it.' } }],
+    };
+    expect(parseExtractionManifest(partial).targets[0].attachment_descriptions).toEqual({ issuer: 'Who filed it.' });
+  });
+
   it('refuses two targets claiming the same document kind', () => {
     const clash = {
       ...manifest,
