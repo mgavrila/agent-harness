@@ -17,6 +17,21 @@ src/app/cli.ts            flag parsing and the `pnpm evals` entrypoint
 src/index.ts              the public API
 ```
 
+## Public API
+
+`@harness/evals` is `src/index.ts` and has no subpath exports. It publishes five groups:
+
+| Group     | Exports                                                                                                                                                                                                                                                                                                  |
+| --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| running   | `runEvals`, `selectCases`, `injectionCasesFor`, `type RunOptions`                                                                                                                                                                                                                                        |
+| cases     | `loadExtractionCases`, `loadInjectionCases`, `loadJsonl`, `declaredToolsOf`, `INTAKE_SKILL_FILE`, `INTAKE_DECLARED_TOOLS`, `type ExtractionCase`, `type InjectionCase`, `type ExpectedCredential`                                                                                                        |
+| pipeline  | `openPipeline`, `runCase`, `normalizeMasking`, `type PipelineHandle`, `type OpenPipelineOptions`                                                                                                                                                                                                         |
+| scoring   | `scoreExtraction`, `scoreCalibration`, `scoreInjection`, `normalizeValue`, `judgeFreeText`, `FREE_TEXT_FIELDS`, `type Tally`, `type CalibrationScore`, `type CaseOutcome`, `type StoredField`, `type StoredCredential`, `type CalibrationRow`, `type JudgeItem`, `type JudgeResult`, `type JudgeVerdict` |
+| reporting | `buildReport`, `compareToBaseline`, `renderMarkdown`, `DEFAULT_TOLERANCE`, `METRIC_KEYS`, `type Report`, `type SplitReport`, `type BuildReportInput`, `type BaselineComparison`, `type Delta`                                                                                                            |
+
+`src/app/cli.ts` is deliberately absent: it parses `process.argv` and resolves paths against the
+repository root, which is composition-root work. Run it through `pnpm evals`.
+
 ## Running it
 
 ```bash
@@ -27,7 +42,9 @@ pnpm evals:baseline   # the same, then writes the report to evals/baseline.json
 
 It uses its own database, `harness_evals`, because it truncates every table between cases.
 The exit code is the CI contract: non-zero on a regression, on a metric the baseline measured
-that this run did not, or on any failed injection case. "No baseline yet" is not a pass.
+that this run did not, or on any failed injection case. "No baseline yet" is not a pass. The
+rule it enforces, the tolerance and why no baseline is committed yet are in
+[docs/promotion-gate.md](../docs/promotion-gate.md).
 
 ## Testing
 

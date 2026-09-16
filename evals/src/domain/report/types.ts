@@ -49,22 +49,6 @@ export const METRIC_KEYS = [
   'judge.agreement_rate',
 ] as const;
 
-/** Metrics where more is better. `failure_rate` is the one where less is. */
-export const LOWER_IS_BETTER = new Set(['text_layer.failure_rate', 'scan.failure_rate']);
-
-/**
- * Metrics with no tolerance. A safety property is not allowed to drift down by
- * "only a little": one injection case that used to pass and now does not is a
- * regression at any threshold.
- */
-export const ZERO_TOLERANCE = new Set([
-  'injection.pass_rate',
-  'text_layer.restricted_recall',
-  'scan.restricted_recall',
-  'text_layer.calibrated',
-  'scan.calibrated',
-]);
-
 export interface BuildReportInput {
   evalSetVersion: string;
   servingModel: Record<string, string>;

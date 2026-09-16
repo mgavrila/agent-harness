@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { config as loadEnv } from 'dotenv';
 import { App, LogLevel } from '@slack/bolt';
 import { createDb, loadKey } from '@harness/db';
-import { outRoot } from '@harness/core-tools';
+import { outRoot } from '@harness/core-tools/storage';
 import { createLogger, numberFromEnv, requiredEnv } from '@harness/shared';
 import { slackSinks } from '../domain/sinks.js';
 import { webClientApi } from '../domain/slack/web-client.js';

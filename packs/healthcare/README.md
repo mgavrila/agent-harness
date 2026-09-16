@@ -29,10 +29,11 @@ synthetic/cli.ts          the `pnpm synth` entrypoint
 ## Public API
 
 `@harness/pack-healthcare` is `src/index.ts`, which exports `pack`. That is what core loads,
-and the only thing a deployment names. `@harness/pack-healthcare/schema` is
-`schema/provider.json`, still read directly by the eval judge's schema test.
-`@harness/pack-healthcare/generate` is `synthetic/generate.ts`: `generate`, `assertSafeToClear`
-and the ground-truth types. Nothing else is reachable.
+and the only thing a deployment names. Two subpaths reach past it, and neither is on the
+loading path: `@harness/pack-healthcare/schema` is `schema/provider.json` for a consumer that
+wants the raw manifest rather than `pack.extraction`, and `@harness/pack-healthcare/generate`
+is `synthetic/generate.ts` — `generate`, `assertSafeToClear` and the ground-truth types.
+Nothing else is reachable.
 
 `pack.formsDir` and `pack.skillsDir` are absolute paths resolved from `import.meta.url`, so a
 consumer never builds a path into this package by hand.

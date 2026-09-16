@@ -1,6 +1,6 @@
 import { and, eq, gt } from 'drizzle-orm';
 import { approvals, type Db } from '@harness/db';
-import { containsRestrictedPattern } from '@harness/core-tools';
+import { containsRestrictedPattern } from '@harness/core-tools/redaction';
 import { createLogger, describeError } from '@harness/shared';
 import type { SlackApi } from './slack/types.js';
 import type { CoreToolsClient, ExecuteOutcome } from './execute/types.js';

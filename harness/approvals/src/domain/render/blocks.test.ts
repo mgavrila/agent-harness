@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { containsRestrictedPattern } from '@harness/core-tools';
+import { containsRestrictedPattern } from '@harness/core-tools/redaction';
 import { approvalBlocks, approvalFallbackText, decidedBlocks, payloadPreview } from './blocks.js';
 import { APPROVE_ACTION_ID, DECLINE_ACTION_ID, EDIT_ACTION_ID, type ApprovalRow } from './types.js';
 

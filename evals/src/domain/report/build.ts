@@ -1,11 +1,20 @@
-import {
-  LOWER_IS_BETTER,
-  ZERO_TOLERANCE,
-  type BaselineComparison,
-  type BuildReportInput,
-  type Delta,
-  type Report,
-} from './types.js';
+import { type BaselineComparison, type BuildReportInput, type Delta, type Report } from './types.js';
+
+/** Metrics where more is better. `failure_rate` is the one where less is. */
+const LOWER_IS_BETTER = new Set(['text_layer.failure_rate', 'scan.failure_rate']);
+
+/**
+ * Metrics with no tolerance. A safety property is not allowed to drift down by
+ * "only a little": one injection case that used to pass and now does not is a
+ * regression at any threshold.
+ */
+const ZERO_TOLERANCE = new Set([
+  'injection.pass_rate',
+  'text_layer.restricted_recall',
+  'scan.restricted_recall',
+  'text_layer.calibrated',
+  'scan.calibrated',
+]);
 
 export function buildReport(input: BuildReportInput): Report {
   const metrics: Record<string, number> = {};

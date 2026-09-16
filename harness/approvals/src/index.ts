@@ -15,7 +15,7 @@ export {
   type EditModalMetadata,
 } from './domain/render/types.js';
 /** The one restricted-value guard, from the package that owns the patterns. */
-export { containsRestrictedPattern } from '@harness/core-tools';
+export { containsRestrictedPattern } from '@harness/core-tools/redaction';
 export { createMcpCoreToolsClient } from './domain/execute/mcp-client.js';
 export type { CoreToolsClient, ExecuteOutcome, McpLauncher } from './domain/execute/types.js';
 export {

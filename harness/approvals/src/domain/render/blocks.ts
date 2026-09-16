@@ -1,4 +1,4 @@
-import { containsRestrictedPattern } from '@harness/core-tools';
+import { containsRestrictedPattern } from '@harness/core-tools/redaction';
 import { APPROVE_ACTION_ID, DECLINE_ACTION_ID, EDIT_ACTION_ID, type ApprovalRow } from './types.js';
 
 export function payloadPreview(payload: unknown, limit = 2000): string {
