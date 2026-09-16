@@ -64,5 +64,5 @@ export async function executeApproval(deps: ToolDeps, approvalId: string): Promi
     approvalId: row.id,
     recordIds: target.recordIds?.(args, result) ?? [],
   });
-  return { approval_id: row.id, tool: target.name, status: 'executed' as const, result };
+  return { approval_id: row.id, tool: target.name, status: 'executed', result };
 }

@@ -3,6 +3,7 @@ import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
+import { describeError } from '@harness/shared';
 import { connectInProcess } from '../domain/tooling/in-process.js';
 import { DEFAULT_POLICY } from '../domain/tooling/policy.js';
 import { DEFAULT_CONFIDENCE_THRESHOLD, type ToolDeps } from '../domain/tooling/types.js';
@@ -115,9 +116,8 @@ export async function readComposeSurface(repoRoot: string): Promise<string> {
     );
     return stdout;
   } catch (err) {
-    const detail = err instanceof Error ? err.message : String(err);
     throw new Error(
-      `could not render the Compose config. The docker CLI has to be on PATH; the stack does not have to be running. ${detail}`,
+      `could not render the Compose config. The docker CLI has to be on PATH; the stack does not have to be running. ${describeError(err)}`,
     );
   }
 }

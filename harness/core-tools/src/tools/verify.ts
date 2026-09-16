@@ -5,6 +5,7 @@ import type { AnyToolDef } from '../domain/tooling/types.js';
 import { requireProvider } from '../domain/providers/repository.js';
 import { namesMatch } from '../domain/verify/names.js';
 import { nppesRegistry } from '../domain/verify/nppes.js';
+import { MASKED } from '../shared/redaction/names.js';
 
 const verifyNppes = defineTool({
   name: 'verify_nppes',
@@ -99,7 +100,7 @@ const verifyStateLicense = defineTool({
   },
   // The licence number is restricted, so it must not be echoed into the
   // plaintext approval payload if a client ever reclassifies this tool.
-  redact: (args) => ({ ...args, number: '[restricted]' }),
+  redact: (args) => ({ ...args, number: MASKED }),
 });
 
 export const verifyTools: AnyToolDef[] = [verifyNppes, verifyStateLicense];
