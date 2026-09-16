@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { loadHealthcareManifest } from './manifest.js';
+import { pack as healthcarePack } from '@harness/pack-healthcare';
+import { parseManifest } from './manifest.js';
 import {
   DATA_BLOCK_SYSTEM_PROMPT,
   buildClassificationMessages,
@@ -7,7 +8,7 @@ import {
   wrapDocument,
 } from './prompts.js';
 
-const manifest = loadHealthcareManifest();
+const manifest = parseManifest(healthcarePack.extraction);
 
 describe('wrapDocument and the prompts', () => {
   const pages = [

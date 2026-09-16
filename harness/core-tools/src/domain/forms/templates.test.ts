@@ -2,10 +2,11 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { describe, it, expect } from 'vitest';
 import { PDFDocument } from 'pdf-lib';
+import { pack as healthcarePack } from '@harness/pack-healthcare';
 import { isRestrictedName } from '../../shared/redaction/names.js';
-import { defaultFormsDir, loadManifest, getTemplate, mappingLabel } from './templates.js';
+import { loadManifest, getTemplate, mappingLabel } from './templates.js';
 
-const dir = defaultFormsDir();
+const dir = healthcarePack.formsDir;
 
 describe('form template manifest', () => {
   it('parses and names two demo templates', async () => {

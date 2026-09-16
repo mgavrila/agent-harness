@@ -12,11 +12,9 @@ import type { ModelMessage } from '../models/types.js';
 import { requireProvider, upsertProviderRecord } from '../providers/repository.js';
 import type { CredentialInput, FieldInput } from '../providers/types.js';
 import { extractDocumentText, pdfPageCount } from './text.js';
-import { loadHealthcareManifest } from './manifest.js';
 import { buildClassificationSchema, buildExtractionSchema } from './schema.js';
 import { buildClassificationMessages, buildExtractionMessages } from './prompts.js';
 import { parseExtraction } from './parse.js';
-import type { DocumentKind } from './types.js';
 
 /** One document as the `documents_*` tools report it. */
 export function documentView(row: typeof documents.$inferSelect) {
@@ -120,10 +118,7 @@ function assertPromptRedacted(deps: ToolDeps, messages: ModelMessage[]): void {
 }
 
 /** `documents_ingest`: hash the file, count its pages and record it, idempotent by content hash. */
-export async function ingestDocument(
-  deps: ToolDeps,
-  args: { path: string; provider_id?: string; kind?: DocumentKind },
-) {
+export async function ingestDocument(deps: ToolDeps, args: { path: string; provider_id?: string; kind?: string }) {
   const { path: requested, provider_id, kind } = args;
   if (provider_id) await requireProvider(deps, provider_id);
   const abs = await resolveStoragePath(deps.storageDir, requested);
@@ -170,7 +165,7 @@ export async function ingestDocument(
 /** `documents_classify`: ask the model what kind this is; a kind already on file is authoritative. */
 export async function classifyDocument(deps: ToolDeps, documentId: string) {
   const row = await requireDocument(deps, documentId);
-  const manifest = loadHealthcareManifest();
+  const manifest = deps.packs.manifest();
   const { promptPages } = await readForModel(deps, row);
   const messages = buildClassificationMessages(promptPages);
   assertPromptRedacted(deps, messages);
@@ -181,7 +176,7 @@ export async function classifyDocument(deps: ToolDeps, documentId: string) {
     validate: ClassificationReply,
     temperature: 0,
   });
-  const modelKind = (manifest.document_kinds as string[]).includes(json.document_kind) ? json.document_kind : 'other';
+  const modelKind = manifest.document_kinds.includes(json.document_kind) ? json.document_kind : 'other';
   const confidence = Math.min(1, Math.max(0, json.confidence));
   // A kind already on file is authoritative, the same rule documents_ingest
   // applies to a declared kind and documents_extract applies by preferring
@@ -202,7 +197,7 @@ export async function extractDocument(deps: ToolDeps, args: { document_id: strin
   // target: no name/NPI re-matching, so the extraction cannot silently
   // attach to, rename, or duplicate a different provider of this client.
   const named = provider_id ? await requireProvider(deps, provider_id) : undefined;
-  const manifest = loadHealthcareManifest();
+  const manifest = deps.packs.manifest();
   const { abs, promptPages, redacted, hits, ocrUsed } = await readForModel(deps, row);
 
   const messages = buildExtractionMessages(promptPages, manifest);

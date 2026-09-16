@@ -1,9 +1,11 @@
 import type * as z from 'zod/v4';
 import type { Db } from '@harness/db';
+import type { AnyToolDef as PackAnyToolDef, ToolDef as PackToolDef } from '@harness/pack-api';
 import type { SinkRegistry } from '../effects/types.js';
 import type { GatewayConfig } from '../models/types.js';
+import type { PackRegistry } from '../packs/types.js';
 import type { VerifyConfig } from '../verify/types.js';
-import type { ActionClass, Policy } from './policy.js';
+import type { Policy } from './policy.js';
 import type { AuditEntry } from './audit.js';
 
 /**
@@ -90,27 +92,17 @@ export interface ToolDeps {
   context: SessionContext;
   /** Every registered tool, keyed by name, so a parked action can be replayed by name. Filled by `registerTools`. */
   tools: Map<string, AnyToolDef>;
-}
-
-export interface ToolDef<I extends z.ZodObject, O extends z.ZodObject> {
-  name: string;
-  description: string;
-  actionClass: ActionClass;
-  input: I;
-  output: O;
-  handler: (args: z.infer<I>, deps: ToolDeps) => Promise<z.infer<O>>;
-  recordIds?: (args: z.infer<I>, result: z.infer<O>) => string[];
   /**
-   * Strip restricted values from the arguments before they are written to the
-   * approvals table in plaintext jsonb. The full arguments are still stored,
-   * encrypted, in `payload_encrypted`. Omit only for tools whose arguments can
-   * never carry a restricted value.
+   * The packs this process loaded, from `HARNESS_PACKS`. Document kinds, the extraction
+   * manifest and the forms directory all come from here rather than from an import, which is
+   * what lets one build serve credentialing today and a different area tomorrow.
    */
-  redact?: (args: z.infer<I>) => unknown;
+  packs: PackRegistry;
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export type AnyToolDef = ToolDef<any, any>;
+/** A core-tools tool: the contract's `ToolDef` with this package's dependency bag filled in. */
+export type ToolDef<I extends z.ZodObject, O extends z.ZodObject> = PackToolDef<I, O, ToolDeps>;
+export type AnyToolDef = PackAnyToolDef<ToolDeps>;
 
 export type AuditBase = Pick<
   AuditEntry,

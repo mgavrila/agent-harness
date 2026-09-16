@@ -1,18 +1,13 @@
 import { createHash } from 'node:crypto';
+import { CREDENTIAL_KINDS, type CredentialKind } from '@harness/pack-api';
 
 /**
- * The credential vocabulary, defined once for the whole package: the storage
- * contract (`CredentialInput.kind`), the form-template manifest, the
- * model-facing extraction schema and the lead-day table below all read it from
- * here. This module is the home because it is the only leaf with no harness
- * imports of its own, so every one of those can depend on it without a cycle.
- *
- * Four copies of this list used to sit in four files. A kind added to the
- * extraction schema but not to the manifest is a credential a model reports and
- * a template can never quote, and nothing fails loudly when the lists drift.
+ * The credential vocabulary now lives in the pack contract, because a pack declares
+ * credentials of these kinds in its own JSON and must be able to name them without importing
+ * core-tools. It is re-exported here so that the lead-day table below, the storage contract
+ * (`CredentialInput.kind`) and every other reader keep resolving it from where they always did.
  */
-export const CREDENTIAL_KINDS = ['license', 'dea', 'malpractice', 'board_cert'] as const;
-export type CredentialKind = (typeof CREDENTIAL_KINDS)[number];
+export { CREDENTIAL_KINDS, type CredentialKind };
 
 export const LEAD_DAYS: Record<CredentialKind, number> = {
   license: 90,

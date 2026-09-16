@@ -2,14 +2,9 @@ import { readFile } from 'node:fs/promises';
 import { parse as parseYaml } from 'yaml';
 import * as z from 'zod/v4';
 import { optionalEnv } from '@harness/shared';
+import { ACTION_CLASSES, BEHAVIORS, type ActionClass, type Behavior, type Policy } from '@harness/pack-api';
 
-export const ACTION_CLASSES = ['read', 'write.internal', 'external', 'financial', 'destructive'] as const;
-export type ActionClass = (typeof ACTION_CLASSES)[number];
-
-export const BEHAVIORS = ['auto', 'approval', 'blocked'] as const;
-export type Behavior = (typeof BEHAVIORS)[number];
-
-export type Policy = Record<ActionClass, Behavior>;
+export { ACTION_CLASSES, BEHAVIORS, type ActionClass, type Behavior, type Policy };
 
 export const DEFAULT_POLICY: Policy = {
   read: 'auto',

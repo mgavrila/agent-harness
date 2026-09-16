@@ -1,5 +1,5 @@
 import type { ProviderManifest } from './manifest.js';
-import type { DocumentKind, ExtractedCredential, ExtractedField, ParsedExtraction } from './types.js';
+import type { ExtractedCredential, ExtractedField, ParsedExtraction } from './types.js';
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 const US_STATE = /^[A-Z]{2}$/;
@@ -34,9 +34,7 @@ export function parseExtraction(raw: unknown, manifest: ProviderManifest): Parse
   const reply = raw as Record<string, unknown>;
   if (typeof reply.document_kind !== 'string') throw new Error('extraction reply has no document_kind');
 
-  const documentKind = (manifest.document_kinds as string[]).includes(reply.document_kind)
-    ? (reply.document_kind as DocumentKind)
-    : ('other' as DocumentKind);
+  const documentKind = manifest.document_kinds.includes(reply.document_kind) ? reply.document_kind : 'other';
 
   const allowed = new Map(manifest.fields.filter((f) => f.source === 'model').map((f) => [f.name, f]));
   const rawFields = (typeof reply.fields === 'object' && reply.fields !== null ? reply.fields : {}) as Record<

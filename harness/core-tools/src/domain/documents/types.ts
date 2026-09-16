@@ -7,9 +7,11 @@
  * `PageText` is structurally identical to `RedactablePage` in shared/redaction/text.ts, which
  * is deliberate and is why redaction can run over a page without the shared layer importing a
  * domain.
+ *
+ * The document kinds themselves are not here any more: the loaded pack declares them and
+ * `deps.packs.documentKinds()` is what answers for them, so a kind is a plain `string` to
+ * everything below — which is what the `documents.kind` text column always stored anyway.
  */
-export const DOCUMENT_KINDS = ['state_license', 'dea_certificate', 'malpractice_certificate', 'w9', 'other'] as const;
-export type DocumentKind = (typeof DOCUMENT_KINDS)[number];
 
 export interface PageText {
   /** 1-based page number, matching what a reviewer sees and what `fields.source_page` stores. */
@@ -40,7 +42,7 @@ export interface ExtractedCredential {
 }
 
 export interface ParsedExtraction {
-  documentKind: DocumentKind;
+  documentKind: string;
   fields: ExtractedField[];
   credentials: ExtractedCredential[];
 }

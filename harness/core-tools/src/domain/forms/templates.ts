@@ -1,16 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { ToolError } from '@harness/shared';
 import { TemplateManifest, type FormTemplate, type TemplateMapping } from './types.js';
-
-/**
- * Where the pack's templates live when nothing overrides it: five levels up
- * from `harness/core-tools/src/domain/forms/` is the repository root.
- */
-export function defaultFormsDir(): string {
-  return path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../../../packs/healthcare/forms');
-}
 
 export async function loadManifest(dir: string): Promise<TemplateManifest> {
   let raw: string;

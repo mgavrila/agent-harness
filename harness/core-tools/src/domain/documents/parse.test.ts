@@ -1,8 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { loadHealthcareManifest } from './manifest.js';
+import { pack as healthcarePack } from '@harness/pack-healthcare';
+import { parseManifest } from './manifest.js';
 import { parseExtraction } from './parse.js';
 
-const manifest = loadHealthcareManifest();
+const manifest = parseManifest(healthcarePack.extraction);
 
 describe('parseExtraction', () => {
   const raw = {

@@ -1,10 +1,11 @@
 import { describe, it, expect } from 'vitest';
+import { pack as healthcarePack } from '@harness/pack-healthcare';
 import { isRestrictedName } from '../../shared/redaction/names.js';
-import { loadHealthcareManifest, parseManifest } from './manifest.js';
+import { parseManifest } from './manifest.js';
 
-const manifest = loadHealthcareManifest();
+const manifest = parseManifest(healthcarePack.extraction);
 
-describe('loadHealthcareManifest', () => {
+describe('the healthcare pack manifest', () => {
   it('validates the shipped manifest', () => {
     expect(manifest.version).toBe('1.0.0');
     expect(manifest.fields.length).toBeGreaterThan(10);
