@@ -23,6 +23,7 @@ services:
       HARNESS_ENCRYPTION_KEY: ${HARNESS_ENCRYPTION_KEY:-}
       HARNESS_FORMS_DIR: /srv/agent-harness/packs/healthcare/forms
       HARNESS_GATEWAY_URL: http://litellm:4000
+      HARNESS_PACKS: ${HARNESS_PACKS:-@harness/pack-healthcare}
       HARNESS_POLICY_FILE: /srv/agent-harness/clients/demo-practice/policy.yaml
       HARNESS_STORAGE_DIR: /srv/harness-storage
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?set LITELLM_MASTER_KEY in .env}
@@ -108,6 +109,7 @@ services:
       DATABASE_URL: postgres://harness:harness@postgres:5432/harness
       HARNESS_FORMS_DIR: /srv/agent-harness/packs/healthcare/forms
       HARNESS_GATEWAY_URL: http://litellm:4000
+      HARNESS_PACKS: ${HARNESS_PACKS:-@harness/pack-healthcare}
       HARNESS_POLICY_FILE: /srv/agent-harness/clients/demo-practice/policy.yaml
       HARNESS_STORAGE_DIR: /srv/harness-storage
       HERMES_GID: ${HERMES_GID:-1000}
