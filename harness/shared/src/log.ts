@@ -14,18 +14,16 @@ export interface Logger {
   error(message: string, err?: unknown): void;
 }
 
-function line(scope: string, message: string, err: unknown): string {
-  return err === undefined ? `${scope}: ${message}` : `${scope}: ${message}: ${describeError(err)}`;
-}
-
-/** A logger that prefixes every line with `scope`, e.g. `createLogger('effects')`. */
+/**
+ * A logger that prefixes every line with `scope`, e.g. `createLogger('effects')`.
+ *
+ * The three levels are one function: the line carries no severity marker, because the scope
+ * and the message are what a reader greps for, and every line goes to the same stream anyway.
+ * They stay three names on the interface so a call site still says what it means.
+ */
 export function createLogger(scope: string): Logger {
-  const write = (message: string, err: unknown): void => {
-    console.error(line(scope, message, err));
+  const write = (message: string, err?: unknown): void => {
+    console.error(err === undefined ? `${scope}: ${message}` : `${scope}: ${message}: ${describeError(err)}`);
   };
-  return {
-    info: (message, err) => write(message, err),
-    warn: (message, err) => write(message, err),
-    error: (message, err) => write(message, err),
-  };
+  return { info: write, warn: write, error: write };
 }
