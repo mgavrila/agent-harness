@@ -1,8 +1,16 @@
 import * as z from 'zod/v4';
 import { ConfigError } from '@harness/shared';
+import { ATTACHMENT_PROPERTIES } from './records.js';
 
 /** Matches every document kind no other target claims. */
 export const ANY_DOCUMENT_KIND = '*';
+
+/**
+ * Every member of one attachment object in the model-facing extraction schema: the three the
+ * kernel always asks for, and the four columns the record model stores.
+ */
+export const ATTACHMENT_SLOTS = ['kind', 'confidence', 'source_page', ...ATTACHMENT_PROPERTIES] as const;
+export type AttachmentSlot = (typeof ATTACHMENT_SLOTS)[number];
 
 /**
  * Where one family of documents lands.
@@ -41,6 +49,16 @@ export interface ExtractionTarget {
    * are part of what this plan must not change. Omit for a target with no attachments.
    */
   attachment_schema_description?: string;
+  /**
+   * What the model is told each member of one attachment object means, keyed by
+   * `ATTACHMENT_SLOTS`. Any slot left out keeps the kernel's own colourless wording.
+   *
+   * The prose is the pack's because the kernel has no word for what hangs off a record:
+   * "credential" is healthcare's noun for it, "link" is the stories pack's, and the module that
+   * stores the row is not the one that should be picking. These strings go out inside
+   * `response_format`, so they are part of what the model reads.
+   */
+  attachment_descriptions?: Partial<Record<AttachmentSlot, string>>;
 }
 
 /**
@@ -68,6 +86,9 @@ const ExtractionTargetShape = z.object({
   instruction: z.string().min(1),
   attachment_instruction: z.string().min(1).optional(),
   attachment_schema_description: z.string().min(1).optional(),
+  // Plain string keys, checked against `ATTACHMENT_SLOTS` in `parseExtractionManifest` rather
+  // than by an enum-keyed record, which zod reads as "every key required".
+  attachment_descriptions: z.record(z.string(), z.string().min(1)).optional(),
 });
 
 const ExtractionManifestShape = z.object({
@@ -89,6 +110,13 @@ export function parseExtractionManifest(raw: unknown): ExtractionManifest {
   if (manifest.targets.length === 0) throw new ConfigError('extraction manifest declares no extraction targets');
   const claimed = new Set<string>();
   for (const target of manifest.targets) {
+    for (const slot of Object.keys(target.attachment_descriptions ?? {})) {
+      if (!(ATTACHMENT_SLOTS as readonly string[]).includes(slot)) {
+        throw new ConfigError(
+          `extraction manifest: target "${target.schema_name}" describes unknown attachment slot "${slot}"`,
+        );
+      }
+    }
     for (const kind of target.document_kinds) {
       if (claimed.has(kind)) {
         throw new ConfigError(`extraction manifest: two extraction targets both claim "${kind}"`);

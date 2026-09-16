@@ -116,7 +116,16 @@
         "attachments_key": "credentials",
         "instruction": "Extract the provider details this document evidences.",
         "attachment_instruction": "Also list every credential the document evidences (state licence, DEA registration,\nmalpractice policy, board certification) with its issuer, state and dates.\nDo not report any registration, policy or licence NUMBER: this pipeline does not extract them.",
-        "attachment_schema_description": "Credentials this document evidences. The registration, licence or policy number is deliberately NOT part of this schema and is not extracted at all: report only the kind, issuer, state and dates."
+        "attachment_schema_description": "Credentials this document evidences. The registration, licence or policy number is deliberately NOT part of this schema and is not extracted at all: report only the kind, issuer, state and dates.",
+        "attachment_descriptions": {
+          "kind": "Which kind of credential this is.",
+          "confidence": "How sure you are that this credential is present in the document, from 0 to 1.",
+          "source_page": "The 1-based page this credential was read from.",
+          "state": "Two-letter US state code, or an empty string when the credential is not state-issued.",
+          "issuer": "The issuing board, agency or carrier as printed.",
+          "issued_at": "The issue date in YYYY-MM-DD form, or an empty string when absent.",
+          "expires_at": "The expiry date in YYYY-MM-DD form, or an empty string when absent."
+        }
       }
     ]
   }

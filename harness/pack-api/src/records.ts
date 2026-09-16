@@ -70,6 +70,30 @@ export interface AttachmentKindSpec {
   properties: readonly AttachmentProperty[];
 }
 
+/**
+ * A kind as it sits in the JSON a human edits, before anything has parsed it.
+ *
+ * The kernel's registry parses every declared kind once, at construction, against *this
+ * build's* restricted-name rules, so a pack is free to hand over the object it read out of its
+ * own schema file. Only `kind` is read before that parse — `definePack` and the registry check
+ * for duplicate kind names — so it is the one member stated here.
+ */
+export interface UnparsedKind {
+  kind: string;
+  [key: string]: unknown;
+}
+
+/**
+ * What `Pack.records` and `Pack.attachments` carry: either a spec this module built and
+ * checked, or the raw JSON above.
+ *
+ * Declaring them as the parsed specs was a lie that cost a cast in every pack: the zod defaults
+ * the kernel's extraction schema reads (`restricted: false`, `source: 'model'`, `genericTools:
+ * true`) do not exist until `parseRecordKind` has run, and it is the kernel that runs it.
+ */
+export type RawRecordKind = RecordKindSpec | UnparsedKind;
+export type RawAttachmentKind = AttachmentKindSpec | UnparsedKind;
+
 const KIND = /^[a-z][a-z0-9_]*$/;
 
 /** Declare a record kind, with the checks that turn a typo into a startup failure. */

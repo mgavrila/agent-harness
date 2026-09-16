@@ -2,9 +2,9 @@
  * External registry lookups.
  *
  * `VerifyRegistry` is the seam: `nppesRegistry(config)` is the production adapter over the
- * public CMS endpoint, and a test double is a plain object with one method — no HTTP stub
- * and no base-URL juggling. `ToolDeps.verify` carries the configuration rather than a built
- * registry, so a test overrides `nppesBaseUrl` exactly as it does today; see ARCHITECTURE.md.
+ * public CMS endpoint, and a test double is a plain object with one method. The configuration
+ * comes from `src/config.ts`, which reads this pack's four environment variables — it used to
+ * ride on core's `ToolDeps`, and NPPES is not core's business.
  */
 export interface VerifyConfig {
   nppesEnabled: boolean;

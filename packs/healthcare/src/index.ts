@@ -6,11 +6,12 @@ import { parse as parseYaml } from 'yaml';
 import {
   definePack,
   parseExtractionManifest,
-  type AttachmentKindSpec,
   type ExtractionManifest,
   type Policy,
-  type RecordKindSpec,
+  type RawAttachmentKind,
+  type RawRecordKind,
 } from '@harness/pack-api';
+import { HEALTHCARE_REPLACES, healthcareTools } from './tools/index.js';
 
 /** The pack root: one level up from `src/`. Every path below is absolute, as the contract requires. */
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -20,8 +21,8 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const requireJson = createRequire(import.meta.url);
 
 interface RawManifest {
-  records: RecordKindSpec[];
-  attachments: AttachmentKindSpec[];
+  records: RawRecordKind[];
+  attachments: RawAttachmentKind[];
   extraction: ExtractionManifest;
 }
 const raw = requireJson('../schema/provider.json') as RawManifest;
@@ -71,4 +72,18 @@ export const pack = definePack({
     ],
     generate: '@harness/pack-healthcare/generate',
   },
+  replaces: HEALTHCARE_REPLACES,
+  tools: healthcareTools,
 });
+
+/**
+ * Two pieces of this pack's content that core-tools' own tests read.
+ *
+ * They are here rather than reached by a path into `src/`, which `pnpm arch` forbids across
+ * packages. `ROSTER_COLUMNS` is the payer's column contract, asserted against `forms_roster`'s
+ * result; `loadManifest` is how the kernel-side test checks that no template this pack ships
+ * maps a name the kernel's own redaction rules call restricted — a check that needs both
+ * halves and so cannot live in either alone.
+ */
+export { loadManifest } from './domain/forms/templates.js';
+export { ROSTER_COLUMNS } from './domain/forms/types.js';

@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { describe, it, expect } from 'vitest';
 import { PDFDocument } from 'pdf-lib';
-import { pack as healthcarePack } from '@harness/pack-healthcare';
+import { pack as healthcarePack } from '../../index.js';
 import { fillTemplatePdf } from './fill.js';
 
 describe('fillTemplatePdf', () => {

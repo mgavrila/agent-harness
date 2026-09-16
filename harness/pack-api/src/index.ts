@@ -7,9 +7,8 @@
  * is what lets core load a pack by name at runtime instead of importing it at build time. See
  * ARCHITECTURE.md, "Adding a pack".
  */
-export { CREDENTIAL_KINDS, type CredentialKind } from './credentials.js';
 export { ACTION_CLASSES, BEHAVIORS, type ActionClass, type Behavior, type Policy } from './policy.js';
-export { type AnyToolDef, type ToolDef } from './tool.js';
+export { definePackTool, type AnyToolDef, type ToolDef } from './tool.js';
 export {
   ManifestFieldShape,
   parseManifest,
@@ -19,8 +18,10 @@ export {
 } from './manifest.js';
 export {
   ANY_DOCUMENT_KIND,
+  ATTACHMENT_SLOTS,
   parseExtractionManifest,
   targetFor,
+  type AttachmentSlot,
   type ExtractionManifest,
   type ExtractionTarget,
 } from './extraction.js';
@@ -33,7 +34,10 @@ export {
   type AttachmentKindSpec,
   type AttachmentProperty,
   type ExternalIdSpec,
+  type RawAttachmentKind,
+  type RawRecordKind,
   type RecordKindSpec,
+  type UnparsedKind,
 } from './records.js';
 export {
   type CoreToolView,

@@ -3,7 +3,7 @@ import type * as z from 'zod/v4';
 import type { PackEvals } from './evals.js';
 import type { ExtractionManifest } from './extraction.js';
 import type { ActionClass, Policy } from './policy.js';
-import type { AttachmentKindSpec, RecordKindSpec } from './records.js';
+import type { AttachmentKindSpec, RawAttachmentKind, RawRecordKind, RecordKindSpec } from './records.js';
 
 /**
  * The mutually-referencing declarations of the pack contract.
@@ -155,10 +155,16 @@ export interface Pack {
   /** Short, stable, lowercase. `deps.packs.byName('healthcare')`. */
   name: string;
   version: string;
-  /** What this pack stores. At least one. */
-  records: RecordKindSpec[];
+  /**
+   * What this pack stores. At least one.
+   *
+   * Handed over unparsed — see `RawRecordKind`. The kernel's registry parses each one against
+   * its own restricted-name rules, because those rules decide what gets encrypted and belong
+   * to whoever does the encrypting.
+   */
+  records: RawRecordKind[];
   /** What hangs off a record: a licence, a link. Omit for a pack that attaches nothing. */
-  attachments?: AttachmentKindSpec[];
+  attachments?: RawAttachmentKind[];
   /** What `documents_classify` may return and `documents_ingest` may be told. */
   documentKinds: readonly string[];
   /** Which document kinds feed which record kinds, and the prose the model reads. */

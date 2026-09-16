@@ -1,6 +1,5 @@
 import { PDFDocument } from 'pdf-lib';
 import { ToolError } from '@harness/shared';
-import { isRestrictedName } from '../../shared/redaction/names.js';
 import { mappingLabel } from './templates.js';
 import type { ProviderData, ResolvedMapping, TemplateMapping } from './types.js';
 
@@ -35,8 +34,16 @@ function present(value: string | null | undefined): string | null {
  * Turn each mapping into a value or a reason there is none. A mapping that
  * names a restricted identifier is not "blocked" but an error: a template that
  * asks for one is misconfigured, and no provider's data should make it fillable.
+ *
+ * `isRestrictedName` is a parameter because the rule belongs to whoever does the encrypting:
+ * it is the kernel's, reached through `deps.kernel`, and a pack may not import it. The caller
+ * in `tools/forms.ts` has the dependency bag in hand and passes it straight through.
  */
-export function resolveMappings(mappings: TemplateMapping[], data: ProviderData): ResolvedMapping[] {
+export function resolveMappings(
+  mappings: TemplateMapping[],
+  data: ProviderData,
+  isRestrictedName: (name: string) => boolean,
+): ResolvedMapping[] {
   return mappings.map((m): ResolvedMapping => {
     const label = mappingLabel(m);
     const base = { pdf_field: m.pdf_field, label, required: m.required };
