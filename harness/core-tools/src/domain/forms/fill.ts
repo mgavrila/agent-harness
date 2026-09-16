@@ -7,6 +7,14 @@ import type { ProviderData, ResolvedMapping, TemplateMapping } from './types.js'
 /** Only a field a model extracted confidently or a human confirmed may reach a form. */
 const USABLE_FIELD_STATUSES = new Set(['extracted', 'verified']);
 
+/** A `credential` mapping's `property`, as the column it reads off a loaded credential. */
+const CREDENTIAL_PROPERTY_COLUMNS = {
+  issuer: 'issuer',
+  state: 'state',
+  issued_at: 'issuedAt',
+  expires_at: 'expiresAt',
+} as const satisfies Record<Extract<TemplateMapping, { source: 'credential' }>['property'], string>;
+
 /**
  * The credential of a kind that a form should quote: the one that expires last.
  * Shared with the roster in provider-data.ts, which must pick the same one: two
@@ -58,15 +66,7 @@ export function resolveMappings(mappings: TemplateMapping[], data: ProviderData)
 
     const credential = latestCredential(data, m.kind);
     if (!credential) return { ...base, value: null, blocked: 'missing' };
-    const raw =
-      m.property === 'issuer'
-        ? credential.issuer
-        : m.property === 'state'
-          ? credential.state
-          : m.property === 'issued_at'
-            ? credential.issuedAt
-            : credential.expiresAt;
-    const value = present(raw);
+    const value = present(credential[CREDENTIAL_PROPERTY_COLUMNS[m.property]]);
     return { ...base, value, blocked: value ? null : 'missing' };
   });
 }

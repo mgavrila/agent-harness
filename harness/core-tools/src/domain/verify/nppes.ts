@@ -34,8 +34,8 @@ interface NppesBody {
  * cannot be read come back null so the reviewer sees a record with gaps.
  */
 function recordFrom(result: NppesResult): NppesRecord {
-  const enumerationType =
-    result.enumeration_type === 'NPI-2' ? 'NPI-2' : result.enumeration_type === 'NPI-1' ? 'NPI-1' : null;
+  const declared = result.enumeration_type;
+  const enumerationType = declared === 'NPI-1' || declared === 'NPI-2' ? declared : null;
   const basic = result.basic ?? {};
   const name =
     enumerationType === 'NPI-2'

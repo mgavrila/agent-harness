@@ -22,6 +22,14 @@ function fieldSlot(field: ManifestField): Record<string, unknown> {
   };
 }
 
+/** What the model is told each credential property means. One entry per `CREDENTIAL_PROPERTIES`. */
+const CREDENTIAL_PROPERTY_DESCRIPTIONS: Record<(typeof CREDENTIAL_PROPERTIES)[number], string> = {
+  state: 'Two-letter US state code, or an empty string when the credential is not state-issued.',
+  issuer: 'The issuing board, agency or carrier as printed.',
+  issued_at: 'The issue date in YYYY-MM-DD form, or an empty string when absent.',
+  expires_at: 'The expiry date in YYYY-MM-DD form, or an empty string when absent.',
+};
+
 /**
  * The `response_format` schema. Everything is inlined: `$ref` and `$defs`
  * support is uneven across providers, and a schema the provider silently
@@ -44,15 +52,7 @@ export function buildExtractionSchema(manifest: ProviderManifest): { name: strin
     source_page: { type: 'integer', description: 'The 1-based page this credential was read from.' },
   };
   for (const prop of CREDENTIAL_PROPERTIES) {
-    credentialProperties[prop] = {
-      type: 'string',
-      description:
-        prop === 'state'
-          ? 'Two-letter US state code, or an empty string when the credential is not state-issued.'
-          : prop === 'issuer'
-            ? 'The issuing board, agency or carrier as printed.'
-            : `The ${prop === 'issued_at' ? 'issue' : 'expiry'} date in YYYY-MM-DD form, or an empty string when absent.`,
-    };
+    credentialProperties[prop] = { type: 'string', description: CREDENTIAL_PROPERTY_DESCRIPTIONS[prop] };
   }
 
   return {
