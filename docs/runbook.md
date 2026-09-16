@@ -158,16 +158,30 @@ contain restricted values:
   remote file id) so an operator can trace an effect to what it produced. A sink
   is responsible for returning identifiers only, never payload content.
 
-Nothing drains the outbox yet. Plan 1.1 stages rows and provides
-`dispatchStagedEffects`, but no sinks are registered and no scheduler calls it,
-so staged rows simply accumulate until Plan 3 registers real sinks and a cron
-runs the dispatcher.
+The approvals app drains the outbox. `startRunner`
+(`harness/approvals/src/domain/runner.ts`) runs a `dispatch` loop every
+`EFFECTS_DISPATCH_SECONDS` seconds (default 5) that calls
+`dispatchStagedEffects` over the `slack_message` and `slack_file` sinks
+`main.ts` registers. Each tick is guarded against overlapping itself, and a
+failure is logged and swallowed, so a Slack outage parks nothing — the next
+tick retries. A backlog of `staged` rows between ticks is normal and does not
+fail `/healthz`.
+
+A dispatch that never reported back is caught by the app's third loop, which
+runs every `RECONCILE_SECONDS` seconds (default 300) and calls
+`harness_reconcile` through the MCP server, parking a dispatch older than ten
+minutes as `needs_review`. So staged rows accumulating is *not* expected
+behaviour: if they do, the approvals app is not running, its dispatch loop is
+erroring (check `/healthz` and the log), or the rows belong to a different
+`client` than the app serves.
 
 ## Reconciliation
 
 `harness_reconcile` (also run once at process start) expires approvals past
-their TTL and parks stuck dispatches. Run it on a schedule in production
-(Plan 3 adds a cron playbook). It never re-sends anything.
+their TTL and parks stuck dispatches. The approvals app's reconcile loop calls
+it every `RECONCILE_SECONDS`, and `clients/demo-practice/cron/playbooks.sh`
+installs a `harness-reconcile-watchdog` job that checks it is happening. It
+never re-sends anything.
 
 The MCP tool repairs **only the calling client's rows**, so an agent acting for
 one practice can never retire another practice's approvals. The startup pass in
@@ -187,7 +201,7 @@ and skill onto another session's audit rows.
 
 ## Writing migrations
 
-Edit `harness/db/src/schema.ts` first, then run plain `pnpm drizzle-kit
+Edit `harness/db/src/domain/schema.ts` first, then run plain `pnpm drizzle-kit
 generate` from `harness/db/` so drizzle-kit writes both the SQL migration and
 the snapshot together. Hand-edit the generated SQL only for things drizzle-kit
 cannot express (triggers, partial indexes), then run `generate` again and

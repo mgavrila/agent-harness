@@ -53,7 +53,7 @@ The dependency graph in one line per layer, with every arrow pointing at somethi
 ```
 shared  <-  pack-api  <-  { core-tools, packs/* }
 shared  <-  db        <-  core-tools  <-  { approvals, evals }
-shared  <-  gateway   <-  core-tools
+gateway   <-  core-tools      (gateway is the one package with no edge to shared: it needs none)
 core-tools  ..>  packs/*        (runtime only: dynamic import, never a static one)
 evals       ->   packs/healthcare  (static: the eval corpus, cases and skill list are the healthcare pack's; making evals pack-agnostic is a follow-up)
 ```
@@ -120,6 +120,37 @@ An agent calls `documents_extract`. Every module named here is under
    "internal error; see audit log" in `domain/tooling/execution.ts`, because a raw message can
    carry a restricted value.
 
+## What ToolDeps carries, and what it does not
+
+`ToolDeps` (`harness/core-tools/src/domain/tooling/types.ts`) is the package's dependency
+contract: a handler reaches for nothing outside it, which is what keeps `process.env` out of
+the domain and what makes every tool testable against `makeTestDeps`.
+
+Three of its fields — `gateway`, `storageDir` and `verify` — are **configuration**, not
+constructed objects. A URL, a directory and four flags, not a `ModelGateway`, a `Storage` and a
+`VerifyRegistry`. That is deliberate, and it is the shape a reviewer should expect to argue
+with, so here is the reasoning.
+
+- **The adapter is built in the domain, from the configuration.** `httpGateway(deps.gateway)`
+  inside `callModel` and `nppesRegistry(deps.verify)` inside `verify_nppes` are the two on the
+  live path; `fileStorage(root)` is declared beside the same interface but has no caller yet,
+  because every storage call still goes through the free functions with `deps.storageDir`
+  threaded in. The interface exists either way, so a second implementation is a new function
+  beside the old one and not a change to this type.
+- **The fake lives beside the interface, not in the deps bag.** `FakeGateway`
+  (`domain/models/fake.ts`) implements `ModelGateway` next to the interface it satisfies and is
+  reachable from `./testing`. A test that wants a scripted model swaps the adapter at the call
+  site; it does not assemble one to hand to `makeTestDeps`.
+- **A test overrides a value, not an object.** This is the practical reason. Pointing a suite at
+  `startFakeGateway`'s loopback URL is one field, and every test that only cares about a
+  timeout or a storage root stays a one-line override. Threading the three interfaces through
+  `ToolDeps` would make each of those tests construct an adapter to say nothing about it.
+
+The cost is real: the domain builds its own adapters, so a caller cannot substitute one without
+going through the module that builds it. Wiring the three interfaces through `ToolDeps` is the
+fix, and it was deferred on purpose — it touches every handler signature and every test's deps
+literal, which is a behaviour-risk refactor and not the file moves this revamp was for.
+
 ## The three invariants
 
 Break any of these and the harness is not safe to run against real data.
@@ -162,8 +193,10 @@ on one — and this branch changed no behaviour.
 
 ## Where each cross-cutting concern lives
 
-Seven of them are `@harness/shared`, a package with no workspace dependency of its own, so
-every package — `@harness/db` and every pack included — imports it rather than keeping a copy.
+Seven of them are `@harness/shared`, a package with no workspace dependency of its own, so any
+package that needs one — `@harness/db` and every pack included — imports it rather than keeping
+a copy. `@harness/gateway` is the one package that declares no dependency on it, because it
+uses none of the seven; the dependency is added when it needs one, not in advance.
 `@harness/core-tools` re-exports all seven, so a module already importing them from there is
 not wrong, only indirect.
 

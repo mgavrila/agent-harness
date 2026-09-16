@@ -5,7 +5,7 @@ import type { Pack, ProviderManifest } from '@harness/pack-api';
  * handler reaches the active pack's manifest or forms directory the same way it reaches the
  * database: through its dependencies, never through an import.
  *
- * Several packs can be loaded at once and `documentKinds()` unions them, but the three
+ * Several packs can be loaded at once and `documentKinds()` unions them, but the two
  * singular accessors — `manifest()`, `formsDir()` — answer for the **first** pack named in
  * `HARNESS_PACKS`. One extraction manifest and one templates directory is what the document
  * and forms pipelines take today; making them per-pack is a feature, not a refactor, and waits

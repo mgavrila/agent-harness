@@ -59,8 +59,9 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 /**
  * Parse `SLACK_ALLOWED_USERS`: comma-separated Slack user ids, trimmed, empty
- * entries dropped. Task 7's entrypoint reads the env var and calls this; it
- * is not wired to anything here.
+ * entries dropped. The app entrypoint (`src/app/main.ts`) reads the variable,
+ * calls this, and passes the result in as `AppDeps.allowedUsers`; this module
+ * never reads the environment itself.
  */
 export function parseAllowedUsers(env: string | undefined): ReadonlySet<string> {
   const ids = (env ?? '')
