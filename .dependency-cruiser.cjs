@@ -130,9 +130,10 @@ function crossPackageRule(dir) {
 const GLOBAL_RULES = [
   {
     name: 'no-circular',
-    comment: 'A cycle means two modules are really one. Split the shared part into a types.ts.',
+    comment:
+      'A cycle means two modules are really one. Split the shared part into a types.ts. Three modules of the pack contract are exempt, and only those three: `Pack` declares tools that are handed a `PackToolDeps`, and a `PackToolDeps` reaches a `Pack` back through `PackRegistryView.byName`, so the two refer to each other and no arrangement short of one enormous module breaks that. Every edge in the loop is an `import type`, erased before anything runs, so there is no initialisation order to get wrong; the exemption would be `dependencyTypesNot: [type-only]` instead if dependency-cruiser 16 tagged those edges under TypeScript 7, which it does not.',
     severity: 'error',
-    from: {},
+    from: { pathNot: '^harness/pack-api/src/(pack|kernel|tool)\\.ts$' },
     to: { circular: true },
   },
   {

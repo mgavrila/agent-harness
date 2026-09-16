@@ -7,9 +7,19 @@ import { definePack } from '@harness/pack-api';
 export const pack = definePack({ … });
 ```
 
-`Pack` is in `src/pack.ts`; the types it uses are in `credentials.ts`, `policy.ts`, `tool.ts`
-and `manifest.ts`. `@harness/core-tools` re-exports every one of them, so a module inside
-core-tools imports them from where it always did.
+`Pack` is in `src/pack.ts`. It says four things, each with its own module:
+
+- **what a pack stores** — `RecordKindSpec` and `AttachmentKindSpec` in `records.ts`, over the
+  field manifest in `manifest.ts`;
+- **what a document turns into** — `ExtractionManifest` in `extraction.ts`, one
+  `ExtractionTarget` per family of document kinds;
+- **what a pack's tools are handed** — `PackToolDeps`, `PackKernel` and `CoreToolView` in
+  `kernel.ts`, the structural view of core's `ToolDeps` a pack can name without importing
+  core-tools;
+- **how a pack is evaluated** — `PackEvals` in `evals.ts`.
+
+`policy.ts`, `tool.ts` and `credentials.ts` carry the rest. `@harness/core-tools` re-exports
+what its own modules need, so a module inside core-tools imports it from where it always did.
 
 ## Why a pack never depends on core-tools
 

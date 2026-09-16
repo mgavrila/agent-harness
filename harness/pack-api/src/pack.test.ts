@@ -4,8 +4,29 @@ import { definePack, type Pack } from './pack.js';
 const base: Pack = {
   name: 'healthcare',
   version: '0.1.0',
+  records: [
+    {
+      kind: 'provider',
+      label: 'Provider',
+      fields: [{ name: 'last_name', type: 'string', description: 'x', restricted: false, source: 'model' }],
+      nameFields: ['last_name'],
+    },
+  ],
   documentKinds: ['other'],
-  extraction: { version: '1.0.0', fields: [], credentials: [], document_kinds: ['other'] },
+  extraction: {
+    version: '1.0.0',
+    document_kinds: ['other'],
+    role: 'You read documents.',
+    targets: [
+      {
+        document_kinds: ['*'],
+        record_kind: 'provider',
+        schema_name: 'provider_extraction',
+        attachments_key: 'credentials',
+        instruction: 'Extract.',
+      },
+    ],
+  },
   formsDir: '/srv/pack/forms',
   skillsDir: '/srv/pack/skills',
   policy: {},
@@ -25,5 +46,34 @@ describe('definePack', () => {
     expect(() => definePack({ ...base, name: 'Health Care' })).toThrow(/must be lowercase/);
     expect(() => definePack({ ...base, version: '' })).toThrow(/has no version/);
     expect(() => definePack({ ...base, documentKinds: [] })).toThrow(/declares no document kinds/);
+  });
+
+  it('accepts a pack with no forms directory, because not every area fills forms', () => {
+    const { formsDir: _dropped, ...noForms } = base;
+    expect(definePack(noForms).formsDir).toBeUndefined();
+  });
+
+  it('refuses an extraction target naming a record kind the pack does not declare', () => {
+    const wrong = {
+      ...base,
+      extraction: { ...base.extraction, targets: [{ ...base.extraction.targets[0], record_kind: 'epic' }] },
+    };
+    expect(() => definePack(wrong)).toThrow(/names record kind "epic", which the pack does not declare/);
+  });
+
+  it('refuses a document kind that reaches no target, and a replaces list with no tools', () => {
+    const unreachable = {
+      ...base,
+      documentKinds: ['other', 'w9'],
+      extraction: {
+        ...base.extraction,
+        document_kinds: ['other', 'w9'],
+        targets: [{ ...base.extraction.targets[0], document_kinds: ['other'] }],
+      },
+    };
+    expect(() => definePack(unreachable)).toThrow(/document kind "w9" reaches no extraction target/);
+    expect(() => definePack({ ...base, replaces: ['records_get'] })).toThrow(
+      /replaces 1 kernel tools but contributes none/,
+    );
   });
 });
