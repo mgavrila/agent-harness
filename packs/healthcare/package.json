@@ -11,7 +11,7 @@
   "scripts": {
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "generate": "tsx synthetic/generate.ts",
+    "generate": "tsx synthetic/cli.ts",
     "forms:generate": "tsx forms/generate-templates.ts"
   },
   "dependencies": {
