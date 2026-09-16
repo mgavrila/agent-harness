@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-16
 **Status:** approved in discussion; awaiting written review
-**Scope:** restructure inside the existing workspace packages; no behaviour change; no schema change
+**Scope:** restructure inside the existing workspace packages, plus two small new packages (`@harness/shared`, `@harness/pack-api`) added by the 2026-09-16 addendum; no behaviour change; no schema change
 **Baseline:** main at 83c4aab (Plans 1, 1.1, 2 and 3 merged; 522 tests across 7 packages)
 
 ## 1. Goal
@@ -61,9 +61,12 @@ Domain folders per package:
 
 ## 3. Shared modules (one home per concern)
 
-All in `harness/core-tools/src/shared/` and exported from the core-tools
-public API so approvals, evals and the pack import them instead of keeping
-copies.
+All in the new workspace package `@harness/shared` (`harness/shared/`, see
+section 9), which sits below every other package so db, core-tools, approvals,
+evals, packs and scripts all import them instead of keeping copies. The
+redaction modules are the exception: they carry domain knowledge and stay in
+core-tools (`harness/core-tools/src/shared/redaction/`), exported from its
+public API.
 
 | Module | Exports | Replaces |
 |---|---|---|
@@ -179,6 +182,79 @@ merged to main when the final review is clean.
 
 - Dormant injection checks and credential-number extraction wait for the
   Plan 4 agent loop.
-- A `@harness/shared` package was declined in favour of `core-tools/src/shared/`
-  exported through the public API; revisit if a package that does not depend on
-  core-tools ever needs the helpers.
+- The `@harness/shared` package was first declined and then adopted by the
+  addendum below, because packs and db cannot import core-tools.
+
+## 9. Addendum (2026-09-16): packs as plug-ins
+
+The product is a foundation onto which project-specific "areas" are plugged:
+healthcare credentialing today; document scanning that produces stories and
+epics tomorrow. A pack must therefore be something core loads through a
+contract, never something core imports by name. Today
+`harness/core-tools/src/documents/extract.ts` requires
+`@harness/pack-healthcare/schema` directly and `DOCUMENT_KINDS`, the forms
+templates directory and the skills directory are wired to the healthcare pack.
+That direction is reversed.
+
+### 9.1 Two new packages
+
+- **`@harness/shared`** (`harness/shared/`): the generic helpers from section 3
+  (`env`, `errors`, `paths`, `log`, `subprocess`, `jsonl`, `csv`). No domain
+  knowledge, no dependency on any other workspace package. Every package
+  depends on it.
+- **`@harness/pack-api`** (`harness/pack-api/`): the pack contract and
+  `definePack()`. Depends only on `@harness/shared` and zod. core-tools and
+  every pack depend on it; a pack never depends on core-tools.
+
+### 9.2 The `Pack` contract
+
+```ts
+export interface Pack {
+  name: string;                      // 'healthcare'
+  version: string;
+  documentKinds: readonly string[];  // what documents_classify may return
+  extraction: ProviderManifest;      // fields + credentials the extractor asks for
+  formsDir: string;                  // absolute path to templates.json + PDFs
+  skillsDir: string;                 // absolute path to <skill>/SKILL.md folders
+  policy: Partial<Policy>;           // action-class defaults the pack ships
+  evals?: { casesFile?: string; injectionFile?: string };
+  tools?: (deps: unknown) => AnyToolDef[]; // optional pack-specific tools
+}
+export function definePack(pack: Pack): Pack;
+```
+
+`ProviderManifest`, `Policy` and `AnyToolDef` types move (types only) into
+`@harness/pack-api` so the contract has no core-tools dependency; core-tools
+re-exports them for compatibility.
+
+### 9.3 Loading
+
+- `app/server.ts` in core-tools reads `HARNESS_PACKS` (comma-separated package
+  names, default `@harness/pack-healthcare`) and loads each with a dynamic
+  `import()`; the module must export `pack: Pack`. The loaded packs form a
+  `PackRegistry` on `ToolDeps` (`deps.packs.byName`, `deps.packs.all`).
+- `documents_classify`, `documents_extract`, `forms_*`, the skills frontmatter
+  test and the evals runner take document kinds, manifest, templates and skills
+  from the registry, never from a hard-coded import.
+- The healthcare pack exports `pack` from `packs/healthcare/src/index.ts`
+  (implementing the contract with its existing manifest, templates and skills)
+  and keeps its `./schema` and `./generate` subpaths for the synthetic
+  generator and evals.
+- Adding a pack: create `packs/<name>/` exporting `pack`, add it to the
+  core-tools `dependencies` (so pnpm can resolve it) and to `HARNESS_PACKS` in
+  the client's `.env`. CONTRIBUTING.md documents this in "Adding a pack".
+
+### 9.4 Consequences for sections 2–8
+
+- Section 3's three "deliberate duplications" (pack `execFile`/JSONL, db
+  logger) disappear: they import `@harness/shared`.
+- Section 7's task order gains one task after the core-tools domains and before
+  approvals: `@harness/pack-api`, the registry, and the healthcare pack
+  implementing the contract. Task 4 creates `@harness/shared` instead of
+  `core-tools/src/shared/`.
+- The dependency graph becomes: shared ← pack-api ← {core-tools, packs};
+  shared ← db ← core-tools ← {approvals, evals}; core-tools → packs at runtime
+  only (dynamic import, declared dependency for resolution). dependency-cruiser
+  forbids a static import of any `@harness/pack-*` from core-tools source.
+- No behaviour change: tool names, schemas, env names and outputs are
+  unchanged; `HARNESS_PACKS` is new but defaults to today's pack.
