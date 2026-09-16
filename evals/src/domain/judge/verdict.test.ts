@@ -6,10 +6,10 @@ import { DEFAULT_POLICY, registryOf, type ToolDeps } from '@harness/core-tools';
 import { pack as healthcarePack } from '@harness/pack-healthcare';
 import { startFakeGateway, type FakeGateway } from '@harness/core-tools/fake-gateway';
 import { createDb, runMigrations } from '@harness/db';
+import { EVALS_DATABASE_URL } from '../../corpus.test-helpers.js';
 import type { JudgeItem } from './types.js';
 import { judgeFreeText } from './verdict.js';
 
-const DATABASE_URL = process.env.EVALS_DATABASE_URL ?? 'postgres://harness:harness@localhost:15432/harness_evals';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const packs = registryOf([healthcarePack]);
 
@@ -20,9 +20,9 @@ let closeDb: () => Promise<void>;
 const VERDICT = (index: number, same: boolean) => ({ index, same, why: 'because' });
 
 beforeAll(async () => {
-  await runMigrations(DATABASE_URL);
+  await runMigrations(EVALS_DATABASE_URL);
   gateway = await startFakeGateway(() => ({ content: JSON.stringify({ verdicts: [VERDICT(0, true)] }) }));
-  const handle = createDb(DATABASE_URL);
+  const handle = createDb(EVALS_DATABASE_URL);
   closeDb = handle.close;
   deps = {
     db: handle.db,

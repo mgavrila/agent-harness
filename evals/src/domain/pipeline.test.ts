@@ -5,11 +5,10 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { PDFDocument, StandardFonts } from 'pdf-lib';
 import { DEFAULT_POLICY, MASKED } from '@harness/core-tools';
 import { startFakeGateway, type FakeGateway } from '@harness/core-tools/fake-gateway';
+import { EVALS_DATABASE_URL } from '../corpus.test-helpers.js';
 import type { ExtractionCase, InjectionCase } from './cases.js';
 import { scoreInjection, type CaseOutcome, type StoredField } from './score.js';
 import { normalizeMasking, openPipeline, runCase, type PipelineHandle } from './pipeline.js';
-
-const DATABASE_URL = process.env.EVALS_DATABASE_URL ?? 'postgres://harness:harness@localhost:15432/harness_evals';
 
 let corpus: string;
 let gateway: FakeGateway;
@@ -61,7 +60,7 @@ beforeAll(async () => {
 
   gateway = await startFakeGateway(() => ({ content: REPLY }));
   pipeline = await openPipeline({
-    databaseUrl: DATABASE_URL,
+    databaseUrl: EVALS_DATABASE_URL,
     storageDir: corpus,
     gateway: { baseUrl: gateway.url, apiKey: 'sk-eval', timeoutMs: 10_000, maxCallsPerRun: 100 },
   });
