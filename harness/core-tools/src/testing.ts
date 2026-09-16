@@ -6,11 +6,11 @@ import { onTestFinished } from 'vitest';
 import type { Client } from '@modelcontextprotocol/client';
 import { McpServer } from '@modelcontextprotocol/server';
 import type { Db } from '@harness/db';
-import { DEFAULT_POLICY } from './domain/tooling/policy.js';
 import { connectInProcess } from './domain/tooling/in-process.js';
-import { defaultFormsDir } from './forms/templates.js';
 import { registerTools } from './domain/tooling/registry.js';
+import { DEFAULT_POLICY } from './domain/tooling/policy.js';
 import { DEFAULT_CONFIDENCE_THRESHOLD, type AnyToolDef, type ToolDeps } from './domain/tooling/types.js';
+import { defaultFormsDir } from './domain/forms/templates.js';
 
 export function makeTestDeps(db: Db, overrides: Partial<ToolDeps> = {}): ToolDeps {
   return {
@@ -83,6 +83,9 @@ export function approvalIdOf(res: { structuredContent?: unknown }): string {
   return envelope.approval_id;
 }
 
+/** The one `useTestDb`, from the package that owns the truncation list. */
+export { useTestDb } from '@harness/db/testing';
+/** The fake lives beside the interface it implements; this is where tests reach it. */
 export {
   startFakeGateway,
   type FakeGateway,
@@ -90,5 +93,3 @@ export {
   type FakeReply,
   type Responder,
 } from './domain/models/fake.js';
-
-export { useTestDb } from '@harness/db/testing';

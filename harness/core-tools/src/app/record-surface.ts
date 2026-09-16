@@ -3,11 +3,11 @@ import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
-import { connectInProcess } from './domain/tooling/in-process.js';
-import { DEFAULT_POLICY } from './domain/tooling/policy.js';
-import { DEFAULT_CONFIDENCE_THRESHOLD, type ToolDeps } from './domain/tooling/types.js';
-import { createCoreToolsServer } from './server.js';
-import { NPPES_DEFAULT_BASE_URL } from './tools/verify.js';
+import { connectInProcess } from '../domain/tooling/in-process.js';
+import { DEFAULT_POLICY } from '../domain/tooling/policy.js';
+import { DEFAULT_CONFIDENCE_THRESHOLD, type ToolDeps } from '../domain/tooling/types.js';
+import { createCoreToolsServer } from '../tools/catalog.js';
+import { NPPES_DEFAULT_BASE_URL } from '../domain/verify/nppes.js';
 
 const run = promisify(execFile);
 
@@ -190,7 +190,7 @@ export async function envNamesFromExample(file: string): Promise<string[]> {
 }
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const repoRoot = path.resolve(here, '../../..');
+const repoRoot = path.resolve(here, '../../../..');
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const outDir = path.join(repoRoot, ARCHITECTURE_DIR);

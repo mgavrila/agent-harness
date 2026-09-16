@@ -13,7 +13,7 @@
     "format:check": "prettier --check .",
     "arch": "depcruise 'harness/*/src/**/*.ts' 'evals/src/**/*.ts' 'packs/*/**/*.ts' 'scripts/**/*.ts'",
     "arch:graph": "depcruise 'harness/*/src/**/*.ts' 'evals/src/**/*.ts' 'packs/*/**/*.ts' 'scripts/**/*.ts' --output-type dot | dot -T svg > docs/architecture/graph.svg",
-    "surface:record": "pnpm --filter @harness/core-tools exec tsx src/record-surface.ts",
+    "surface:record": "pnpm --filter @harness/core-tools surface",
     "test": "pnpm lint && pnpm -r --if-present test",
     "typecheck": "pnpm -r --if-present typecheck",
     "db:up": "docker compose --env-file .env -f harness/compose/docker-compose.yml up -d postgres",

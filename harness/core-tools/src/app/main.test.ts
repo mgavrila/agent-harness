@@ -16,7 +16,7 @@ describe('stdio entrypoint', () => {
     const transport = new StdioClientTransport({
       command: 'pnpm',
       args: ['exec', 'tsx', path.join(here, 'main.ts')],
-      cwd: path.resolve(here, '..'),
+      cwd: path.resolve(here, '../..'),
       env: {
         ...process.env,
         DATABASE_URL: TEST_DATABASE_URL,

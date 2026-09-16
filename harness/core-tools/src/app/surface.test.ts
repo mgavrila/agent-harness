@@ -11,7 +11,7 @@ import {
   type ToolSurfaceEntry,
 } from './record-surface.js';
 
-const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../..');
 const architecture = path.join(repoRoot, ARCHITECTURE_DIR);
 
 /**
