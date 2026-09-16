@@ -1,8 +1,5 @@
-import { readFile, writeFile } from 'node:fs/promises';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { stringify as stringifyYaml } from 'yaml';
-import { ROUTES, parseRouting, type RoutingFile } from './routing.schema.js';
+import { ROUTES, type RoutingFile } from './types.js';
 
 /**
  * Which environment variable holds the credential for a provider prefix. The
@@ -99,30 +96,4 @@ export function renderLiteLlmConfig(routing: RoutingFile): string {
   };
 
   return HEADER + stringifyYaml(config, { lineWidth: 0 });
-}
-
-const here = path.dirname(fileURLToPath(import.meta.url));
-const repoRoot = path.resolve(here, '../..');
-
-export async function renderClientConfig(client: string): Promise<string> {
-  const source = path.join(repoRoot, 'clients', client, 'routing.yaml');
-  const target = path.join(here, 'litellm.config.yaml');
-  const routing = parseRouting(await readFile(source, 'utf8'));
-  await writeFile(target, renderLiteLlmConfig(routing), 'utf8');
-  return target;
-}
-
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const client = process.env.HARNESS_CLIENT ?? 'demo-practice';
-  renderClientConfig(client)
-    .then((target) => {
-      console.log(`rendered ${client} routing to ${target}`);
-    })
-    .catch((err: unknown) => {
-      // parseRouting exists to turn an invalid routing.yaml into a readable
-      // z.prettifyError listing. Without this, the rejection went unhandled
-      // and the operator got a stack trace with that listing buried in it.
-      process.stderr.write(`${err instanceof Error ? err.message : String(err)}\n`);
-      process.exitCode = 1;
-    });
 }

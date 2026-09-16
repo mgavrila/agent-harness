@@ -1,10 +1,10 @@
 import * as z from 'zod/v4';
-import { parse as parseYaml } from 'yaml';
 
 /**
  * The four named routes from spec section 4.2. Callers ask for a *job*
  * (`extract`), never a provider, so a routing change is a config change.
- * This is the single definition; `@harness/core-tools/src/models.ts` imports it.
+ * This is the single definition; @harness/core-tools imports it through the
+ * `@harness/gateway/routing` subpath.
  */
 export const ROUTES = ['chat', 'extract', 'reason', 'judge'] as const;
 export type Route = (typeof ROUTES)[number];
@@ -47,12 +47,3 @@ export const RoutingFile = z.object({
     .default({ daily_budget_usd: 1, num_retries: 2, request_timeout_s: 120 }),
 });
 export type RoutingFile = z.infer<typeof RoutingFile>;
-
-export function parseRouting(yamlText: string): RoutingFile {
-  const raw: unknown = parseYaml(yamlText) ?? {};
-  const parsed = RoutingFile.safeParse(raw);
-  if (!parsed.success) {
-    throw new Error(`routing.yaml is invalid: ${z.prettifyError(parsed.error)}`);
-  }
-  return parsed.data;
-}

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { parse as parseYaml } from 'yaml';
-import { ROUTES, parseRouting } from './routing.schema.js';
-import { apiKeyEnvFor, renderLiteLlmConfig } from './render-config.js';
+import { parseRouting } from './parse.js';
+import { apiKeyEnvFor, renderLiteLlmConfig } from './render.js';
 
 const ROUTING = `
 routes:
@@ -19,38 +19,6 @@ routes:
     model: groq/openai/gpt-oss-120b
     daily_budget_usd: 1
 `;
-
-describe('routing.schema', () => {
-  it('names exactly the four spec routes', () => {
-    expect([...ROUTES]).toEqual(['chat', 'extract', 'reason', 'judge']);
-  });
-
-  it('parses a routing file', () => {
-    const r = parseRouting(ROUTING);
-    expect(r.routes.chat.model).toBe('gemini/gemini-3-flash-preview');
-    expect(r.routes.chat.fallbacks).toEqual(['groq/openai/gpt-oss-120b']);
-    expect(r.routes.judge.daily_budget_usd).toBe(1);
-  });
-
-  it('rejects a file missing a route', () => {
-    expect(() => parseRouting('routes:\n  chat:\n    model: gemini/gemini-3-flash-preview\n')).toThrow(/extract/);
-  });
-
-  it('rejects an unknown route name', () => {
-    expect(() => parseRouting(`${ROUTING}\n  summarise:\n    model: groq/openai/gpt-oss-120b\n`)).toThrow();
-  });
-
-  it('rejects an unknown key on a route', () => {
-    expect(() =>
-      parseRouting(
-        ROUTING.replace(
-          '  chat:\n    model: gemini/gemini-3-flash-preview\n',
-          '  chat:\n    model: gemini/gemini-3-flash-preview\n    apikey: sk-inline-not-allowed\n',
-        ),
-      ),
-    ).toThrow(/apikey/);
-  });
-});
 
 describe('apiKeyEnvFor', () => {
   it('maps known provider prefixes', () => {

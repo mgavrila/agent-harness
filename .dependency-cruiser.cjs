@@ -39,7 +39,7 @@ const path = require('node:path');
 /** @type {{ name: string, src: string, severity: 'warn' | 'error' }[]} */
 const PACKAGES = [
   { name: 'db', src: 'harness/db/src', severity: 'error' },
-  { name: 'gateway', src: 'harness/gateway/src', severity: 'warn' },
+  { name: 'gateway', src: 'harness/gateway/src', severity: 'error' },
   { name: 'core-tools', src: 'harness/core-tools/src', severity: 'warn' },
   { name: 'approvals', src: 'harness/approvals/src', severity: 'warn' },
   { name: 'evals', src: 'evals/src', severity: 'warn' },
