@@ -211,7 +211,18 @@ module.exports = {
     // cross-package rules never fire. With it, they resolve to the source entry.
     enhancedResolveOptions: { extensions: ['.ts', '.js', '.json'], exportsFields: ['exports'] },
     reporterOptions: {
-      dot: { collapsePattern: '^(harness|packs|evals|scripts)/[^/]+/(src/)?(shared|domain|tools|app)(/[^/]+)?' },
+      dot: {
+        // One node per package layer, not per file: the graph answers "may this package import
+        // that one", which is the same question the rules above answer. `index.ts` is left
+        // uncollapsed everywhere, because it is the node every cross-package arrow should land
+        // on. `@harness/shared` and `@harness/pack-api` are flat — they are one layer each — so
+        // they get a pattern of their own, as do the pack's two generator directories.
+        collapsePattern: [
+          '^(harness|packs|evals|scripts)/[^/]+/(src/)?(shared|domain|tools|app)',
+          '^harness/(shared|pack-api)/src/(?!index[.]ts)',
+          '^packs/[^/]+/(synthetic|forms)/',
+        ],
+      },
     },
   },
 };
