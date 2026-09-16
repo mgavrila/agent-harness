@@ -6,19 +6,19 @@ import { reconcile, type ReconcileResult } from '../tooling/reconcile.js';
 import { stageEffect } from '../effects/outbox.js';
 import { containsRestrictedPattern } from '../../shared/redaction/patterns.js';
 
-export interface SetContextArgs {
+interface SetContextArgs {
   run_id?: string | null;
   skill?: string | null;
   skill_version?: string | null;
 }
 
-export interface SetContextResult {
+interface SetContextResult {
   run_id: string | null;
   skill: string | null;
   skill_version: string | null;
 }
 
-export interface NotifyArgs {
+interface NotifyArgs {
   text: string;
   idempotency_key: string;
   channel?: string;

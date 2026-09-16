@@ -19,7 +19,7 @@ function flag(name: string): string | undefined {
   return flagFrom(process.argv, name);
 }
 
-export type LimitFlagResult = { ok: true; limit: number | undefined } | { ok: false; error: string };
+type LimitFlagResult = { ok: true; limit: number | undefined } | { ok: false; error: string };
 
 /**
  * `--limit=N` must be a positive integer. `Number(flag)` alone lets `NaN`
@@ -42,7 +42,7 @@ export function parseLimitFlag(argv: readonly string[]): LimitFlagResult {
   return { ok: true, limit: Number(raw) };
 }
 
-export type UpdateBaselineFlagResult = { ok: true; update: boolean } | { ok: false; error: string };
+type UpdateBaselineFlagResult = { ok: true; update: boolean } | { ok: false; error: string };
 
 /**
  * `--update-baseline` and `--update-baseline=true` both mean "write the

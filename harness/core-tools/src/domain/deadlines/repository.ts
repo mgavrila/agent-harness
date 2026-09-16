@@ -7,7 +7,7 @@ import { computeDeadlines, daysUntil, addDays, bucketFor, digestKeyFor, type Urg
 /** Identifies a deadline row within a provider, matching `deadlines_credential_kind_uq`. */
 const deadlineKey = (d: { credentialId: string; kind: string }) => `${d.credentialId}:${d.kind}`;
 
-export interface UpcomingArgs {
+interface UpcomingArgs {
   window_days: number;
   /** `YYYY-MM-DD`; `deps.now()` when absent. */
   today?: string;

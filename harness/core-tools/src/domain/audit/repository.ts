@@ -3,7 +3,7 @@ import { auditLog } from '@harness/db';
 import type { ToolDeps } from '../tooling/types.js';
 
 /** The filters `audit_query` accepts, already parsed by its input schema. */
-export interface AuditQueryArgs {
+interface AuditQueryArgs {
   tool?: string;
   decision?: string;
   /** ISO 8601 datetime; rows older than it are left out. */

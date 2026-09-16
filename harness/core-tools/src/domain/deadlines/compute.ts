@@ -75,7 +75,7 @@ export function bucketFor(daysLeft: number): UrgencyBucket {
   return 'due_90d';
 }
 
-export interface DigestKeyItem {
+interface DigestKeyItem {
   credentialId: string;
   kind: string;
   bucket: UrgencyBucket;
