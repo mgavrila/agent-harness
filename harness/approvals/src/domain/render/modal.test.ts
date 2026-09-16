@@ -1,29 +1,7 @@
 import { describe, it, expect } from 'vitest';
+import { approvalRow as row } from '../../testing.js';
 import { editModalView, parseEditModalMetadata } from './modal.js';
-import { EDIT_MODAL_CALLBACK_ID, type ApprovalRow } from './types.js';
-
-function row(over: Partial<ApprovalRow> = {}): ApprovalRow {
-  return {
-    id: '11111111-1111-4111-8111-111111111111',
-    client: 'demo-practice',
-    action: 'forms_release',
-    payload: { tool: 'forms_release', args: { file_id: 'roster/aetna-abc123def456.csv' } },
-    payloadEncrypted: null,
-    summary: 'forms_release (external) requested by hermes',
-    requestedBy: 'hermes',
-    status: 'pending',
-    decidedBy: null,
-    decidedAt: null,
-    decisionNote: null,
-    executedAt: null,
-    expiresAt: new Date('2026-09-16T12:00:00Z'),
-    idempotencyKey: 'demo-practice:forms_release:abc',
-    slackChannel: null,
-    slackTs: null,
-    createdAt: new Date('2026-09-15T12:00:00Z'),
-    ...over,
-  } as ApprovalRow;
-}
+import { EDIT_MODAL_CALLBACK_ID } from './types.js';
 
 describe('editModalView', () => {
   it('carries the approval id and channel in private_metadata', () => {
