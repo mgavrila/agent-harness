@@ -4,24 +4,26 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/server.ts",
+    ".": "./src/index.ts",
     "./testing": "./src/testing.ts",
-    "./effects": "./src/effects.ts",
-    "./fake-gateway": "./src/fake-gateway.ts",
-    "./in-process": "./src/in-process.ts",
-    "./models": "./src/models.ts",
-    "./reconcile": "./src/reconcile.ts",
-    "./storage": "./src/storage.ts"
+    "./effects": "./src/domain/effects/outbox.ts",
+    "./fake-gateway": "./src/domain/models/fake.ts",
+    "./in-process": "./src/domain/tooling/in-process.ts",
+    "./redaction": "./src/shared/redaction/index.ts",
+    "./storage": "./src/domain/storage/layout.ts"
   },
   "scripts": {
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "start": "tsx src/main.ts"
+    "surface": "tsx src/app/record-surface.ts",
+    "start": "tsx src/app/main.ts"
   },
   "dependencies": {
     "@harness/db": "workspace:*",
     "@harness/gateway": "workspace:*",
+    "@harness/pack-api": "workspace:*",
     "@harness/pack-healthcare": "workspace:*",
+    "@harness/shared": "workspace:*",
     "@modelcontextprotocol/server": "^2.0.0",
     "dotenv": "^17.4.2",
     "drizzle-orm": "^0.45.2",

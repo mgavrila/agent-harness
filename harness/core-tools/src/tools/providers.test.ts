@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { fields, credentials, decrypt } from '@harness/db';
 import { connectTools, makeTestDeps, resultOf, useTestDb } from '../testing.js';
-import { providerTools, isRestrictedName } from './providers.js';
+import { providerTools } from './providers.js';
 
 const db = useTestDb();
 const deps = makeTestDeps(db);
@@ -54,7 +54,14 @@ describe('providers tools', () => {
   it('upsert is idempotent by (client, npi) and updates existing fields', async () => {
     const client = await connectProviders();
     const a = await client.callTool({ name: 'providers_upsert', arguments: upsertArgs });
-    const b = await client.callTool({ name: 'providers_upsert', arguments: { ...upsertArgs, fields: [{ name: 'first_name', value: 'Augusta', confidence: 0.99 }], credentials: [] } });
+    const b = await client.callTool({
+      name: 'providers_upsert',
+      arguments: {
+        ...upsertArgs,
+        fields: [{ name: 'first_name', value: 'Augusta', confidence: 0.99 }],
+        credentials: [],
+      },
+    });
     const idA = resultOf<UpsertResult>(a).provider_id;
     const idB = resultOf<UpsertResult>(b).provider_id;
     expect(idA).toBe(idB);
@@ -124,8 +131,13 @@ describe('providers tools', () => {
     const pendingFields = resultOf<{ fields: { name: string }[] }>(pending).fields;
     expect(pendingFields.map((f) => f.name)).toEqual(['malpractice_carrier']);
 
-    await client.callTool({ name: 'providers_confirm_field', arguments: { provider_id: id, field: 'malpractice_carrier', value: 'MedPro Group', confirmed_by: 'U123' } });
-    const row = (await db.select().from(fields).where(eq(fields.providerId, id))).find((r) => r.name === 'malpractice_carrier')!;
+    await client.callTool({
+      name: 'providers_confirm_field',
+      arguments: { provider_id: id, field: 'malpractice_carrier', value: 'MedPro Group', confirmed_by: 'U123' },
+    });
+    const row = (await db.select().from(fields).where(eq(fields.providerId, id))).find(
+      (r) => r.name === 'malpractice_carrier',
+    )!;
     expect(row).toMatchObject({ status: 'verified', value: 'MedPro Group', confirmedBy: 'U123' });
     expect(row.confirmedAt).not.toBeNull();
 
@@ -135,7 +147,10 @@ describe('providers tools', () => {
 
   it('get returns isError for unknown provider', async () => {
     const client = await connectProviders();
-    const res = await client.callTool({ name: 'providers_get', arguments: { provider_id: '00000000-0000-0000-0000-000000000000' } });
+    const res = await client.callTool({
+      name: 'providers_get',
+      arguments: { provider_id: '00000000-0000-0000-0000-000000000000' },
+    });
     expect(res.isError).toBe(true);
   });
 
@@ -171,13 +186,19 @@ describe('providers tools', () => {
 
     const reextract = await client.callTool({
       name: 'providers_upsert',
-      arguments: { ...upsertArgs, fields: [{ name: 'malpractice_carrier', value: 'Other Carrier', confidence: 0.99 }], credentials: [] },
+      arguments: {
+        ...upsertArgs,
+        fields: [{ name: 'malpractice_carrier', value: 'Other Carrier', confidence: 0.99 }],
+        credentials: [],
+      },
     });
     const out = resultOf<UpsertResult>(reextract);
     expect(out.fields_pending).toBe(0);
     expect(out.fields_extracted).toBe(0);
 
-    const row = (await db.select().from(fields).where(eq(fields.providerId, id))).find((r) => r.name === 'malpractice_carrier')!;
+    const row = (await db.select().from(fields).where(eq(fields.providerId, id))).find(
+      (r) => r.name === 'malpractice_carrier',
+    )!;
     expect(row.value).toBe('MedPro Group');
     expect(row.status).toBe('verified');
     expect(row.confirmedBy).toBe('U123');
@@ -263,23 +284,4 @@ describe('approval payload redaction', () => {
       value: 'Ada',
     });
   });
-});
-
-describe('isRestrictedName', () => {
-  it.each(['ssn', 'SSN', 'social_security_number', 'dea_number', 'tax_id', 'ein'])('treats %s as restricted', (name) => {
-    expect(isRestrictedName(name)).toBe(true);
-  });
-
-  it.each(['npi', 'first_name', 'deadline'])('treats %s as unrestricted', (name) => {
-    expect(isRestrictedName(name)).toBe(false);
-  });
-
-  // fieldNameFor in documents/redact.ts generates exactly these names for a
-  // second distinct value of a kind, so they are names this harness hands out.
-  it.each(['ssn_2', 'ein_2', 'dea_number_2', 'SSN-3', 'dea_no_10'])(
-    'treats the ordinal-suffixed name %s as restricted',
-    (name) => {
-      expect(isRestrictedName(name)).toBe(true);
-    },
-  );
 });

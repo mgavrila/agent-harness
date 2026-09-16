@@ -1,36 +1,58 @@
-# Healthcare credentialing pack
+# @harness/pack-healthcare
 
-Reusable content for a credentialing deployment: what to extract, what the
-default policy is, and how to make test data.
+Content plus one declaration: everything the harness needs to do credentialing for a medical
+practice, and a `Pack` that tells core where it all is. This package depends on
+`@harness/pack-api` and `@harness/shared` and on nothing else in the workspace. core-tools
+loads it by name from `HARNESS_PACKS` and never imports it, so an import of
+`@harness/core-tools` from here would be a cycle and `pnpm arch` fails the build on one.
 
-| Path | What it is |
-|---|---|
-| `schema/provider.json` | The extraction manifest. See the `$comment` at the top for why it is a manifest and not a JSON Schema. |
-| `policy.yaml` | The default action-class table. |
-| `synthetic/generate.ts` | Twenty synthetic providers with four documents each, as text-layer PDFs and as scans, plus ground truth. |
-| `evals/` | Case files the `@harness/evals` runner reads. |
-| `skills/` | The four credentialing skills, each a `SKILL.md` with Hermes frontmatter plus the harness keys. |
+## Layout
 
-## Which numbers reach a model
-
-SSN, EIN and DEA numbers are replaced with placeholders by the redaction pass
-before any document text is put in a prompt, and stored encrypted on the
-provider record straight from that pass. Licence, registration and policy
-numbers are **not** redacted — blanking every nine-digit string would blank the
-fields this pipeline exists to read — so they stay in the document text the
-model sees. They are never requested as fields and never extracted, so nothing
-writes them to a record. `number_restricted` in the manifest is reserved for
-the day something does; today it is read by nothing.
-
-Generate the synthetic corpus:
-
-```bash
-pnpm synth
+```
+src/index.ts              the Pack core loads: document kinds, manifest, forms, skills, policy
+schema/provider.json      the extraction manifest: fields, credentials, document kinds
+forms/templates.json      which PDF field each record value fills
+forms/*.pdf               two demo AcroForm templates (generated, committed)
+forms/generate-templates.ts   rebuilds them deterministically
+skills/                   four SKILL.md files the agent loads
+evals/injection.jsonl     the prompt-injection assertions
+policy.yaml               the pack's default action-class table
+synthetic/types.ts        the ground-truth shapes
+synthetic/rng.ts          mulberry32 and the check-digit-valid identifier generators
+synthetic/fixtures.ts     the name, state, school, carrier and board tables; makeProvider
+synthetic/pdf.ts          writeTextPdf and the rasterised scan twin
+synthetic/plan.ts         the four document plans and the injection twin
+synthetic/generate.ts     assertSafeToClear and generate
+synthetic/cli.ts          the `pnpm synth` entrypoint
 ```
 
-Output goes to `synthetic/out/` and is gitignored: it is reproducible from the
-seed, and twenty providers of PDFs do not belong in git.
+## Public API
 
-**Everything in `synthetic/` is fabricated.** The NPIs are shaped like real ones
-and will not resolve against NPPES, which is deliberate: the demo shows the
-mismatch flag.
+`@harness/pack-healthcare` is `src/index.ts`, which exports `pack`. That is what core loads,
+and the only thing a deployment names. Two subpaths reach past it, and neither is on the
+loading path: `@harness/pack-healthcare/schema` is `schema/provider.json` for a consumer that
+wants the raw manifest rather than `pack.extraction`, and `@harness/pack-healthcare/generate`
+is `synthetic/generate.ts` — `generate`, `assertSafeToClear` and the ground-truth types.
+Nothing else is reachable.
+
+`pack.formsDir` and `pack.skillsDir` are absolute paths resolved from `import.meta.url`, so a
+consumer never builds a path into this package by hand.
+
+## Regenerating
+
+```bash
+pnpm synth              # the full corpus, text layer and scan twins
+pnpm synth:fast         # text layer only, about six times faster
+pnpm forms:generate     # rebuild the two AcroForm templates
+```
+
+The corpus is **deterministic in its content**: one seed produces the same providers, the same
+page text and the same `ground-truth.json` and `cases.jsonl`, which is what lets the eval
+baseline mean anything. The PDF _bytes_ are not stable run to run, because pdf-lib stamps a
+creation and a modification date into every file it saves, so compare content rather than
+checksums. If a change to `synthetic/` makes the same seed produce different providers or
+different page text, that is a finding, not a detail. `generate` refuses to clear an output
+directory that is neither empty nor a corpus it wrote — `ground-truth.json` is the marker.
+
+**Everything here is fabricated.** The NPIs are check-digit valid and unregistered; the SSNs
+are in issued ranges so the redaction pass sees them. None of it belongs to anyone.

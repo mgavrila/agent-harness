@@ -1,4 +1,4 @@
 {
   "extends": "../../tsconfig.base.json",
-  "include": ["forms", "synthetic", "vitest.config.ts"]
+  "include": ["src", "forms", "synthetic", "vitest.config.ts"]
 }

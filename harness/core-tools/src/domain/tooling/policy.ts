@@ -1,0 +1,42 @@
+import { readFile } from 'node:fs/promises';
+import { parse as parseYaml } from 'yaml';
+import * as z from 'zod/v4';
+import { optionalEnv } from '@harness/shared';
+import { ACTION_CLASSES, BEHAVIORS, type ActionClass, type Behavior, type Policy } from '@harness/pack-api';
+
+export { ACTION_CLASSES, BEHAVIORS, type ActionClass, type Behavior, type Policy };
+
+export const DEFAULT_POLICY: Policy = {
+  read: 'auto',
+  'write.internal': 'auto',
+  external: 'approval',
+  financial: 'blocked',
+  destructive: 'approval',
+};
+
+const PolicyFile = z.object({
+  classes: z.partialRecord(z.enum(ACTION_CLASSES), z.enum(BEHAVIORS)).optional(),
+});
+
+export function parsePolicy(yamlText: string): Policy {
+  const raw: unknown = parseYaml(yamlText) ?? {};
+  const parsed = PolicyFile.safeParse(raw);
+  if (!parsed.success) {
+    const classes = (raw as { classes?: Record<string, unknown> }).classes ?? {};
+    const badKey = Object.keys(classes).find((k) => !(ACTION_CLASSES as readonly string[]).includes(k));
+    if (badKey) throw new Error(`policy: unknown action class "${badKey}"`);
+    const badVal = Object.values(classes).find((v) => !(BEHAVIORS as readonly string[]).includes(String(v)));
+    throw new Error(`policy: invalid behavior "${String(badVal)}"`);
+  }
+  return { ...DEFAULT_POLICY, ...(parsed.data.classes ?? {}) };
+}
+
+export async function loadPolicy(filePath: string | undefined = optionalEnv('HARNESS_POLICY_FILE')): Promise<Policy> {
+  if (!filePath) return { ...DEFAULT_POLICY };
+  const text = await readFile(filePath, 'utf8');
+  return parsePolicy(text);
+}
+
+export function decide(actionClass: ActionClass, policy: Policy): Behavior {
+  return policy[actionClass];
+}

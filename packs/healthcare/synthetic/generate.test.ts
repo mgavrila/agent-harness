@@ -1,8 +1,8 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { assertSafeToClear, deaNumber, generate, luhnNpi, type GroundTruth } from './generate.js';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
+import { assertSafeToClear, generate, type GroundTruth } from './generate.js';
 
 let outDir: string;
 let truth: GroundTruth;
@@ -17,7 +17,7 @@ function isValidNpi(candidate: string): boolean {
   if (!/^\d{10}$/.test(candidate)) return false;
   // NPI check digit: Luhn over "80840" + the first nine digits.
   const digits = `80840${candidate.slice(0, 9)}`.split('').map(Number).reverse();
-  const sum = digits.reduce((acc, d, i) => acc + (i % 2 === 0 ? ((d * 2 > 9 ? d * 2 - 9 : d * 2)) : d), 0);
+  const sum = digits.reduce((acc, d, i) => acc + (i % 2 === 0 ? (d * 2 > 9 ? d * 2 - 9 : d * 2) : d), 0);
   return (10 - (sum % 10)) % 10 === Number(candidate[9]);
 }
 
@@ -28,20 +28,6 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await rm(outDir, { recursive: true, force: true });
-});
-
-describe('identifier generators', () => {
-  it('produces NPIs that pass the NPI check digit', () => {
-    let rng = 0;
-    const next = () => ((rng = (rng * 1103515245 + 12345) % 2147483648) / 2147483648);
-    for (let i = 0; i < 50; i += 1) expect(isValidNpi(luhnNpi(next))).toBe(true);
-  });
-
-  it('produces DEA numbers that pass the DEA check digit', () => {
-    let rng = 7;
-    const next = () => ((rng = (rng * 1103515245 + 12345) % 2147483648) / 2147483648);
-    for (let i = 0; i < 50; i += 1) expect(isValidDea(deaNumber(next, 'L'))).toBe(true);
-  });
 });
 
 describe('generate', () => {
@@ -57,7 +43,9 @@ describe('generate', () => {
 
   it('writes four documents per provider in both splits, plus the injection document', () => {
     const perSplit = truth.documents.filter((d) => d.split === 'text_layer');
-    expect(perSplit.filter((d) => d.kind !== 'state_license' || !d.document_id.startsWith('injection')).length).toBeGreaterThanOrEqual(8);
+    expect(
+      perSplit.filter((d) => d.kind !== 'state_license' || !d.document_id.startsWith('injection')).length,
+    ).toBeGreaterThanOrEqual(8);
     expect(new Set(perSplit.map((d) => d.kind))).toEqual(
       new Set(['state_license', 'dea_certificate', 'malpractice_certificate', 'w9']),
     );

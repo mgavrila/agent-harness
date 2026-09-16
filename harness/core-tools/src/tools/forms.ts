@@ -1,47 +1,16 @@
-import { readFile, stat } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import * as z from 'zod/v4';
-import { eq, sql } from 'drizzle-orm';
-import { credentials, fields } from '@harness/db';
-import { defineTool, ToolError, type AnyToolDef, type ToolDeps } from '../registry.js';
-import { writeOutFile, resolveOutFile } from '../storage.js';
-import { stageEffect } from '../effects.js';
-import { getTemplate, loadManifest, mappingLabel } from '../forms/templates.js';
-import { fillTemplatePdf, latestCredential, resolveMappings, type ProviderData } from '../forms/fill.js';
-import { buildRosterCsv, ROSTER_COLUMNS, type RosterRow } from '../forms/roster.js';
-import { requireProvider } from './providers.js';
-
-/**
- * Read everything a template may need about one provider, scoped to the client.
- *
- * Both queries are projections rather than `select()`: the encrypted columns
- * are never pulled into this process, and `number_encrypted IS NOT NULL` is
- * evaluated by Postgres. That is what lets the roster say whether a credential
- * number is on file without the bytes ever being in memory.
- */
-export async function loadProviderData(deps: ToolDeps, providerId: string): Promise<ProviderData> {
-  const provider = await requireProvider(deps, providerId);
-  const fieldRows = await deps.db
-    .select({ name: fields.name, value: fields.value, restricted: fields.restricted, status: fields.status })
-    .from(fields)
-    .where(eq(fields.providerId, providerId));
-  const credentialRows = await deps.db
-    .select({
-      kind: credentials.kind,
-      issuer: credentials.issuer,
-      state: credentials.state,
-      issuedAt: credentials.issuedAt,
-      expiresAt: credentials.expiresAt,
-      hasNumber: sql<boolean>`${credentials.numberEncrypted} is not null`,
-    })
-    .from(credentials)
-    .where(eq(credentials.providerId, providerId));
-  return {
-    provider: { name: provider.name, npi: provider.npi, status: provider.status },
-    fields: fieldRows,
-    credentials: credentialRows,
-  };
-}
+import { ToolError } from '@harness/shared';
+import { defineTool } from '../domain/tooling/registry.js';
+import type { AnyToolDef } from '../domain/tooling/types.js';
+import { writeOutFile } from '../domain/storage/file-store.js';
+import { getTemplate, loadManifest, mappingLabel } from '../domain/forms/templates.js';
+import { fillTemplatePdf, resolveMappings } from '../domain/forms/fill.js';
+import { buildRoster, loadProviderData } from '../domain/forms/provider-data.js';
+import { stageRelease } from '../domain/forms/release.js';
+import { buildRosterCsv } from '../domain/forms/roster.js';
+import { ROSTER_COLUMNS } from '../domain/forms/types.js';
 
 const formsListTemplates = defineTool({
   name: 'forms_list_templates',
@@ -50,7 +19,12 @@ const formsListTemplates = defineTool({
   input: z.object({}),
   output: z.object({
     templates: z.array(
-      z.object({ id: z.string(), title: z.string(), required_inputs: z.array(z.string()), optional_inputs: z.array(z.string()) }),
+      z.object({
+        id: z.string(),
+        title: z.string(),
+        required_inputs: z.array(z.string()),
+        optional_inputs: z.array(z.string()),
+      }),
     ),
   }),
   handler: async (_args, deps) => {
@@ -120,15 +94,6 @@ const formsFill = defineTool({
   recordIds: ({ provider_id }) => [provider_id],
 });
 
-/** Slack rejects very large uploads and a 25 MB roster is a bug, not a roster. */
-const MAX_RELEASE_BYTES = 25 * 1024 * 1024;
-
-const fieldValue = (data: ProviderData, name: string): string | null => {
-  const row = data.fields.find((f) => f.name === name);
-  if (!row || row.restricted) return null;
-  return row.status === 'extracted' || row.status === 'verified' ? row.value : null;
-};
-
 const formsRoster = defineTool({
   name: 'forms_roster',
   description:
@@ -149,35 +114,7 @@ const formsRoster = defineTool({
   handler: async ({ payer_id, provider_ids }, deps) => {
     // Preserve the caller's order and drop repeats, so a roster built from a
     // search result does not list a provider twice.
-    const unique = [...new Set(provider_ids)];
-    const rows: RosterRow[] = [];
-    for (const providerId of unique) {
-      // requireProvider inside loadProviderData scopes this to deps.client, so
-      // one unknown id aborts the whole roster rather than silently skipping.
-      const data = await loadProviderData(deps, providerId);
-      const license = latestCredential(data, 'license');
-      const malpractice = latestCredential(data, 'malpractice');
-      const boardCert = latestCredential(data, 'board_cert');
-      rows.push({
-        payer_id,
-        provider_name: data.provider.name,
-        npi: data.provider.npi,
-        primary_specialty: fieldValue(data, 'primary_specialty'),
-        practice_address: fieldValue(data, 'practice_address'),
-        license_state: license?.state ?? null,
-        license_issuer: license?.issuer ?? null,
-        license_expires_at: license?.expiresAt ?? null,
-        // "On file" means a number is stored, not that a credential row
-        // exists: `number_encrypted` is nullable, so a licence recorded from a
-        // document with no legible number must report no.
-        license_number_on_file: license?.hasNumber ?? false,
-        dea_on_file: latestCredential(data, 'dea')?.hasNumber ?? false,
-        malpractice_carrier: malpractice?.issuer ?? null,
-        malpractice_expires_at: malpractice?.expiresAt ?? null,
-        board_cert_expires_at: boardCert?.expiresAt ?? null,
-        provider_status: data.provider.status,
-      });
-    }
+    const rows = await buildRoster(deps, payer_id, [...new Set(provider_ids)]);
     const bytes = new TextEncoder().encode(buildRosterCsv(rows));
     const written = await writeOutFile({ dir: 'roster', name: payer_id, ext: 'csv', bytes }, deps.storageDir);
     return {
@@ -199,7 +136,10 @@ const formsRelease = defineTool({
   actionClass: 'external',
   input: z.object({
     file_id: z.string().min(1).max(300),
-    channel: z.string().regex(/^[CGD][A-Z0-9]{2,}$/, 'channel must be a Slack channel id').optional(),
+    channel: z
+      .string()
+      .regex(/^[CGD][A-Z0-9]{2,}$/, 'channel must be a Slack channel id')
+      .optional(),
   }),
   output: z.object({
     effect_id: z.string(),
@@ -208,31 +148,7 @@ const formsRelease = defineTool({
     filename: z.string(),
     bytes: z.number(),
   }),
-  handler: async ({ file_id, channel }, deps) => {
-    const absolute = await resolveOutFile(file_id, deps.storageDir);
-    let size: number;
-    try {
-      const info = await stat(absolute);
-      if (!info.isFile()) throw new Error('not a file');
-      size = info.size;
-    } catch {
-      throw new ToolError(`no generated file with id "${file_id}"; run forms_fill or forms_roster first`);
-    }
-    if (size > MAX_RELEASE_BYTES) {
-      throw new ToolError(`file "${file_id}" is ${size} bytes, over the ${MAX_RELEASE_BYTES} byte release limit`);
-    }
-    const filename = path.basename(absolute);
-    // Keyed on the file id, which is content-addressed: releasing the same
-    // bytes twice is one delivery, and re-filling after a correction produces
-    // a new id and therefore a new delivery.
-    const staged = await stageEffect(deps, {
-      sink: 'slack_file',
-      idempotencyKey: `forms_release:${file_id}${channel ? `:${channel}` : ''}`,
-      payload: { file_id, path: absolute, filename, channel: channel ?? null },
-      summary: `Release ${filename} to Slack`,
-    });
-    return { effect_id: staged.effect_id, staged: staged.staged, file_id, filename, bytes: size };
-  },
+  handler: async (args, deps) => stageRelease(deps, args),
 });
 
 export const formTools: AnyToolDef[] = [formsListTemplates, formsFill, formsRoster, formsRelease];

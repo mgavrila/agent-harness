@@ -11,25 +11,25 @@
 # The LiteLLM gateway (Plan 2) exposes named routes as OpenAI-compatible model
 # names, so switching provider is a gateway change and never a Hermes change.
 model:
-  default: "chat"
-  provider: "custom"
-  base_url: "http://gateway:4000/v1"
-  api_key: "${LITELLM_MASTER_KEY}"
+  default: 'chat'
+  provider: 'custom'
+  base_url: 'http://gateway:4000/v1'
+  api_key: '${LITELLM_MASTER_KEY}'
   context_length: 131072
 
 # `reason` is the slower, stronger route. One-shot per session.
 fallback_providers:
   - provider: custom
-    model: "reason"
-    base_url: "http://gateway:4000/v1"
+    model: 'reason'
+    base_url: 'http://gateway:4000/v1'
 
 # --- Sandbox ----------------------------------------------------------------
 terminal:
-  backend: "docker"
-  cwd: "/workspace"
+  backend: 'docker'
+  cwd: '/workspace'
   timeout: 180
   lifetime_seconds: 300
-  docker_image: "nikolaik/python-nodejs:python3.11-nodejs20"
+  docker_image: 'nikolaik/python-nodejs:python3.11-nodejs20'
   # Never mount the launch directory: the agent has no reason to reach the repo.
   docker_mount_cwd_to_workspace: false
 
@@ -86,24 +86,33 @@ tool_loop_guardrails:
 # variable core-tools reads has to be named here or the child never sees it.
 mcp_servers:
   core-tools:
-    command: "pnpm"
-    args: ["--dir", "/srv/agent-harness", "--filter", "@harness/core-tools", "start"]
+    command: 'pnpm'
+    args: ['--dir', '/srv/agent-harness', '--filter', '@harness/core-tools', 'start']
     env:
-      DATABASE_URL: "${DATABASE_URL}"
-      HARNESS_ENCRYPTION_KEY: "${HARNESS_ENCRYPTION_KEY}"
-      HARNESS_CLIENT: "demo-practice"
-      HARNESS_POLICY_FILE: "/srv/agent-harness/clients/demo-practice/policy.yaml"
-      HARNESS_STORAGE_DIR: "/srv/harness-storage"
-      HARNESS_FORMS_DIR: "/srv/agent-harness/packs/healthcare/forms"
-      CORE_TOOLS_CALLER: "hermes"
-      APPROVAL_TTL_HOURS: "24"
+      DATABASE_URL: '${DATABASE_URL}'
+      HARNESS_ENCRYPTION_KEY: '${HARNESS_ENCRYPTION_KEY}'
+      HARNESS_CLIENT: 'demo-practice'
+      HARNESS_POLICY_FILE: '/srv/agent-harness/clients/demo-practice/policy.yaml'
+      HARNESS_STORAGE_DIR: '/srv/harness-storage'
+      # Optional. Unset, core-tools takes the forms directory from the first
+      # pack in HARNESS_PACKS, so swapping the pack swaps the templates with
+      # it. Set, it overrides the pack — clear or repoint this line when the
+      # new pack owns the forms.
+      HARNESS_FORMS_DIR: '/srv/agent-harness/packs/healthcare/forms'
+      # Interpolated, never hardcoded: the hermes container's own
+      # HARNESS_PACKS has to reach this child, or this core-tools process
+      # would serve a different pack set from the one the approvals app's
+      # core-tools child serves.
+      HARNESS_PACKS: '${HARNESS_PACKS}'
+      CORE_TOOLS_CALLER: 'hermes'
+      APPROVAL_TTL_HOURS: '24'
       # CONFIDENCE_THRESHOLD is left unset: core-tools applies DEFAULT_CONFIDENCE_THRESHOLD (0.85).
       # Every model call goes through the proxy, and core-tools refuses to
       # start without the key. The provider keys never leave the proxy, so
       # this is the only model credential the child holds. The URL is the
       # compose service, not the host loopback in .env.
-      HARNESS_GATEWAY_URL: "${HARNESS_GATEWAY_URL}"
-      LITELLM_MASTER_KEY: "${LITELLM_MASTER_KEY}"
+      HARNESS_GATEWAY_URL: '${HARNESS_GATEWAY_URL}'
+      LITELLM_MASTER_KEY: '${LITELLM_MASTER_KEY}'
     timeout: 120
     connect_timeout: 60
 
@@ -115,7 +124,7 @@ platform_toolsets:
 
 platforms:
   slack:
-    reply_to_mode: "first"
+    reply_to_mode: 'first'
     extra:
       unfurl_links: false
       unfurl_media: false

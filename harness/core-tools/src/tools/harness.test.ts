@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { auditLog, runs, toolEffects } from '@harness/db';
-import { type ToolDeps } from '../registry.js';
+import { type ToolDeps } from '../domain/tooling/types.js';
 import { connectTestClient, makeTestDeps, resultOf, useTestDb } from '../testing.js';
-import { createCoreToolsServer } from '../server.js';
+import { createCoreToolsServer } from './catalog.js';
 
 const db = useTestDb();
 let deps: ToolDeps;
@@ -19,7 +19,10 @@ describe('session context and lineage', () => {
   it('stamps run, skill, and version on later audit rows and creates the run row', async () => {
     const client = await connectServer();
     const runId = '11111111-1111-4111-8111-111111111111';
-    await client.callTool({ name: 'harness_set_context', arguments: { run_id: runId, skill: 'credentialing-intake', skill_version: '1.0.0' } });
+    await client.callTool({
+      name: 'harness_set_context',
+      arguments: { run_id: runId, skill: 'credentialing-intake', skill_version: '1.0.0' },
+    });
     await client.callTool({ name: 'providers_search', arguments: { query: 'nobody' } });
     const rows = await db.select().from(auditLog);
     const search = rows.find((r) => r.tool === 'providers_search')!;
@@ -56,7 +59,10 @@ describe('session context and lineage', () => {
     const first = await client.callTool({ name: 'providers_search', arguments: { query: 'a' } });
     expect(first.isError).toBeFalsy();
     const [firstAudit] = await db.select().from(auditLog);
-    const second = await client.callTool({ name: 'providers_search', arguments: { query: 'b', derived_from: [firstAudit.id] } });
+    const second = await client.callTool({
+      name: 'providers_search',
+      arguments: { query: 'b', derived_from: [firstAudit.id] },
+    });
     expect(second.isError).toBeFalsy();
     const rows = await db.select().from(auditLog);
     const secondAudit = rows.find((r) => r.id !== firstAudit.id)!;
@@ -106,7 +112,14 @@ describe('session context and lineage', () => {
     const client = await connectServer();
     const [earlier] = await db
       .insert(auditLog)
-      .values({ client: 'test', caller: 'test-caller', tool: 'deadlines_upcoming', actionClass: 'read', argsHash: 'h', decision: 'auto' })
+      .values({
+        client: 'test',
+        caller: 'test-caller',
+        tool: 'deadlines_upcoming',
+        actionClass: 'read',
+        argsHash: 'h',
+        decision: 'auto',
+      })
       .returning();
     await client.callTool({
       name: 'harness_notify',

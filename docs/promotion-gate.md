@@ -1,7 +1,7 @@
 # Promotion gate
 
 A change to a skill, a prompt, a memory entry or the extraction schema is
-promoted only when the evals say it is better. This is the rule; `evals/src/report.ts`
+promoted only when the evals say it is better. This is the rule; `evals/src/domain/report/`
 is the implementation.
 
 ## The rule
@@ -132,7 +132,7 @@ should not read stronger than it is, and today `injection.pass_rate` is those
 three.
 
 Both dormant checks are implemented and proven against synthetic outcomes in
-`evals/src/score.test.ts`, so they are ready rather than aspirational. They
+`evals/src/domain/score.test.ts`, so they are ready rather than aspirational. They
 become live measurements in Plan 4, when an agent loop rather than a fixed
 sequence drives the cases: then the tool list is the agent's choice and the
 policy table is something a document could try to talk the agent into changing.

@@ -10,11 +10,12 @@
   "scripts": {
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "start": "tsx src/main.ts"
+    "start": "tsx src/app/main.ts"
   },
   "dependencies": {
     "@harness/core-tools": "workspace:*",
     "@harness/db": "workspace:*",
+    "@harness/shared": "workspace:*",
     "@modelcontextprotocol/client": "^2.0.0",
     "@slack/bolt": "^5.1.0",
     "@slack/web-api": "^8.1.1",

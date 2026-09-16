@@ -4,13 +4,13 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./render-config.ts",
-    "./routing": "./routing.schema.ts"
+    ".": "./src/index.ts",
+    "./routing": "./src/domain/routing/types.ts"
   },
   "scripts": {
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "render": "tsx render-config.ts"
+    "render": "tsx src/app/render-config.ts"
   },
   "dependencies": {
     "yaml": "^2.9.1",

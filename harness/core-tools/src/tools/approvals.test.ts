@@ -2,9 +2,10 @@ import { describe, it, expect } from 'vitest';
 import * as z from 'zod/v4';
 import { eq } from 'drizzle-orm';
 import { approvals, auditLog, providers } from '@harness/db';
-import { defineTool, ToolError } from '../registry.js';
+import { ToolError } from '@harness/shared';
+import { defineTool } from '../domain/tooling/registry.js';
 import { approvalIdOf, connectTools, makeTestDeps, resultOf, useTestDb, type TestClient } from '../testing.js';
-import { DEFAULT_POLICY } from '../policy.js';
+import { DEFAULT_POLICY } from '../domain/tooling/policy.js';
 import { approvalTools } from './approvals.js';
 
 const db = useTestDb();
@@ -38,7 +39,10 @@ describe('approvals_execute', () => {
   it('executes an approved action once, audits it against the original tool, and records executed_at', async () => {
     const client = await connectApprovals();
     const id = await park(client, { name: 'Dr. Approved' });
-    await db.update(approvals).set({ status: 'approved', decidedBy: 'U1', decidedAt: deps.now() }).where(eq(approvals.id, id));
+    await db
+      .update(approvals)
+      .set({ status: 'approved', decidedBy: 'U1', decidedAt: deps.now() })
+      .where(eq(approvals.id, id));
 
     const res = await client.callTool({ name: 'approvals_execute', arguments: { approval_id: id } });
     const out = resultOf<{ status: string; tool: string; result: { provider_id: string } }>(res);
@@ -49,7 +53,10 @@ describe('approvals_execute', () => {
     expect(row.status).toBe('executed');
     expect(row.executedAt).not.toBeNull();
     const audits = await db.select().from(auditLog).where(eq(auditLog.approvalId, id));
-    expect(audits.map((a) => `${a.tool}:${a.decision}`).sort()).toEqual(['create_provider_external:approval', 'create_provider_external:auto']);
+    expect(audits.map((a) => `${a.tool}:${a.decision}`).sort()).toEqual([
+      'create_provider_external:approval',
+      'create_provider_external:auto',
+    ]);
 
     const again = await client.callTool({ name: 'approvals_execute', arguments: { approval_id: id } });
     expect(again.isError).toBe(true);
@@ -62,7 +69,10 @@ describe('approvals_execute', () => {
     const declined = await park(client, { name: 'B' });
     const expired = await park(client, { name: 'C' });
     await db.update(approvals).set({ status: 'declined' }).where(eq(approvals.id, declined));
-    await db.update(approvals).set({ status: 'approved', expiresAt: new Date('2026-09-15T11:00:00Z') }).where(eq(approvals.id, expired));
+    await db
+      .update(approvals)
+      .set({ status: 'approved', expiresAt: new Date('2026-09-15T11:00:00Z') })
+      .where(eq(approvals.id, expired));
     for (const id of [pending, declined, expired]) {
       const res = await client.callTool({ name: 'approvals_execute', arguments: { approval_id: id } });
       expect(res.isError).toBe(true);
@@ -83,7 +93,7 @@ describe('approvals_execute', () => {
     expect(errors).toHaveLength(1);
   });
 
-  it('carries the parking row\'s derived_from onto the audit row written at replay', async () => {
+  it("carries the parking row's derived_from onto the audit row written at replay", async () => {
     const client = await connectApprovals();
     await park(client, { name: 'Dr. First' });
     const [firstAudit] = await db.select().from(auditLog);
@@ -96,7 +106,10 @@ describe('approvals_execute', () => {
     const parking = (await db.select().from(auditLog).where(eq(auditLog.approvalId, id)))[0];
     expect(parking.derivedFrom).toEqual([firstAudit.id]);
 
-    await db.update(approvals).set({ status: 'approved', decidedBy: 'U1', decidedAt: deps.now() }).where(eq(approvals.id, id));
+    await db
+      .update(approvals)
+      .set({ status: 'approved', decidedBy: 'U1', decidedAt: deps.now() })
+      .where(eq(approvals.id, id));
     const exec = await client.callTool({ name: 'approvals_execute', arguments: { approval_id: id } });
     expect(exec.isError).toBeFalsy();
 
@@ -108,7 +121,10 @@ describe('approvals_execute', () => {
   it('refuses to replay an action whose class has since become blocked by policy', async () => {
     const client = await connectApprovals();
     const id = await park(client, { name: 'Dr. Blocked' });
-    await db.update(approvals).set({ status: 'approved', decidedBy: 'U1', decidedAt: deps.now() }).where(eq(approvals.id, id));
+    await db
+      .update(approvals)
+      .set({ status: 'approved', decidedBy: 'U1', decidedAt: deps.now() })
+      .where(eq(approvals.id, id));
 
     // Same key as the parking deps, so the stored payload still decrypts and
     // the policy re-check is the only thing that can stop the replay.

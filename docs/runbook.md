@@ -158,16 +158,31 @@ contain restricted values:
   remote file id) so an operator can trace an effect to what it produced. A sink
   is responsible for returning identifiers only, never payload content.
 
-Nothing drains the outbox yet. Plan 1.1 stages rows and provides
-`dispatchStagedEffects`, but no sinks are registered and no scheduler calls it,
-so staged rows simply accumulate until Plan 3 registers real sinks and a cron
-runs the dispatcher.
+The approvals app drains the outbox. `startRunner`
+(`harness/approvals/src/domain/runner.ts`) runs a `dispatch` loop every
+`EFFECTS_DISPATCH_SECONDS` seconds (default 5) that calls
+`dispatchStagedEffects` over the `slack_message` and `slack_file` sinks
+`main.ts` registers. Each tick is guarded against overlapping itself, and a
+failure is logged and swallowed, so a Slack outage never crashes the loop: the
+next tick retries each effect until `maxAttempts` (default 3) is reached, after
+which the effect is marked `failed` and waits for a human, as described above.
+A backlog of `staged` rows between ticks is normal and does not fail `/healthz`.
+
+A dispatch that never reported back is caught by the app's third loop, which
+runs every `RECONCILE_SECONDS` seconds (default 300) and calls
+`harness_reconcile` through the MCP server, parking a dispatch older than ten
+minutes as `needs_review`. So staged rows accumulating is *not* expected
+behaviour: if they do, the approvals app is not running, its dispatch loop is
+erroring (check `/healthz` and the log), or the rows belong to a different
+`client` than the app serves.
 
 ## Reconciliation
 
 `harness_reconcile` (also run once at process start) expires approvals past
-their TTL and parks stuck dispatches. Run it on a schedule in production
-(Plan 3 adds a cron playbook). It never re-sends anything.
+their TTL and parks stuck dispatches. The approvals app's reconcile loop calls
+it every `RECONCILE_SECONDS`, and `clients/demo-practice/cron/playbooks.sh`
+installs a `harness-reconcile-watchdog` job that checks it is happening. It
+never re-sends anything.
 
 The MCP tool repairs **only the calling client's rows**, so an agent acting for
 one practice can never retire another practice's approvals. The startup pass in
@@ -187,7 +202,7 @@ and skill onto another session's audit rows.
 
 ## Writing migrations
 
-Edit `harness/db/src/schema.ts` first, then run plain `pnpm drizzle-kit
+Edit `harness/db/src/domain/schema.ts` first, then run plain `pnpm drizzle-kit
 generate` from `harness/db/` so drizzle-kit writes both the SQL migration and
 the snapshot together. Hand-edit the generated SQL only for things drizzle-kit
 cannot express (triggers, partial indexes), then run `generate` again and
@@ -280,7 +295,7 @@ from the metric map rather than recording a rate nobody measured. A metric
 present on only one side of a comparison is listed as not comparable and cannot
 open the promotion gate. The judge needs a second database handle and a session
 the CLI does not have; Plan 3 wires it up when Hermes supplies one.
-`evals/src/run.test.ts` exercises the judge end to end against the fake gateway,
+`evals/src/domain/orchestrate.test.ts` exercises the judge end to end against the fake gateway,
 including the route being down.
 
 ### Which model a `model_calls` row names
@@ -316,8 +331,8 @@ ingest and `resolveOutFile` for output. Each compares the lexical path *and*
 the symlink-resolved path against its root, so neither an absolute path, nor a
 `..` segment, nor a symlink planted inside the tree can name a file outside it.
 `realOrNearestAncestor` is the shared primitive behind both; it lives in
-`documents/storage.ts` and `storage.ts` imports it, so there is one
-implementation to keep right.
+`@harness/shared` and `domain/storage/file-store.ts` reaches it through
+`assertInsideRoot`, so there is one implementation to keep right.
 
 In Compose, the same named volume is mounted into the `hermes` container (where
 the core-tools child writes the file) and the `approvals` container (where the

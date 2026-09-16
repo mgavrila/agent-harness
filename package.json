@@ -7,7 +7,15 @@
     "node": ">=22"
   },
   "scripts": {
-    "test": "pnpm -r --if-present test",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "lint:strict": "eslint . --max-warnings=0",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "arch": "depcruise 'harness/*/src/**/*.ts' 'evals/src/**/*.ts' 'packs/*/*.ts' 'packs/*/src/**/*.ts' 'packs/*/synthetic/**/*.ts' 'packs/*/forms/**/*.ts' 'scripts/*.ts' 'scripts/src/**/*.ts'",
+    "arch:graph": "depcruise 'harness/*/src/**/*.ts' 'evals/src/**/*.ts' 'packs/*/*.ts' 'packs/*/src/**/*.ts' 'packs/*/synthetic/**/*.ts' 'packs/*/forms/**/*.ts' 'scripts/*.ts' 'scripts/src/**/*.ts' --output-type dot | dot -T svg > docs/architecture/graph.svg",
+    "surface:record": "pnpm --filter @harness/core-tools surface",
+    "test": "pnpm lint && pnpm -r --if-present test",
     "typecheck": "pnpm -r --if-present typecheck",
     "db:up": "docker compose --env-file .env -f harness/compose/docker-compose.yml up -d postgres",
     "db:down": "docker compose --env-file .env -f harness/compose/docker-compose.yml down",
@@ -21,10 +29,23 @@
     "evals": "pnpm --filter @harness/evals start",
     "evals:baseline": "pnpm --filter @harness/evals start -- --update-baseline=true",
     "approvals": "pnpm --filter @harness/approvals start",
-    "new-client": "pnpm --filter @harness/scripts exec tsx new-client.ts",
+    "new-client": "pnpm --filter @harness/scripts exec tsx src/app/cli.ts",
     "demo:up": "docker compose --env-file .env -f harness/compose/docker-compose.yml --profile demo up -d --build",
     "demo:down": "docker compose --env-file .env -f harness/compose/docker-compose.yml --profile demo down",
     "demo:logs": "docker compose --env-file .env -f harness/compose/docker-compose.yml --profile demo logs -f hermes approvals",
     "demo:playbooks": "docker compose --env-file .env -f harness/compose/docker-compose.yml exec hermes bash /opt/data/cron/playbooks.sh"
+  },
+  "devDependencies": {
+    "@eslint/js": "9.39.5",
+    "dependency-cruiser": "16.10.4",
+    "eslint": "9.39.5",
+    "eslint-config-prettier": "10.1.8",
+    "eslint-import-resolver-typescript": "4.4.5",
+    "eslint-plugin-import-x": "4.17.1",
+    "eslint-plugin-unused-imports": "4.4.1",
+    "globals": "17.12.0",
+    "prettier": "3.9.7",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.70.0"
   }
 }

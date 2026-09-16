@@ -2,15 +2,19 @@ import { randomBytes } from 'node:crypto';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { afterAll, beforeEach, onTestFinished } from 'vitest';
+import { onTestFinished } from 'vitest';
 import type { Client } from '@modelcontextprotocol/client';
 import { McpServer } from '@modelcontextprotocol/server';
-import { createDb, type Db } from '@harness/db';
-import { TEST_DATABASE_URL, resetDatabase } from '@harness/db/testing';
-import { DEFAULT_POLICY } from './policy.js';
-import { connectInProcess } from './in-process.js';
-import { defaultFormsDir } from './forms/templates.js';
-import { DEFAULT_CONFIDENCE_THRESHOLD, registerTools, type AnyToolDef, type ToolDeps } from './registry.js';
+import type { Db } from '@harness/db';
+import { pack as healthcarePack } from '@harness/pack-healthcare';
+import { connectInProcess } from './domain/tooling/in-process.js';
+import { registerTools } from './domain/tooling/registry.js';
+import { DEFAULT_POLICY } from './domain/tooling/policy.js';
+import { DEFAULT_CONFIDENCE_THRESHOLD, type AnyToolDef, type ToolDeps } from './domain/tooling/types.js';
+import { registryOf } from './domain/packs/registry.js';
+
+/** The packs a test runs against: the shipped one, with no environment involved. */
+const TEST_PACKS = registryOf([healthcarePack]);
 
 export function makeTestDeps(db: Db, overrides: Partial<ToolDeps> = {}): ToolDeps {
   return {
@@ -26,7 +30,7 @@ export function makeTestDeps(db: Db, overrides: Partial<ToolDeps> = {}): ToolDep
     // A throwaway directory per call, so a test that forgets to override it
     // still cannot write into the repository.
     storageDir: mkdtempSync(path.join(tmpdir(), 'harness-test-storage-')),
-    formsDir: defaultFormsDir(),
+    formsDir: TEST_PACKS.formsDir(),
     restrictedToModel: false,
     verify: {
       nppesEnabled: true,
@@ -39,20 +43,9 @@ export function makeTestDeps(db: Db, overrides: Partial<ToolDeps> = {}): ToolDep
     sinks: {},
     context: {},
     tools: new Map(),
+    packs: TEST_PACKS,
     ...overrides,
   };
-}
-
-/**
- * The database for one test file: emptied before each test and closed when the
- * file finishes. Call it once at module scope; test files run in their own
- * worker, so each gets its own pool.
- */
-export function useTestDb(): Db {
-  const { db, close } = createDb(TEST_DATABASE_URL);
-  beforeEach(() => resetDatabase(db));
-  afterAll(() => close());
-  return db;
 }
 
 export type TestClient = Client;
@@ -95,4 +88,13 @@ export function approvalIdOf(res: { structuredContent?: unknown }): string {
   return envelope.approval_id;
 }
 
-export { startFakeGateway, type FakeGateway, type FakeGatewayCall, type FakeReply, type Responder } from './fake-gateway.js';
+/** The one `useTestDb`, from the package that owns the truncation list. */
+export { useTestDb } from '@harness/db/testing';
+/** The fake lives beside the interface it implements; this is where tests reach it. */
+export {
+  startFakeGateway,
+  type FakeGateway,
+  type FakeGatewayCall,
+  type FakeReply,
+  type Responder,
+} from './domain/models/fake.js';
