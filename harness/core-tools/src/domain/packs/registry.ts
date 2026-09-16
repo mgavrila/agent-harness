@@ -3,7 +3,7 @@ import type { Pack } from '@harness/pack-api';
 import { parseManifest } from '../documents/manifest.js';
 import type { PackRegistry } from './types.js';
 
-const logger = createLogger('packs');
+const log = createLogger('packs');
 
 /** Shared between `loadPacks` and `registryOf`, which both refuse an empty pack list the same way. */
 const NO_PACKS_MESSAGE = 'HARNESS_PACKS names no pack; at least one is required';
@@ -85,7 +85,7 @@ export async function loadPacks(names: string[]): Promise<PackRegistry> {
       if (err instanceof ConfigError) {
         throw new ConfigError(`pack "${name}": ${err.message}`);
       }
-      logger.error(`pack "${name}" failed to initialise`, err);
+      log.error(`pack "${name}" failed to initialise`, err);
       throw new ConfigError(`pack "${name}" failed to initialise`);
     }
     if (!module.pack) throw new ConfigError(`module "${name}" exports no \`pack\``);
