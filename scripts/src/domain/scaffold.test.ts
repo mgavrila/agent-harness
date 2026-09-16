@@ -2,7 +2,7 @@ import { mkdtemp, mkdir, rm, writeFile, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { newClient, titleCase } from './new-client.js';
+import { newClient, titleCase } from './scaffold.js';
 
 let root: string;
 

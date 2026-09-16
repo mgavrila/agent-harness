@@ -51,6 +51,7 @@ const STRICT_LAYER_ROOTS = [
   'harness/pack-api/src',
   'harness/approvals/src',
   'evals/src',
+  'scripts/src',
 ];
 
 /** True for the two spellings of a disabled rule, bare or at the head of an options array. */
@@ -73,16 +74,14 @@ function asWarning(value) {
  * has no `src/shared/` directory for the glob below to match. That glob stays for `@harness/db`
  * and for any package that grows a local `shared/log.ts` later.
  *
- * `synthetic/generate.ts` is the pack's corpus generator and its own CLI, so it prints. Task 11
- * splits the CLI out of it and renames that half to `synthetic/cli.ts`; both names are listed
- * so the exemption survives the tasks in between rather than lapsing at the rename. Task 11
- * drops the stale entry once it lands.
+ * `synthetic/cli.ts` is the pack's corpus-generator entrypoint, so it prints. The pack has no
+ * `src/app/` for the glob above to match, so it is named outright, as is the form-template
+ * builder next to it.
  */
 const CONSOLE_IS_FINE = [
   'harness/shared/src/log.ts',
   '**/src/shared/log.ts',
   '**/src/app/**/*.ts',
-  'packs/healthcare/synthetic/generate.ts',
   'packs/healthcare/synthetic/cli.ts',
   'packs/healthcare/forms/generate-templates.ts',
 ];

@@ -23,7 +23,7 @@ harness/     model gateway config, core tools MCP server, approvals app, db, com
 packs/       healthcare/
 clients/     demo-practice/
 evals/       runner and judges
-scripts/     new-client.ts
+scripts/     the client scaffolder behind `pnpm new-client`
 docs/        specs, ADRs, runbook
 ```
 
