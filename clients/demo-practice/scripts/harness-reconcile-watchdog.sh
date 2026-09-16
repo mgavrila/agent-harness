@@ -25,7 +25,12 @@ not_answering() {
 
 body="$(curl -sS --max-time 10 "$HEALTH_URL" 2>/dev/null)" || not_answering
 
-if ! printf '%s' "$body" | grep -q '"lastReconcileAt"'; then
+# A bash pattern match rather than a pipe into `grep -q`: under `set -o
+# pipefail`, grep exiting early on a match can leave the upstream `printf`
+# killed by SIGPIPE and the whole pipeline reporting 141, which this `if` would
+# read as "the key is absent" and report the app as down. The same trap is
+# written up at length in cron/playbooks.sh, which hit it for real.
+if [[ $body != *'"lastReconcileAt"'* ]]; then
   not_answering
 fi
 
