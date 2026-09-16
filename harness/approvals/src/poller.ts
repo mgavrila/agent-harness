@@ -20,10 +20,9 @@ export interface PollResult {
 /**
  * A claim with no `slack_ts` older than this is assumed abandoned (a poller
  * crashed, or its process was killed, between claiming and posting) and is
- * released so the row can be tried again. There is no `claimed_at` column, so
- * `created_at` stands in for it; a row can therefore sit unclaimed for up to
- * this long after creation before its first claim attempt without being
- * mistaken for a stale claim, which is fine since nothing claims a row before
+ * released so the row can be tried again. The window is measured from
+ * `claimed_at`, so a row that was already old when first claimed is not
+ * mistaken for a stale claim on the very next tick. Nothing claims a row before
  * a poller has actually picked it up.
  */
 const STALE_CLAIM_MS = 2 * 60 * 1000;
@@ -47,9 +46,8 @@ const STALE_CLAIM_MS = 2 * 60 * 1000;
  * That row is then recovered by the stale sweep below rather than at once.
  *
  * Because there is no separate "claim expired but the process died before it
- * could release" signal, this run first releases any claim older than
- * `STALE_CLAIM_MS` that never got a `slack_ts`, using `created_at` as the
- * stand-in for a claim timestamp.
+ * could release" signal, this run first releases any claim whose `claimed_at`
+ * is older than `STALE_CLAIM_MS` and that never got a `slack_ts`.
  */
 export async function postPendingApprovals(deps: PollDeps, limit = 20): Promise<PollResult> {
   const now = deps.now();
@@ -57,14 +55,14 @@ export async function postPendingApprovals(deps: PollDeps, limit = 20): Promise<
 
   await deps.db
     .update(approvals)
-    .set({ slackChannel: null })
+    .set({ slackChannel: null, claimedAt: null })
     .where(
       and(
         eq(approvals.client, deps.client),
         eq(approvals.status, 'pending'),
         isNull(approvals.slackTs),
         isNotNull(approvals.slackChannel),
-        lte(approvals.createdAt, staleBefore),
+        lte(approvals.claimedAt, staleBefore),
       ),
     );
 
@@ -87,7 +85,7 @@ export async function postPendingApprovals(deps: PollDeps, limit = 20): Promise<
   for (const row of pending) {
     const claimed = await deps.db
       .update(approvals)
-      .set({ slackChannel: deps.channel })
+      .set({ slackChannel: deps.channel, claimedAt: now })
       .where(and(eq(approvals.id, row.id), eq(approvals.status, 'pending'), isNull(approvals.slackChannel)))
       .returning({ id: approvals.id });
     if (claimed.length === 0) {
@@ -112,7 +110,7 @@ export async function postPendingApprovals(deps: PollDeps, limit = 20): Promise<
       console.error(`approvals: could not post the card for ${row.id}: ${err instanceof Error ? err.message : String(err)}`);
       await deps.db
         .update(approvals)
-        .set({ slackChannel: null })
+        .set({ slackChannel: null, claimedAt: null })
         .where(and(eq(approvals.id, row.id), isNull(approvals.slackTs)));
       continue;
     }

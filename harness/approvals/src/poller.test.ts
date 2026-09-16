@@ -92,14 +92,15 @@ describe('postPendingApprovals', () => {
     expect(afterRetry.slackTs).not.toBeNull();
   });
 
-  it('releases a stale claim (older than the 2-minute window) and posts it', async () => {
-    const staleCreatedAt = new Date(now().getTime() - 3 * 60 * 1000);
+  it('releases a stale claim (claimed more than 2 minutes ago) and posts it', async () => {
+    const staleClaimedAt = new Date(now().getTime() - 3 * 60 * 1000);
     await db.insert(approvals).values({
       ...base,
       idempotencyKey: 'k1',
       expiresAt: new Date('2026-09-16T12:00:00Z'),
       slackChannel: 'C0STALE',
-      createdAt: staleCreatedAt,
+      claimedAt: staleClaimedAt,
+      createdAt: staleClaimedAt,
     });
     const slack = new FakeSlack();
     const out = await postPendingApprovals({ db, api: slack, client: 'demo-practice', channel: 'C0DEMO', now });
@@ -110,13 +111,15 @@ describe('postPendingApprovals', () => {
     expect(row.slackTs).not.toBeNull();
   });
 
-  it('leaves a fresh claim by another poller alone', async () => {
+  it('leaves a fresh claim on an old row alone: the window runs from the claim, not from creation', async () => {
+    const createdLongAgo = new Date(now().getTime() - 30 * 60 * 1000);
     await db.insert(approvals).values({
       ...base,
       idempotencyKey: 'k1',
       expiresAt: new Date('2026-09-16T12:00:00Z'),
       slackChannel: 'C0OTHER',
-      createdAt: now(),
+      claimedAt: now(),
+      createdAt: createdLongAgo,
     });
     const slack = new FakeSlack();
     const out = await postPendingApprovals({ db, api: slack, client: 'demo-practice', channel: 'C0DEMO', now });

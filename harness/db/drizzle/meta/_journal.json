@@ -50,6 +50,13 @@
       "when": 1789491707442,
       "tag": "0006_documents_client",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1789545790693,
+      "tag": "0007_approvals_claimed_at",
+      "breakpoints": true
     }
   ]
 }

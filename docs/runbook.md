@@ -354,8 +354,9 @@ affects zero rows and it logs the row as `orphaned`.
 
 A claim can outlive the process that took it, so a claim older than two
 minutes that never got a `slack_ts` is released at the top of the next run and
-the row is posted again. There is no `claimed_at` column; `created_at` stands
-in for it.
+the row is posted again. The window runs from `claimed_at` (migration 0007),
+not from `created_at`, so an old row claimed just now is not released on the
+next tick.
 
 Two failure points sit either side of the post and are handled differently.
 A post that fails releases the claim, so the next run retries immediately. A
@@ -443,6 +444,9 @@ does not make that client runnable on its own — the Compose file still names
 5. Start it under its own Compose project so it does not collide with another
    client's containers and volumes:
    `COMPOSE_PROJECT_NAME=<slug> docker compose --env-file .env -f harness/compose/docker-compose.yml --profile demo up -d --build`.
+   The compose file fixes the default project name to `agent-harness`; the
+   environment variable overrides it, so each client instance gets its own
+   containers, network and volumes.
 
 Do **not** use `pnpm demo:up` for a new client. It runs the default Compose
 project with the `demo-practice` paths above, so it starts demo-practice

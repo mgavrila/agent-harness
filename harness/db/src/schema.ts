@@ -103,6 +103,8 @@ export const approvals = pgTable('approvals', {
   idempotencyKey: text('idempotency_key').notNull(),
   slackChannel: text('slack_channel'),
   slackTs: text('slack_ts'),
+  /** When the poller claimed the row for posting; null until claimed and after a release. */
+  claimedAt: timestamp('claimed_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [
   // Partial: only one live pending request per idempotency key. Decided and
