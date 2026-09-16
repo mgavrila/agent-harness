@@ -1,6 +1,3 @@
-import { afterAll, beforeEach } from 'vitest';
-import { createDb, type Db } from '@harness/db';
-import { TEST_DATABASE_URL, resetDatabase } from '@harness/db/testing';
 import type {
   SlackApi,
   SlackEphemeralArgs,
@@ -12,16 +9,7 @@ import type {
 } from './slack.js';
 import type { CoreToolsClient, ExecuteOutcome } from './execute.js';
 
-/**
- * The database for one test file: emptied before each test and closed when the
- * file finishes. Mirrors the helper in @harness/core-tools/testing.
- */
-export function useTestDb(): Db {
-  const { db, close } = createDb(TEST_DATABASE_URL);
-  beforeEach(() => resetDatabase(db));
-  afterAll(() => close());
-  return db;
-}
+export { useTestDb } from '@harness/db/testing';
 
 /**
  * A Slack that records instead of sending. Timestamps count up from a fixed

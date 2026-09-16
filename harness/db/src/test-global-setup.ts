@@ -1,4 +1,4 @@
-import { runMigrations } from './migrate.js';
+import { runMigrations } from './domain/migrate.js';
 import { TEST_DATABASE_URL } from './testing.js';
 
 export default async function setup(): Promise<void> {

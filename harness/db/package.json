@@ -5,14 +5,14 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./schema": "./src/schema.ts",
+    "./schema": "./src/domain/schema.ts",
     "./testing": "./src/testing.ts"
   },
   "scripts": {
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "generate": "drizzle-kit generate",
-    "migrate": "tsx src/migrate.ts"
+    "migrate": "tsx src/app/migrate.ts"
   },
   "dependencies": {
     "dotenv": "^17.4.2",

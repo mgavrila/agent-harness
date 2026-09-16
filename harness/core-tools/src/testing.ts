@@ -2,11 +2,10 @@ import { randomBytes } from 'node:crypto';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { afterAll, beforeEach, onTestFinished } from 'vitest';
+import { onTestFinished } from 'vitest';
 import type { Client } from '@modelcontextprotocol/client';
 import { McpServer } from '@modelcontextprotocol/server';
-import { createDb, type Db } from '@harness/db';
-import { TEST_DATABASE_URL, resetDatabase } from '@harness/db/testing';
+import type { Db } from '@harness/db';
 import { DEFAULT_POLICY } from './policy.js';
 import { connectInProcess } from './in-process.js';
 import { defaultFormsDir } from './forms/templates.js';
@@ -41,18 +40,6 @@ export function makeTestDeps(db: Db, overrides: Partial<ToolDeps> = {}): ToolDep
     tools: new Map(),
     ...overrides,
   };
-}
-
-/**
- * The database for one test file: emptied before each test and closed when the
- * file finishes. Call it once at module scope; test files run in their own
- * worker, so each gets its own pool.
- */
-export function useTestDb(): Db {
-  const { db, close } = createDb(TEST_DATABASE_URL);
-  beforeEach(() => resetDatabase(db));
-  afterAll(() => close());
-  return db;
 }
 
 export type TestClient = Client;
@@ -102,3 +89,5 @@ export {
   type FakeReply,
   type Responder,
 } from './fake-gateway.js';
+
+export { useTestDb } from '@harness/db/testing';

@@ -1,7 +1,10 @@
 import { drizzle, type NodePgQueryResultHKT } from 'drizzle-orm/node-postgres';
 import type { PgDatabase } from 'drizzle-orm/pg-core';
 import pg from 'pg';
+import { createLogger } from '../shared/log.js';
 import * as schema from './schema.js';
+
+const log = createLogger('db');
 
 /**
  * The database handle every tool and helper accepts. Widened from
@@ -17,7 +20,7 @@ export function createDb(url: string | undefined = process.env.DATABASE_URL) {
   // without a listener node-postgres turns that into an unhandled 'error' event
   // and takes the process down.
   pool.on('error', (err) => {
-    console.error('postgres pool error:', err.message);
+    log.error('postgres pool error', err);
   });
   const db: Db = drizzle(pool, { schema });
   return { db, pool, close: () => pool.end() };

@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import { eq, sql } from 'drizzle-orm';
+import { TEST_DATABASE_URL, resetDatabase } from '../testing.js';
 import { createDb, type Db } from './client.js';
 import { providers, auditLog, toolEffects } from './schema.js';
-import { TEST_DATABASE_URL, resetDatabase } from './testing.js';
 
 let db: Db;
 let close: () => Promise<void>;

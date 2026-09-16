@@ -1,5 +1,6 @@
 import { sql } from 'drizzle-orm';
-import type { Db } from './client.js';
+import { afterAll, beforeEach } from 'vitest';
+import { createDb, type Db } from './domain/client.js';
 
 export const TEST_DATABASE_URL =
   process.env.TEST_DATABASE_URL ?? 'postgres://harness:harness@localhost:15432/harness_test';
@@ -23,4 +24,20 @@ export async function resetDatabase(db: Db): Promise<void> {
   } finally {
     await db.execute(sql`ALTER TABLE audit_log ENABLE TRIGGER USER`);
   }
+}
+
+/**
+ * The database for one test file: emptied before each test and closed when the
+ * file finishes. Call it once at module scope; test files run in their own
+ * worker, so each gets its own pool.
+ *
+ * This is the only copy. @harness/core-tools and @harness/approvals each had a
+ * byte-identical one and now re-export this from their own `./testing` subpath, because
+ * the truncation list and the append-only bracketing above have to agree with it exactly.
+ */
+export function useTestDb(): Db {
+  const { db, close } = createDb(TEST_DATABASE_URL);
+  beforeEach(() => resetDatabase(db));
+  afterAll(() => close());
+  return db;
 }
