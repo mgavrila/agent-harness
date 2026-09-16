@@ -2,24 +2,11 @@ import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
+import { isValidDea, isValidNpi } from './check-digits.test-helpers.js';
 import { assertSafeToClear, generate, type GroundTruth } from './generate.js';
 
 let outDir: string;
 let truth: GroundTruth;
-
-function isValidDea(candidate: string): boolean {
-  if (!/^[A-Z]{2}\d{7}$/.test(candidate)) return false;
-  const d = candidate.slice(2).split('').map(Number);
-  return (d[0] + d[2] + d[4] + 2 * (d[1] + d[3] + d[5])) % 10 === d[6];
-}
-
-function isValidNpi(candidate: string): boolean {
-  if (!/^\d{10}$/.test(candidate)) return false;
-  // NPI check digit: Luhn over "80840" + the first nine digits.
-  const digits = `80840${candidate.slice(0, 9)}`.split('').map(Number).reverse();
-  const sum = digits.reduce((acc, d, i) => acc + (i % 2 === 0 ? (d * 2 > 9 ? d * 2 - 9 : d * 2) : d), 0);
-  return (10 - (sum % 10)) % 10 === Number(candidate[9]);
-}
 
 beforeAll(async () => {
   outDir = await mkdtemp(path.join(tmpdir(), 'harness-synth-'));

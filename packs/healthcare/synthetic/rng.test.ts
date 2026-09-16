@@ -1,19 +1,6 @@
 import { describe, it, expect } from 'vitest';
+import { isValidDea, isValidNpi } from './check-digits.test-helpers.js';
 import { deaNumber, luhnNpi } from './rng.js';
-
-function isValidDea(candidate: string): boolean {
-  if (!/^[A-Z]{2}\d{7}$/.test(candidate)) return false;
-  const d = candidate.slice(2).split('').map(Number);
-  return (d[0] + d[2] + d[4] + 2 * (d[1] + d[3] + d[5])) % 10 === d[6];
-}
-
-function isValidNpi(candidate: string): boolean {
-  if (!/^\d{10}$/.test(candidate)) return false;
-  // NPI check digit: Luhn over "80840" + the first nine digits.
-  const digits = `80840${candidate.slice(0, 9)}`.split('').map(Number).reverse();
-  const sum = digits.reduce((acc, d, i) => acc + (i % 2 === 0 ? (d * 2 > 9 ? d * 2 - 9 : d * 2) : d), 0);
-  return (10 - (sum % 10)) % 10 === Number(candidate[9]);
-}
 
 describe('identifier generators', () => {
   it('produces NPIs that pass the NPI check digit', () => {
