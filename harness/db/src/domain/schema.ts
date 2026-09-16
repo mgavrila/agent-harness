@@ -43,8 +43,10 @@ export const records = pgTable(
   },
   (t) => [
     index('records_client_kind_name_idx').on(t.client, t.kind, t.name),
-    // Scoped by kind as well as client: two packs may both key on a ten-digit number and mean
-    // different things. With one kind loaded this is exactly the old providers_client_npi_uq.
+    // Scoped by the kind name as well as the client, so two kinds may both key on a ten-digit
+    // number and mean different things. The pack registry refuses two loaded packs that declare
+    // the same kind name, which is what keeps (client, kind, external_id) unambiguous without
+    // `pack` in the key. With one kind loaded this is exactly the old providers_client_npi_uq.
     uniqueIndex('records_client_kind_external_id_uq').on(t.client, t.kind, t.externalId),
   ],
 );

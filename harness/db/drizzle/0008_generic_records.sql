@@ -64,5 +64,5 @@ ALTER TABLE "documents" DROP COLUMN "provider_id";--> statement-breakpoint
 ALTER TABLE "fields" DROP COLUMN "provider_id";--> statement-breakpoint
 ALTER TABLE "deadlines" DROP COLUMN "provider_id";--> statement-breakpoint
 ALTER TABLE "deadlines" DROP COLUMN "credential_id";--> statement-breakpoint
-DROP TABLE "credentials" CASCADE;--> statement-breakpoint
-DROP TABLE "providers" CASCADE;
+DROP TABLE "credentials";--> statement-breakpoint
+DROP TABLE "providers";

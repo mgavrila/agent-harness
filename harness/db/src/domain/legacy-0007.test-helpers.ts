@@ -2,7 +2,7 @@ import { sql } from 'drizzle-orm';
 import { createDb, type Db } from './client.js';
 
 /**
- * The five tables migration 0008 touches, exactly as they stood after 0007.
+ * The five tables migration 0008 touches, as they stood after 0007 (column order differs from the migrations, which appended text_path and client later; every statement names its columns).
  *
  * Copied out of `schema.ts` as it was before this task rather than derived from anything, on
  * purpose: this is the *old* shape, and a fixture generated from the current schema would
@@ -76,7 +76,9 @@ CREATE UNIQUE INDEX "deadlines_credential_kind_uq" ON "deadlines" USING btree ("
 `;
 
 /** The database the migration test builds and drops. Nothing else in the repository uses it. */
-export const MIGRATION_DATABASE = 'harness_test_migration';
+// Suffixed with the process id so two concurrent runs of this package cannot drop each other's
+// scratch database mid-test.
+export const MIGRATION_DATABASE = `harness_test_migration_${process.pid}`;
 
 /** `maintenanceUrl` with its database swapped for `MIGRATION_DATABASE`, everything else intact. */
 export function migrationDatabaseUrl(maintenanceUrl: string): string {

@@ -122,6 +122,17 @@ describe('migration 0008_generic_records', () => {
         expect(await one('SELECT count(*)::int AS n FROM deadlines')).toBe(10);
         expect(await one('SELECT count(*)::int AS n FROM fields WHERE record_id IS NOT NULL')).toBe(3);
         expect(await one('SELECT count(*)::int AS n FROM documents WHERE record_id IS NOT NULL')).toBe(1);
+        // The re-key must point each row at the record its provider became, not merely at some record.
+        expect(
+          await one(
+            `SELECT count(*)::int AS n FROM fields WHERE name = 'ssn' AND record_id = '11111111-1111-4111-8111-111111111111'`,
+          ),
+        ).toBe(1);
+        expect(
+          await one(
+            `SELECT count(*)::int AS n FROM documents WHERE id = 'aaaaaaaa-0000-4000-8000-000000000001' AND record_id = '11111111-1111-4111-8111-111111111111'`,
+          ),
+        ).toBe(1);
 
         // Ids are preserved, which is what keeps every digest_key a playbook has already sent.
         expect(
