@@ -4,7 +4,6 @@ import type { AnyToolDef as PackAnyToolDef, PackKernel, ToolDef as PackToolDef }
 import type { SinkRegistry } from '../effects/types.js';
 import type { GatewayConfig } from '../models/types.js';
 import type { PackRegistry } from '../packs/types.js';
-import type { VerifyConfig } from '../verify/types.js';
 import type { Policy } from './policy.js';
 import type { AuditEntry } from './audit.js';
 
@@ -35,15 +34,14 @@ export const DEFAULT_CONFIDENCE_THRESHOLD = 0.85;
  * reaches for nothing outside it, which is what makes every tool testable against
  * `makeTestDeps` and what keeps `process.env` out of the domain.
  *
- * Note what this carries and what it does not. `gateway`, `storageDir` and `verify` are
- * *configuration*, not constructed objects: a test overrides a URL or a directory rather than
- * assembling an interface. See ARCHITECTURE.md for why.
+ * Note what this carries and what it does not. `gateway` and `storageDir` are *configuration*,
+ * not constructed objects: a test overrides a URL or a directory rather than assembling an
+ * interface. See ARCHITECTURE.md for why.
  *
- * Two of the three adapters are built by the domain from that configuration and are on the
- * live path today: `httpGateway(deps.gateway)` inside `callModel`, and
- * `nppesRegistry(deps.verify)` inside `verify_nppes`. The third, `fileStorage(root)`, is a
- * declared seam with no caller yet: every storage call still goes through the free functions
- * with `deps.storageDir` threaded in. Wiring it is a later task, not a behaviour change here.
+ * One adapter is built by the domain from that configuration and is on the live path today:
+ * `httpGateway(deps.gateway)` inside `callModel`. The other, `fileStorage(root)`, is a declared
+ * seam with no caller yet: every storage call still goes through the free functions with
+ * `deps.storageDir` threaded in. Wiring it is a later task, not a behaviour change here.
  */
 export interface ToolDeps {
   /** Drizzle database handle; every handler runs inside a transaction opened on it. */
@@ -84,8 +82,6 @@ export interface ToolDeps {
    * that requires a BAA with the model provider (spec section 4.4).
    */
   restrictedToModel: boolean;
-  /** External registry lookups: which are enabled, and where they live. */
-  verify: VerifyConfig;
   /** External-effect senders keyed by sink name (e.g. 'slack'). Empty in Plan 1.1; Plan 3 registers real ones. */
   sinks: SinkRegistry;
   /** Per-process session context (run, skill, tool) stamped on audit rows; see `context.ts`. */

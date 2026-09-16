@@ -13,15 +13,15 @@ const NO_PACKS_MESSAGE = 'HARNESS_PACKS names no pack; at least one is required'
  * it, and `loadPacks` below builds one over whatever it resolved.
  *
  * `recordKinds()` and `attachmentKinds()` answer with each pack's declarations **parsed**, not
- * the raw values off `Pack.records` and `Pack.attachments`. Those members are typed against the
- * contract, but a pack is free to hand in the raw JSON a human edits — `packs/healthcare/src/
- * index.ts` casts `provider.json` rather than validating it — and the raw value is missing the
- * zod defaults `buildExtractionSchema` depends on (`restricted: false`, `source: 'model'`).
- * Parsing here, once, at construction, is what makes those defaults exist no matter which pack,
- * or which test, built this registry; validating against *this build's* restricted-name rules
- * rather than the pack's matters too, because those rules decide what gets encrypted, so they
- * belong to whoever does the encrypting. A pack shipped against an older rule set fails here,
- * at startup, named.
+ * the raw values off `Pack.records` and `Pack.attachments`. Those two members are typed
+ * `RawRecordKind` and `RawAttachmentKind`, which say so: a pack hands over the JSON a human
+ * edits — `packs/healthcare/src/index.ts` hands over `provider.json` — and the raw value is
+ * missing the zod defaults `buildExtractionSchema` depends on (`restricted: false`,
+ * `source: 'model'`). Parsing here, once, at construction, is what makes those defaults exist
+ * no matter which pack, or which test, built this registry; validating against *this build's*
+ * restricted-name rules rather than the pack's matters too, because those rules decide what
+ * gets encrypted, so they belong to whoever does the encrypting. A pack shipped against an
+ * older rule set fails here, at startup, named.
  *
  * Refuses an empty list up front: `manifest()` and `formsDir()` would otherwise answer for
  * `all[0]` of an empty array, throwing a raw `TypeError` that names no variable and no pack.

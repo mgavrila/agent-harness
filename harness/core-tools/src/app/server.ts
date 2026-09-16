@@ -8,15 +8,13 @@ import { storageRoot } from '../domain/storage/layout.js';
 import { PACK_KERNEL } from '../domain/packs/kernel.js';
 import { loadPacks } from '../domain/packs/registry.js';
 import type { PackRegistry } from '../domain/packs/types.js';
-import { NPPES_DEFAULT_BASE_URL } from '../domain/verify/nppes.js';
 
 /**
  * A variable with a default, where an empty value is a mistake rather than a request for that
  * default. `optionalEnv` reads an empty string as absent, so a half-filled `.env` would leave
- * this process serving the `default` client, auditing every call as `hermes`, or pointing the
- * registry lookup at the live CMS endpoint — each of them silently, and the last of them only
- * failing much later on an outbound path. Unset keeps the default; set-but-empty fails startup
- * naming the variable.
+ * this process serving the `default` client or auditing every call as `hermes`, either of them
+ * silently. Unset keeps the default; set-but-empty fails startup naming the variable. A pack
+ * that reads a variable of its own keeps a copy of this — see `packs/healthcare/src/config.ts`.
  */
 export function envOrDefault(name: string, fallback: string, env: NodeJS.ProcessEnv = process.env): string {
   const raw = env[name];
@@ -73,12 +71,6 @@ export async function buildDepsFromEnv(): Promise<{ deps: ToolDeps; close: () =>
     storageDir: storageRoot(),
     formsDir: formsDirFrom(packs),
     restrictedToModel: booleanFromEnv('HARNESS_RESTRICTED_TO_MODEL'),
-    verify: {
-      nppesEnabled: booleanFromEnv('VERIFY_NPPES_ENABLED'),
-      nppesBaseUrl: envOrDefault('NPPES_BASE_URL', NPPES_DEFAULT_BASE_URL),
-      stateLicenseEnabled: booleanFromEnv('VERIFY_STATE_LICENSE_ENABLED'),
-      timeoutMs: numberFromEnv('VERIFY_TIMEOUT_MS', 15_000, { min: 1_000, max: 60_000 }),
-    },
     sinks: {},
     // One context object per process, shared by every connection this process
     // serves. That is correct for the stdio deployment, where Hermes starts one

@@ -50,12 +50,6 @@ export function openJudgeDeps(opts: { gatewayUrl: string; storageDir: string }):
       storageDir: opts.storageDir,
       formsDir: packs.formsDir(),
       restrictedToModel: false,
-      verify: {
-        nppesEnabled: false,
-        nppesBaseUrl: 'http://127.0.0.1:1/api/',
-        stateLicenseEnabled: false,
-        timeoutMs: 5_000,
-      },
       sinks: {},
       context: {},
       tools: new Map(),

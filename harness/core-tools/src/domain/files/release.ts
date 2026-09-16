@@ -37,7 +37,9 @@ export async function stageRelease(
     if (!info.isFile()) throw new Error('not a file');
     size = info.size;
   } catch {
-    throw new ToolError(`no generated file with id "${file_id}"; run forms_fill or forms_roster first`);
+    // No pack tool is named here: the kernel does not know which of a pack's tools produced
+    // the file. A pack that wants to say so catches this and rethrows — `forms_release` does.
+    throw new ToolError(`no generated file with id "${file_id}"`);
   }
   if (size > MAX_RELEASE_BYTES) {
     throw new ToolError(`file "${file_id}" is ${size} bytes, over the ${MAX_RELEASE_BYTES} byte release limit`);

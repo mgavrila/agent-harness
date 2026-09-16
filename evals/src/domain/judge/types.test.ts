@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { isRestrictedName } from '@harness/core-tools';
+import { isRestrictedName, parseRecordKindSpec } from '@harness/core-tools';
 import { pack as healthcarePack } from '@harness/pack-healthcare';
 import { FREE_TEXT_FIELDS } from './types.js';
 
@@ -11,8 +11,11 @@ describe('FREE_TEXT_FIELDS', () => {
   it('names no field the healthcare pack marks restricted', () => {
     // Read from the pack's own manifest rather than a repository path: the pack
     // is the source of what it declares restricted, and a test that reaches for
-    // packs/healthcare/schema/provider.json by path asserts against a copy.
+    // packs/healthcare/schema/provider.json by path asserts against a copy. A pack hands its
+    // kinds over unparsed, so they go through the kernel's parser here, exactly as the pack
+    // registry does at startup.
     const restricted = healthcarePack.records
+      .map((r) => parseRecordKindSpec(r))
       .flatMap((r) => r.fields)
       .filter((f) => f.restricted === true)
       .map((f) => f.name);

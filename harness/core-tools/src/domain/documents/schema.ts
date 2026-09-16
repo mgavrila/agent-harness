@@ -1,4 +1,9 @@
-import { ATTACHMENT_PROPERTIES, type AttachmentKindSpec, type ManifestField } from '@harness/pack-api';
+import {
+  ATTACHMENT_PROPERTIES,
+  type AttachmentKindSpec,
+  type AttachmentSlot,
+  type ManifestField,
+} from '@harness/pack-api';
 
 /** One field's slot in the model-facing schema: the value plus how sure and from where. */
 function fieldSlot(field: ManifestField): Record<string, unknown> {
@@ -21,10 +26,20 @@ function fieldSlot(field: ManifestField): Record<string, unknown> {
   };
 }
 
-/** What the model is told each attachment property means. One entry per `ATTACHMENT_PROPERTIES`. */
-const ATTACHMENT_PROPERTY_DESCRIPTIONS: Record<(typeof ATTACHMENT_PROPERTIES)[number], string> = {
-  state: 'Two-letter US state code, or an empty string when the credential is not state-issued.',
-  issuer: 'The issuing board, agency or carrier as printed.',
+/**
+ * What the model is told each member of one attachment object means, when the pack's extraction
+ * target says nothing.
+ *
+ * Deliberately colourless. A pack knows what it attaches — a credential, a link to a ticket —
+ * and the kernel that stores the row does not, so the real prose comes from the target's
+ * `attachment_descriptions` and this is only the floor under a pack that declares none.
+ */
+const DEFAULT_ATTACHMENT_DESCRIPTIONS: Record<AttachmentSlot, string> = {
+  kind: 'Which kind of attachment this is.',
+  confidence: 'How sure you are that this attachment is present in the document, from 0 to 1.',
+  source_page: 'The 1-based page this attachment was read from.',
+  state: 'Two-letter US state code, or an empty string when it is not state-issued.',
+  issuer: 'The issuing organisation as printed.',
   issued_at: 'The issue date in YYYY-MM-DD form, or an empty string when absent.',
   expires_at: 'The expiry date in YYYY-MM-DD form, or an empty string when absent.',
 };
@@ -34,7 +49,7 @@ export interface ExtractionSchemaInput {
   documentKinds: readonly string[];
   fields: ManifestField[];
   attachmentKinds: AttachmentKindSpec[];
-  /** The JSON property the attachment list is returned under. `credentials` for healthcare. */
+  /** The JSON property the attachment list is returned under, from the target's `attachments_key`. */
   attachmentsKey: string;
   /**
    * The attachment array's JSON-Schema `description`, from the target's
@@ -43,6 +58,12 @@ export interface ExtractionSchemaInput {
    * declares no attachments.
    */
   attachmentsDescription?: string;
+  /**
+   * What each member of one attachment object means, from the target's
+   * `attachment_descriptions`. Any slot the pack leaves out falls back to
+   * `DEFAULT_ATTACHMENT_DESCRIPTIONS`.
+   */
+  attachmentDescriptions?: Partial<Record<AttachmentSlot, string>>;
 }
 
 /**
@@ -58,20 +79,19 @@ export function buildExtractionSchema(input: ExtractionSchemaInput): { name: str
   const fieldProperties: Record<string, unknown> = {};
   for (const f of modelFields) fieldProperties[f.name] = fieldSlot(f);
 
+  const describe = (slot: AttachmentSlot): string =>
+    input.attachmentDescriptions?.[slot] ?? DEFAULT_ATTACHMENT_DESCRIPTIONS[slot];
   const attachmentProperties: Record<string, unknown> = {
     kind: {
       type: 'string',
       enum: input.attachmentKinds.map((a) => a.kind),
-      description: 'Which kind of credential this is.',
+      description: describe('kind'),
     },
-    confidence: {
-      type: 'number',
-      description: 'How sure you are that this credential is present in the document, from 0 to 1.',
-    },
-    source_page: { type: 'integer', description: 'The 1-based page this credential was read from.' },
+    confidence: { type: 'number', description: describe('confidence') },
+    source_page: { type: 'integer', description: describe('source_page') },
   };
   for (const prop of ATTACHMENT_PROPERTIES) {
-    attachmentProperties[prop] = { type: 'string', description: ATTACHMENT_PROPERTY_DESCRIPTIONS[prop] };
+    attachmentProperties[prop] = { type: 'string', description: describe(prop) };
   }
 
   return {

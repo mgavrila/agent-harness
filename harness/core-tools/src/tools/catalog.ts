@@ -5,13 +5,10 @@ import { publishedCatalogue, type ToolSource } from '../domain/packs/publication
 import type { PackRegistry } from '../domain/packs/types.js';
 import { approvalTools } from './approvals.js';
 import { auditTools } from './audit.js';
-import { COMPAT_REPLACES, compatTools } from './compat.js';
 import { deadlineTools } from './deadlines.js';
 import { documentTools } from './documents.js';
-import { formTools } from './forms.js';
 import { harnessTools } from './harness.js';
 import { GENERIC_RECORD_TOOLS, recordTools } from './records.js';
-import { verifyTools } from './verify.js';
 
 /**
  * Every tool the kernel itself defines, whatever any pack replaces.
@@ -27,9 +24,6 @@ export function kernelTools(packs: PackRegistry): AnyToolDef[] {
     ...approvalTools,
     ...harnessTools,
     ...documentTools(packs),
-    // Still the kernel's in Task 3; Plan 5 Task 4 moves both sets into the healthcare pack.
-    ...formTools,
-    ...verifyTools,
   ];
 }
 
@@ -48,17 +42,11 @@ export const allTools = kernelTools;
  * `publishedCatalogue` is where those rules live and where each of them fails loudly.
  */
 export function publishedTools(deps: ToolDeps): AnyToolDef[] {
-  const sources: ToolSource[] = [
-    // Transitional: the kernel's own healthcare-shaped wrappers, so tool-surface.json stays
-    // byte-identical while the kernel is rebuilt. Plan 5 Task 4 deletes this entry, and
-    // `compat.ts` with it; the healthcare pack contributes the same twelve tools from then on.
-    { label: 'tools/compat.ts', replaces: COMPAT_REPLACES, tools: compatTools(deps) },
-    ...deps.packs.all.map((pack) => ({
-      label: `pack "${pack.name}"`,
-      replaces: pack.replaces ?? [],
-      tools: pack.tools?.(deps) ?? [],
-    })),
-  ];
+  const sources: ToolSource[] = deps.packs.all.map((pack) => ({
+    label: `pack "${pack.name}"`,
+    replaces: pack.replaces ?? [],
+    tools: pack.tools?.(deps) ?? [],
+  }));
   // A deployment whose every kind is served by a pack's own tools publishes none of the five,
   // and its catalogue is exactly what the packs named.
   const anyGenericKind = deps.packs.recordKinds().some((r) => r.genericTools !== false);

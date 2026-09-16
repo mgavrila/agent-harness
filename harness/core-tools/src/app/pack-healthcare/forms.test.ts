@@ -4,12 +4,10 @@ import path from 'node:path';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { and, eq } from 'drizzle-orm';
 import { auditLog, attachments, fields, records, approvals, toolEffects } from '@harness/db';
-import { pack as healthcarePack } from '@harness/pack-healthcare';
-import { useTestDb, makeTestDeps, connectTools, resultOf, approvalIdOf, textOf } from '../testing.js';
-import { ROSTER_COLUMNS } from '../domain/forms/types.js';
-import type { ToolDeps } from '../domain/tooling/types.js';
-import { approvalTools } from './approvals.js';
-import { formTools } from './forms.js';
+import { ROSTER_COLUMNS, pack as healthcarePack } from '@harness/pack-healthcare';
+import { useTestDb, makeTestDeps, connectTools, resultOf, approvalIdOf, textOf } from '../../testing.js';
+import type { ToolDeps } from '../../domain/tooling/types.js';
+import { approvalTools } from '../../tools/approvals.js';
 
 const eqField = (providerId: string, name: string) => and(eq(fields.recordId, providerId), eq(fields.name, name));
 
@@ -60,7 +58,7 @@ async function seedCompleteProvider(): Promise<string> {
 
 describe('forms_list_templates', () => {
   it('lists the installed templates with their required inputs', async () => {
-    const client = await connectTools('forms-test', formTools, deps);
+    const client = await connectTools('forms-test', healthcarePack.tools!(deps), deps);
     const out = resultOf<{ templates: { id: string; title: string; required_inputs: string[] }[] }>(
       await client.callTool({ name: 'forms_list_templates', arguments: {} }),
     );
@@ -73,7 +71,7 @@ describe('forms_list_templates', () => {
 describe('forms_fill', () => {
   it('fills a template and writes a content-addressed PDF under out/', async () => {
     const providerId = await seedCompleteProvider();
-    const client = await connectTools('forms-test', formTools, deps);
+    const client = await connectTools('forms-test', healthcarePack.tools!(deps), deps);
     const out = resultOf<{ file_id: string; bytes: number; filled: string[]; left_blank: string[] }>(
       await client.callTool({
         name: 'forms_fill',
@@ -90,7 +88,7 @@ describe('forms_fill', () => {
 
   it('produces the same file id for the same inputs', async () => {
     const providerId = await seedCompleteProvider();
-    const client = await connectTools('forms-test', formTools, deps);
+    const client = await connectTools('forms-test', healthcarePack.tools!(deps), deps);
     const args = { template_id: 'state-license-renewal-cover', provider_id: providerId };
     const first = resultOf<{ file_id: string }>(await client.callTool({ name: 'forms_fill', arguments: args }));
     const second = resultOf<{ file_id: string }>(await client.callTool({ name: 'forms_fill', arguments: args }));
@@ -100,7 +98,7 @@ describe('forms_fill', () => {
   it('refuses when a required field is still pending, and names the field', async () => {
     const providerId = await seedCompleteProvider();
     await db.update(fields).set({ status: 'pending', confidence: 0.4 }).where(eqField(providerId, 'practice_address'));
-    const client = await connectTools('forms-test', formTools, deps);
+    const client = await connectTools('forms-test', healthcarePack.tools!(deps), deps);
     const res = await client.callTool({
       name: 'forms_fill',
       arguments: { template_id: 'payer-credentialing-application', provider_id: providerId },
@@ -115,7 +113,7 @@ describe('forms_fill', () => {
       .insert(records)
       .values({ client: 'test', pack: 'healthcare', kind: 'provider', name: 'Dr. Bare', externalId: '1999999998' })
       .returning();
-    const client = await connectTools('forms-test', formTools, deps);
+    const client = await connectTools('forms-test', healthcarePack.tools!(deps), deps);
     const res = await client.callTool({
       name: 'forms_fill',
       arguments: { template_id: 'state-license-renewal-cover', provider_id: p.id },
@@ -127,7 +125,7 @@ describe('forms_fill', () => {
   it('leaves an optional mapping blank instead of refusing', async () => {
     const providerId = await seedCompleteProvider();
     await db.delete(fields).where(eqField(providerId, 'practice_name'));
-    const client = await connectTools('forms-test', formTools, deps);
+    const client = await connectTools('forms-test', healthcarePack.tools!(deps), deps);
     const out = resultOf<{ left_blank: string[] }>(
       await client.callTool({
         name: 'forms_fill',
@@ -159,7 +157,7 @@ describe('forms_fill', () => {
       }),
     );
     const leaky = makeTestDeps(db, { storageDir, formsDir: badDir });
-    const client = await connectTools('forms-test', formTools, leaky);
+    const client = await connectTools('forms-test', healthcarePack.tools!(leaky), leaky);
     const res = await client.callTool({
       name: 'forms_fill',
       arguments: { template_id: 'leaky', provider_id: providerId },
@@ -174,7 +172,7 @@ describe('forms_fill', () => {
       .insert(records)
       .values({ client: 'other-clinic', pack: 'healthcare', kind: 'provider', name: 'Dr. Elsewhere' })
       .returning();
-    const client = await connectTools('forms-test', formTools, deps);
+    const client = await connectTools('forms-test', healthcarePack.tools!(deps), deps);
     const res = await client.callTool({
       name: 'forms_fill',
       arguments: { template_id: 'state-license-renewal-cover', provider_id: p.id },
@@ -185,7 +183,7 @@ describe('forms_fill', () => {
 
   it('audits a successful fill with the provider id, and no field values anywhere in the row', async () => {
     const providerId = await seedCompleteProvider();
-    const client = await connectTools('forms-test', formTools, deps);
+    const client = await connectTools('forms-test', healthcarePack.tools!(deps), deps);
     await client.callTool({
       name: 'forms_fill',
       arguments: { template_id: 'payer-credentialing-application', provider_id: providerId },
@@ -203,7 +201,7 @@ describe('forms_fill', () => {
   it('audits a refused fill (pending field) as an error, without the field value', async () => {
     const providerId = await seedCompleteProvider();
     await db.update(fields).set({ status: 'pending', confidence: 0.4 }).where(eqField(providerId, 'practice_address'));
-    const client = await connectTools('forms-test', formTools, deps);
+    const client = await connectTools('forms-test', healthcarePack.tools!(deps), deps);
     await client.callTool({
       name: 'forms_fill',
       arguments: { template_id: 'payer-credentialing-application', provider_id: providerId },
@@ -240,7 +238,7 @@ describe('forms_fill', () => {
       }),
     );
     const leaky = makeTestDeps(db, { storageDir, formsDir: badDir });
-    const client = await connectTools('forms-test', formTools, leaky);
+    const client = await connectTools('forms-test', healthcarePack.tools!(leaky), leaky);
     const res = await client.callTool({
       name: 'forms_fill',
       arguments: { template_id: 'leaky-optional', provider_id: providerId },
@@ -259,7 +257,7 @@ describe('forms_roster', () => {
       .insert(records)
       .values({ client: 'test', pack: 'healthcare', kind: 'provider', name: 'Dr. Bo Lin', externalId: '1987654320' })
       .returning();
-    const client = await connectTools('forms-test', formTools, deps);
+    const client = await connectTools('forms-test', healthcarePack.tools!(deps), deps);
     const out = resultOf<{ file_id: string; rows: number; columns: string[] }>(
       await client.callTool({
         name: 'forms_roster',
@@ -277,7 +275,7 @@ describe('forms_roster', () => {
 
   it('reports a licence as on file without exporting the number', async () => {
     const providerId = await seedCompleteProvider();
-    const client = await connectTools('forms-test', formTools, deps);
+    const client = await connectTools('forms-test', healthcarePack.tools!(deps), deps);
     const out = resultOf<{ file_id: string }>(
       await client.callTool({ name: 'forms_roster', arguments: { payer_id: 'aetna', provider_ids: [providerId] } }),
     );
@@ -297,7 +295,7 @@ describe('forms_roster', () => {
       { recordId: p.id, kind: 'license', issuer: 'Texas Medical Board', state: 'TX', expiresAt: '2027-03-31' },
       { recordId: p.id, kind: 'dea', issuer: 'DEA', expiresAt: '2028-02-28' },
     ]);
-    const client = await connectTools('forms-test', formTools, deps);
+    const client = await connectTools('forms-test', healthcarePack.tools!(deps), deps);
     const out = resultOf<{ file_id: string }>(
       await client.callTool({ name: 'forms_roster', arguments: { payer_id: 'aetna', provider_ids: [p.id] } }),
     );
@@ -330,7 +328,7 @@ describe('forms_roster', () => {
       expiresAt: '2028-02-28',
       numberEncrypted: Buffer.from('enc'),
     });
-    const client = await connectTools('forms-test', formTools, deps);
+    const client = await connectTools('forms-test', healthcarePack.tools!(deps), deps);
     const out = resultOf<{ file_id: string }>(
       await client.callTool({ name: 'forms_roster', arguments: { payer_id: 'aetna', provider_ids: [p.id] } }),
     );
@@ -346,7 +344,7 @@ describe('forms_roster', () => {
       .insert(records)
       .values({ client: 'other-clinic', pack: 'healthcare', kind: 'provider', name: 'Dr. Elsewhere' })
       .returning();
-    const client = await connectTools('forms-test', formTools, deps);
+    const client = await connectTools('forms-test', healthcarePack.tools!(deps), deps);
     const res = await client.callTool({
       name: 'forms_roster',
       arguments: { payer_id: 'aetna', provider_ids: [mine, theirs.id] },
@@ -359,7 +357,7 @@ describe('forms_roster', () => {
 describe('forms_release', () => {
   it('parks an approval instead of sending, and stages nothing yet', async () => {
     const providerId = await seedCompleteProvider();
-    const client = await connectTools('forms-test', [...formTools, ...approvalTools], deps);
+    const client = await connectTools('forms-test', [...healthcarePack.tools!(deps), ...approvalTools], deps);
     const filled = resultOf<{ file_id: string }>(
       await client.callTool({
         name: 'forms_fill',
@@ -377,7 +375,7 @@ describe('forms_release', () => {
 
   it('stages exactly one slack_file effect when the approval is executed', async () => {
     const providerId = await seedCompleteProvider();
-    const client = await connectTools('forms-test', [...formTools, ...approvalTools], deps);
+    const client = await connectTools('forms-test', [...healthcarePack.tools!(deps), ...approvalTools], deps);
     const filled = resultOf<{ file_id: string }>(
       await client.callTool({
         name: 'forms_fill',
@@ -406,7 +404,7 @@ describe('forms_release', () => {
       formsDir: healthcarePack.formsDir!,
       policy: { ...deps.policy, external: 'auto' },
     });
-    const client = await connectTools('forms-test', [...formTools, ...approvalTools], strict);
+    const client = await connectTools('forms-test', [...healthcarePack.tools!(strict), ...approvalTools], strict);
     const res = await client.callTool({ name: 'forms_release', arguments: { file_id: '../../etc/passwd' } });
     expect(res.isError).toBe(true);
     expect(await db.select().from(approvals)).toHaveLength(0);
@@ -418,7 +416,7 @@ describe('forms_release', () => {
       formsDir: healthcarePack.formsDir!,
       policy: { ...deps.policy, external: 'auto' },
     });
-    const client = await connectTools('forms-test', [...formTools, ...approvalTools], strict);
+    const client = await connectTools('forms-test', [...healthcarePack.tools!(strict), ...approvalTools], strict);
     const res = await client.callTool({
       name: 'forms_release',
       arguments: { file_id: 'forms/never-written-000000000000.pdf' },

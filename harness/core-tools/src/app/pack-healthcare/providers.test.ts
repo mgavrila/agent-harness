@@ -1,13 +1,13 @@
 import { describe, it, expect } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { fields, attachments, decrypt } from '@harness/db';
+import { pack as healthcarePack } from '@harness/pack-healthcare';
 import { connectTools, makeTestDeps, resultOf, useTestDb } from '../../testing.js';
-import { compatTools } from '../../tools/compat.js';
 
 const db = useTestDb();
 const deps = makeTestDeps(db);
 
-const connectProviders = () => connectTools('providers-test', compatTools(deps), deps);
+const connectProviders = () => connectTools('providers-test', healthcarePack.tools!(deps), deps);
 
 /** `providers_upsert`'s result, which most of these tests read the id out of. */
 interface UpsertResult {
@@ -156,7 +156,7 @@ describe('providers tools', () => {
 
   it('rejects cross-tenant access to a provider by id', async () => {
     const otherDeps = makeTestDeps(db, { client: 'other-clinic' });
-    const otherClient = await connectTools('providers-test-other', compatTools(otherDeps), otherDeps);
+    const otherClient = await connectTools('providers-test-other', healthcarePack.tools!(otherDeps), otherDeps);
     const up = await otherClient.callTool({ name: 'providers_upsert', arguments: upsertArgs });
     const id = resultOf<UpsertResult>(up).provider_id;
 
@@ -242,7 +242,7 @@ describe('providers tools', () => {
 
 describe('approval payload redaction', () => {
   const redactOf = (name: string) => {
-    const tool = compatTools(deps).find((t) => t.name === name)!;
+    const tool = healthcarePack.tools!(deps).find((t) => t.name === name)!;
     if (!tool.redact) throw new Error(`${name} defines no redact`);
     return tool.redact;
   };

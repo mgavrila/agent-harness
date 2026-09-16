@@ -5,9 +5,9 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { PDFDocument, StandardFonts } from 'pdf-lib';
 import { documents, records, fields as fieldsTable, attachments as attachmentsTable } from '@harness/db';
+import { pack as healthcarePack } from '@harness/pack-healthcare';
 import type { ToolDeps } from '../../domain/tooling/types.js';
 import { connectTools, makeTestDeps, resultOf, useTestDb, startFakeGateway, type FakeGateway } from '../../testing.js';
-import { compatTools } from '../../tools/compat.js';
 
 const db = useTestDb();
 let storageDir: string;
@@ -59,7 +59,7 @@ beforeEach(() => {
   deps = makeTestDeps(db, { storageDir });
 });
 
-const connect = () => connectTools('documents-test', compatTools(deps), deps);
+const connect = () => connectTools('documents-test', healthcarePack.tools!(deps), deps);
 
 async function seedProvider(client: Awaited<ReturnType<typeof connect>>): Promise<string> {
   const res = await client.callTool({
@@ -146,7 +146,7 @@ describe('documents_get and documents_list', () => {
     const client = await connect();
     const providerId = await seedProvider(client);
     const otherDeps = makeTestDeps(db, { storageDir, client: 'other' });
-    const other = await connectTools('other-client', compatTools(otherDeps), otherDeps);
+    const other = await connectTools('other-client', healthcarePack.tools!(otherDeps), otherDeps);
     const res = await other.callTool({ name: 'documents_list', arguments: { provider_id: providerId } });
     expect(res.isError).toBe(true);
   });
@@ -169,7 +169,7 @@ describe('documents_classify and documents_extract', () => {
       ...overrides,
     });
     deps = d;
-    return connectTools('documents-pipeline', compatTools(d), d);
+    return connectTools('documents-pipeline', healthcarePack.tools!(d), d);
   }
 
   const EXTRACTION_REPLY = JSON.stringify({

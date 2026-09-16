@@ -74,12 +74,6 @@ export async function openPipeline(opts: OpenPipelineOptions): Promise<PipelineH
     // one would find what a deployment finds, not a stub.
     formsDir: packs.formsDir(),
     restrictedToModel: false,
-    verify: {
-      nppesEnabled: false,
-      nppesBaseUrl: 'http://127.0.0.1:1/api/',
-      stateLicenseEnabled: false,
-      timeoutMs: 5_000,
-    },
     sinks: {},
     context: {},
     tools: new Map(),

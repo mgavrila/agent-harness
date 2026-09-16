@@ -10,7 +10,6 @@ import { DEFAULT_CONFIDENCE_THRESHOLD, type ToolDeps } from '../domain/tooling/t
 import { PACK_KERNEL } from '../domain/packs/kernel.js';
 import { loadPacks } from '../domain/packs/registry.js';
 import { createCoreToolsServer } from '../tools/catalog.js';
-import { NPPES_DEFAULT_BASE_URL } from '../domain/verify/nppes.js';
 
 const run = promisify(execFile);
 
@@ -46,12 +45,6 @@ export async function surfaceDeps(): Promise<ToolDeps> {
     storageDir: '/nonexistent/surface',
     formsDir: '/nonexistent/surface',
     restrictedToModel: false,
-    verify: {
-      nppesEnabled: false,
-      nppesBaseUrl: NPPES_DEFAULT_BASE_URL,
-      stateLicenseEnabled: false,
-      timeoutMs: 1_000,
-    },
     sinks: {},
     context: {},
     tools: new Map(),

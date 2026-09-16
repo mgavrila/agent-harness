@@ -98,6 +98,8 @@ const PROCESS_ENV_IS_FINE = [
   '**/*.test.ts',
   'harness/db/src/**/*.ts',
   '**/drizzle.config.ts',
+  // A pack reads its own configuration; it has no app/ layer for the glob above to match.
+  'packs/*/src/config.ts',
 ];
 
 export default tseslint.config(

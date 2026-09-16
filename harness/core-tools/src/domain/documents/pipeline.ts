@@ -251,6 +251,7 @@ export async function extractDocument(
       // The schema's string, not the prompt's: these are two different fields on the target
       // and today's healthcare pipeline puts different text in each place.
       attachmentsDescription: target.target.attachment_schema_description,
+      attachmentDescriptions: target.target.attachment_descriptions,
     }),
     validate: extractionReplyFor(target.target.attachments_key),
     temperature: 0,

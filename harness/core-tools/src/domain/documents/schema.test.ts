@@ -16,6 +16,7 @@ describe('buildExtractionSchema', () => {
     attachmentKinds: attachments,
     attachmentsKey: target.attachments_key,
     attachmentsDescription: target.attachment_schema_description,
+    attachmentDescriptions: target.attachment_descriptions,
   });
   const props = schema.properties as Record<string, Record<string, unknown>>;
   const fieldProps = props.fields.properties as Record<string, unknown>;

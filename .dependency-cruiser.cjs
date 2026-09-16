@@ -38,6 +38,7 @@ const PACKAGES = [
   { name: 'core-tools', src: 'harness/core-tools/src', severity: 'error' },
   { name: 'approvals', src: 'harness/approvals/src', severity: 'error' },
   { name: 'evals', src: 'evals/src', severity: 'error' },
+  { name: 'pack-healthcare', src: 'packs/healthcare/src', severity: 'error' },
   { name: 'scripts', src: 'scripts/src', severity: 'error' },
 ];
 
@@ -190,9 +191,9 @@ const GLOBAL_RULES = [
   {
     name: 'a-pack-never-imports-core-tools',
     comment:
-      'A pack depends on @harness/pack-api and @harness/shared only. An edge back into core-tools would be a cycle and would make the pack unloadable by anything else.',
+      'A pack depends on @harness/pack-api and @harness/shared only. An edge back into core-tools or @harness/db would be a cycle and would make the pack unloadable by anything else. Its *tests* may reach @harness/core-tools/testing: a test that boots the real kernel against Postgres is not shipped and is not part of the cycle. No pack declares such a dependency today — the five kernel-side healthcare tests live in harness/core-tools/src/app/pack-healthcare — and this exemption is here so the next pack author is not blocked by a false error.',
     severity: 'error',
-    from: { path: '^packs/' },
+    from: { path: '^packs/', pathNot: ['\\.test\\.ts$', '\\.test-helpers\\.ts$'] },
     to: { path: '^(harness|evals|scripts)/', pathNot: ['^harness/pack-api/src/', '^harness/shared/src/'] },
   },
   {

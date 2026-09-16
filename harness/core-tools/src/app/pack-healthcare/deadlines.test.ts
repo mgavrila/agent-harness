@@ -2,13 +2,13 @@ import { randomUUID } from 'node:crypto';
 import { describe, it, expect } from 'vitest';
 import { and, eq } from 'drizzle-orm';
 import { attachments, deadlines } from '@harness/db';
+import { pack as healthcarePack } from '@harness/pack-healthcare';
 import { connectTools, makeTestDeps, resultOf, useTestDb, type TestClient } from '../../testing.js';
-import { compatTools } from '../../tools/compat.js';
 
 const db = useTestDb();
 const deps = makeTestDeps(db, { now: () => new Date('2026-09-15T12:00:00Z') });
 
-const connectDeadlines = () => connectTools('deadlines-test', compatTools(deps), deps);
+const connectDeadlines = () => connectTools('deadlines-test', healthcarePack.tools!(deps), deps);
 
 interface ComputedDeadline {
   credential_id: string;

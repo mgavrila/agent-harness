@@ -66,21 +66,9 @@ export {
   type SinkRegistry,
   type StageEffectInput,
 } from './domain/effects/types.js';
-export { getTemplate, loadManifest, mappingLabel } from './domain/forms/templates.js';
 export { PACK_KERNEL } from './domain/packs/kernel.js';
 export { loadPacks, registryOf } from './domain/packs/registry.js';
 export { type PackRegistry, type ResolvedTarget } from './domain/packs/types.js';
-export { fillTemplatePdf, latestCredential, resolveMappings } from './domain/forms/fill.js';
-export { buildRosterCsv } from './domain/forms/roster.js';
-export {
-  ROSTER_COLUMNS,
-  type FormTemplate,
-  type ProviderData,
-  type ResolvedMapping,
-  type RosterRow,
-  type TemplateManifest,
-  type TemplateMapping,
-} from './domain/forms/types.js';
 export { callModel, callModelJson, gatewayFromEnv, httpGateway } from './domain/models/gateway.js';
 export {
   ROUTES,
@@ -105,9 +93,6 @@ export {
   writeOutFile,
 } from './domain/storage/file-store.js';
 export { type Storage, type WriteFileInput, type WrittenFile } from './domain/storage/types.js';
-export { namesMatch } from './domain/verify/names.js';
-export { NPPES_DEFAULT_BASE_URL, nppesRegistry } from './domain/verify/nppes.js';
-export { type NppesRecord, type VerifyConfig, type VerifyRegistry } from './domain/verify/types.js';
 
 // --- The pack contract ----------------------------------------------------------------------
 export { definePack, type Pack } from '@harness/pack-api';

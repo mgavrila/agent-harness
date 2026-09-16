@@ -34,14 +34,6 @@ export function makeTestDeps(db: Db, overrides: Partial<ToolDeps> = {}): ToolDep
     storageDir: mkdtempSync(path.join(tmpdir(), 'harness-test-storage-')),
     formsDir: TEST_PACKS.formsDir(),
     restrictedToModel: false,
-    verify: {
-      nppesEnabled: true,
-      // Unroutable by default: a test that wants a lookup starts its own stub
-      // and overrides this, so no test can reach the real registry by accident.
-      nppesBaseUrl: 'http://127.0.0.1:1/api/',
-      stateLicenseEnabled: false,
-      timeoutMs: 5_000,
-    },
     sinks: {},
     context: {},
     tools: new Map(),

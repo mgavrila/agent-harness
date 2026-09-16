@@ -1,10 +1,9 @@
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import type { ToolDeps } from '../domain/tooling/types.js';
-import { connectTools, makeTestDeps, resultOf, useTestDb } from '../testing.js';
-import { compatTools } from './compat.js';
-import { verifyTools } from './verify.js';
+import { describe, it, expect, afterEach, beforeAll, beforeEach, afterAll, vi } from 'vitest';
+import { pack as healthcarePack } from '@harness/pack-healthcare';
+import type { ToolDeps } from '../../domain/tooling/types.js';
+import { connectTools, makeTestDeps, resultOf, useTestDb } from '../../testing.js';
 
 const db = useTestDb();
 
@@ -65,14 +64,32 @@ afterAll(async () => {
   await new Promise<void>((r) => registry.close(() => r()));
 });
 
+/**
+ * The registry configuration is the pack's own now, read from the environment when
+ * `healthcarePack.tools(deps)` builds the catalogue. Stubbing the variables is what used to be
+ * `makeTestDeps(db, { verify: … })`; the unroutable default keeps a test that forgets from
+ * reaching the real registry.
+ */
+beforeEach(() => {
+  vi.stubEnv('VERIFY_NPPES_ENABLED', 'true');
+  vi.stubEnv('NPPES_BASE_URL', 'http://127.0.0.1:1/api/');
+  vi.stubEnv('VERIFY_STATE_LICENSE_ENABLED', 'false');
+  vi.stubEnv('VERIFY_TIMEOUT_MS', '5000');
+});
+afterEach(() => vi.unstubAllEnvs());
+
 function deps(overrides: Partial<ToolDeps> = {}): ToolDeps {
-  return makeTestDeps(db, {
-    verify: { nppesEnabled: true, nppesBaseUrl: registryUrl, stateLicenseEnabled: false, timeoutMs: 5_000 },
-    ...overrides,
-  });
+  return makeTestDeps(db, overrides);
 }
 
-const connect = (d: ToolDeps = deps()) => connectTools('verify-test', [...compatTools(d), ...verifyTools], d);
+/**
+ * Point the pack at the stub registry and build its tools. The environment is read inside
+ * `tools(deps)`, so a test that wants a different flag stubs it before calling this.
+ */
+const connect = (d: ToolDeps = deps()) => {
+  vi.stubEnv('NPPES_BASE_URL', registryUrl);
+  return connectTools('verify-test', healthcarePack.tools!(d), d);
+};
 
 interface NppesOut {
   npi: string;
@@ -187,11 +204,8 @@ describe('verify_nppes', () => {
   });
 
   it('refuses when the lookup is switched off for the client', async () => {
-    const client = await connect(
-      deps({
-        verify: { nppesEnabled: false, nppesBaseUrl: registryUrl, stateLicenseEnabled: false, timeoutMs: 5_000 },
-      }),
-    );
+    vi.stubEnv('VERIFY_NPPES_ENABLED', 'false');
+    const client = await connect();
     const res = await client.callTool({ name: 'verify_nppes', arguments: { npi: '1063837144' } });
     expect(res.isError).toBe(true);
     expect(JSON.stringify(res.content)).toMatch(/VERIFY_NPPES_ENABLED/);
@@ -204,7 +218,7 @@ describe('verify_nppes', () => {
       await client.callTool({ name: 'providers_upsert', arguments: { name: 'Jackelyn Kelley', npi: '1063837144' } }),
     );
     const otherDeps = deps({ client: 'other' });
-    const other = await connectTools('other', [...compatTools(otherDeps), ...verifyTools], otherDeps);
+    const other = await connectTools('other', healthcarePack.tools!(otherDeps), otherDeps);
     const res = await other.callTool({
       name: 'verify_nppes',
       arguments: { npi: '1063837144', provider_id: p.provider_id },
@@ -225,9 +239,8 @@ describe('verify_state_license', () => {
   });
 
   it('still reports unsupported when the flag is on, because no board is wired up yet', async () => {
-    const client = await connect(
-      deps({ verify: { nppesEnabled: true, nppesBaseUrl: registryUrl, stateLicenseEnabled: true, timeoutMs: 5_000 } }),
-    );
+    vi.stubEnv('VERIFY_STATE_LICENSE_ENABLED', 'true');
+    const client = await connect();
     const out = resultOf<{ status: string }>(
       await client.callTool({ name: 'verify_state_license', arguments: { state: 'NY', number: 'L1' } }),
     );
