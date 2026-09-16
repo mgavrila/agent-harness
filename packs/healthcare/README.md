@@ -11,6 +11,18 @@ default policy is, and how to make test data.
 | `evals/`                | Case files the `@harness/evals` runner reads.                                                            |
 | `skills/`               | The four credentialing skills, each a `SKILL.md` with Hermes frontmatter plus the harness keys.          |
 
+## How core loads this pack
+
+`src/index.ts` exports `pack`, a `Pack` from `@harness/pack-api`: the document kinds, the
+extraction manifest, absolute paths to `forms/` and `skills/`, and the action-class defaults
+from `policy.yaml`. core-tools imports this module by name at startup, from `HARNESS_PACKS`,
+and reads everything through `deps.packs` — it never imports the pack statically and never
+resolves a path into it.
+
+This package depends on `@harness/pack-api` and `@harness/shared` and on nothing else in the
+workspace. An import of `@harness/core-tools` from here would be a cycle and `pnpm arch` fails
+the build on one.
+
 ## Which numbers reach a model
 
 SSN, EIN and DEA numbers are replaced with placeholders by the redaction pass

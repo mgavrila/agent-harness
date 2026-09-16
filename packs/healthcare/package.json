@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "exports": {
+    ".": "./src/index.ts",
     "./schema": "./schema/provider.json",
     "./generate": "./synthetic/generate.ts"
   },
@@ -14,8 +15,10 @@
     "forms:generate": "tsx forms/generate-templates.ts"
   },
   "dependencies": {
+    "@harness/pack-api": "workspace:*",
     "@harness/shared": "workspace:*",
-    "pdf-lib": "^1.17.1"
+    "pdf-lib": "^1.17.1",
+    "yaml": "^2.9.1"
   },
   "devDependencies": {
     "@types/node": "^26.5.1",
