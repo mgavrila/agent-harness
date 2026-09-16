@@ -190,3 +190,12 @@ pnpm arch          # zero violations: every rule is an error
 pnpm format:check
 pnpm test
 ```
+
+`pnpm lint` must be at zero errors and `pnpm test` runs it first, so an error cannot reach a
+review. The type-aware warnings are the one thing no gate fails on: `pnpm lint:strict` is the
+same run with `--max-warnings=0` and is how you see that backlog. It is 33 warnings today,
+almost all `no-unsafe-*` at JSON boundaries where narrowing `unknown` is the real fix. Do not
+silence one with an inline disable to make the count go down — either narrow the type or leave
+it in the backlog. `require-await` is off in tests, fakes and `testing.ts`, where an `async`
+with nothing to await is what makes the signature match the interface; it stays a warning in
+shipping code.

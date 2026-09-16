@@ -28,14 +28,25 @@ const NO_PROCESS_ENV = {
 };
 
 /**
- * Only a ToolError's message reaches the agent; a plain Error is masked by the kernel and
- * lands in the audit log. A tool that throws a bare Error is therefore telling the caller
- * nothing on purpose, which is almost never what the author meant.
- * `new Error(...)` as a value is untouched; only the `throw` form is restricted.
+ * Only a ToolError's message reaches the agent; anything else is masked by the kernel and
+ * lands in the audit log. A tool that throws one is therefore telling the caller nothing on
+ * purpose, which is almost never what the author meant.
+ *
+ * The selector matches `new <anything ending in Error>`, not just `new Error`: `TypeError`,
+ * `RangeError` and a hand-rolled `ValidationError` are all masked exactly the same way.
+ * `ToolError` and `ModelOutputError` are the two exemptions, because `ModelOutputError`
+ * extends `ToolError` and its message reaches the agent too. `new Error(...)` as a *value* is
+ * untouched; only the `throw` form is restricted.
+ *
+ * KNOWN GAP: `const e = new Error(...); throw e;` is not caught. Matching `throw <identifier>`
+ * would also flag every legitimate re-throw of a caught `ToolError`, which is a false positive
+ * on correct code, so the indirect spelling is left to review. There are none in `tools/`
+ * today.
  */
 const NO_BARE_THROW = {
-  selector: 'ThrowStatement > NewExpression[callee.name="Error"]',
-  message: 'tools/ throws ToolError for an expected failure. A bare Error is masked and the caller learns nothing.',
+  selector:
+    'ThrowStatement > NewExpression[callee.name=/Error$/][callee.name!="ToolError"][callee.name!="ModelOutputError"]',
+  message: 'tools/ throws ToolError for an expected failure. Any other Error is masked and the caller learns nothing.',
 };
 
 /** True for the two spellings of a disabled rule, bare or at the head of an options array. */
@@ -174,6 +185,18 @@ export default tseslint.config(
     files: ['**/src/tools/**/*.ts'],
     ignores: ['**/*.test.ts'],
     rules: { 'no-restricted-syntax': ['error', NO_PROCESS_ENV, NO_BARE_THROW] },
+  },
+
+  // require-await is a false positive by construction in a fake and in a test. A fake
+  // implements an interface whose methods return a Promise, so `async` is what makes the
+  // signature match — `FakeSlack.postMessage` has nothing to await and must still be awaitable
+  // by the code under test. A test declares the same kind of stub inline. Satisfying the rule
+  // there means writing `Promise.resolve(...)` by hand, which is noise in place of a warning.
+  // Everywhere else it stays a warning and means what it says: an `async` that awaits nothing
+  // in shipping code is usually a signature nobody checked.
+  {
+    files: ['**/*.test.ts', '**/fake.ts', '**/fakes/**/*.ts', '**/testing.ts'],
+    rules: { '@typescript-eslint/require-await': 'off' },
   },
 
   // Config files legitimately default-export, and are not in any package's tsconfig `include`

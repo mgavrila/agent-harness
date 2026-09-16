@@ -155,6 +155,14 @@ const GLOBAL_RULES = [
     to: { path: '^packs/[^/]+/', dependencyTypesNot: ['dynamic-import'] },
   },
   {
+    name: 'no-unresolvable-workspace-import',
+    comment:
+      'An import the resolver cannot follow matches no other rule in this file, so a deep cross-package import written as a bare specifier (@harness/core-tools/src/domain/x.js) would pass every layer rule in silence. This catches it. Scoped to specifiers starting with `@harness/` or a relative `./` or `../`, deliberately: six third-party specifiers are unresolvable here for reasons that have nothing to do with the architecture (zod/v4, vitest and the @modelcontextprotocol subpaths resolve through export maps depcruise does not follow), and a rule that failed on those would have to be switched off rather than fixed. tsc --noEmit catches these too; this is the gate that says so at the architecture layer.',
+    severity: 'error',
+    from: {},
+    to: { couldNotResolve: true, path: '^(@harness/|[.][.]?/)' },
+  },
+  {
     name: 'no-orphans',
     comment:
       'A module nothing imports and that is not an entrypoint is dead. Entrypoints, configs and declaration files are exempt.',

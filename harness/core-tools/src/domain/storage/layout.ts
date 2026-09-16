@@ -1,10 +1,6 @@
 import { createHash } from 'node:crypto';
 import path from 'node:path';
-import { ConfigError, optionalEnv, realOrNearestAncestor } from '@harness/shared';
-
-// Re-exported for @harness/approvals' Slack file sink, which checks containment again as
-// defence in depth. Task 9 points it at the public API and this line goes.
-export { realOrNearestAncestor };
+import { ConfigError, optionalEnv } from '@harness/shared';
 
 /**
  * Root of the harness file store. There is no default: a deployment that has
