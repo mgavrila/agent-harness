@@ -61,5 +61,5 @@ export {
   type WriteOutFileInput,
   type WrittenFile,
 } from './kernel.js';
-export { type PackEvals } from './evals.js';
+export { type EvalReadback, type PackEvals } from './evals.js';
 export { definePack, type Pack } from './pack.js';

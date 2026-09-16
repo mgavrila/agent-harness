@@ -71,6 +71,7 @@ export const pack = definePack({
       'malpractice_coverage',
     ],
     generate: '@harness/pack-healthcare/generate',
+    readback: { tool: 'providers_get', recordIdKey: 'provider_id', attachmentsKey: 'credentials' },
   },
   replaces: HEALTHCARE_REPLACES,
   tools: healthcareTools,
