@@ -30,6 +30,20 @@ export function definePack(pack: Pack): Pack {
     }
   }
 
+  // `documentKinds` and `extraction.document_kinds` are two hands describing the same list: the
+  // first is what `documents_classify` may return and `documents_ingest` may be told, the second
+  // is what the extraction manifest was built to cover. A pack that lets them drift would
+  // classify a document its own manifest never mentions, or advertise coverage its extraction
+  // step cannot reach — so they must name the same kinds in the same order.
+  if (
+    pack.documentKinds.length !== pack.extraction.document_kinds.length ||
+    pack.documentKinds.some((kind, i) => kind !== pack.extraction.document_kinds[i])
+  ) {
+    throw new ConfigError(
+      `pack "${pack.name}" documentKinds [${pack.documentKinds.join(', ')}] does not match extraction.document_kinds [${pack.extraction.document_kinds.join(', ')}]`,
+    );
+  }
+
   // Every extraction target must name a record kind this pack declares, or an extraction would
   // resolve to a kind the kernel cannot store.
   const recordKinds = new Set(pack.records.map((r) => r.kind));

@@ -29,6 +29,14 @@ describe('defineRecordKind', () => {
     expect(() => defineRecordKind({ ...epic, kind: 'Epic' })).toThrow(/record kind "Epic"/);
   });
 
+  it('refuses a kind with no label', () => {
+    expect(() => defineRecordKind({ ...epic, label: '  ' })).toThrow(/record kind "epic" has no label/);
+  });
+
+  it('refuses a kind with no fields', () => {
+    expect(() => defineRecordKind({ ...epic, fields: [] })).toThrow(/record kind "epic" declares no fields/);
+  });
+
   it('refuses nameFields that are empty or name a field the kind does not declare', () => {
     expect(() => defineRecordKind({ ...epic, nameFields: [] })).toThrow(/declares no nameFields/);
     expect(() => defineRecordKind({ ...epic, nameFields: ['headline'] })).toThrow(
@@ -58,6 +66,14 @@ describe('defineAttachmentKind', () => {
 
   it('returns the spec unchanged when it is well formed', () => {
     expect(defineAttachmentKind(link)).toBe(link);
+  });
+
+  it('refuses a kind that is not a lowercase identifier, because it is a column value', () => {
+    expect(() => defineAttachmentKind({ ...link, kind: 'Source-Link' })).toThrow(/attachment kind "Source-Link"/);
+  });
+
+  it('refuses a kind with no label', () => {
+    expect(() => defineAttachmentKind({ ...link, label: '  ' })).toThrow(/attachment kind "source_link" has no label/);
   });
 
   it('refuses a negative lead time; zero means "no renewal deadline"', () => {

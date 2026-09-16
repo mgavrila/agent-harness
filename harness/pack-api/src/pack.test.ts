@@ -48,9 +48,27 @@ describe('definePack', () => {
     expect(() => definePack({ ...base, documentKinds: [] })).toThrow(/declares no document kinds/);
   });
 
+  it('refuses a pack with no record kinds', () => {
+    expect(() => definePack({ ...base, records: [] })).toThrow(/declares no record kinds/);
+  });
+
   it('accepts a pack with no forms directory, because not every area fills forms', () => {
     const { formsDir: _dropped, ...noForms } = base;
     expect(definePack(noForms).formsDir).toBeUndefined();
+  });
+
+  it('refuses documentKinds that name a kind extraction.document_kinds does not', () => {
+    const extra = { ...base, documentKinds: ['other', 'w9'] };
+    expect(() => definePack(extra)).toThrow(
+      /documentKinds \[other, w9\] does not match extraction\.document_kinds \[other\]/,
+    );
+  });
+
+  it('refuses extraction.document_kinds that name a kind documentKinds does not', () => {
+    const extra = { ...base, extraction: { ...base.extraction, document_kinds: ['other', 'w9'] } };
+    expect(() => definePack(extra)).toThrow(
+      /documentKinds \[other\] does not match extraction\.document_kinds \[other, w9\]/,
+    );
   });
 
   it('refuses an extraction target naming a record kind the pack does not declare', () => {
