@@ -138,9 +138,10 @@ with, so here is the reasoning.
   threaded in. The interface exists either way, so a second implementation is a new function
   beside the old one and not a change to this type.
 - **The fake lives beside the interface, not in the deps bag.** `FakeGateway`
-  (`domain/models/fake.ts`) implements `ModelGateway` next to the interface it satisfies and is
-  reachable from `./testing`. A test that wants a scripted model swaps the adapter at the call
-  site; it does not assemble one to hand to `makeTestDeps`.
+  (`domain/models/fake.ts`) is a loopback HTTP server with a scripted responder, kept next to
+  the interface and reachable from `./testing`. A test that wants a scripted model points
+  `GatewayConfig.baseUrl` at the fake's URL; it does not assemble an adapter to hand to
+  `makeTestDeps`.
 - **A test overrides a value, not an object.** This is the practical reason. Pointing a suite at
   `startFakeGateway`'s loopback URL is one field, and every test that only cares about a
   timeout or a storage root stays a one-line override. Threading the three interfaces through

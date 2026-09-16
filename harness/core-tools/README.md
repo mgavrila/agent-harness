@@ -30,10 +30,10 @@ consumer that imported it would inherit both.
 ## Configuration
 
 `src/app/server.ts` is the composition root and reads almost everything, through a helper in
-`@harness/shared` so no variable is validated more loosely than its neighbour. A domain that
-owns a default reads its own variable the same way, as a default parameter a caller can
-override: `storageRoot` (`HARNESS_STORAGE_DIR`), `loadPolicy` (`HARNESS_POLICY_FILE`) and
-`gatewayFromEnv` (`LITELLM_MASTER_KEY`).
+`@harness/shared` so no variable is validated more loosely than its neighbour. Two domains
+read their own variable the same way, as a default parameter a caller can override:
+`storageRoot` (`HARNESS_STORAGE_DIR`) and `loadPolicy` (`HARNESS_POLICY_FILE`). The third
+reader, `gatewayFromEnv`, takes no parameter and is the exception described next.
 
 **`gatewayFromEnv` in `src/domain/models/gateway.ts` is the documented exception**, and it is
 the only one in the workspace. Three more variables — `HARNESS_GATEWAY_URL`,

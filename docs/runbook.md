@@ -163,9 +163,10 @@ The approvals app drains the outbox. `startRunner`
 `EFFECTS_DISPATCH_SECONDS` seconds (default 5) that calls
 `dispatchStagedEffects` over the `slack_message` and `slack_file` sinks
 `main.ts` registers. Each tick is guarded against overlapping itself, and a
-failure is logged and swallowed, so a Slack outage parks nothing — the next
-tick retries. A backlog of `staged` rows between ticks is normal and does not
-fail `/healthz`.
+failure is logged and swallowed, so a Slack outage never crashes the loop: the
+next tick retries each effect until `maxAttempts` (default 3) is reached, after
+which the effect is marked `failed` and waits for a human, as described above.
+A backlog of `staged` rows between ticks is normal and does not fail `/healthz`.
 
 A dispatch that never reported back is caught by the app's third loop, which
 runs every `RECONCILE_SECONDS` seconds (default 300) and calls
