@@ -9,6 +9,11 @@
 # Every variable below is interpolated from the repository-root `.env`, so run
 # these through the `pnpm` scripts, which pass `--env-file .env`. Compose's own
 # default is `.env` beside this file, where there is none.
+# The project name is fixed here so containers, networks and volumes do not
+# take their name from the checkout directory (two checkouts would otherwise
+# share one Postgres). Override per instance with COMPOSE_PROJECT_NAME or -p.
+name: agent-harness
+
 services:
   postgres:
     image: postgres:16
