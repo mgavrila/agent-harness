@@ -1,4 +1,4 @@
-import type { ProviderManifest } from './manifest.js';
+import type { AttachmentKindSpec, ExtractionManifest, RecordKindSpec } from './manifest.js';
 import type { ExtractedCredential, ExtractedField, ParsedExtraction } from './types.js';
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -29,14 +29,19 @@ function textOrUndefined(value: unknown): string | undefined {
  *   would have nothing to do with it, and a credential row with no dates is
  *   noise a human then has to clear.
  */
-export function parseExtraction(raw: unknown, manifest: ProviderManifest): ParsedExtraction {
+export function parseExtraction(
+  raw: unknown,
+  manifest: ExtractionManifest,
+  kind: RecordKindSpec,
+  attachments: AttachmentKindSpec[],
+): ParsedExtraction {
   if (typeof raw !== 'object' || raw === null) throw new Error('extraction reply is not an object');
   const reply = raw as Record<string, unknown>;
   if (typeof reply.document_kind !== 'string') throw new Error('extraction reply has no document_kind');
 
   const documentKind = manifest.document_kinds.includes(reply.document_kind) ? reply.document_kind : 'other';
 
-  const allowed = new Map(manifest.fields.filter((f) => f.source === 'model').map((f) => [f.name, f]));
+  const allowed = new Map(kind.fields.filter((f) => f.source === 'model').map((f) => [f.name, f]));
   const rawFields = (typeof reply.fields === 'object' && reply.fields !== null ? reply.fields : {}) as Record<
     string,
     unknown
@@ -58,13 +63,13 @@ export function parseExtraction(raw: unknown, manifest: ProviderManifest): Parse
   }
   fields.sort((a, b) => a.name.localeCompare(b.name));
 
-  const kinds = new Set(manifest.credentials.map((c) => c.kind));
+  const kinds = new Set<string>(attachments.map((a) => a.kind));
   const rawCredentials = Array.isArray(reply.credentials) ? reply.credentials : [];
   const credentials: ExtractedCredential[] = [];
   for (const entry of rawCredentials) {
     if (typeof entry !== 'object' || entry === null) continue;
     const c = entry as Record<string, unknown>;
-    if (typeof c.kind !== 'string' || !kinds.has(c.kind as ExtractedCredential['kind'])) continue;
+    if (typeof c.kind !== 'string' || !kinds.has(c.kind)) continue;
     const issuedAt = textOrUndefined(c.issued_at);
     const expiresAt = textOrUndefined(c.expires_at);
     if (expiresAt === undefined || !ISO_DATE.test(expiresAt)) continue;

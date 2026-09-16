@@ -9,9 +9,10 @@ import { createCoreToolsServer } from '../tools/catalog.js';
 const db = useTestDb();
 
 /**
- * `Pack.tools` types its argument `unknown` because a pack cannot see `ToolDeps` (see
- * `pack-api/src/pack.ts`) — so this tool's handler, like any real pack's, takes no typed
- * `deps` at all. `createCoreToolsServer` is documented to hand the callback core's actual
+ * `Pack.tools` types its argument `PackToolDeps`, the structural view of `ToolDeps` a pack can
+ * see without importing core-tools (see `pack-api/src/kernel.ts`) — so this tool's handler,
+ * like any real pack's, takes no typed `deps` at all and this fixture widens the parameter to
+ * `unknown` to record whatever arrives. `createCoreToolsServer` is documented to hand the callback core's actual
  * dependency bag — the same object every core tool's handler runs against, not the
  * `PackRegistry` that an earlier version of `catalog.ts` passed by mistake. This pack records
  * whatever it is given so the test can assert on it directly.

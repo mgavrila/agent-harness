@@ -1,87 +1,123 @@
 {
-  "$comment": "Extraction manifest for the healthcare credentialing pack. This is NOT a JSON Schema: buildExtractionSchema() in harness/core-tools/src/domain/documents/schema.ts expands it into the inlined JSON Schema sent to the model as response_format. A manifest is used because structured-output support across providers is unreliable with $ref and $defs, and because restricted fields must be dropped from the model-facing schema while staying part of the record.",
+  "$comment": "The healthcare credentialing pack's declaration. This is NOT a JSON Schema: buildExtractionSchema() in harness/core-tools/src/domain/documents/schema.ts expands the target record kind's fields into the inlined JSON Schema sent to the model as response_format. A manifest is used because structured-output support across model vendors is unreliable with $ref and $defs, and because restricted fields must be dropped from the model-facing schema while staying part of the record.",
   "version": "1.0.0",
-  "fields": [
+  "records": [
     {
-      "name": "first_name",
-      "type": "string",
-      "description": "The provider's legal given name, as printed on the document."
-    },
-    { "name": "middle_name", "type": "string", "description": "Middle name or initial, if printed." },
-    { "name": "last_name", "type": "string", "description": "The provider's legal family name." },
-    {
-      "name": "suffix",
-      "type": "string",
-      "description": "Generational or degree suffix printed after the name, such as MD, DO or Jr."
-    },
-    {
-      "name": "npi",
-      "type": "string",
-      "description": "Ten-digit National Provider Identifier. Digits only, no spaces."
-    },
-    { "name": "date_of_birth", "type": "string", "description": "Date of birth in YYYY-MM-DD form." },
-    { "name": "email", "type": "string", "description": "Contact email address." },
-    { "name": "phone", "type": "string", "description": "Contact telephone number as printed." },
-    { "name": "practice_name", "type": "string", "description": "Name of the practice, group or employer." },
-    { "name": "practice_address", "type": "string", "description": "Street address of the practice, on one line." },
-    { "name": "specialty", "type": "string", "description": "Primary clinical specialty." },
-    { "name": "medical_school", "type": "string", "description": "Degree-granting medical school." },
-    { "name": "graduation_year", "type": "string", "description": "Four-digit year of graduation." },
-    { "name": "malpractice_carrier", "type": "string", "description": "Name of the malpractice insurance carrier." },
-    {
-      "name": "malpractice_coverage",
-      "type": "string",
-      "description": "Per-occurrence and aggregate coverage as printed, e.g. $1,000,000 / $3,000,000."
-    },
-
-    {
-      "name": "ssn",
-      "type": "string",
-      "restricted": true,
-      "source": "redaction",
-      "description": "Social Security Number. Never requested from a model; filled from the redaction pass."
-    },
-    {
-      "name": "ein",
-      "type": "string",
-      "restricted": true,
-      "source": "redaction",
-      "description": "Employer Identification Number. Never requested from a model; filled from the redaction pass."
-    },
-    {
-      "name": "dea_number",
-      "type": "string",
-      "restricted": true,
-      "source": "redaction",
-      "description": "DEA registration number. Never requested from a model; filled from the redaction pass."
+      "kind": "provider",
+      "label": "Provider",
+      "nameFields": ["first_name", "middle_name", "last_name"],
+      "externalId": { "field": "npi", "digitsOnly": true, "length": 10 },
+      "genericTools": false,
+      "missingNameError": "extraction found no provider name; pass provider_id to attach this document to a known provider",
+      "fields": [
+        {
+          "name": "first_name",
+          "type": "string",
+          "description": "The provider's legal given name, as printed on the document."
+        },
+        { "name": "middle_name", "type": "string", "description": "Middle name or initial, if printed." },
+        { "name": "last_name", "type": "string", "description": "The provider's legal family name." },
+        {
+          "name": "suffix",
+          "type": "string",
+          "description": "Generational or degree suffix printed after the name, such as MD, DO or Jr."
+        },
+        {
+          "name": "npi",
+          "type": "string",
+          "description": "Ten-digit National Provider Identifier. Digits only, no spaces."
+        },
+        { "name": "date_of_birth", "type": "string", "description": "Date of birth in YYYY-MM-DD form." },
+        { "name": "email", "type": "string", "description": "Contact email address." },
+        { "name": "phone", "type": "string", "description": "Contact telephone number as printed." },
+        { "name": "practice_name", "type": "string", "description": "Name of the practice, group or employer." },
+        {
+          "name": "practice_address",
+          "type": "string",
+          "description": "Street address of the practice, on one line."
+        },
+        { "name": "specialty", "type": "string", "description": "Primary clinical specialty." },
+        { "name": "medical_school", "type": "string", "description": "Degree-granting medical school." },
+        { "name": "graduation_year", "type": "string", "description": "Four-digit year of graduation." },
+        {
+          "name": "malpractice_carrier",
+          "type": "string",
+          "description": "Name of the malpractice insurance carrier."
+        },
+        {
+          "name": "malpractice_coverage",
+          "type": "string",
+          "description": "Per-occurrence and aggregate coverage as printed, e.g. $1,000,000 / $3,000,000."
+        },
+        {
+          "name": "ssn",
+          "type": "string",
+          "restricted": true,
+          "source": "redaction",
+          "description": "Social Security Number. Never requested from a model; filled from the redaction pass."
+        },
+        {
+          "name": "ein",
+          "type": "string",
+          "restricted": true,
+          "source": "redaction",
+          "description": "Employer Identification Number. Never requested from a model; filled from the redaction pass."
+        },
+        {
+          "name": "dea_number",
+          "type": "string",
+          "restricted": true,
+          "source": "redaction",
+          "description": "DEA registration number. Never requested from a model; filled from the redaction pass."
+        }
+      ]
     }
   ],
-  "$comment_credential_numbers": "What is and is not kept from the model. SSN, EIN and DEA numbers are found by the regex pass in harness/core-tools/src/shared/redaction/ and replaced with placeholders BEFORE the document text is put in a prompt, so those three never reach a model. Licence, registration and policy numbers are NOT redacted: redacting every nine-digit string would blank the fields this pipeline exists to read, so they stay in the document text the model sees. They are simply never asked for as fields and never extracted, which is why `number_restricted` below is reserved and currently read by nothing: no code path fills credentials.number from a document, so credentials.number_encrypted is always null from extraction. A number stored through providers_upsert by some other caller is still encrypted and masked on the way out.",
-  "credentials": [
+  "$comment_credential_numbers": "What is and is not kept from the model. SSN, EIN and DEA numbers are found by the regex pass in harness/core-tools/src/shared/redaction/ and replaced with placeholders BEFORE the document text is put in a prompt, so those three never reach a model. Licence, registration and policy numbers are NOT redacted: redacting every nine-digit string would blank the fields this pipeline exists to read, so they stay in the document text the model sees. They are simply never asked for as fields and never extracted, which is why numberRestricted below is reserved and currently read by nothing: no code path fills an attachment number from a document, so attachments.number_encrypted is always null from extraction. A number stored through providers_upsert by some other caller is still encrypted and masked on the way out.",
+  "attachments": [
     {
       "kind": "license",
-      "description": "A state medical licence.",
-      "number_restricted": true,
+      "label": "State medical licence",
+      "leadDays": 90,
+      "numberRestricted": true,
       "properties": ["state", "issuer", "issued_at", "expires_at"]
     },
     {
       "kind": "dea",
-      "description": "A DEA controlled-substance registration.",
-      "number_restricted": true,
+      "label": "DEA registration",
+      "leadDays": 90,
+      "numberRestricted": true,
       "properties": ["state", "issuer", "issued_at", "expires_at"]
     },
     {
       "kind": "malpractice",
-      "description": "A malpractice insurance certificate.",
-      "number_restricted": true,
+      "label": "Malpractice certificate",
+      "leadDays": 60,
+      "numberRestricted": true,
       "properties": ["issuer", "issued_at", "expires_at"]
     },
     {
       "kind": "board_cert",
-      "description": "A specialty board certification.",
-      "number_restricted": true,
+      "label": "Board certification",
+      "leadDays": 120,
+      "numberRestricted": true,
       "properties": ["issuer", "issued_at", "expires_at"]
     }
   ],
-  "document_kinds": ["state_license", "dea_certificate", "malpractice_certificate", "w9", "other"]
+  "extraction": {
+    "version": "1.0.0",
+    "document_kinds": ["state_license", "dea_certificate", "malpractice_certificate", "w9", "other"],
+    "role": "You read credentialing documents for a medical practice and return structured data.",
+    "targets": [
+      {
+        "document_kinds": ["*"],
+        "record_kind": "provider",
+        "schema_name": "provider_extraction",
+        "attachments_key": "credentials",
+        "instruction": "Extract the provider details this document evidences.",
+        "attachment_instruction": "Also list every credential the document evidences (state licence, DEA registration,\nmalpractice policy, board certification) with its issuer, state and dates.\nDo not report any registration, policy or licence NUMBER: this pipeline does not extract them.",
+        "attachment_schema_description": "Credentials this document evidences. The registration, licence or policy number is deliberately NOT part of this schema and is not extracted at all: report only the kind, issuer, state and dates."
+      }
+    ]
+  }
 }

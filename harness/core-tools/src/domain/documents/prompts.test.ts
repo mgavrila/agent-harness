@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { pack as healthcarePack } from '@harness/pack-healthcare';
-import { parseManifest } from './manifest.js';
+import { parseRecordKindSpec } from './manifest.js';
 import {
   DATA_BLOCK_SYSTEM_PROMPT,
   buildClassificationMessages,
@@ -8,7 +8,7 @@ import {
   wrapDocument,
 } from './prompts.js';
 
-const manifest = parseManifest(healthcarePack.extraction);
+const provider = parseRecordKindSpec(healthcarePack.records[0]);
 
 describe('wrapDocument and the prompts', () => {
   const pages = [
@@ -29,7 +29,7 @@ describe('wrapDocument and the prompts', () => {
   });
 
   it('puts the document in the user turn and the rule in the system turn', () => {
-    const messages = buildExtractionMessages(pages, manifest);
+    const messages = buildExtractionMessages(pages, provider);
     expect(messages[0].role).toBe('system');
     expect(messages[0].content).toBe(DATA_BLOCK_SYSTEM_PROMPT);
     expect(messages.at(-1)!.role).toBe('user');

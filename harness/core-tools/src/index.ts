@@ -55,7 +55,12 @@ export {
   type UrgencyBucket,
 } from './domain/deadlines/compute.js';
 export { type ExtractedText, type PageText, type ParsedExtraction } from './domain/documents/types.js';
-export { parseManifest, type ProviderManifest } from './domain/documents/manifest.js';
+export {
+  parseAttachmentKindSpec,
+  parseExtractionManifest,
+  parseRecordKindSpec,
+  type ExtractionManifest,
+} from './domain/documents/manifest.js';
 export { dispatchStagedEffects, stageEffect } from './domain/effects/outbox.js';
 export {
   type DispatchOptions,

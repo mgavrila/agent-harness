@@ -12,7 +12,10 @@ describe('FREE_TEXT_FIELDS', () => {
     // Read from the pack's own manifest rather than a repository path: the pack
     // is the source of what it declares restricted, and a test that reaches for
     // packs/healthcare/schema/provider.json by path asserts against a copy.
-    const restricted = healthcarePack.extraction.fields.filter((f) => f.restricted === true).map((f) => f.name);
+    const restricted = healthcarePack.records
+      .flatMap((r) => r.fields)
+      .filter((f) => f.restricted === true)
+      .map((f) => f.name);
     expect(restricted.length).toBeGreaterThan(0);
     for (const field of FREE_TEXT_FIELDS) expect(restricted).not.toContain(field);
   });

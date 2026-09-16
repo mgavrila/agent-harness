@@ -198,18 +198,21 @@ export async function extractDocument(deps: ToolDeps, args: { document_id: strin
   // attach to, rename, or duplicate a different provider of this client.
   const named = provider_id ? await requireProvider(deps, provider_id) : undefined;
   const manifest = deps.packs.manifest();
+  // The bridge Task 3 replaces with `deps.packs.targetFor(...)`: one pack, one record kind.
+  const recordKind = deps.packs.recordKinds()[0];
+  const attachmentKinds = deps.packs.attachmentKinds();
   const { abs, promptPages, redacted, hits, ocrUsed } = await readForModel(deps, row);
 
-  const messages = buildExtractionMessages(promptPages, manifest);
+  const messages = buildExtractionMessages(promptPages, recordKind);
   assertPromptRedacted(deps, messages);
   const { json } = await callModelJson(deps, {
     route: 'extract',
     messages,
-    jsonSchema: buildExtractionSchema(manifest),
+    jsonSchema: buildExtractionSchema(manifest, recordKind, attachmentKinds),
     validate: ExtractionReply,
     temperature: 0,
   });
-  const parsed = parseExtraction(json, manifest);
+  const parsed = parseExtraction(json, manifest, recordKind, attachmentKinds);
 
   const byName = new Map(parsed.fields.map((f) => [f.name, f]));
   const name =

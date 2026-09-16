@@ -1,4 +1,4 @@
-import type { Pack, ProviderManifest } from '@harness/pack-api';
+import type { AttachmentKindSpec, ExtractionManifest, Pack, RecordKindSpec } from '@harness/pack-api';
 
 /**
  * The loaded packs, as the rest of core-tools sees them. It hangs off `ToolDeps.packs`, so a
@@ -19,8 +19,12 @@ export interface PackRegistry {
   byName(name: string): Pack;
   /** Every document kind any loaded pack declares, deduplicated, first-pack order first. */
   documentKinds(): string[];
+  /** Every record kind any loaded pack declares, parsed, in load order. */
+  recordKinds(): RecordKindSpec[];
+  /** Every attachment kind any loaded pack declares, parsed, in load order. */
+  attachmentKinds(): AttachmentKindSpec[];
   /** The first pack's extraction manifest. */
-  manifest(): ProviderManifest;
+  manifest(): ExtractionManifest;
   /** The first pack's forms directory. `HARNESS_FORMS_DIR` overrides it in `app/server.ts`. */
   formsDir(): string;
   /** One skills directory per loaded pack, in order. */

@@ -138,7 +138,7 @@ describe('forms_fill', () => {
     const providerId = await seedCompleteProvider();
     const badDir = await mkdtemp(path.join(tmpdir(), 'harness-badforms-'));
     await copyFile(
-      path.join(healthcarePack.formsDir, 'state-license-renewal-cover.pdf'),
+      path.join(healthcarePack.formsDir!, 'state-license-renewal-cover.pdf'),
       path.join(badDir, 'state-license-renewal-cover.pdf'),
     );
     await writeFile(
@@ -213,7 +213,7 @@ describe('forms_fill', () => {
     const providerId = await seedCompleteProvider();
     const badDir = await mkdtemp(path.join(tmpdir(), 'harness-badforms-optional-'));
     await copyFile(
-      path.join(healthcarePack.formsDir, 'state-license-renewal-cover.pdf'),
+      path.join(healthcarePack.formsDir!, 'state-license-renewal-cover.pdf'),
       path.join(badDir, 'state-license-renewal-cover.pdf'),
     );
     await writeFile(
@@ -388,7 +388,7 @@ describe('forms_release', () => {
   it('refuses a file id that escapes the output directory', async () => {
     const strict = makeTestDeps(db, {
       storageDir,
-      formsDir: healthcarePack.formsDir,
+      formsDir: healthcarePack.formsDir!,
       policy: { ...deps.policy, external: 'auto' },
     });
     const client = await connectTools('forms-test', [...formTools, ...approvalTools], strict);
@@ -400,7 +400,7 @@ describe('forms_release', () => {
   it('refuses a file id that does not exist', async () => {
     const strict = makeTestDeps(db, {
       storageDir,
-      formsDir: healthcarePack.formsDir,
+      formsDir: healthcarePack.formsDir!,
       policy: { ...deps.policy, external: 'auto' },
     });
     const client = await connectTools('forms-test', [...formTools, ...approvalTools], strict);

@@ -6,7 +6,8 @@ import { pack as healthcarePack } from '@harness/pack-healthcare';
 import { isRestrictedName } from '../../shared/redaction/names.js';
 import { loadManifest, getTemplate, mappingLabel } from './templates.js';
 
-const dir = healthcarePack.formsDir;
+// `Pack.formsDir` is optional on the contract; this pack ships one.
+const dir = healthcarePack.formsDir!;
 
 describe('form template manifest', () => {
   it('parses and names two demo templates', async () => {

@@ -1,12 +1,14 @@
 import { describe, it, expect } from 'vitest';
 import { pack as healthcarePack } from '@harness/pack-healthcare';
-import { parseManifest } from './manifest.js';
+import { parseAttachmentKindSpec, parseRecordKindSpec } from './manifest.js';
 import { buildClassificationSchema, buildExtractionSchema } from './schema.js';
 
-const manifest = parseManifest(healthcarePack.extraction);
+const manifest = healthcarePack.extraction;
+const provider = parseRecordKindSpec(healthcarePack.records[0]);
+const attachments = (healthcarePack.attachments ?? []).map((a) => parseAttachmentKindSpec(a));
 
 describe('buildExtractionSchema', () => {
-  const { name, schema } = buildExtractionSchema(manifest);
+  const { name, schema } = buildExtractionSchema(manifest, provider, attachments);
   const props = schema.properties as Record<string, Record<string, unknown>>;
   const fieldProps = props.fields.properties as Record<string, unknown>;
 

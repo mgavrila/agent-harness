@@ -7,7 +7,7 @@ import { fillTemplatePdf } from './fill.js';
 
 describe('fillTemplatePdf', () => {
   it('writes the given values into the named fields, leaving an unmapped field blank', async () => {
-    const templateBytes = await readFile(path.join(healthcarePack.formsDir, 'payer-credentialing-application.pdf'));
+    const templateBytes = await readFile(path.join(healthcarePack.formsDir!, 'payer-credentialing-application.pdf'));
     const values = [
       { pdf_field: 'provider_full_name', value: 'Dr. Ada Reyes' },
       { pdf_field: 'provider_npi', value: '1234567893' },
@@ -31,7 +31,7 @@ describe('fillTemplatePdf', () => {
   });
 
   it('flattens by default, leaving no fillable fields behind', async () => {
-    const templateBytes = await readFile(path.join(healthcarePack.formsDir, 'payer-credentialing-application.pdf'));
+    const templateBytes = await readFile(path.join(healthcarePack.formsDir!, 'payer-credentialing-application.pdf'));
     const filled = await fillTemplatePdf(templateBytes, [{ pdf_field: 'provider_full_name', value: 'Dr. Ada Reyes' }]);
     const doc = await PDFDocument.load(filled);
     expect(doc.getForm().getFields()).toHaveLength(0);

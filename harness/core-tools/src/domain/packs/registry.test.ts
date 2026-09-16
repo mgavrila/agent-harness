@@ -95,8 +95,29 @@ describe('loadPacks failure modes', () => {
       export const pack = definePack({
         name: 'broken',
         version: '1.0.0',
+        records: [
+          {
+            kind: 'provider',
+            label: 'Provider',
+            fields: [{ name: 'last_name', type: 'string', description: 'x', restricted: false, source: 'model' }],
+            nameFields: ['last_name'],
+          },
+        ],
         documentKinds: ['other'],
-        extraction: { document_kinds: ['other'], fields: [], credentials: [] },
+        extraction: {
+          version: '1.0.0',
+          document_kinds: ['other'],
+          role: 'You read documents.',
+          targets: [
+            {
+              document_kinds: ['*'],
+              record_kind: 'provider',
+              schema_name: 'provider_extraction',
+              attachments_key: 'credentials',
+              instruction: 'Extract.',
+            },
+          ],
+        },
         formsDir: 'relative/forms',
         skillsDir: '/abs/skills',
         policy: {},

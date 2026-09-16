@@ -1,5 +1,5 @@
 import type { ModelMessage } from '../models/types.js';
-import type { ProviderManifest } from './manifest.js';
+import type { RecordKindSpec } from './manifest.js';
 import type { PageText } from './types.js';
 
 /**
@@ -42,8 +42,8 @@ export function buildClassificationMessages(pages: PageText[]): ModelMessage[] {
   ];
 }
 
-export function buildExtractionMessages(pages: PageText[], manifest: ProviderManifest): ModelMessage[] {
-  const wanted = manifest.fields
+export function buildExtractionMessages(pages: PageText[], kind: RecordKindSpec): ModelMessage[] {
+  const wanted = kind.fields
     .filter((f) => f.source === 'model')
     .map((f) => `- ${f.name}: ${f.description}`)
     .join('\n');
