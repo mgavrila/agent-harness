@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
-import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { parse as parseYaml } from 'yaml';
+import { readJsonl } from '@harness/shared';
 import { pack as healthcarePack } from '@harness/pack-healthcare';
 
 export interface ExpectedCredential {
@@ -85,42 +85,21 @@ export function declaredToolsOf(skillFile: string): string[] {
  */
 export const INTAKE_DECLARED_TOOLS: readonly string[] = declaredToolsOf(INTAKE_SKILL_FILE);
 
-/** A parsed row, carrying the 1-based file line it came from so a later
- * validation error points at the same place a JSON error would. */
-interface JsonlRow<T> {
-  value: T;
-  line: number;
-}
-
-async function readJsonlRows<T>(file: string): Promise<JsonlRow<T>[]> {
-  let text: string;
-  try {
-    text = await readFile(file, 'utf8');
-  } catch {
-    throw new Error(`cannot read case file ${file}`);
-  }
-  const rows: JsonlRow<T>[] = [];
-  const lines = text.split('\n');
-  for (let i = 0; i < lines.length; i += 1) {
-    const line = lines[i].trim();
-    if (line === '') continue;
-    try {
-      rows.push({ value: JSON.parse(line) as T, line: i + 1 });
-    } catch {
-      throw new Error(`${path.basename(file)} line ${i + 1} is not valid JSON`);
-    }
-  }
-  return rows;
-}
-
+/**
+ * `readJsonl`'s `label` is what makes the unreadable-file message read as
+ * `cannot read case file <path>`, exactly as this module's own reader did. The
+ * 1-based file line travels on every row for the same reason it always has: a
+ * validation error below and a JSON error inside the reader have to point a
+ * person at the same line.
+ */
 export async function loadJsonl<T = unknown>(file: string): Promise<T[]> {
-  return (await readJsonlRows<T>(file)).map((r) => r.value);
+  return (await readJsonl<T>(file, 'case file')).map((r) => r.value);
 }
 
 const SPLITS = new Set(['text_layer', 'scan']);
 
 export async function loadExtractionCases(file: string): Promise<ExtractionCase[]> {
-  const rows = await readJsonlRows<Partial<ExtractionCase>>(file);
+  const rows = await readJsonl<Partial<ExtractionCase>>(file, 'case file');
   // The true file line, not a count of non-blank rows: a validation error and
   // a JSON error in the same file must point a person at the same line.
   return rows.map(({ value: row, line }) => {
@@ -148,7 +127,7 @@ export async function loadExtractionCases(file: string): Promise<ExtractionCase[
 }
 
 export async function loadInjectionCases(file: string): Promise<InjectionCase[]> {
-  const rows = await readJsonlRows<Partial<InjectionCase>>(file);
+  const rows = await readJsonl<Partial<InjectionCase>>(file, 'case file');
   return rows.map(({ value: row, line }) => {
     const where = `${path.basename(file)} line ${line}`;
     if (typeof row.id !== 'string') throw new Error(`${where}: missing id`);

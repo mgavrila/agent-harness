@@ -1,13 +1,13 @@
-import { readFile } from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { DEFAULT_POLICY, isRestrictedName, registryOf, type ToolDeps } from '@harness/core-tools';
+import { DEFAULT_POLICY, registryOf, type ToolDeps } from '@harness/core-tools';
 import { pack as healthcarePack } from '@harness/pack-healthcare';
 import { startFakeGateway, type FakeGateway } from '@harness/core-tools/fake-gateway';
 import { createDb, runMigrations } from '@harness/db';
-import { FREE_TEXT_FIELDS, judgeFreeText, type JudgeItem } from './judge.js';
+import type { JudgeItem } from './types.js';
+import { judgeFreeText } from './verdict.js';
 
 const DATABASE_URL = process.env.EVALS_DATABASE_URL ?? 'postgres://harness:harness@localhost:15432/harness_evals';
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -61,21 +61,6 @@ const item = (over: Partial<JudgeItem> = {}): JudgeItem => ({
   actual: 'San Francisco Medical Group',
   split: 'text_layer',
   ...over,
-});
-
-describe('FREE_TEXT_FIELDS', () => {
-  it('names no restricted field, so no restricted value can reach the judge', () => {
-    for (const field of FREE_TEXT_FIELDS) expect(isRestrictedName(field)).toBe(false);
-  });
-
-  it('names no field the healthcare pack marks restricted', async () => {
-    const manifest = JSON.parse(
-      await readFile(path.resolve(here, '../../packs/healthcare/schema/provider.json'), 'utf8'),
-    ) as { fields: { name: string; restricted?: boolean }[] };
-    const restricted = manifest.fields.filter((f) => f.restricted === true).map((f) => f.name);
-    expect(restricted.length).toBeGreaterThan(0);
-    for (const field of FREE_TEXT_FIELDS) expect(restricted).not.toContain(field);
-  });
 });
 
 describe('judgeFreeText', () => {

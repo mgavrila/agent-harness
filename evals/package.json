@@ -4,13 +4,13 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/run.ts",
-    "./score": "./src/score.ts"
+    ".": "./src/index.ts",
+    "./score": "./src/domain/score.ts"
   },
   "scripts": {
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "start": "tsx src/run.ts"
+    "start": "tsx src/app/cli.ts"
   },
   "dependencies": {
     "@harness/core-tools": "workspace:*",

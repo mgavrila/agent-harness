@@ -1,27 +1,20 @@
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { randomBytes } from 'node:crypto';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { PDFDocument, StandardFonts } from 'pdf-lib';
 import { DEFAULT_POLICY, registryOf, type ToolDeps } from '@harness/core-tools';
 import { pack as healthcarePack } from '@harness/pack-healthcare';
 import { startFakeGateway, type FakeGateway } from '@harness/core-tools/fake-gateway';
 import { createDb } from '@harness/db';
-import { runEvals, selectCases, injectionCasesFor, parseLimitFlag, parseUpdateBaselineFlag } from './run.js';
+import { runEvals, selectCases, injectionCasesFor } from './orchestrate.js';
 import type { ExtractionCase, InjectionCase } from './cases.js';
-import type { Report } from './report.js';
+import type { Report } from './report/types.js';
 
 const DATABASE_URL = process.env.EVALS_DATABASE_URL ?? 'postgres://harness:harness@localhost:15432/harness_evals';
 
-const execFileAsync = promisify(execFile);
-const evalsDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const packs = registryOf([healthcarePack]);
-const tsxBin = path.join(evalsDir, 'node_modules', '.bin', 'tsx');
-const runScript = path.join(evalsDir, 'src', 'run.ts');
 
 let dir: string;
 let corpus: string;
@@ -420,131 +413,4 @@ describe('injectionCasesFor', () => {
   it('scores nothing against a document no row names', () => {
     expect(injectionCasesFor(doc('other', 'text/injection-b.pdf'), rows)).toEqual([]);
   });
-});
-
-describe('parseUpdateBaselineFlag', () => {
-  it('accepts the bare flag and =true, treats absence and =false as no-op', () => {
-    expect(parseUpdateBaselineFlag(['node', 'run.ts'])).toEqual({ ok: true, update: false });
-    expect(parseUpdateBaselineFlag(['node', 'run.ts', '--update-baseline'])).toEqual({ ok: true, update: true });
-    expect(parseUpdateBaselineFlag(['node', 'run.ts', '--update-baseline=true'])).toEqual({ ok: true, update: true });
-    expect(parseUpdateBaselineFlag(['node', 'run.ts', '--update-baseline=false'])).toEqual({ ok: true, update: false });
-  });
-
-  it('rejects any other value instead of silently ignoring it', () => {
-    for (const bad of ['yes', '1', '', 'TRUE']) {
-      const result = parseUpdateBaselineFlag(['node', 'run.ts', `--update-baseline=${bad}`]);
-      expect(result.ok).toBe(false);
-    }
-  });
-});
-
-describe('parseLimitFlag', () => {
-  it('returns undefined when --limit is not given', () => {
-    expect(parseLimitFlag(['node', 'run.ts'])).toEqual({ ok: true, limit: undefined });
-  });
-
-  it('accepts a positive integer', () => {
-    expect(parseLimitFlag(['--limit=24'])).toEqual({ ok: true, limit: 24 });
-    expect(parseLimitFlag(['--limit=1'])).toEqual({ ok: true, limit: 1 });
-  });
-
-  // `Number('')`, `Number('  ')` and `Number(null)` are all `0` or `NaN`-adjacent
-  // surprises; `selectCases` treats an unguarded NaN/0 limit as "pick nothing",
-  // which used to make a typo'd --limit exit 0 having scored zero cases.
-  for (const bad of ['0', '-3', '3.5', 'abc', '', ' ', '1e3', '024', 'NaN', 'Infinity']) {
-    it(`rejects ${JSON.stringify(bad)} as not a positive integer`, () => {
-      const result = parseLimitFlag([`--limit=${bad}`]);
-      expect(result.ok).toBe(false);
-      if (!result.ok) expect(result.error).toContain('--limit must be a positive integer');
-    });
-  }
-});
-
-describe('CLI', () => {
-  it('exits 2 on an invalid --limit and runs no cases', async () => {
-    const outDir = path.join(dir, 'cli-bad-limit-out');
-    await expect(
-      execFileAsync(
-        tsxBin,
-        [
-          runScript,
-          '--limit=abc',
-          `--out=${outDir}`,
-          `--cases=${path.join(dir, 'cases.jsonl')}`,
-          `--corpus=${corpus}`,
-          `--injection=${path.join(dir, 'injection.jsonl')}`,
-          `--baseline=${path.join(dir, 'no-such-baseline.json')}`,
-        ],
-        {
-          cwd: evalsDir,
-          env: {
-            ...process.env,
-            // Deliberately absent/invalid gateway credentials: a bad --limit
-            // must be rejected before any of this is touched.
-            LITELLM_MASTER_KEY: '',
-            HARNESS_GATEWAY_URL: '',
-            EVALS_DATABASE_URL: DATABASE_URL,
-          },
-        },
-      ),
-    ).rejects.toMatchObject({ code: 2, stderr: expect.stringContaining('--limit must be a positive integer') });
-
-    await expect(readFile(path.join(outDir, 'report.json'), 'utf8')).rejects.toThrow();
-  }, 60_000);
-
-  it('writes the new baseline to the --baseline path when --update-baseline is given bare', async () => {
-    const outDir = path.join(dir, 'cli-update-baseline-out');
-    const baselineFile = path.join(dir, 'cli-custom-baseline.json');
-    await execFileAsync(
-      tsxBin,
-      [
-        runScript,
-        `--gateway=${gateway.url}`,
-        `--out=${outDir}`,
-        `--cases=${path.join(dir, 'cases.jsonl')}`,
-        `--corpus=${corpus}`,
-        `--injection=${path.join(dir, 'injection.jsonl')}`,
-        `--baseline=${baselineFile}`,
-        '--update-baseline',
-      ],
-      { cwd: evalsDir, env: { ...process.env, LITELLM_MASTER_KEY: 'sk-eval', EVALS_DATABASE_URL: DATABASE_URL } },
-    );
-
-    const written = JSON.parse(await readFile(baselineFile, 'utf8')) as Report;
-    expect(written.metrics).toBeDefined();
-    await expect(readFile(path.join(evalsDir, 'baseline.json'), 'utf8')).rejects.toThrow();
-  }, 120_000);
-
-  it('lets --gateway override the base URL that reaches openPipeline, independent of HARNESS_GATEWAY_URL', async () => {
-    const outDir = path.join(dir, 'cli-gateway-override-out');
-    await execFileAsync(
-      tsxBin,
-      [
-        runScript,
-        `--gateway=${gateway.url}`,
-        `--out=${outDir}`,
-        `--cases=${path.join(dir, 'cases.jsonl')}`,
-        `--corpus=${corpus}`,
-        `--injection=${path.join(dir, 'injection.jsonl')}`,
-        `--baseline=${path.join(dir, 'no-such-baseline.json')}`,
-      ],
-      {
-        cwd: evalsDir,
-        env: {
-          ...process.env,
-          LITELLM_MASTER_KEY: 'sk-eval',
-          // Wrong on purpose: if the CLI used this instead of --gateway, every
-          // extraction call would fail to connect and no field would ever
-          // match, so a passing report here is only possible if --gateway's
-          // base URL is what actually reached openPipeline.
-          HARNESS_GATEWAY_URL: 'http://127.0.0.1:1',
-          EVALS_DATABASE_URL: DATABASE_URL,
-        },
-      },
-    );
-
-    const report = JSON.parse(await readFile(path.join(outDir, 'report.json'), 'utf8')) as Report;
-    expect(report.splits.text_layer.failures).toBe(0);
-    expect(report.splits.text_layer.fieldAccuracy).toBeGreaterThan(0);
-  }, 120_000);
 });

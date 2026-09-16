@@ -44,7 +44,7 @@ const PACKAGES = [
   { name: 'gateway', src: 'harness/gateway/src', severity: 'error' },
   { name: 'core-tools', src: 'harness/core-tools/src', severity: 'error' },
   { name: 'approvals', src: 'harness/approvals/src', severity: 'error' },
-  { name: 'evals', src: 'evals/src', severity: 'warn' },
+  { name: 'evals', src: 'evals/src', severity: 'error' },
 ];
 
 /** Escape a path so it can sit inside a regular expression. */

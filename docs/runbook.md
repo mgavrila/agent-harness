@@ -280,7 +280,7 @@ from the metric map rather than recording a rate nobody measured. A metric
 present on only one side of a comparison is listed as not comparable and cannot
 open the promotion gate. The judge needs a second database handle and a session
 the CLI does not have; Plan 3 wires it up when Hermes supplies one.
-`evals/src/run.test.ts` exercises the judge end to end against the fake gateway,
+`evals/src/domain/orchestrate.test.ts` exercises the judge end to end against the fake gateway,
 including the route being down.
 
 ### Which model a `model_calls` row names
