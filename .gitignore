@@ -13,8 +13,9 @@ venv/
 .mypy_cache/
 .ruff_cache/
 
-# data and generated files
-data/
+# data and generated files (anchored for the same reason as /storage/ below: a bare
+# `data/` would also hide any future src/.../data/ directory from git)
+/data/
 # Anchored: an unanchored `storage/` also matches source directories at any depth, which
 # silently hid harness/core-tools/src/domain/storage/ from git. The file store this ignores
 # is a repository-root directory; every deployed root is an absolute path outside the tree.
