@@ -21,7 +21,6 @@ function line(scope: string, message: string, err: unknown): string {
 /** A logger that prefixes every line with `scope`, e.g. `createLogger('effects')`. */
 export function createLogger(scope: string): Logger {
   const write = (message: string, err: unknown): void => {
-    // eslint-disable-next-line no-console -- this module is the one place console is allowed
     console.error(line(scope, message, err));
   };
   return {
