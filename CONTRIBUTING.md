@@ -29,8 +29,7 @@ wrong reason.
 ## Adding a tool
 
 1. Put the logic in a domain: a function in `src/domain/<name>/` that takes `ToolDeps` and
-   plain arguments. Write its test beside it. _(target state, landing in Tasks 4–8; today the
-   domains sit one level up, as `src/documents/`, `src/forms/` and `src/deadlines/`.)_
+   plain arguments. Write its test beside it.
 2. Add the definition to `src/tools/<area>.ts`:
 
    ```ts

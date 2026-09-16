@@ -41,7 +41,7 @@ const PACKAGES = [
   { name: 'shared', src: 'harness/shared/src', severity: 'error' },
   { name: 'db', src: 'harness/db/src', severity: 'error' },
   { name: 'gateway', src: 'harness/gateway/src', severity: 'error' },
-  { name: 'core-tools', src: 'harness/core-tools/src', severity: 'warn' },
+  { name: 'core-tools', src: 'harness/core-tools/src', severity: 'error' },
   { name: 'approvals', src: 'harness/approvals/src', severity: 'warn' },
   { name: 'evals', src: 'evals/src', severity: 'warn' },
 ];
@@ -135,7 +135,7 @@ const GLOBAL_RULES = [
   {
     name: 'no-circular',
     comment:
-      'A cycle means two modules are really one. Warn until Task 11 of the maintainability plan: registry.ts sits in two type-only cycles that Task 7 removes.',
+      'A cycle means two modules are really one. Warn until Task 11 of the maintainability plan promotes the packages that have not been restructured yet.',
     severity: 'warn',
     from: {},
     to: { circular: true },

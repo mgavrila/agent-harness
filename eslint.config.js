@@ -43,7 +43,7 @@ const NO_BARE_THROW = {
  * own root here as it lands (e.g. 'harness/db/src'); Task 11 appends whatever is left. Adding a
  * root is the *only* edit a package task makes to this file.
  */
-const STRICT_LAYER_ROOTS = ['harness/db/src', 'harness/gateway/src', 'harness/shared/src'];
+const STRICT_LAYER_ROOTS = ['harness/db/src', 'harness/gateway/src', 'harness/shared/src', 'harness/core-tools/src'];
 
 /** True for the two spellings of a disabled rule, bare or at the head of an options array. */
 const isOff = (severity) => severity === 'off' || severity === 0;
@@ -162,8 +162,8 @@ export default tseslint.config(
         },
       ],
       'import-x/no-default-export': 'error',
-      // Warn until Task 11: registry.ts <-> tools/verify.ts and registry.ts <-> effects.ts are
-      // type-only cycles today, and Task 7 is what removes them.
+      // Warn for the packages that have not been promoted yet; an error inside every
+      // STRICT_LAYER_ROOTS entry below.
       'import-x/no-cycle': ['warn', { maxDepth: Infinity }],
 
       'no-console': 'warn',

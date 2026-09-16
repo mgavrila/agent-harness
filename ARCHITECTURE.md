@@ -127,9 +127,9 @@ Break any of these and the harness is not safe to run against real data.
 ## The three error types
 
 Declared once, in `@harness/shared`, at `harness/shared/src/errors.ts`. `@harness/core-tools`
-re-exports all three from its own public API, so a module that still reaches `ToolError`
-through `registry.ts` or `@harness/core-tools` gets the same class; Tasks 5 to 11 point those
-imports at the shared package directly.
+re-exports all three from `src/index.ts`, so a module that still reaches `ToolError` through
+`@harness/core-tools` rather than `@harness/shared` gets the same class; Tasks 8 to 11 point
+the remaining importers at the shared package directly.
 
 | Type                               | Means                                                                                                 | Who sees the message     |
 | ---------------------------------- | ----------------------------------------------------------------------------------------------------- | ------------------------ |
@@ -235,5 +235,5 @@ fails the suite. Regenerate the snapshots with `pnpm surface:record` only when t
 intended, and say so in the commit message. `HARNESS_PACKS` is a new name, so the task that
 introduces it adds it to `.env.example` in the same commit or this test fails.
 
-The recorder behind it is `harness/core-tools/src/record-surface.ts`; Task 7 moves it to
-`src/app/record-surface.ts` and changes nothing else about it.
+The recorder behind it is `harness/core-tools/src/app/record-surface.ts`, which is both the
+library the test imports and the CLI `pnpm surface:record` runs.
