@@ -1,4 +1,3 @@
-import type { McpServer } from '@modelcontextprotocol/server';
 import type * as z from 'zod/v4';
 import type { Db } from '@harness/db';
 import type { SinkRegistry } from '../../effects.js'; // until Task 7 moves it to ../effects/types.js
@@ -40,13 +39,21 @@ export const DEFAULT_CONFIDENCE_THRESHOLD = 0.85;
  * assembling an interface. See ARCHITECTURE.md for why.
  */
 export interface ToolDeps {
+  /** Drizzle database handle; every handler runs inside a transaction opened on it. */
   db: Db;
+  /** The client this process serves. Every query is scoped by it; nothing crosses clients. */
   client: string;
+  /** Who is calling (the agent identity recorded on every audit row). */
   caller: string;
+  /** Action-class → behaviour table that decides auto / approval / blocked for each tool. */
   policy: Policy;
+  /** 32-byte AES-256-GCM key for restricted values and approval payloads. Never logged. */
   encryptionKey: Buffer;
+  /** Clock, injectable so tests can freeze time. */
   now: () => Date;
+  /** How long a parked approval stays pending before reconciliation expires it. */
   approvalTtlHours: number;
+  /** Extracted fields below this confidence stay `pending` for a human. Default `DEFAULT_CONFIDENCE_THRESHOLD`. */
   confidenceThreshold: number;
   /** How to reach the model gateway. Every model call goes through it. */
   gateway: GatewayConfig;
@@ -74,6 +81,7 @@ export interface ToolDeps {
   verify: VerifyConfig;
   /** External-effect senders keyed by sink name (e.g. 'slack'). Empty in Plan 1.1; Plan 3 registers real ones. */
   sinks: SinkRegistry;
+  /** Per-process session context (run, skill, tool) stamped on audit rows; see `context.ts`. */
   context: SessionContext;
   /** Every registered tool, keyed by name, so a parked action can be replayed by name. Filled by `registerTools`. */
   tools: Map<string, AnyToolDef>;
@@ -116,6 +124,3 @@ export type ToolCallResult = {
   isError: boolean;
   structuredContent?: Envelope;
 };
-
-/** Re-exported so a tool author imports one module. `McpServer` appears in `registerTools`. */
-export type { McpServer };
