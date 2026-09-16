@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { booleanFromEnv, numberFromEnv } from './server.js';
+import { booleanFromEnv, numberFromEnv, optionalEnv, requiredEnv } from './env.js';
 
 const NAME = 'TEST_NUMBER_FROM_ENV';
 const FLAG = 'TEST_BOOLEAN_FROM_ENV';
@@ -53,5 +53,48 @@ describe('booleanFromEnv', () => {
   it.each(['false', 'FALSE', '0', 'no', 'off', 'yes', 'ture'])('is off for %s', (raw) => {
     process.env[FLAG] = raw;
     expect(booleanFromEnv(FLAG)).toBe(false);
+  });
+});
+
+describe('numberFromEnv with integer and unit', () => {
+  it('rejects a fractional value when integer is set', () => {
+    process.env[NAME] = '8787.5';
+    expect(() => numberFromEnv(NAME, 8787, { min: 1, max: 65_535, integer: true })).toThrow(
+      `${NAME} must be an integer between 1 and 65535`,
+    );
+  });
+
+  it('names the unit in the failure', () => {
+    process.env[NAME] = '0';
+    expect(() => numberFromEnv(NAME, 5, { min: 1, max: 86_400, unit: 'seconds' })).toThrow(
+      `${NAME} must be a number between 1 and 86400 seconds`,
+    );
+  });
+});
+
+describe('requiredEnv', () => {
+  it('returns the value', () => {
+    process.env[NAME] = 'sk-test';
+    expect(requiredEnv(NAME)).toBe('sk-test');
+  });
+
+  it('treats an empty or whitespace value as unset and appends the hint', () => {
+    process.env[NAME] = '   ';
+    expect(() => requiredEnv(NAME, ' (see docs/runbook.md)')).toThrow(`${NAME} is not set (see docs/runbook.md)`);
+  });
+
+  it('reads an environment it is handed, so a caller can validate a child process env', () => {
+    expect(requiredEnv(NAME, '', { [NAME]: 'from-a-fixture' })).toBe('from-a-fixture');
+    expect(() => requiredEnv(NAME, '', {})).toThrow(`${NAME} is not set`);
+  });
+});
+
+describe('optionalEnv', () => {
+  it('is undefined when unset or empty, and the value otherwise', () => {
+    expect(optionalEnv(NAME)).toBeUndefined();
+    process.env[NAME] = '  ';
+    expect(optionalEnv(NAME)).toBeUndefined();
+    process.env[NAME] = '/srv/harness-storage';
+    expect(optionalEnv(NAME)).toBe('/srv/harness-storage');
   });
 });
