@@ -105,6 +105,11 @@ export default tseslint.config(
     ignores: [
       '**/node_modules/**',
       '**/dist/**',
+      // Nested checkouts and scratch: a linked worktree under .claude/ or a scratch dir has its
+      // own tsconfig and would trip the type-aware rules from the outer root.
+      '.claude/**',
+      '.worktrees/**',
+      '.superpowers/**',
       'harness/db/drizzle/**',
       'packs/healthcare/synthetic/out/**',
       'evals/results/**',
