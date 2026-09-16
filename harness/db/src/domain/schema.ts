@@ -20,20 +20,32 @@ export const bytea = customType<{ data: Buffer; driverData: Buffer }>({
   },
 });
 
-export const providers = pgTable(
-  'providers',
+/**
+ * One thing a pack stores: a provider, an epic, whatever a pack declares. `pack` and `kind`
+ * together say which `RecordKindSpec` this row was written against; the kernel validates a
+ * `kind` against the loaded packs before it writes, and never hard-codes one.
+ */
+export const records = pgTable(
+  'records',
   {
     id: uuid('id').primaryKey().defaultRandom(),
     client: text('client').notNull(),
+    /** The pack that owns this kind, e.g. `healthcare`. */
+    pack: text('pack').notNull(),
+    kind: text('kind').notNull(),
+    /** Display name, joined from the kind's `nameFields`. Plaintext, and never restricted. */
     name: text('name').notNull(),
-    npi: text('npi'),
+    /** The kind's stable outside identifier — an NPI, a ticket key. Plaintext, and never restricted. */
+    externalId: text('external_id'),
     status: text('status').notNull().default('active'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
-    index('providers_client_name_idx').on(t.client, t.name),
-    uniqueIndex('providers_client_npi_uq').on(t.client, t.npi),
+    index('records_client_kind_name_idx').on(t.client, t.kind, t.name),
+    // Scoped by kind as well as client: two packs may both key on a ten-digit number and mean
+    // different things. With one kind loaded this is exactly the old providers_client_npi_uq.
+    uniqueIndex('records_client_kind_external_id_uq').on(t.client, t.kind, t.externalId),
   ],
 );
 
@@ -42,12 +54,12 @@ export const documents = pgTable(
   {
     id: uuid('id').primaryKey().defaultRandom(),
     /**
-     * The document is scoped to this client independently of `providerId`: a
-     * document that has not yet been attached to a provider must still be
+     * The document is scoped to this client independently of `recordId`: a
+     * document that has not yet been attached to a record must still be
      * invisible to any other client of this process.
      */
     client: text('client').notNull(),
-    providerId: uuid('provider_id').references(() => providers.id),
+    recordId: uuid('record_id').references(() => records.id),
     kind: text('kind'),
     storagePath: text('storage_path').notNull(),
     sha256: text('sha256').notNull(),
@@ -64,13 +76,39 @@ export const documents = pgTable(
   (t) => [index('documents_client_ingested_idx').on(t.client, t.ingestedAt)],
 );
 
+/**
+ * Something attached to a record that may expire: a licence, a registration, a link. `kind` is
+ * pack-defined and its lead time comes from the pack's `AttachmentKindSpec`, not from a table
+ * in core. `properties` carries whatever else the kind declares, as plaintext jsonb — a
+ * restricted value belongs in `number_encrypted` and nowhere else.
+ */
+export const attachments = pgTable(
+  'attachments',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    recordId: uuid('record_id')
+      .notNull()
+      .references(() => records.id),
+    kind: text('kind').notNull(),
+    issuer: text('issuer'),
+    numberEncrypted: bytea('number_encrypted'),
+    state: text('state'),
+    issuedAt: date('issued_at', { mode: 'string' }),
+    expiresAt: date('expires_at', { mode: 'string' }),
+    properties: jsonb('properties').$type<Record<string, string>>().notNull().default({}),
+    sourceDocId: uuid('source_doc_id').references(() => documents.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('attachments_record_idx').on(t.recordId)],
+);
+
 export const fields = pgTable(
   'fields',
   {
     id: uuid('id').primaryKey().defaultRandom(),
-    providerId: uuid('provider_id')
+    recordId: uuid('record_id')
       .notNull()
-      .references(() => providers.id),
+      .references(() => records.id),
     name: text('name').notNull(),
     value: text('value'),
     valueEncrypted: bytea('value_encrypted'),
@@ -82,44 +120,25 @@ export const fields = pgTable(
     confirmedBy: text('confirmed_by'),
     confirmedAt: timestamp('confirmed_at', { withTimezone: true }),
   },
-  (t) => [uniqueIndex('fields_provider_name_uq').on(t.providerId, t.name)],
-);
-
-export const credentials = pgTable(
-  'credentials',
-  {
-    id: uuid('id').primaryKey().defaultRandom(),
-    providerId: uuid('provider_id')
-      .notNull()
-      .references(() => providers.id),
-    kind: text('kind').notNull(),
-    issuer: text('issuer'),
-    numberEncrypted: bytea('number_encrypted'),
-    state: text('state'),
-    issuedAt: date('issued_at', { mode: 'string' }),
-    expiresAt: date('expires_at', { mode: 'string' }),
-    sourceDocId: uuid('source_doc_id').references(() => documents.id),
-    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-  },
-  (t) => [index('credentials_provider_idx').on(t.providerId)],
+  (t) => [uniqueIndex('fields_record_name_uq').on(t.recordId, t.name)],
 );
 
 export const deadlines = pgTable(
   'deadlines',
   {
     id: uuid('id').primaryKey().defaultRandom(),
-    providerId: uuid('provider_id')
+    recordId: uuid('record_id')
       .notNull()
-      .references(() => providers.id),
-    credentialId: uuid('credential_id')
+      .references(() => records.id),
+    attachmentId: uuid('attachment_id')
       .notNull()
-      .references(() => credentials.id),
+      .references(() => attachments.id),
     kind: text('kind').notNull(),
     dueAt: date('due_at', { mode: 'string' }).notNull(),
     windowDays: integer('window_days').notNull().default(90),
     notifiedAt: timestamp('notified_at', { withTimezone: true }),
   },
-  (t) => [uniqueIndex('deadlines_credential_kind_uq').on(t.credentialId, t.kind)],
+  (t) => [uniqueIndex('deadlines_attachment_kind_uq').on(t.attachmentId, t.kind)],
 );
 
 export const approvals = pgTable(
@@ -238,3 +257,15 @@ export const auditLog = pgTable(
     index('audit_log_client_created_idx').on(t.client, t.createdAt.desc()),
   ],
 );
+
+/**
+ * Transitional aliases for the two tables migration 0008 replaced.
+ *
+ * `@harness/core-tools` names `providers` and `credentials` in five modules and Plan 5's Task 3
+ * is what rewrites them. Until it does, these keep the package compiling against the new tables
+ * — the column names in `records` and `attachments` are the ones the old code reads, except
+ * `npi` and `provider_id`, which Task 3 is the first thing to touch. **Delete both lines in
+ * Task 3 Step 13.** Nothing outside core-tools ever imported them.
+ */
+export const providers = records;
+export const credentials = attachments;
