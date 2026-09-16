@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { createDb, loadKey } from '@harness/db';
-import { booleanFromEnv, numberFromEnv, optionalEnv } from '@harness/shared';
+import { booleanFromEnv, ConfigError, numberFromEnv, optionalEnv } from '@harness/shared';
 import { loadPolicy } from '../domain/tooling/policy.js';
 import { DEFAULT_CONFIDENCE_THRESHOLD, type ToolDeps } from '../domain/tooling/types.js';
 import { gatewayFromEnv } from '../domain/models/gateway.js';
@@ -8,13 +8,30 @@ import { storageRoot } from '../domain/storage/layout.js';
 import { defaultFormsDir } from '../domain/forms/templates.js';
 import { NPPES_DEFAULT_BASE_URL } from '../domain/verify/nppes.js';
 
+/**
+ * A variable with a default, where an empty value is a mistake rather than a request for that
+ * default. `optionalEnv` reads an empty string as absent, so a half-filled `.env` would leave
+ * this process serving the `default` client, auditing every call as `hermes`, or pointing the
+ * registry lookup at the live CMS endpoint — each of them silently, and the last of them only
+ * failing much later on an outbound path. Unset keeps the default; set-but-empty fails startup
+ * naming the variable.
+ */
+export function envOrDefault(name: string, fallback: string, env: NodeJS.ProcessEnv = process.env): string {
+  const raw = env[name];
+  if (raw === undefined) return fallback;
+  if (raw.trim() === '') {
+    throw new ConfigError(`${name} is set but empty; give it a value, or unset it to use the default`);
+  }
+  return raw;
+}
+
 export async function buildDepsFromEnv(): Promise<{ deps: ToolDeps; close: () => Promise<void> }> {
   const { db, close } = createDb();
   const formsDir = optionalEnv('HARNESS_FORMS_DIR');
   const deps: ToolDeps = {
     db,
-    client: optionalEnv('HARNESS_CLIENT') ?? 'default',
-    caller: optionalEnv('CORE_TOOLS_CALLER') ?? 'hermes',
+    client: envOrDefault('HARNESS_CLIENT', 'default'),
+    caller: envOrDefault('CORE_TOOLS_CALLER', 'hermes'),
     policy: await loadPolicy(),
     encryptionKey: loadKey(),
     now: () => new Date(),
@@ -29,7 +46,7 @@ export async function buildDepsFromEnv(): Promise<{ deps: ToolDeps; close: () =>
     restrictedToModel: booleanFromEnv('HARNESS_RESTRICTED_TO_MODEL'),
     verify: {
       nppesEnabled: booleanFromEnv('VERIFY_NPPES_ENABLED'),
-      nppesBaseUrl: optionalEnv('NPPES_BASE_URL') ?? NPPES_DEFAULT_BASE_URL,
+      nppesBaseUrl: envOrDefault('NPPES_BASE_URL', NPPES_DEFAULT_BASE_URL),
       stateLicenseEnabled: booleanFromEnv('VERIFY_STATE_LICENSE_ENABLED'),
       timeoutMs: numberFromEnv('VERIFY_TIMEOUT_MS', 15_000, { min: 1_000, max: 60_000 }),
     },

@@ -24,6 +24,19 @@ shared helpers — see `src/index.ts`, which is grouped and commented. The subpa
 `./storage`. Nothing under `src/app/` is reachable: the composition root reads the environment
 and opens a pool, and a consumer that imported it would inherit both.
 
+## Configuration
+
+`src/app/server.ts` is the only module that names an environment variable, and every value is
+read through a helper in `@harness/shared` so no variable is validated more loosely than its
+neighbour. `.env.example` documents them all; `src/app/surface.test.ts` fails if the code reads
+one that file does not list.
+
+`HARNESS_CLIENT`, `CORE_TOOLS_CALLER` and `NPPES_BASE_URL` have defaults, and for those three an
+empty value is a startup `ConfigError` naming the variable rather than a silent fall back to the
+default. Unset keeps the default. Blanking one of these lines in a `.env` is a half-filled file,
+not a choice: an empty caller would audit every call as `hermes`, and an empty registry URL would
+point NPI lookups at the live CMS endpoint.
+
 ## How to test it
 
 ```bash

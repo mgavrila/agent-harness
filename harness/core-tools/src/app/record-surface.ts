@@ -132,6 +132,7 @@ export const ENV_READING_HELPERS = [
   'booleanFromEnv',
   'requiredEnv',
   'optionalEnv',
+  'envOrDefault',
   'required',
   'requiredFrom',
   'seconds',
