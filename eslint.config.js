@@ -203,6 +203,11 @@ export default tseslint.config(
         },
         { files: CONSOLE_IS_FINE, rules: { 'no-console': 'off' } },
         { files: PROCESS_ENV_IS_FINE, rules: { 'no-restricted-syntax': 'off' } },
+        // A test prints: a suite that skips says why on stderr, and nothing parses that output.
+        // PROCESS_ENV_IS_FINE already exempts test files from the environment rule; this is the
+        // same exemption for console, so promoting a root does not turn every such line into an
+        // error that has to be suppressed one by one.
+        { files: ['**/*.test.ts'], rules: { 'no-console': 'off' } },
       ]),
 
   // Config files legitimately default-export, and are not in any package's tsconfig `include`

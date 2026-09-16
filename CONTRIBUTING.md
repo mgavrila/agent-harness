@@ -44,9 +44,8 @@ wrong reason.
    });
    ```
 
-3. Add it to the exported array at the bottom of that file. `ALL_TOOLS` in `app/server.ts`
-   already spreads it. _(target state, landing in Task 7; `ALL_TOOLS` is in
-   `harness/core-tools/src/server.ts` today.)_
+3. Add it to the exported array at the bottom of that file. `ALL_TOOLS` in `src/tools/catalog.ts`
+   already spreads it.
 4. Choose the action class honestly: `read`, `write.internal`, `external`, `financial`,
    `destructive`. `external` parks an approval; `financial` is blocked by default.
 5. Throw `ToolError` for anything the caller can fix. Never `throw new Error` in `tools/` —

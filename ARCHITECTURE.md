@@ -222,7 +222,7 @@ rules is one row in `PACKAGES` and one entry in `WORKSPACE_DIRS`, which is how
 
 ## Proof that a refactor changed nothing
 
-`harness/core-tools/src/surface.test.ts` compares three things against committed snapshots on
+`harness/core-tools/src/app/surface.test.ts` compares three things against committed snapshots on
 every run:
 
 - the MCP tool list, with each tool's input and output JSON Schema, against

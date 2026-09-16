@@ -44,9 +44,9 @@ const fieldValue = (data: ProviderData, name: string): string | null => {
 };
 
 /**
- * One roster row per provider, in the order given. `forms_roster` has already
- * dropped repeats, so a roster built from a search result does not list a
- * provider twice.
+ * One roster row per provider, in the order given. The ids are used as handed
+ * over: a repeated id produces a repeated row, so a caller that must not list a
+ * provider twice dedupes before calling.
  */
 export async function buildRoster(deps: ToolDeps, payerId: string, providerIds: string[]): Promise<RosterRow[]> {
   const rows: RosterRow[] = [];
