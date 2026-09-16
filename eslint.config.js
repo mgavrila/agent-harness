@@ -38,22 +38,6 @@ const NO_BARE_THROW = {
   message: 'tools/ throws ToolError for an expected failure. A bare Error is masked and the caller learns nothing.',
 };
 
-/**
- * Source roots whose layer rules are promoted from warn to error. Each package task appends its
- * own root here as it lands (e.g. 'harness/db/src'); Task 11 appends whatever is left. Adding a
- * root is the *only* edit a package task makes to this file.
- */
-const STRICT_LAYER_ROOTS = [
-  'harness/db/src',
-  'harness/gateway/src',
-  'harness/shared/src',
-  'harness/core-tools/src',
-  'harness/pack-api/src',
-  'harness/approvals/src',
-  'evals/src',
-  'scripts/src',
-];
-
 /** True for the two spellings of a disabled rule, bare or at the head of an options array. */
 const isOff = (severity) => severity === 'off' || severity === 0;
 
@@ -123,9 +107,10 @@ export default tseslint.config(
   // Syntax-only rules: these are clean today and stay errors.
   ...tseslint.configs.recommended,
 
-  // Type-aware rules. They run (projectService below switches them on) but land as warnings:
-  // the existing code trips require-await and the no-unsafe-* family in places, and fixing
-  // that is a separate piece of work from moving files. `pnpm lint` does not fail on warnings.
+  // Type-aware rules stay warnings — the one family that does. Every other rule in this file
+  // is an error. The existing code trips require-await and the no-unsafe-* family in places,
+  // and clearing that is a separate piece of work from moving files. `pnpm lint` does not fail
+  // on them; `pnpm lint:strict` (eslint . --max-warnings=0) is how you see the backlog.
   //
   // A rule the preset deliberately turns OFF stays off. Rewriting every value to 'warn' would
   // resurrect the ones typescript-eslint disables on purpose: the preset switches off each
@@ -169,53 +154,27 @@ export default tseslint.config(
         },
       ],
       'import-x/no-default-export': 'error',
-      // Warn for the packages that have not been promoted yet; an error inside every
-      // STRICT_LAYER_ROOTS entry below.
-      'import-x/no-cycle': ['warn', { maxDepth: Infinity }],
+      'import-x/no-cycle': ['error', { maxDepth: Infinity }],
 
-      'no-console': 'warn',
-      'no-restricted-syntax': ['warn', NO_PROCESS_ENV],
+      'no-console': 'error',
+      'no-restricted-syntax': ['error', NO_PROCESS_ENV],
     },
   },
 
   { files: CONSOLE_IS_FINE, rules: { 'no-console': 'off' } },
   { files: PROCESS_ENV_IS_FINE, rules: { 'no-restricted-syntax': 'off' } },
+  // A test prints: a suite that skips says why on stderr, and nothing parses that output.
+  // PROCESS_ENV_IS_FINE already exempts test files from the environment rule; this is the same
+  // exemption for console, so a printing test is not an error to be suppressed one by one.
+  { files: ['**/*.test.ts'], rules: { 'no-console': 'off' } },
 
   // The tools layer carries both selectors. Listing only NO_BARE_THROW here would switch the
   // environment rule back off for every file under tools/ — see the comment at the top.
   {
     files: ['**/src/tools/**/*.ts'],
     ignores: ['**/*.test.ts'],
-    rules: { 'no-restricted-syntax': ['warn', NO_PROCESS_ENV, NO_BARE_THROW] },
+    rules: { 'no-restricted-syntax': ['error', NO_PROCESS_ENV, NO_BARE_THROW] },
   },
-
-  // Promoted roots. Empty until Task 2 appends the first one. The two exemption blocks are
-  // repeated inside, because the promotion blocks above them would otherwise switch console
-  // back on for app/ and the environment rule back on for tests.
-  ...(STRICT_LAYER_ROOTS.length === 0
-    ? []
-    : [
-        {
-          files: STRICT_LAYER_ROOTS.map((root) => `${root}/**/*.ts`),
-          rules: {
-            'no-console': 'error',
-            'import-x/no-cycle': ['error', { maxDepth: Infinity }],
-            'no-restricted-syntax': ['error', NO_PROCESS_ENV],
-          },
-        },
-        {
-          files: STRICT_LAYER_ROOTS.map((root) => `${root}/tools/**/*.ts`),
-          ignores: ['**/*.test.ts'],
-          rules: { 'no-restricted-syntax': ['error', NO_PROCESS_ENV, NO_BARE_THROW] },
-        },
-        { files: CONSOLE_IS_FINE, rules: { 'no-console': 'off' } },
-        { files: PROCESS_ENV_IS_FINE, rules: { 'no-restricted-syntax': 'off' } },
-        // A test prints: a suite that skips says why on stderr, and nothing parses that output.
-        // PROCESS_ENV_IS_FINE already exempts test files from the environment rule; this is the
-        // same exemption for console, so promoting a root does not turn every such line into an
-        // error that has to be suppressed one by one.
-        { files: ['**/*.test.ts'], rules: { 'no-console': 'off' } },
-      ]),
 
   // Config files legitimately default-export, and are not in any package's tsconfig `include`
   // in a way the project service can type-check, so the type-aware rules are switched off here.

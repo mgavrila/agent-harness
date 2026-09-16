@@ -9,8 +9,6 @@
     "./effects": "./src/domain/effects/outbox.ts",
     "./fake-gateway": "./src/domain/models/fake.ts",
     "./in-process": "./src/domain/tooling/in-process.ts",
-    "./models": "./src/domain/models/gateway.ts",
-    "./reconcile": "./src/domain/tooling/reconcile.ts",
     "./redaction": "./src/shared/redaction/index.ts",
     "./storage": "./src/domain/storage/layout.ts"
   },

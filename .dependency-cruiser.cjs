@@ -12,22 +12,15 @@
  *   app/      the composition root and the process entrypoints. May import everything.
  *   index.ts  the only module other packages may import, plus the declared subpath exports.
  *
- * HOW A PACKAGE FLIPS TO ERROR
- * ----------------------------
- * Every rule below starts at the severity its PACKAGES row names. A package task that has
- * finished moving its files changes exactly one word on its own row:
- *
- *     { name: 'db', src: 'harness/db/src', severity: 'warn' },
- *                                                    ^^^^^^ becomes 'error'
- *
- * Nothing else in this file changes. `pnpm arch` then exits 1 on any violation in that
- * package while the others keep reporting warnings and exiting 0. Task 11 flips the last rows.
+ * EVERY RULE IS AN ERROR. `pnpm arch` exits 1 on any violation, and `pnpm test` runs it.
+ * A new package adds a row to PACKAGES at severity 'error' from the start — the warn-then-
+ * promote path existed only for the migration that introduced these layers.
  *
  * HOW A NEW PACKAGE IS ADDED
  * --------------------------
- * `@harness/shared` and `@harness/pack-api` (spec section 9, landing in Tasks 4 to 8) each
- * need exactly two lines: one PACKAGES row for its layer rules, and one WORKSPACE_DIRS entry
- * so other packages may reach it only through its declared exports. Nothing else here changes.
+ * Two lines: one PACKAGES row for its layer rules, and one WORKSPACE_DIRS entry so other
+ * packages may reach it only through its declared exports. Nothing else here changes. That is
+ * how `@harness/shared` and `@harness/pack-api` were added.
  *
  * Run it with `pnpm arch`. depcruise needs a GLOB, not a directory: `depcruise harness/db/src`
  * cruises zero modules and reports a cheerful success.
@@ -127,7 +120,7 @@ function crossPackageRule(dir) {
   return {
     name: `only-public-entry-of-${dir.replace(/\//g, '-')}`,
     comment: `Reach ${dir} through its package name or one of its declared subpath exports (${entries.join(', ') || 'none'}), never by a path into its source tree.`,
-    severity: 'warn',
+    severity: 'error',
     from: { pathNot: `^${re(dir)}/` },
     to: { path: `^${re(dir)}/`, pathNot: entries.map((entry) => `^${re(entry)}$`) },
   };
@@ -137,9 +130,8 @@ function crossPackageRule(dir) {
 const GLOBAL_RULES = [
   {
     name: 'no-circular',
-    comment:
-      'A cycle means two modules are really one. Warn until Task 11 of the maintainability plan promotes the packages that have not been restructured yet.',
-    severity: 'warn',
+    comment: 'A cycle means two modules are really one. Split the shared part into a types.ts.',
+    severity: 'error',
     from: {},
     to: { circular: true },
   },
@@ -147,7 +139,7 @@ const GLOBAL_RULES = [
     name: 'no-test-imported-by-production',
     comment:
       'A *.test.ts file is never imported by shipping code. Fixtures belong under the package testing.ts subpath.',
-    severity: 'warn',
+    severity: 'error',
     from: { pathNot: '\\.test\\.ts$' },
     to: { path: '\\.test\\.ts$' },
   },
@@ -155,7 +147,7 @@ const GLOBAL_RULES = [
     name: 'core-tools-never-statically-imports-a-pack',
     comment:
       'Packs are loaded at runtime from HARNESS_PACKS through a dynamic import in domain/packs/registry.ts. A static import would wire core to one pack by name, which is the coupling the contract exists to remove. src/testing.ts and *.test.ts build a registry from the healthcare pack directly and are exempt: they are not shipped and they need a registry synchronously.',
-    severity: 'warn',
+    severity: 'error',
     from: {
       path: '^harness/core-tools/src/',
       pathNot: ['\\.test\\.ts$', '^harness/core-tools/src/testing\\.ts$'],
@@ -166,7 +158,7 @@ const GLOBAL_RULES = [
     name: 'no-orphans',
     comment:
       'A module nothing imports and that is not an entrypoint is dead. Entrypoints, configs and declaration files are exempt.',
-    severity: 'warn',
+    severity: 'error',
     from: {
       orphan: true,
       pathNot: [

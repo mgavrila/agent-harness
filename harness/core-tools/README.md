@@ -20,8 +20,8 @@ src/testing.ts     ./testing: makeTestDeps, connectTools, resultOf, approvalIdOf
 
 `@harness/core-tools` exports the kernel, every domain's public functions and types, and the
 shared helpers — see `src/index.ts`, which is grouped and commented. The subpaths are
-`./testing`, `./effects`, `./fake-gateway`, `./in-process`, `./models`, `./reconcile`,
-`./redaction` and `./storage`. A subpath exists so that a consumer needing one thing does not
+`./testing`, `./effects`, `./fake-gateway`, `./in-process`, `./redaction` and `./storage`. A
+subpath exists so that a consumer needing one thing does not
 inherit the whole barrel: the approvals app takes `containsRestrictedPattern` from
 `./redaction` and `outRoot` from `./storage` rather than the package root. Nothing under
 `src/app/` is reachable: the composition root reads the environment and opens a pool, and a

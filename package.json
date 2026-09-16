@@ -9,6 +9,7 @@
   "scripts": {
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
+    "lint:strict": "eslint . --max-warnings=0",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "arch": "depcruise 'harness/*/src/**/*.ts' 'evals/src/**/*.ts' 'packs/*/**/*.ts' 'scripts/**/*.ts'",
