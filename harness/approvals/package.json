@@ -10,7 +10,7 @@
   "scripts": {
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "start": "tsx src/main.ts"
+    "start": "tsx src/app/main.ts"
   },
   "dependencies": {
     "@harness/core-tools": "workspace:*",

@@ -1,8 +1,13 @@
 import { and, eq, gt } from 'drizzle-orm';
 import { approvals, type Db } from '@harness/db';
-import type { SlackApi } from './slack.js';
-import type { CoreToolsClient, ExecuteOutcome } from './execute.js';
-import { containsRestrictedPattern, decidedBlocks, type ApprovalRow } from './render.js';
+import { containsRestrictedPattern } from '@harness/core-tools';
+import { createLogger, describeError } from '@harness/shared';
+import type { SlackApi } from './slack/types.js';
+import type { CoreToolsClient, ExecuteOutcome } from './execute/types.js';
+import { decidedBlocks } from './render/blocks.js';
+import type { ApprovalRow } from './render/types.js';
+
+const log = createLogger('approvals');
 
 export interface DecisionDeps {
   db: Db;
@@ -50,7 +55,7 @@ export function threadReplyText(row: ApprovalRow, execution?: ExecuteOutcome): s
 /** Slack is best effort: a decision that is recorded must not be lost to a failed post. */
 async function tellSlack(deps: DecisionDeps, row: ApprovalRow, execution: ExecuteOutcome | undefined): Promise<void> {
   if (!row.slackChannel || !row.slackTs) {
-    console.error(`approvals: ${row.id} has no card to update; the decision is recorded but not shown in Slack`);
+    log.warn(`${row.id} has no card to update; the decision is recorded but not shown in Slack`);
     return;
   }
   const outcome = {
@@ -66,9 +71,7 @@ async function tellSlack(deps: DecisionDeps, row: ApprovalRow, execution: Execut
       blocks: decidedBlocks(row, outcome),
     });
   } catch (err) {
-    console.error(
-      `approvals: could not edit the card for ${row.id}: ${err instanceof Error ? err.message : String(err)}`,
-    );
+    log.error(`could not edit the card for ${row.id}`, err);
   }
   try {
     await deps.api.chat.postMessage({
@@ -77,9 +80,7 @@ async function tellSlack(deps: DecisionDeps, row: ApprovalRow, execution: Execut
       text: threadReplyText(row, execution),
     });
   } catch (err) {
-    console.error(
-      `approvals: could not post the thread reply for ${row.id}: ${err instanceof Error ? err.message : String(err)}`,
-    );
+    log.error(`could not post the thread reply for ${row.id}`, err);
   }
 }
 
@@ -117,7 +118,7 @@ export async function decideApproval(deps: DecisionDeps, input: DecisionInput): 
     try {
       execution = await deps.core.execute(row.id);
     } catch (err) {
-      execution = { status: 'failed', error: err instanceof Error ? err.message : String(err) };
+      execution = { status: 'failed', error: describeError(err) };
     }
   }
 

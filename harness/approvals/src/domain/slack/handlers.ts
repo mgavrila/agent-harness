@@ -1,12 +1,9 @@
-import { decideApproval, type DecisionDeps } from './decisions.js';
-import {
-  APPROVE_ACTION_ID,
-  DECLINE_ACTION_ID,
-  EDIT_ACTION_ID,
-  EDIT_MODAL_CALLBACK_ID,
-  editModalView,
-  parseEditModalMetadata,
-} from './render.js';
+import { createLogger } from '@harness/shared';
+import { decideApproval, type DecisionDeps } from '../decisions.js';
+import { editModalView, parseEditModalMetadata } from '../render/modal.js';
+import { APPROVE_ACTION_ID, DECLINE_ACTION_ID, EDIT_ACTION_ID, EDIT_MODAL_CALLBACK_ID } from '../render/types.js';
+
+const log = createLogger('approvals');
 
 /**
  * What a button press reduces to. Bolt's own payload types are large and
@@ -78,7 +75,7 @@ async function ackFirst(ack: () => Promise<void>): Promise<void> {
   try {
     await ack();
   } catch (err) {
-    console.error(`approvals: ack failed: ${err instanceof Error ? err.message : String(err)}`);
+    log.error('ack failed', err);
   }
 }
 
@@ -87,9 +84,7 @@ async function tellUser(deps: AppDeps, channel: string, userId: string, text: st
   try {
     await deps.api.chat.postEphemeral({ channel, user: userId, text });
   } catch (err) {
-    console.error(
-      `approvals: could not post an ephemeral notice to ${userId}: ${err instanceof Error ? err.message : String(err)}`,
-    );
+    log.error(`could not post an ephemeral notice to ${userId}`, err);
   }
 }
 
@@ -101,7 +96,7 @@ async function tellUser(deps: AppDeps, channel: string, userId: string, text: st
  */
 async function authorize(deps: AppDeps, channel: string, userId: string, approvalId: string): Promise<boolean> {
   if (deps.allowedUsers.has(userId)) return true;
-  console.error(`approvals: user ${userId} is not an approver; refused action on ${approvalId}`);
+  log.warn(`user ${userId} is not an approver; refused action on ${approvalId}`);
   await tellUser(deps, channel, userId, UNAUTHORIZED_TEXT);
   return false;
 }
@@ -109,14 +104,14 @@ async function authorize(deps: AppDeps, channel: string, userId: string, approva
 /** A button value or private_metadata that is not a well-formed uuid can never name a row. */
 async function validId(deps: AppDeps, channel: string, userId: string, id: string): Promise<boolean> {
   if (UUID_RE.test(id)) return true;
-  console.error(`approvals: rejected a malformed approval id from ${userId}`);
+  log.warn(`rejected a malformed approval id from ${userId}`);
   await tellUser(deps, channel, userId, NOT_FOUND_TEXT);
   return false;
 }
 
 function report(approvalId: string, result: Awaited<ReturnType<typeof decideApproval>>): void {
   if (result.outcome === 'not_actionable') {
-    console.error(`approvals: ${approvalId} was not actionable (already decided, expired, or another client's)`);
+    log.info(`${approvalId} was not actionable (already decided, expired, or another client's)`);
   }
 }
 
@@ -139,14 +134,14 @@ function registerDecisionButton(
       if (!(await validId(deps, channel, userId, value))) return;
       report(value, await decideApproval(deps, { approvalId: value, decision, decidedBy: userId }));
     } catch (err) {
-      console.error(`approvals: ${label} handler failed: ${err instanceof Error ? err.message : String(err)}`);
+      log.error(`${label} handler failed`, err);
     }
   });
 }
 
 export function registerApprovalHandlers(registry: HandlerRegistry, deps: AppDeps): void {
   if (deps.allowedUsers.size === 0) {
-    console.error('approvals: SLACK_ALLOWED_USERS is empty; all decisions are refused');
+    log.warn('SLACK_ALLOWED_USERS is empty; all decisions are refused');
   }
 
   registerDecisionButton(registry, deps, APPROVE_ACTION_ID, 'approved', 'Approve');
@@ -160,12 +155,12 @@ export function registerApprovalHandlers(registry: HandlerRegistry, deps: AppDep
       if (!(await authorize(deps, channel, userId, value))) return;
       if (!(await validId(deps, channel, userId, value))) return;
       if (!triggerId) {
-        console.error(`approvals: Edit on ${value} arrived without a trigger id; cannot open the modal`);
+        log.warn(`Edit on ${value} arrived without a trigger id; cannot open the modal`);
         return;
       }
       await deps.api.views.open({ trigger_id: triggerId, view: editModalView(value, channel) });
     } catch (err) {
-      console.error(`approvals: could not open the note modal: ${err instanceof Error ? err.message : String(err)}`);
+      log.error('could not open the note modal', err);
     }
   });
 
@@ -176,7 +171,7 @@ export function registerApprovalHandlers(registry: HandlerRegistry, deps: AppDep
       if (!metadata) {
         // No parsed channel to address an ephemeral to; fall back to whatever
         // Bolt gave us, and only log if even that is unavailable.
-        console.error(`approvals: modal submission arrived with unreadable private metadata`);
+        log.warn('modal submission arrived with unreadable private metadata');
         if (channel) await tellUser(deps, channel, userId, NOT_FOUND_TEXT);
         return;
       }
@@ -194,7 +189,7 @@ export function registerApprovalHandlers(registry: HandlerRegistry, deps: AppDep
         }),
       );
     } catch (err) {
-      console.error(`approvals: modal submission handler failed: ${err instanceof Error ? err.message : String(err)}`);
+      log.error('modal submission handler failed', err);
     }
   });
 }

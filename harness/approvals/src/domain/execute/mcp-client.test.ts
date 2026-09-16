@@ -7,11 +7,11 @@ import { describe, it, expect } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { approvals, encrypt, toolEffects } from '@harness/db';
 import { TEST_DATABASE_URL } from '@harness/db/testing';
-import { createMcpCoreToolsClient } from './execute.js';
-import { useTestDb } from './testing.js';
+import { useTestDb } from '../../testing.js';
+import { createMcpCoreToolsClient } from './mcp-client.js';
 
 const db = useTestDb();
-const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../../..');
 
 describe('core-tools MCP client', () => {
   it('executes an approved forms_release and stages the effect, audited', async () => {

@@ -1,7 +1,10 @@
 import { and, asc, eq, gt, isNotNull, isNull, lte } from 'drizzle-orm';
 import { approvals, type Db } from '@harness/db';
-import type { SlackApi } from './slack.js';
-import { approvalBlocks, approvalFallbackText } from './render.js';
+import { createLogger } from '@harness/shared';
+import type { SlackApi } from './slack/types.js';
+import { approvalBlocks, approvalFallbackText } from './render/blocks.js';
+
+const log = createLogger('approvals');
 
 export interface PollDeps {
   db: Db;
@@ -107,9 +110,7 @@ export async function postPendingApprovals(deps: PollDeps, limit = 20): Promise<
         blocks: approvalBlocks(row),
       });
     } catch (err) {
-      console.error(
-        `approvals: could not post the card for ${row.id}: ${err instanceof Error ? err.message : String(err)}`,
-      );
+      log.error(`could not post the card for ${row.id}`, err);
       await deps.db
         .update(approvals)
         .set({ slackChannel: null, claimedAt: null })
@@ -127,9 +128,10 @@ export async function postPendingApprovals(deps: PollDeps, limit = 20): Promise<
       // Deliberately no release. The row stays claimed with no slack_ts, and
       // the stale-claim sweep above picks it up after STALE_CLAIM_MS — late
       // enough for a transient database failure to have been noticed.
-      console.error(
-        `approvals: posted the card for ${row.id} but could not record its timestamp; ` +
-          `leaving the claim in place so no duplicate is posted: ${err instanceof Error ? err.message : String(err)}`,
+      log.error(
+        `posted the card for ${row.id} but could not record its timestamp; ` +
+          `leaving the claim in place so no duplicate is posted`,
+        err,
       );
     }
   }

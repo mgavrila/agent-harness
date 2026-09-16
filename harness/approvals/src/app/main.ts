@@ -3,18 +3,19 @@ import { fileURLToPath } from 'node:url';
 import { config as loadEnv } from 'dotenv';
 import { App, LogLevel } from '@slack/bolt';
 import { createDb, loadKey } from '@harness/db';
-import { outRoot } from '@harness/core-tools/storage';
-import { slackSinks } from './sinks.js';
-import { webClientApi } from './slack.js';
-import { createMcpCoreToolsClient } from './execute.js';
-import { coreToolsChildEnv, requiredFrom } from './child-env.js';
+import { outRoot } from '@harness/core-tools';
+import { createLogger, numberFromEnv, requiredEnv } from '@harness/shared';
+import { slackSinks } from '../domain/sinks.js';
+import { webClientApi } from '../domain/slack/web-client.js';
+import { createMcpCoreToolsClient } from '../domain/execute/mcp-client.js';
 import {
   registerApprovalHandlers,
   parseAllowedUsers,
   type ActionArgs,
   type HandlerRegistry,
   type ViewArgs,
-} from './app.js';
+} from '../domain/slack/handlers.js';
+import { parseEditModalMetadata } from '../domain/render/modal.js';
 import {
   EDIT_MODAL_CALLBACK_ID,
   EDIT_NOTE_ACTION_ID,
@@ -22,45 +23,23 @@ import {
   APPROVE_ACTION_ID,
   DECLINE_ACTION_ID,
   EDIT_ACTION_ID,
-  parseEditModalMetadata,
-} from './render.js';
-import { collectHealth, startRunner } from './runner.js';
-import { DEFAULT_HEALTH_BIND, startHealthServer } from './health.js';
+} from '../domain/render/types.js';
+import { collectHealth, startRunner } from '../domain/runner.js';
+import { DEFAULT_HEALTH_BIND, startHealthServer } from '../domain/health.js';
+import { coreToolsChildEnv } from './child-env.js';
 
-const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
+const log = createLogger('approvals');
+
+// One level deeper than the package's `src/`, so four segments up is the
+// repository root: src/app -> src -> approvals -> harness -> <repo>.
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../..');
 loadEnv({ path: path.join(repoRoot, '.env'), quiet: true });
 
 function required(name: string): string {
   const hint = name.startsWith('APPROVALS_SLACK_')
     ? ' (the approvals app needs its own Slack app; see docs/runbook.md)'
     : '';
-  return requiredFrom(process.env, name, hint);
-}
-
-/**
- * Read a numeric variable, falling back when it is unset or empty. A present
- * but unparseable or out-of-range value is a configuration error and fails
- * startup rather than silently becoming `NaN` — an unvalidated typo in a port
- * makes `listen(NaN)` pick an arbitrary free port, and the process then looks
- * healthy while nothing can reach it.
- *
- * One reader for every number this file takes from the environment, so no
- * variable can be range-checked more loosely than its neighbour.
- */
-function numberFromEnv(
-  name: string,
-  fallback: number,
-  spec: { min: number; max: number; integer?: boolean; unit?: string },
-): number {
-  const raw = process.env[name];
-  if (!raw || raw.trim() === '') return fallback;
-  const value = Number(raw);
-  const wellFormed = spec.integer ? Number.isInteger(value) : Number.isFinite(value);
-  if (!wellFormed || value < spec.min || value > spec.max) {
-    const kind = spec.integer ? 'an integer ' : '';
-    throw new Error(`${name} must be ${kind}between ${spec.min} and ${spec.max}${spec.unit ? ` ${spec.unit}` : ''}`);
-  }
-  return value;
+  return requiredEnv(name, hint);
 }
 
 const seconds = (name: string, fallback: number): number =>
@@ -96,15 +75,15 @@ const bolt = new App({
 
 /**
  * Narrow Bolt's payloads onto the fields the handlers need. Everything
- * Bolt-specific lives here, so `app.ts` and its tests stay free of Bolt types.
+ * Bolt-specific lives here, so the handlers and their tests stay free of Bolt types.
  *
  * `channel` for a block action comes from `body.channel.id`, the channel the
  * interactive message lives in. A view submission carries no channel of its
  * own in Slack's payload — Bolt's `view.channel` is not populated for a modal
  * opened by `trigger_id` from a button click, which is this app's only path
  * to one — so `channel` here is decoded from `private_metadata` instead
- * (`editModalView` encoded it there when the modal was opened). `app.ts`'s own
- * view handler decodes the same metadata and does not trust this value either;
+ * (`editModalView` encoded it there when the modal was opened). The domain's
+ * own view handler decodes the same metadata and does not trust this value either;
  * it is passed through only so a metadata parse failure still has a channel to
  * report the failure to.
  */
@@ -187,12 +166,12 @@ const health = startHealthServer({
 });
 
 await bolt.start();
-console.error(
-  `approvals: listening (client=${client}, channel=${channel}, buttons=${[APPROVE_ACTION_ID, EDIT_ACTION_ID, DECLINE_ACTION_ID].join(',')}, modal=${EDIT_MODAL_CALLBACK_ID})`,
+log.info(
+  `listening (client=${client}, channel=${channel}, buttons=${[APPROVE_ACTION_ID, EDIT_ACTION_ID, DECLINE_ACTION_ID].join(',')}, modal=${EDIT_MODAL_CALLBACK_ID})`,
 );
 
 async function shutdown(signal: string): Promise<void> {
-  console.error(`approvals: ${signal} received, stopping`);
+  log.info(`${signal} received, stopping`);
   try {
     await runner.stop();
     await health.close();
@@ -201,7 +180,7 @@ async function shutdown(signal: string): Promise<void> {
     await closeDb();
     process.exit(0);
   } catch (err) {
-    console.error(`approvals: shutdown failed: ${err instanceof Error ? err.message : String(err)}`);
+    log.error('shutdown failed', err);
     process.exit(1);
   }
 }

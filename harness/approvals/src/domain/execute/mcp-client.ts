@@ -1,27 +1,9 @@
 import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
+import { createLogger } from '@harness/shared';
+import type { CallResult, CoreToolsClient, McpLauncher } from './types.js';
 
-export type ExecuteOutcome = { status: 'executed'; tool: string } | { status: 'failed'; error: string };
-
-export interface CoreToolsClient {
-  /** Run an approved action. Never runs a handler directly: always `approvals_execute`. */
-  execute(approvalId: string): Promise<ExecuteOutcome>;
-  /** Expire stale approvals and park stuck dispatches, audited as a normal tool call. */
-  reconcile(staleAfterMinutes: number): Promise<{ approvals_expired: number; dispatches_parked: number }>;
-  close(): Promise<void>;
-}
-
-export interface McpLauncher {
-  command: string;
-  args: string[];
-  env: Record<string, string>;
-}
-
-interface CallResult {
-  isError?: boolean;
-  content?: { type: string; text?: string }[];
-  structuredContent?: { status?: string; result?: unknown };
-}
+const log = createLogger('approvals');
 
 function textOf(res: CallResult): string {
   return (res.content ?? [])
@@ -61,9 +43,7 @@ export function createMcpCoreToolsClient(launcher: McpLauncher): CoreToolsClient
       return (await client.callTool({ name, arguments: args })) as CallResult;
     } catch (err) {
       // A dead child looks like a transport error; drop it and try once more.
-      console.error(
-        `approvals: core-tools call ${name} failed, reconnecting: ${err instanceof Error ? err.message : String(err)}`,
-      );
+      log.warn(`core-tools call ${name} failed, reconnecting`, err);
       try {
         await client.close();
       } catch {

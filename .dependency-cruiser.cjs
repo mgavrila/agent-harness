@@ -43,7 +43,7 @@ const PACKAGES = [
   { name: 'db', src: 'harness/db/src', severity: 'error' },
   { name: 'gateway', src: 'harness/gateway/src', severity: 'error' },
   { name: 'core-tools', src: 'harness/core-tools/src', severity: 'error' },
-  { name: 'approvals', src: 'harness/approvals/src', severity: 'warn' },
+  { name: 'approvals', src: 'harness/approvals/src', severity: 'error' },
   { name: 'evals', src: 'evals/src', severity: 'warn' },
 ];
 

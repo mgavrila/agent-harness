@@ -1,9 +1,12 @@
 import { and, eq } from 'drizzle-orm';
 import { approvals, toolEffects, type Db } from '@harness/db';
 import { dispatchStagedEffects, type DispatchResult, type SinkRegistry } from '@harness/core-tools/effects';
-import type { SlackApi } from './slack.js';
-import type { CoreToolsClient } from './execute.js';
+import { createLogger, describeError } from '@harness/shared';
+import type { SlackApi } from './slack/types.js';
+import type { CoreToolsClient } from './execute/types.js';
 import { postPendingApprovals, type PollResult } from './poller.js';
+
+const log = createLogger('approvals');
 
 export interface RunnerDeps {
   db: Db;
@@ -111,11 +114,11 @@ export function startRunner(deps: RunnerDeps, intervals: RunnerIntervals): Runne
           status.loops[name].lastError = null;
           status.loops[name].lastOkAt = at;
         } catch (err) {
-          const message = `${name}: ${err instanceof Error ? err.message : String(err)}`;
+          const message = `${name}: ${describeError(err)}`;
           status.lastError = message;
           status.loops[name].lastError = message;
           status.loops[name].lastErrorAt = at;
-          console.error(`approvals: ${message}`);
+          log.error(message);
         } finally {
           running = false;
         }

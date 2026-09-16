@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { approvals, type Db } from '@harness/db';
+import { FakeSlack, useTestDb } from '../testing.js';
 import { postPendingApprovals } from './poller.js';
-import { FakeSlack, useTestDb } from './testing.js';
 
 const db = useTestDb();
 const now = () => new Date('2026-09-15T12:00:00Z');

@@ -1,18 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import {
-  containsRestrictedPattern,
-  payloadPreview,
-  approvalBlocks,
-  approvalFallbackText,
-  decidedBlocks,
-  editModalView,
-  parseEditModalMetadata,
-  APPROVE_ACTION_ID,
-  DECLINE_ACTION_ID,
-  EDIT_ACTION_ID,
-  EDIT_MODAL_CALLBACK_ID,
-  type ApprovalRow,
-} from './render.js';
+import { containsRestrictedPattern } from '@harness/core-tools';
+import { approvalBlocks, approvalFallbackText, decidedBlocks, payloadPreview } from './blocks.js';
+import { APPROVE_ACTION_ID, DECLINE_ACTION_ID, EDIT_ACTION_ID, type ApprovalRow } from './types.js';
 
 function row(over: Partial<ApprovalRow> = {}): ApprovalRow {
   return {
@@ -136,29 +125,5 @@ describe('decidedBlocks', () => {
       { executed: false },
     );
     expect(JSON.stringify(blocks)).toContain('Execution failed; see the audit log. Nothing was sent.');
-  });
-});
-
-describe('editModalView', () => {
-  it('carries the approval id and channel in private_metadata', () => {
-    const view = editModalView(row().id, 'C0DEMO') as { callback_id: string; private_metadata: string };
-    expect(view.callback_id).toBe(EDIT_MODAL_CALLBACK_ID);
-    expect(JSON.parse(view.private_metadata)).toEqual({ approval_id: row().id, channel: 'C0DEMO' });
-  });
-});
-
-describe('parseEditModalMetadata', () => {
-  it('round-trips what editModalView encoded', () => {
-    const view = editModalView(row().id, 'C0DEMO') as { private_metadata: string };
-    expect(parseEditModalMetadata(view.private_metadata)).toEqual({ approvalId: row().id, channel: 'C0DEMO' });
-  });
-
-  it('returns null for anything that is not the expected shape', () => {
-    expect(parseEditModalMetadata('not-json')).toBeNull();
-    expect(parseEditModalMetadata(row().id)).toBeNull();
-    expect(parseEditModalMetadata('{}')).toBeNull();
-    expect(parseEditModalMetadata(JSON.stringify({ approval_id: row().id }))).toBeNull();
-    expect(parseEditModalMetadata(JSON.stringify({ approval_id: '', channel: 'C0DEMO' }))).toBeNull();
-    expect(parseEditModalMetadata(JSON.stringify({ approval_id: row().id, channel: '' }))).toBeNull();
   });
 });

@@ -2,8 +2,8 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import * as z from 'zod/v4';
 import type { SinkHandler, SinkRegistry } from '@harness/core-tools/effects';
-import { realOrNearestAncestor } from '@harness/core-tools/storage';
-import type { SlackApi } from './slack.js';
+import { assertInsideRoot } from '@harness/shared';
+import type { SlackApi } from './slack/types.js';
 
 // `channel` is nullable as well as optional: a staging tool writes an explicit
 // null when the caller did not pick one, and that must mean "use the default",
@@ -45,27 +45,24 @@ function parsePayload<T>(schema: z.ZodType<T>, payload: unknown, sink: string): 
  * uploads whatever it points at. Both sides are compared as real paths too.
  */
 async function assertUnderRoot(candidate: string, root: string, effectId: string): Promise<void> {
-  const resolvedRoot = path.resolve(root);
-  const resolved = path.resolve(candidate);
-  const rel = path.relative(resolvedRoot, resolved);
-  if (rel === '..' || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel)) {
-    throw new Error(`slack_file: path outside the release directory (effect ${effectId})`);
-  }
-  let realRoot: string;
-  let realCandidate: string;
-  try {
-    realRoot = await realOrNearestAncestor(resolvedRoot);
-    realCandidate = await realOrNearestAncestor(resolved);
-  } catch {
-    // realpath errors (ELOOP, EACCES, ENOTDIR) carry the absolute path in
-    // their message; keep it out of the plaintext `tool_effects.last_error`.
-    throw new Error(`slack_file: staged file unavailable (effect ${effectId})`);
-  }
-  // The separator matters: `${realRoot}-evil` starts with `realRoot` but is
-  // not inside it.
-  if (realCandidate !== realRoot && !realCandidate.startsWith(realRoot + path.sep)) {
-    throw new Error(`slack_file: path outside the release directory (effect ${effectId})`);
-  }
+  await assertInsideRoot(
+    // Resolve against the working directory first, matching this guard's own
+    // pre-refactor `path.resolve(candidate)` exactly. `assertInsideRoot`
+    // resolves a relative candidate *inside `root`*, which would silently
+    // loosen this check for a relative path — see the note above this function.
+    path.resolve(candidate),
+    root,
+    (reason) => {
+      throw new Error(
+        reason === 'unreadable'
+          ? `slack_file: staged file unavailable (effect ${effectId})`
+          : `slack_file: path outside the release directory (effect ${effectId})`,
+      );
+    },
+    // realpath errors (ELOOP, EACCES, ENOTDIR) carry the absolute path in their
+    // message; keep it out of the plaintext `tool_effects.last_error`.
+    { onUnreadable: 'escape' },
+  );
 }
 
 /**

@@ -4,6 +4,7 @@ import path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { describe, it, expect } from 'vitest';
 import { approvals, encrypt, toolEffects } from '@harness/db';
+import { FakeCoreToolsClient, FakeSlack, useTestDb } from '../testing.js';
 import {
   runPollTick,
   runDispatchTick,
@@ -13,7 +14,6 @@ import {
   type RunnerDeps,
 } from './runner.js';
 import { slackSinks } from './sinks.js';
-import { FakeCoreToolsClient, FakeSlack, useTestDb } from './testing.js';
 
 const db = useTestDb();
 const key = randomBytes(32);

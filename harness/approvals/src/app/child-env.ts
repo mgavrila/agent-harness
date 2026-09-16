@@ -1,3 +1,5 @@
+import { requiredEnv } from '@harness/shared';
+
 /**
  * The environment the core-tools child is launched with.
  *
@@ -14,24 +16,12 @@ export interface ChildEnvInput {
   storageRoot: string;
 }
 
-/**
- * Read a variable that has no sensible default, or fail startup naming it.
- * Shared with `main.ts`, which reads its own required variables the same way:
- * an empty string has to count as unset in both, or a half-filled `.env` starts
- * a process that fails later and further from the cause.
- */
-export function requiredFrom(env: NodeJS.ProcessEnv, name: string, hint = ''): string {
-  const value = env[name];
-  if (!value || value.trim() === '') throw new Error(`${name} is not set${hint}`);
-  return value;
-}
-
 export function coreToolsChildEnv({ env, client, storageRoot }: ChildEnvInput): Record<string, string> {
   return {
     PATH: env.PATH ?? '',
     HOME: env.HOME ?? '',
-    DATABASE_URL: requiredFrom(env, 'DATABASE_URL'),
-    HARNESS_ENCRYPTION_KEY: requiredFrom(env, 'HARNESS_ENCRYPTION_KEY'),
+    DATABASE_URL: requiredEnv('DATABASE_URL', '', env),
+    HARNESS_ENCRYPTION_KEY: requiredEnv('HARNESS_ENCRYPTION_KEY', '', env),
     HARNESS_CLIENT: client,
     CORE_TOOLS_CALLER: 'approvals-app',
     HARNESS_STORAGE_DIR: storageRoot,
@@ -39,7 +29,7 @@ export function coreToolsChildEnv({ env, client, storageRoot }: ChildEnvInput): 
     // through the proxy, and an approved documents_extract replay makes one.
     // The provider keys stay in the proxy, so this is the only model
     // credential the child ever holds.
-    LITELLM_MASTER_KEY: requiredFrom(env, 'LITELLM_MASTER_KEY'),
+    LITELLM_MASTER_KEY: requiredEnv('LITELLM_MASTER_KEY', '', env),
     ...(env.HARNESS_POLICY_FILE ? { HARNESS_POLICY_FILE: env.HARNESS_POLICY_FILE } : {}),
     ...(env.HARNESS_FORMS_DIR ? { HARNESS_FORMS_DIR: env.HARNESS_FORMS_DIR } : {}),
     ...(env.HARNESS_GATEWAY_URL ? { HARNESS_GATEWAY_URL: env.HARNESS_GATEWAY_URL } : {}),

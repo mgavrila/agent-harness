@@ -49,6 +49,7 @@ const STRICT_LAYER_ROOTS = [
   'harness/shared/src',
   'harness/core-tools/src',
   'harness/pack-api/src',
+  'harness/approvals/src',
 ];
 
 /** True for the two spellings of a disabled rule, bare or at the head of an options array. */

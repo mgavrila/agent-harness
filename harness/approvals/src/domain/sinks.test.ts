@@ -5,8 +5,8 @@ import { randomBytes } from 'node:crypto';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { encrypt, toolEffects } from '@harness/db';
 import { dispatchStagedEffects } from '@harness/core-tools/effects';
+import { FakeSlack, useTestDb } from '../testing.js';
 import { slackSinks } from './sinks.js';
-import { FakeSlack, useTestDb } from './testing.js';
 
 const db = useTestDb();
 const key = randomBytes(32);

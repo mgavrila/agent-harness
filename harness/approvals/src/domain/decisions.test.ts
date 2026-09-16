@@ -1,9 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { approvals } from '@harness/db';
+import { FakeCoreToolsClient, FakeSlack, useTestDb } from '../testing.js';
 import { decideApproval, threadReplyText } from './decisions.js';
-import { FakeCoreToolsClient, FakeSlack, useTestDb } from './testing.js';
-import type { ApprovalRow } from './render.js';
+import type { ApprovalRow } from './render/types.js';
 
 const db = useTestDb();
 const now = () => new Date('2026-09-15T12:00:00Z');

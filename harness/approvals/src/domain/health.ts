@@ -1,6 +1,9 @@
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
+import { createLogger } from '@harness/shared';
 import type { HealthSnapshot } from './runner.js';
+
+const log = createLogger('approvals');
 
 /** Bind every interface by default: see the `bind` note on `startHealthServer`. */
 export const DEFAULT_HEALTH_BIND = '0.0.0.0';
@@ -49,7 +52,7 @@ export function startHealthServer(opts: {
         // and those carry fragments of the statement or of the connection
         // target. This route is unauthenticated and outside the audit trail;
         // the detail goes to stderr, where an operator can read it.
-        console.error(`approvals: health snapshot failed: ${err instanceof Error ? err.message : String(err)}`);
+        log.error('health snapshot failed', err);
         res.writeHead(500, { 'content-type': 'application/json' });
         res.end('{"ok":false,"error":"snapshot failed"}');
       });
