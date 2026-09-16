@@ -191,7 +191,11 @@ module.exports = {
     exclude: { path: '(^|/)node_modules/|(^|/)drizzle/|(^|/)out/|(^|/)results/' },
     tsPreCompilationDeps: true,
     // Without this, depcruise resolves .js/.json only and every .ts import is "unresolvable".
-    enhancedResolveOptions: { extensions: ['.ts', '.js', '.json'] },
+    // `exportsFields` is off by default in dependency-cruiser's resolver; every
+    // workspace manifest here declares `exports` and no `main`, so without it a
+    // bare specifier such as `@harness/shared` is "unresolvable" and the
+    // cross-package rules never fire. With it, they resolve to the source entry.
+    enhancedResolveOptions: { extensions: ['.ts', '.js', '.json'], exportsFields: ['exports'] },
     reporterOptions: {
       dot: { collapsePattern: '^(harness|packs|evals|scripts)/[^/]+/(src/)?(shared|domain|tools|app)(/[^/]+)?' },
     },
