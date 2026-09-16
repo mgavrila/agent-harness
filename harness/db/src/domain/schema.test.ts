@@ -17,6 +17,24 @@ beforeEach(async () => {
   await resetDatabase(db);
 });
 
+/**
+ * The message a query's rejection really carries, or a sentence saying it did
+ * not reject at all. drizzle-orm wraps the driver error as "Failed query: ..."
+ * and puts the underlying Postgres error — the trigger's RAISE EXCEPTION
+ * message — on `.cause`, so the cause is what the append-only assertions below
+ * have to read.
+ */
+async function rejectionMessage(query: PromiseLike<unknown>): Promise<string> {
+  try {
+    await query;
+    return 'the query succeeded';
+  } catch (err) {
+    const cause = err instanceof Error ? err.cause : undefined;
+    if (cause instanceof Error) return cause.message;
+    return err instanceof Error ? err.message : String(err);
+  }
+}
+
 describe('schema', () => {
   it('inserts and reads a provider', async () => {
     const [row] = await db
@@ -45,19 +63,10 @@ describe('schema', () => {
         decision: 'auto',
       })
       .returning();
-    // drizzle-orm wraps the driver error as "Failed query: ..." and puts the
-    // underlying Postgres error (our RAISE EXCEPTION message) on `.cause`.
-    const updateErr: any = await db
-      .update(auditLog)
-      .set({ decision: 'blocked' })
-      .where(eq(auditLog.id, row.id))
-      .catch((e) => e);
-    expect(String(updateErr?.cause?.message ?? updateErr)).toMatch(/append-only/);
-    const deleteErr: any = await db
-      .delete(auditLog)
-      .where(eq(auditLog.id, row.id))
-      .catch((e) => e);
-    expect(String(deleteErr?.cause?.message ?? deleteErr)).toMatch(/append-only/);
+    const updated = db.update(auditLog).set({ decision: 'blocked' }).where(eq(auditLog.id, row.id));
+    await expect(rejectionMessage(updated)).resolves.toMatch(/append-only/);
+    const deleted = db.delete(auditLog).where(eq(auditLog.id, row.id));
+    await expect(rejectionMessage(deleted)).resolves.toMatch(/append-only/);
   });
 
   it('audit_log rejects TRUNCATE', async () => {
@@ -69,8 +78,7 @@ describe('schema', () => {
       argsHash: 'h',
       decision: 'auto',
     });
-    const err: any = await db.execute(sql`TRUNCATE TABLE audit_log`).catch((e) => e);
-    expect(String(err?.cause?.message ?? err?.message ?? err)).toMatch(/append-only/);
+    await expect(rejectionMessage(db.execute(sql`TRUNCATE TABLE audit_log`))).resolves.toMatch(/append-only/);
     expect(await db.select().from(auditLog)).toHaveLength(1);
   });
 
