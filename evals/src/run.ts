@@ -330,7 +330,8 @@ export function parseUpdateBaselineFlag(argv: readonly string[]): UpdateBaseline
  *
  *   --corpus=<dir>      Corpus root. Defaults to packs/healthcare/synthetic/out.
  *   --cases=<file>      Extraction cases file. Defaults to <corpus>/cases.jsonl.
- *   --injection=<file>  Injection cases file. Defaults to packs/healthcare/evals/injection.jsonl.
+ *   --injection=<file>  Injection cases file. Defaults to the pack's declared
+ *                        `evals.injectionFile` (packs/healthcare/evals/injection.jsonl today).
  *   --out=<dir>         Where report.json and report.md are written. Defaults to evals/results.
  *   --baseline=<file>   Baseline report to compare against. Defaults to evals/baseline.json.
  *   --version=<string>  Recorded as eval_set_version. Defaults to 1.0.0.

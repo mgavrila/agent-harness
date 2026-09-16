@@ -16,8 +16,11 @@ const extraction = requireJson('../schema/provider.json') as ProviderManifest;
 const { version } = requireJson('../package.json') as { version: string };
 
 /**
- * The action-class defaults this pack ships, read from the file a human edits. A client's
- * `HARNESS_POLICY_FILE` still wins: core merges `DEFAULT_POLICY`, then this, then the client's.
+ * The action-class defaults this pack ships, read from the file a human edits. The `Pack`
+ * contract carries this field, but core's `loadPolicy` does not merge it into `deps.policy`
+ * yet — see ARCHITECTURE.md, "Packs are plug-ins, not dependencies". That is unobservable
+ * today because this file matches `DEFAULT_POLICY`; it stops being unobservable the day a
+ * pack's classes and `DEFAULT_POLICY` diverge.
  */
 const { classes = {} } = parseYaml(readFileSync(path.join(root, 'policy.yaml'), 'utf8')) as {
   classes?: Partial<Policy>;

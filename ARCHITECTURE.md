@@ -77,6 +77,11 @@ A pack supplies the content that makes the kernel specific to a domain: the docu
 `templates.json` and its PDFs, the skills directory, the action-class policy defaults it
 ships, optionally its eval case files, and optionally its own tools.
 
+`Pack.policy` is part of the contract but `loadPolicy` (`domain/tooling/policy.ts`) does not
+read it yet: `deps.policy` is `DEFAULT_POLICY` merged with the client's `HARNESS_POLICY_FILE`
+only. A pack's policy is carried, not merged, until something changes that — unobservable
+today because the healthcare pack's `policy.yaml` matches `DEFAULT_POLICY`.
+
 `app/server.ts` reads `HARNESS_PACKS`, a comma-separated list of package names defaulting to
 `@harness/pack-healthcare`, and loads each with a dynamic `import()`. Each module must export
 `pack`. The loaded packs become a registry on `ToolDeps`, and `documents_classify`,
