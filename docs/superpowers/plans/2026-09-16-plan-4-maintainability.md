@@ -4,7 +4,7 @@
 
 **Goal:** Restructure every workspace package onto one four-layer shape (shared → domain → tools → app) with a single public entry point, one home for each cross-cutting concern, lint and architecture tooling that fails the build when a layer is crossed the wrong way, and documentation a newcomer can read — changing no behaviour at all.
 
-**Architecture:** Three moves, repeated per package. (1) A `src/shared/` layer holds the pure helpers that are currently reinvented per package — env parsing, the three error types, path containment, logging, bounded subprocesses, JSONL, CSV quoting and the redaction patterns — and `@harness/core-tools` exports them through its public API so `@harness/approvals`, `@harness/evals` and the pack import them instead of keeping copies. (2) Each package's business code moves into `src/domain/<name>/` folders whose `types.ts` declares every interface reached across a boundary, with the production adapter and the fake beside it; `src/tools/` shrinks to `defineTool` calls; `src/app/` becomes the only place that reads the environment and composes dependencies. (3) ESLint 9 flat config, Prettier and dependency-cruiser enforce the layering, and a public-surface snapshot test (MCP tool list with JSON schemas, the set of environment variable names, the rendered Compose config) fails the suite the moment a rename or a lost export escapes.
+**Architecture:** Four moves. (1) A new workspace package **`@harness/shared`** (`harness/shared/`) holds the pure helpers that are currently reinvented per package — env parsing, the three error types, path containment, logging, bounded subprocesses, JSONL and CSV quoting. It has no workspace dependency of its own, so it sits below everything and `@harness/db`, `packs/healthcare` and `scripts` can import it as freely as `@harness/core-tools` can. The redaction modules stay in core-tools' own `src/shared/redaction/`, because they carry domain knowledge, and are exported from its public API. (2) A second new package **`@harness/pack-api`** (`harness/pack-api/`) holds the `Pack` contract and `definePack()`, plus the types the contract needs (`ProviderManifest`, `Policy`, `ToolDef`), so a pack never depends on core-tools; core-tools loads packs named by `HARNESS_PACKS` through a dynamic `import()` into a `PackRegistry` on `ToolDeps`, and never statically imports one. (3) Each package's business code moves into `src/domain/<name>/` folders whose `types.ts` declares every interface reached across a boundary, with the production adapter and the fake beside it; `src/tools/` shrinks to `defineTool` calls; `src/app/` becomes the only place that reads the environment and composes dependencies. (4) ESLint 9 flat config, Prettier and dependency-cruiser enforce the layering, and a public-surface snapshot test (MCP tool list with JSON schemas, the set of environment variable names, the rendered Compose config) fails the suite the moment a rename or a lost export escapes.
 
 **Tech Stack:** unchanged runtime (Node `>=22`, pnpm `11.4.0`, TypeScript `7.0.2` strict ESM, zod v4 as `import * as z from 'zod/v4'`, drizzle-orm `0.45`, `@modelcontextprotocol/server`/`client` v2, `@slack/bolt` `5.1`, vitest 5, Postgres 16), plus new **dev-only** tooling: ESLint `9.39.5`, `typescript-eslint` `8.70.0` driven by a root-only `typescript` `6.0.3` (see "Facts verified" — typescript-eslint refuses to load against TypeScript 7), `eslint-plugin-import-x` `4.17.1`, `eslint-import-resolver-typescript` `4.4.5`, `eslint-plugin-unused-imports` `4.4.1`, `eslint-config-prettier` `10.1.8`, `globals` `17.12.0`, Prettier `3.9.7`, `dependency-cruiser` `16.10.4`.
 
@@ -21,9 +21,10 @@ Every task's requirements implicitly include this section.
 - **The public-surface snapshot test from Task 1 is green after every task.**
 - **Imports only go downward:** `shared → domain → tools → app`. `shared/` imports only Node built-ins and third-party libraries. A domain may import `shared/`, and other domains' `types.ts` and exported functions. `tools/` imports `domain/` and `shared/`. `app/` imports everything. `src/index.ts` imports `domain/`, `tools/` and `shared/`, and **never** `app/`.
 - **Other packages import only a package's `index.ts` or one of its declared subpath exports.** No package ever deep-imports `../other-package/src/...`.
-- **Exactly three deliberate error types:** `ToolError` (agent-visible), `ModelOutputError` (a `ToolError` subclass), `ConfigError` (startup misconfiguration). They are declared once, in `harness/core-tools/src/shared/errors.ts`. Everything else is a plain `Error` that the tooling kernel masks. `@harness/db` is the one exception and it is deliberate: it sits below `core-tools` in the graph and cannot import it without a cycle, so it keeps plain `Error`. ARCHITECTURE.md says so.
-- **No `console.*` outside `shared/log.ts` and CLI entrypoints** (`src/app/**`, and the three pack/script CLI files). ESLint enforces it.
-- **No `process.env` outside `shared/env.ts` and `app/`.** ESLint enforces it.
+- **Exactly three deliberate error types:** `ToolError` (agent-visible), `ModelOutputError` (a `ToolError` subclass), `ConfigError` (startup misconfiguration). They are declared **once**, in `harness/shared/src/errors.ts`, and `@harness/core-tools` re-exports them so no importer changes. One class definition means `instanceof` keeps working across every package, which is what the tooling kernel's error masking depends on. Everything else is a plain `Error` that the kernel masks. `@harness/db` keeps throwing plain `Error` from `loadKey` and `createDb`, not because it cannot reach `ConfigError` — after Task 4 it can — but because changing what those two throw is a behaviour change this plan does not make; ARCHITECTURE.md records it as the one place left to revisit.
+- **Packs are plug-ins, loaded at runtime.** `app/server.ts` reads `HARNESS_PACKS` (comma-separated package names, default `@harness/pack-healthcare`) and loads each through a dynamic `import()` into a `PackRegistry` on `ToolDeps`. **No module under `harness/core-tools/src/` ever statically imports a `@harness/pack-*` package**, with two named exceptions that dependency-cruiser exempts: `src/testing.ts` and any `*.test.ts`. Document kinds, the extraction manifest, the forms directory, the skills directory and the pack's policy defaults all come from the registry; none is hard-coded to a pack name.
+- **No `console.*` outside `harness/shared/src/log.ts` and CLI entrypoints** (`src/app/**`, and the three pack/script CLI files). ESLint enforces it.
+- **No `process.env` outside `harness/shared/src/env.ts` and `app/`.** ESLint enforces it.
 - **No `throw new Error` inside `tools/`.** ESLint enforces it. `new Error(...)` as a *value* is still fine; only the `throw` form is restricted.
 - A domain that needs only one module is a single file `src/domain/<name>.ts`. It gets a folder as soon as it needs a second module or a `types.ts` shared between modules. Files are named by responsibility (`types.ts`, `repository.ts`, `render.ts`, `prompts.ts`), never after the package or the folder they sit in, so no two files in a package share a basename with different responsibilities.
 - **Commit messages: conventional prefix, imperative subject, and NO trailer of any kind.** No `Co-Authored-By`, no `Generated with`, nothing. This overrides any trailer guidance from the environment.
@@ -53,8 +54,8 @@ Everything below was executed against this checkout on 2026-09-16. Quote the com
 | Prettier | `3.9.7` | `npm view prettier version` |
 | dependency-cruiser | `16.10.4`, engines `^18.17 \|\| >=20`. **Pinned to 16 on purpose**: 17.4.3 requires `^20.12 \|\| ^22 \|\| >=24` and 18.3.1 requires `^22 \|\| ^24 \|\| >=26`, which excludes Node 23 and Node 25. Contributors on Node 25 exist. | `npm view dependency-cruiser@{16,17,18} engines`; `node --version` on this machine prints `v25.9.0` |
 | dependency-cruiser needs a glob, not a directory | `depcruise harness/core-tools/src` cruises **0 modules**. `depcruise 'harness/core-tools/src/**/*.ts'` cruises them all. Also set `options.enhancedResolveOptions.extensions` explicitly. | Ran both forms against a scratch package |
-| dependency-cruiser severities map to exit codes | `severity: 'warn'` prints the violation and exits **0**; `severity: 'error'` exits **1**. That is what makes the warn-then-error migration in Task 11 work. | Ran a deliberately violating fixture at each severity and echoed `$?` |
-| Graphviz is **not** installed here | `which dot` finds nothing. `pnpm arch:graph` needs it; Task 11 installs it. | `which dot` |
+| dependency-cruiser severities map to exit codes | `severity: 'warn'` prints the violation and exits **0**; `severity: 'error'` exits **1**. That is what makes the warn-then-error migration in Task 12 work. | Ran a deliberately violating fixture at each severity and echoed `$?` |
+| Graphviz is **not** installed here | `which dot` finds nothing. `pnpm arch:graph` needs it; Task 12 installs it. | `which dot` |
 | The three project rules work as ESLint selectors | `no-console` off for `shared/log.ts`; `MemberExpression[object.name="process"][property.name="env"]` flags `process.env.X` in `domain/` and not in `app/`, and leaves `process.argv` alone; `ThrowStatement > NewExpression[callee.name="Error"]` flags `throw new Error(...)` in `tools/` and leaves `const e = new Error(...)` alone | Built the exact config in a scratch workspace against fixtures in `shared/`, `domain/`, `tools/` and `app/` |
 | **Two flat-config blocks that both set `no-restricted-syntax` do not merge** | The later block *replaces* the rule for any file both blocks match. The tools-layer block therefore has to repeat the `process.env` selector alongside the `throw new Error` one, or `tools/` silently loses the environment rule. | Observed exactly this failure in the scratch workspace, then fixed it by listing both selectors |
 | Prettier reformats 68 of 115 TypeScript files at `printWidth: 120` | Line lengths today: p50 35, p90 86, p99 127, max 268; 251 lines over 120 columns, 49 over 140. 120 is the smallest width that does not rewrap the whole codebase. | `prettier --list-different` over `harness packs evals scripts`; `awk` over every source line |
@@ -74,18 +75,28 @@ Spec section 4 asks for several dependencies to be reshaped into interfaces carr
 
 2. **`redaction/patterns.ts` ships two pattern sets, not one.** `tools/harness.ts:RESTRICTED_TEXT_PATTERNS` and `approvals/render.ts:RESTRICTED_PATTERNS` are byte-identical to each other — three strict-`\d` shape regexes with no validity gate. `documents/redact.ts:PATTERNS` are different: OCR-tolerant, and gated on SSA allocation rules and the DEA check digit. Collapsing them into one list would change behaviour in both directions (a shape-only `AB1234567` stops tripping the Slack guard; an OCR-noisy `O12-34-5678` starts tripping it). So the module exports `containsRestrictedPattern` over the strict shape set — killing the byte-identical duplicate, which is the stated goal — and `redactPages`/`assertRedacted` keep the gated set. One module, one test file, two documented tiers.
 
-3. **`@harness/db` gets its own ten-line `shared/log.ts`.** It has three `console.*` sites and sits below `core-tools` in the package graph, so it cannot import the shared logger without a cycle. Spec section 8 declined a `@harness/shared` package and said to revisit "if a package that does not depend on core-tools ever needs the helpers"; this is that case, and the answer for now is a local copy of one tiny module rather than a new package. ARCHITECTURE.md flags it for revisit.
+3. **`@harness/db` gets a local `shared/log.ts` in Task 2 and loses it again in Task 4.** It has three `console.*` sites and sits below `core-tools`, so at Task 2 there is nothing it can import. Task 4 creates `@harness/shared`, which sits below `@harness/db` in turn, and Task 4 Step 16 deletes the local copy and points both call sites at it. The two commits are worth keeping apart: Task 2 is a layout task and Task 4 is where the shared package arrives. The printed lines are byte-identical either way.
 
 4. **The Compose surface is snapshotted with `--no-interpolate --no-path-resolution`,** not with `--env-file .env.example`. See the two "Facts verified" rows above: the `--env-file` form cannot run without placeholder secrets, and once it runs it copies the developer's real `.env` into the output through the `hermes` service's `env_file`. `.env.example` is left exactly as it is.
 
-5. **`packs/healthcare` cannot import the shared helpers, and neither can `scripts`.** Spec section 3 says approvals, evals *and the pack* import them from core-tools' public API. The pack is a **dependency** of core-tools — `documents/manifest.ts` reads `@harness/pack-healthcare/schema` — so importing back is a cycle. The pack therefore keeps its own bounded `execFile` call in `synthetic/pdf.ts` and its own two-line JSONL write in `synthetic/generate.ts`. Same argument as `@harness/db`'s logger, same entry in ARCHITECTURE.md's "Three deliberate duplications", same trigger for revisiting the declined `@harness/shared` package. This is the one spec item this plan does not fully deliver.
+5. **`packs/healthcare` and `scripts` import `@harness/shared`, not `@harness/core-tools`.** Spec section 3 wanted the pack to stop keeping copies; the reason it could not was that the pack is a *dependency* of core-tools, so importing back is a cycle. `@harness/shared` has no workspace dependency at all, which removes the argument: Task 4 adds it to both manifests, Task 11 switches the pack's `execFile` wrapper to `runBounded` and its JSONL writer to `writeJsonl`, and the "three deliberate duplications" section of ARCHITECTURE.md shrinks to one — the two redaction pattern tiers in decision 2. This is spec section 9.4's first bullet.
 
-6. **`./testing` survives Task 11 even though no other package imports it.** Spec section 2 names it as the subpath every package exports its fakes under, and each package README documents it. Task 11 removes `./models` and `./reconcile`, which nothing names at all.
+6. **`./testing` survives Task 12 even though no other package imports it.** Spec section 2 names it as the subpath every package exports its fakes under, and each package README documents it. Task 12 removes `./models` and `./reconcile`, which nothing names at all.
+
+7. **`parseManifest` takes its restricted-name check as a parameter.** Spec section 9.2 moves `ProviderManifest` into `@harness/pack-api`, but today's zod schema calls `isRestrictedName`, which lives in core-tools' `shared/redaction/` and must stay there (spec section 3: it carries domain knowledge). So `@harness/pack-api` exports `parseManifest(raw, { isRestrictedName })` and core-tools' `domain/documents/manifest.ts` re-exports a one-argument `parseManifest(raw)` bound to its own predicate. Every message, every issue path and every existing assertion is unchanged; the `describe('parseManifest')` block in `extract.test.ts` moves without an edit.
+
+8. **The manifest's `document_kinds` is validated as strings, not against an enum.** Today `parseManifest` checks each entry against core-tools' `DOCUMENT_KINDS`. After the addendum the pack *is* the source of document kinds — `pack.documentKinds` is `extraction.document_kinds` — so validating the source against a copy of itself is circular, and the copy is exactly the hard-coding the addendum removes. The field becomes `z.array(z.string().min(1)).min(1)`. **Why it is safe:** the only manifest parsed in production is the shipped one, whose five kinds are byte-identical to today's `DOCUMENT_KINDS` and in the same order, so `documents_ingest`'s `kind` enum — the one place the list reaches the public JSON Schema — is unchanged and the surface snapshot still matches. Both `parseManifest` tests pass `document_kinds: ['other']` and are unaffected. Task 8 adds a registry test asserting the five kinds and their order.
+
+9. **`documents_ingest` is built per registry; every other tool stays a module-level constant.** `documents_ingest.input.kind` is the single `z.enum(DOCUMENT_KINDS)` in any tool schema, so `documentTools` becomes `documentTools(packs)` and `ALL_TOOLS` becomes `allTools(packs)`. The other seven arrays are untouched. **Why not all of them:** a factory per toolset would churn seven files to no purpose, and the surface snapshot is what proves the one that changed did not change.
+
+10. **`HARNESS_PACKS` is a real addition to the Compose surface.** It is the only environment variable this plan adds. It defaults to `@harness/pack-healthcare`, so no deployment behaves differently, but it appears in `.env.example`, in `clients/demo-practice/.env.example`, in both Compose services and in `hermes.config.yaml` — which means `docs/architecture/compose-surface.yaml` is re-recorded in Task 8 and ends the branch with **two** commits rather than one. `docs/architecture/tool-surface.json` still ends with exactly one. The completion checklist says so.
 
 ---
 ## File structure
 
-Every file that moves, across all seven packages, old path → new path. A row that says **split** is a file whose contents are divided across several new files; the task that owns it lists exactly which export lands where. Paths are relative to the repository root.
+Every file that moves, across all seven existing packages and the two new ones, old path → new path. A row that says **split** is a file whose contents are divided across several new files; the task that owns it lists exactly which export lands where. Paths are relative to the repository root.
+
+The workspace grows from seven packages to nine: `@harness/shared` (Task 4) and `@harness/pack-api` (Task 8). `pnpm-workspace.yaml` needs no edit — its first glob is already `harness/*`.
 
 ### New at the repository root (Task 1)
 
@@ -94,7 +105,7 @@ Every file that moves, across all seven packages, old path → new path. A row t
 | `eslint.config.js` | ESLint 9 flat config: typescript-eslint type-aware, import-x, unused-imports, and the three project rules scoped by path |
 | `.prettierrc` | `printWidth: 120`, single quotes, semicolons, `trailingComma: all` |
 | `.prettierignore` | build output, generated PDFs, drizzle snapshots, the committed surface snapshots |
-| `.dependency-cruiser.cjs` | the layer rules, all at `severity: 'warn'` until Task 11 |
+| `.dependency-cruiser.cjs` | the layer rules, all at `severity: 'warn'` until Task 12 |
 | `.editorconfig` | 2-space, LF, UTF-8, final newline |
 | `.vscode/extensions.json` | recommends `dbaeumer.vscode-eslint` and `esbenp.prettier-vscode` |
 | `ARCHITECTURE.md` | the layer table, package map, the path of one tool call, the three invariants, the three error types, where each cross-cutting concern lives |
@@ -110,7 +121,7 @@ Every file that moves, across all seven packages, old path → new path. A row t
 |---|---|
 | `harness/db/src/crypto.ts` | `harness/db/src/shared/crypto.ts` |
 | `harness/db/src/crypto.test.ts` | `harness/db/src/shared/crypto.test.ts` |
-| — | `harness/db/src/shared/log.ts`, `harness/db/src/shared/log.test.ts` (new) |
+| — | `harness/db/src/shared/log.ts`, `harness/db/src/shared/log.test.ts` (new; **deleted again in Task 4** once `@harness/shared` exists — see decision 3) |
 | `harness/db/src/schema.ts` | `harness/db/src/domain/schema.ts` |
 | `harness/db/src/schema.test.ts` | `harness/db/src/domain/schema.test.ts` |
 | `harness/db/src/client.ts` | `harness/db/src/domain/client.ts` |
@@ -131,21 +142,23 @@ Every file that moves, across all seven packages, old path → new path. A row t
 | `harness/gateway/litellm.config.yaml` | unchanged (generated artefact, still written to the package root) |
 | `harness/gateway/README.md` | unchanged path, rewritten |
 
-### `@harness/core-tools` — shared layer (Task 4)
+### `@harness/shared` — the new package, plus core-tools' `shared/redaction/` (Task 4)
 
 | Old | New |
 |---|---|
-| `harness/core-tools/src/server.ts:40-66` (`numberFromEnv`, `booleanFromEnv`) | `harness/core-tools/src/shared/env.ts` (joined by `requiredEnv`, `optionalEnv`) |
-| `harness/core-tools/src/server.test.ts` | `harness/core-tools/src/shared/env.test.ts` (whole file; assertions untouched) |
-| `harness/core-tools/src/registry.ts:11-16` (`ToolError`) and `src/models.ts:183-188` (`ModelOutputError`) | `harness/core-tools/src/shared/errors.ts` (joined by `ConfigError`, `describeError`) |
-| — | `harness/core-tools/src/shared/errors.test.ts` (new) |
-| `harness/core-tools/src/documents/storage.ts:25-40` (`realOrNearestAncestor`) | `harness/core-tools/src/shared/paths.ts` (joined by `assertInsideRoot`) |
-| — | `harness/core-tools/src/shared/paths.test.ts` (new) |
-| — | `harness/core-tools/src/shared/log.ts`, `shared/log.test.ts` (new) |
-| — | `harness/core-tools/src/shared/subprocess.ts`, `shared/subprocess.test.ts` (new) |
-| — | `harness/core-tools/src/shared/jsonl.ts`, `shared/jsonl.test.ts` (new) |
-| `harness/core-tools/src/forms/roster.ts:42-69` (`csvCell` + its three constants) | `harness/core-tools/src/shared/csv.ts` |
-| `harness/core-tools/src/forms/roster.test.ts` `describe('csvCell')` | `harness/core-tools/src/shared/csv.test.ts` |
+| — | `harness/shared/package.json`, `tsconfig.json`, `vitest.config.ts`, `README.md` (new) |
+| — | `harness/shared/src/index.ts` (new; the package's only entry point) |
+| `harness/core-tools/src/server.ts:40-66` (`numberFromEnv`, `booleanFromEnv`) | `harness/shared/src/env.ts` (joined by `requiredEnv`, `optionalEnv`) |
+| `harness/core-tools/src/server.test.ts` | `harness/shared/src/env.test.ts` (whole file; assertions untouched) |
+| `harness/core-tools/src/registry.ts:11-16` (`ToolError`) and `src/models.ts:183-188` (`ModelOutputError`) | `harness/shared/src/errors.ts` (joined by `ConfigError`, `describeError`) |
+| — | `harness/shared/src/errors.test.ts` (new) |
+| `harness/core-tools/src/documents/storage.ts:25-40` (`realOrNearestAncestor`) | `harness/shared/src/paths.ts` (joined by `assertInsideRoot`) |
+| — | `harness/shared/src/paths.test.ts` (new) |
+| `harness/db/src/shared/log.ts` (Task 2's local copy) | `harness/shared/src/log.ts`, `harness/shared/src/log.test.ts`; the db copy is **deleted** |
+| — | `harness/shared/src/subprocess.ts`, `subprocess.test.ts` (new) |
+| — | `harness/shared/src/jsonl.ts`, `jsonl.test.ts` (new) |
+| `harness/core-tools/src/forms/roster.ts:42-69` (`csvCell` + its three constants) | `harness/shared/src/csv.ts` |
+| `harness/core-tools/src/forms/roster.test.ts` `describe('csvCell')` | `harness/shared/src/csv.test.ts` |
 | `harness/core-tools/src/tools/harness.ts:62-66` and `harness/approvals/src/render.ts:18-26` (the duplicated shape regexes) | `harness/core-tools/src/shared/redaction/patterns.ts` (`containsRestrictedPattern`) |
 | `harness/core-tools/src/documents/redact.ts` (pattern machinery, `isValidDea`) | `harness/core-tools/src/shared/redaction/patterns.ts` |
 | `harness/core-tools/src/documents/redact.ts` (`redactPages`, `assertRedacted`, `fieldNameFor`) | `harness/core-tools/src/shared/redaction/text.ts` |
@@ -216,7 +229,28 @@ Every file that moves, across all seven packages, old path → new path. A row t
 | `harness/core-tools/src/testing.ts` | path unchanged; becomes a barrel over the domain fakes |
 | `harness/core-tools/src/test-global-setup.ts` | path unchanged |
 
-### `@harness/approvals` (Task 8)
+### `@harness/pack-api` and the healthcare pack as a plug-in (Task 8)
+
+| Old | New |
+|---|---|
+| — | `harness/pack-api/package.json`, `tsconfig.json`, `vitest.config.ts`, `README.md` (new) |
+| — | `harness/pack-api/src/index.ts` (new; `Pack`, `definePack`, re-exports of the three type modules) |
+| — | `harness/pack-api/src/pack.ts`, `pack.test.ts` (new; the `Pack` interface and `definePack`) |
+| `harness/core-tools/src/domain/documents/manifest.ts` (the zod schema, `ProviderManifest`, `ManifestField`, `ManifestCredential`, `parseManifest`) | `harness/pack-api/src/manifest.ts` + `manifest.test.ts`; core-tools keeps a one-argument `parseManifest` wrapper and the manifest loader |
+| `harness/core-tools/src/domain/tooling/policy.ts` (`ACTION_CLASSES`, `ActionClass`, `BEHAVIORS`, `Behavior`, `Policy`) | `harness/pack-api/src/policy.ts`; core-tools re-exports all five and keeps `DEFAULT_POLICY`, `parsePolicy`, `loadPolicy`, `decide` |
+| `harness/core-tools/src/domain/tooling/types.ts` (`ToolDef`, `AnyToolDef`) | `harness/pack-api/src/tool.ts` as `ToolDef<I, O, TDeps>` / `AnyToolDef<TDeps>`; core-tools narrows both to `ToolDeps` under the same names |
+| — | `harness/core-tools/src/domain/packs/types.ts`, `registry.ts`, `registry.test.ts` (new) |
+| `harness/core-tools/src/domain/documents/manifest.ts:loadHealthcareManifest` | **deleted**; `deps.packs.manifest()` |
+| `harness/core-tools/src/domain/documents/types.ts:DOCUMENT_KINDS` | **deleted**; `deps.packs.documentKinds()` |
+| `harness/core-tools/src/domain/forms/templates.ts:defaultFormsDir` | **deleted**; `deps.packs.formsDir()` |
+| `harness/core-tools/src/tools/catalog.ts:ALL_TOOLS` | `allTools(packs)`; `documentTools` becomes `documentTools(packs)` |
+| — | `packs/healthcare/src/index.ts` (new; `export const pack = definePack({ … })`) |
+| `packs/healthcare/package.json` | gains `"."` → `./src/index.ts`, and `@harness/pack-api` + `@harness/shared` dependencies; `./schema` and `./generate` unchanged |
+| `.env.example`, `clients/demo-practice/.env.example` | gain `HARNESS_PACKS=@harness/pack-healthcare` |
+| `harness/compose/docker-compose.yml`, `clients/demo-practice/hermes.config.yaml`, `harness/approvals/src/app/child-env.ts` | pass `HARNESS_PACKS` to the hermes and approvals services and to the core-tools child |
+| `docs/architecture/compose-surface.yaml` | re-recorded: the two services gain one environment key |
+
+### `@harness/approvals` (Task 9)
 
 | Old | New |
 |---|---|
@@ -248,7 +282,7 @@ Every file that moves, across all seven packages, old path → new path. A row t
 | `harness/approvals/src/testing.ts` | path unchanged; becomes a barrel |
 | — | `harness/approvals/README.md` (new) |
 
-### `@harness/evals` (Task 9)
+### `@harness/evals` (Task 10)
 
 | Old | New |
 |---|---|
@@ -266,7 +300,7 @@ Every file that moves, across all seven packages, old path → new path. A row t
 | `evals/src/run.test.ts` | **split** → `src/domain/orchestrate.test.ts` (`runEvals`, `selectCases`, `injectionCasesFor`) + `src/app/cli.test.ts` (`parseUpdateBaselineFlag`, `parseLimitFlag`, `CLI`) |
 | — | `evals/src/index.ts` (new public API), `evals/README.md` (new) |
 
-### `packs/healthcare` and `scripts` (Task 10)
+### `packs/healthcare` and `scripts` (Task 11)
 
 | Old | New |
 |---|---|
@@ -282,13 +316,14 @@ Every file that moves, across all seven packages, old path → new path. A row t
 The tasks are strictly sequential and each one must land before the next starts.
 
 - **Task 1** installs the tooling and records the surface snapshot from unmoved code. Every later task depends on it, because every later task's gate is "the snapshot test still passes".
-- **Tasks 2 and 3** (`db`, `gateway`) are the two packages nothing else in this plan reshapes. They come first because `db` gains the single `useTestDb` that Tasks 4 and 8 delete their copies of, and because `gateway`'s `./routing` subpath is what `core-tools`'s models domain imports in Task 6.
-- **Task 4** must precede 5, 6 and 7: those tasks' files import `shared/errors.ts`, `shared/paths.ts`, `shared/log.ts` and `shared/redaction/*`.
-- **Task 5** must precede 6 and 7: every domain module imports `ToolDeps` from `domain/tooling/types.ts`.
-- **Task 6** must precede 7: `tools/documents.ts` and `tools/forms.ts` import the storage, documents and models domains.
-- **Task 7** must precede 8, 9 and 10: those packages import the new `@harness/core-tools` public API for `createLogger`, `requiredEnv`, `numberFromEnv`, `containsRestrictedPattern`, `readJsonl` and `runBounded`.
-- **Tasks 8, 9 and 10** touch three disjoint packages and could in principle run in parallel, but each ends with a full-suite run, so run them in order.
-- **Task 11** is last by definition: it flips every cruiser rule to error, which only passes once every package has moved.
+- **Tasks 2 and 3** (`db`, `gateway`) are the two packages nothing else in this plan reshapes. They come first because `db` gains the single `useTestDb` that Task 4 and Task 9 delete their copies of, and because `gateway`'s `./routing` subpath is what `core-tools`'s models domain imports in Task 6.
+- **Task 4** creates `@harness/shared` and must precede everything after it: Tasks 5, 6 and 7 import `ToolError`, `ConfigError`, `assertInsideRoot`, `createLogger` and `runBounded` from it, Task 8's `@harness/pack-api` depends on it, and Tasks 9–11 switch their own callers onto it. It also deletes `@harness/db`'s local logger, which is why it comes after Task 2 rather than before.
+- **Task 5** must precede 6, 7 and 8: every domain module imports `ToolDeps` from `domain/tooling/types.ts`, and Task 8 rewrites `ToolDef`/`AnyToolDef` in that same file.
+- **Task 6** must precede 7 and 8: `tools/documents.ts` and `tools/forms.ts` import the storage, documents and models domains, and Task 8 moves the manifest schema out of `domain/documents/manifest.ts`, which Task 6 creates.
+- **Task 7** must precede 8: Task 8 edits `src/index.ts`, `src/app/server.ts`, `src/tools/catalog.ts` and `src/app/record-surface.ts`, all of which Task 7 creates or moves.
+- **Task 8** must precede 9, 10 and 11. It adds the required `ToolDeps.packs` field, so every construction of a `ToolDeps` — in `src/testing.ts`, in `app/record-surface.ts` and in `evals/src/pipeline.ts` — is fixed in that one task rather than half-fixed in three. It also adds `HARNESS_PACKS` to the Compose file, so it owns the one re-recording of `docs/architecture/compose-surface.yaml`.
+- **Tasks 9, 10 and 11** touch three disjoint packages and could in principle run in parallel, but each ends with a full-suite run, so run them in order. Each switches its own imports of the shared helpers from `@harness/core-tools` to `@harness/shared`; core-tools keeps re-exporting them, so a missed line is caught by Task 12's grep rather than by a broken build.
+- **Task 12** is last by definition: it flips every cruiser rule to error, which only passes once every package has moved.
 
 ---
 
@@ -2296,77 +2331,103 @@ git commit -m "refactor(gateway): adopt the domain/app layout behind src/"
 ```
 
 ---
-### Task 4: `@harness/core-tools` — the `shared/` layer, with every caller switched
+### Task 4: `@harness/shared` — the new workspace package, with every caller switched
 
-Ten modules, each the single home of a concern that is currently reinvented per file. Nothing
-moves out of `src/` yet; this task only creates `src/shared/` and rewires the callers inside
-core-tools. Tasks 8, 9 and 10 switch the other packages once the public API exists.
+Seven modules, each the single home of a concern that is currently reinvented per file, in a
+new workspace package that sits **below everything else in the graph**. `@harness/shared` has
+no workspace dependency of its own, so `@harness/db` and `packs/healthcare` — the two packages
+that cannot import `@harness/core-tools` without making a cycle — can import it. That is what
+spec section 9.1 asks for and what retires the plan's earlier "three deliberate duplications".
+
+The redaction modules do **not** move into it. They carry domain knowledge (which field names
+are restricted, which SSA allocation rules are real), so spec section 3 keeps them in
+core-tools, at `harness/core-tools/src/shared/redaction/`, exported from its public API.
+
+Nothing moves out of `harness/core-tools/src/` yet beyond those two groups; the rest of this
+task rewires core-tools' and `@harness/db`'s callers. Tasks 9, 10 and 11 switch approvals,
+evals, the pack and scripts, whose dependency on `@harness/shared` this task declares.
 
 **Files:**
-- Create: `harness/core-tools/src/shared/env.ts`, `errors.ts`, `paths.ts`, `log.ts`, `subprocess.ts`, `jsonl.ts`, `csv.ts`
+- Create: `harness/shared/package.json`, `harness/shared/tsconfig.json`, `harness/shared/vitest.config.ts`, `harness/shared/README.md`
+- Create: `harness/shared/src/index.ts`, `env.ts`, `errors.ts`, `paths.ts`, `log.ts`, `subprocess.ts`, `jsonl.ts`, `csv.ts`
+- Create: `harness/shared/src/errors.test.ts`, `paths.test.ts`, `log.test.ts`, `subprocess.test.ts`, `jsonl.test.ts`
 - Create: `harness/core-tools/src/shared/redaction/patterns.ts`, `names.ts`, `text.ts`
-- Create: `harness/core-tools/src/shared/errors.test.ts`, `paths.test.ts`, `log.test.ts`, `subprocess.test.ts`, `jsonl.test.ts`
-- Move: `harness/core-tools/src/server.test.ts` → `harness/core-tools/src/shared/env.test.ts`
-- Move: `harness/core-tools/src/forms/roster.test.ts` `describe('csvCell')` → `harness/core-tools/src/shared/csv.test.ts`
+- Move: `harness/core-tools/src/server.test.ts` → `harness/shared/src/env.test.ts`
+- Move: `harness/core-tools/src/forms/roster.test.ts` `describe('csvCell')` → `harness/shared/src/csv.test.ts`
 - Move: `harness/core-tools/src/tools/providers.test.ts` `describe('isRestrictedName')` → `harness/core-tools/src/shared/redaction/names.test.ts`
 - Move: `harness/core-tools/src/documents/redact.test.ts` → **split** into `harness/core-tools/src/shared/redaction/patterns.test.ts` and `text.test.ts`
 - Delete: `harness/core-tools/src/documents/redact.ts` (its contents move into `shared/redaction/`)
-- Modify: `src/server.ts`, `src/registry.ts`, `src/models.ts`, `src/policy.ts`, `src/storage.ts`, `src/effects.ts`, `src/documents/storage.ts`, `src/documents/text.ts`, `src/documents/extract.ts`, `src/forms/roster.ts`, `src/forms/fill.ts`, `src/tools/providers.ts`, `src/tools/harness.ts`, `src/tools/documents.ts`
-- Modify: `harness/core-tools/package.json` (no new dependency; only the note below)
+- Delete: `harness/db/src/shared/log.ts` and `harness/db/src/shared/log.test.ts` (Task 2's local copy; `@harness/shared` replaces it)
+- Modify: `harness/core-tools/src/server.ts`, `registry.ts`, `models.ts`, `policy.ts`, `storage.ts`, `effects.ts`, `documents/storage.ts`, `documents/text.ts`, `documents/extract.ts`, `forms/roster.ts`, `forms/fill.ts`, `tools/providers.ts`, `tools/harness.ts`, `tools/documents.ts`
+- Modify: `harness/db/src/domain/client.ts`, `harness/db/src/app/migrate.ts`, `harness/db/README.md`
+- Modify: every package manifest — `harness/db/package.json`, `harness/gateway/package.json`, `harness/core-tools/package.json`, `harness/approvals/package.json`, `evals/package.json`, `scripts/package.json`, `packs/healthcare/package.json` — each gains `"@harness/shared": "workspace:*"`
+- Modify: `eslint.config.js` (two exemption globs), `.dependency-cruiser.cjs` (one package row, one new rule)
+
+`pnpm-workspace.yaml` needs no edit: its first glob is already `harness/*`, so `harness/shared/`
+is a workspace package the moment the directory has a `package.json`.
 
 **Interfaces:**
-- Consumes: `useTestDb` from `@harness/db/testing` (Task 2).
-- Produces, all re-exported from `@harness/core-tools` at the end of this task so Tasks 8–10 can reach them:
+- Consumes: nothing. `@harness/shared` imports Node built-ins only; no third-party package, no
+  workspace package. That is the whole point of it and `.dependency-cruiser.cjs` enforces it
+  in Step 15.
+- Produces `@harness/shared`, whose single entry point `src/index.ts` re-exports every module
+  below. `@harness/core-tools` re-exports the same names from its own public API (Step 22 for
+  `server.ts`, Task 7 Step 8 for `index.ts`), so a consumer that already imports them from
+  `@harness/core-tools` keeps working and Tasks 9–11 can switch at their own pace.
 
   ```ts
-  // shared/errors.ts
+  // @harness/shared — errors.ts
   class ToolError extends Error { constructor(message: string) }
   class ModelOutputError extends ToolError { constructor(route: string, detail: string) }
   class ConfigError extends Error { constructor(message: string) }
   function describeError(err: unknown): string
 
-  // shared/env.ts
+  // @harness/shared — env.ts
   interface NumberEnvOptions { min: number; max: number; integer?: boolean; unit?: string }
   function numberFromEnv(name: string, fallback: number, options: NumberEnvOptions): number
   function booleanFromEnv(name: string, env?: NodeJS.ProcessEnv): boolean
   function requiredEnv(name: string, hint?: string, env?: NodeJS.ProcessEnv): string
   function optionalEnv(name: string, env?: NodeJS.ProcessEnv): string | undefined
 
-  // shared/paths.ts
+  // @harness/shared — paths.ts
   type EscapeReason = 'lexical' | 'real' | 'unreadable'
   interface InsideRootOptions { allowRoot?: boolean; onUnreadable?: 'rethrow' | 'escape' }
   function realOrNearestAncestor(target: string): Promise<string>
   function assertInsideRoot(candidate: string, root: string, onEscape: (reason: EscapeReason) => never, options?: InsideRootOptions): Promise<string>
 
-  // shared/log.ts
+  // @harness/shared — log.ts
   interface Logger { info(message: string, err?: unknown): void; warn(message: string, err?: unknown): void; error(message: string, err?: unknown): void }
   function createLogger(scope: string): Logger
 
-  // shared/subprocess.ts
+  // @harness/shared — subprocess.ts
   interface RunBoundedOptions { timeoutMs: number; cwd?: string; maxBuffer?: number }
   type RunBoundedOutcome = { ok: true; stdout: string; stderr: string } | { ok: false; reason: 'timeout' | 'failed' }
   function runBounded(command: string, args: string[], options: RunBoundedOptions): Promise<RunBoundedOutcome>
 
-  // shared/jsonl.ts
+  // @harness/shared — jsonl.ts
   interface JsonlRow<T> { value: T; line: number }
   function readJsonl<T>(file: string, label?: string): Promise<JsonlRow<T>[]>
   function writeJsonl(file: string, rows: readonly unknown[]): Promise<void>
 
-  // shared/csv.ts
+  // @harness/shared — csv.ts
   function csvCell(value: string | null | undefined): string
+  ```
 
-  // shared/redaction/patterns.ts
+- Produces, still inside `@harness/core-tools` and still re-exported from its public API:
+
+  ```ts
+  // harness/core-tools/src/shared/redaction/patterns.ts
   type RestrictedKind = 'ssn' | 'ein' | 'dea'
   interface RestrictedPattern { kind: RestrictedKind; regex: RegExp; toValue: (raw: string) => string; accept: (raw: string) => boolean; identity: (value: string) => string }
   const RESTRICTED_PATTERNS: RestrictedPattern[]
   function containsRestrictedPattern(text: string): boolean
   function isValidDea(candidate: string): boolean
 
-  // shared/redaction/names.ts
+  // harness/core-tools/src/shared/redaction/names.ts
   const MASKED = '[restricted]'
   function isRestrictedName(name: string): boolean
 
-  // shared/redaction/text.ts
+  // harness/core-tools/src/shared/redaction/text.ts
   interface RedactablePage { num: number; text: string }
   interface RedactionHit { kind: RestrictedKind; value: string; token: string; fieldName: string; page: number }
   interface RedactedText { pages: RedactablePage[]; hits: RedactionHit[] }
@@ -2375,24 +2436,78 @@ core-tools. Tasks 8, 9 and 10 switch the other packages once the public API exis
   function assertRedacted(text: string): void
   ```
 
-**Two error messages change, and nothing reads either one.** `shared/env.ts` has one wording,
-so `HARNESS_GATEWAY_MAX_CALLS_PER_RUN must be a whole number between 1 and 10000` becomes
-`... must be an integer between ...`, and approvals' `APPROVALS_POLL_SECONDS must be between
-1 and 86400 seconds` becomes `... must be a number between 1 and 86400 seconds`. Both are
-startup-failure strings; `grep -rn "whole number" .` and the `gatewayFromEnv` describe in
+**Two error messages change, and nothing reads either one.** `@harness/shared`'s `env.ts` has
+one wording, so `HARNESS_GATEWAY_MAX_CALLS_PER_RUN must be a whole number between 1 and 10000`
+becomes `... must be an integer between ...`, and approvals' `APPROVALS_POLL_SECONDS must be
+between 1 and 86400 seconds` becomes `... must be a number between 1 and 86400 seconds`. Both
+are startup-failure strings; `grep -rn "whole number" .` and the `gatewayFromEnv` describe in
 `models.test.ts` confirm no test, no document and no runbook quotes either. Every other
 message — including `must be a number between 1 and 720`, which `server.test.ts` does assert —
 comes out byte-identical.
 
 ---
 
-- [ ] **Step 1: Write the errors module**
+- [ ] **Step 1: Create the `@harness/shared` package skeleton**
+
+```bash
+mkdir -p harness/shared/src
+```
+
+`harness/shared/package.json`. No `dependencies` block at all: this package imports Node
+built-ins and nothing else, which is what lets `@harness/db` and `packs/healthcare` depend on
+it without producing a cycle.
+
+```json
+{
+  "name": "@harness/shared",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^26.5.1",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.0"
+  }
+}
+```
+
+`harness/shared/tsconfig.json`, the same two lines every other package has:
+
+```json
+{
+  "extends": "../../tsconfig.base.json",
+  "include": ["src", "vitest.config.ts"]
+}
+```
+
+`harness/shared/vitest.config.ts`. No global setup and no `fileParallelism: false`: nothing
+here touches Postgres, so the suite runs in parallel.
+
+```ts
+import { defineConfig } from 'vitest/config';
+
+export default defineConfig({});
+```
+
+```bash
+pnpm install
+```
+Expected: pnpm reports `+1` project and writes `harness/shared/node_modules`. `pnpm ls -r --depth -1 | grep shared` should now print `@harness/shared`.
+
+- [ ] **Step 2: Write the errors module**
 
 No failing-test-first here: `ToolError` and `ModelOutputError` are existing code being moved,
 and their behaviour is already covered by `registry.test.ts` and `models.test.ts`. Only
-`ConfigError` and `describeError` are new, and Step 2 tests them.
+`ConfigError` and `describeError` are new, and Step 3 tests them.
 
-Create `harness/core-tools/src/shared/errors.ts`:
+Create `harness/shared/src/errors.ts`:
 
 ```ts
 /**
@@ -2430,8 +2545,9 @@ export class ModelOutputError extends ToolError {
 }
 
 /**
- * The process is misconfigured and must not start. Raised only from `shared/env.ts` and from
- * `app/`, never from a handler: by the time a tool runs, configuration is settled.
+ * The process is misconfigured and must not start. Raised only from this package's `env.ts`
+ * and from an `app/` folder, never from a handler: by the time a tool runs, configuration is
+ * settled.
  */
 export class ConfigError extends Error {
   constructor(message: string) {
@@ -2450,9 +2566,9 @@ export function describeError(err: unknown): string {
 }
 ```
 
-- [ ] **Step 2: Write the failing tests for the new helpers**
+- [ ] **Step 3: Write the failing tests for the new helpers**
 
-Create `harness/core-tools/src/shared/errors.test.ts`:
+Create `harness/shared/src/errors.test.ts`:
 
 ```ts
 import { describe, it, expect } from 'vitest';
@@ -2490,18 +2606,18 @@ describe('describeError', () => {
 });
 ```
 
-- [ ] **Step 3: Run it and watch it pass**
+- [ ] **Step 4: Run it and watch it pass**
 
 ```bash
-pnpm --filter @harness/core-tools exec vitest run src/shared/errors.test.ts
+pnpm --filter @harness/shared exec vitest run src/errors.test.ts
 ```
-Expected: `Tests 5 passed`. (These pass on the first run because Step 1 already wrote the
+Expected: `Tests 5 passed`. (These pass on the first run because Step 2 already wrote the
 module — the moved classes had to move as a unit with their consumers, and writing a failing
 test for `class ToolError extends Error {}` would be theatre.)
 
-- [ ] **Step 4: Write the environment module**
+- [ ] **Step 5: Write the environment module**
 
-Create `harness/core-tools/src/shared/env.ts`:
+Create `harness/shared/src/env.ts`:
 
 ```ts
 import { ConfigError } from './errors.js';
@@ -2581,20 +2697,22 @@ export function optionalEnv(name: string, env: NodeJS.ProcessEnv = process.env):
 }
 ```
 
-- [ ] **Step 5: Move the environment tests and extend them**
+- [ ] **Step 6: Move the environment tests and extend them**
 
 ```bash
-cd harness/core-tools
-git mv src/server.test.ts src/shared/env.test.ts
-sed -i '' "s#from './server.js'#from './env.js'#" src/shared/env.test.ts
-cd ../..
+git mv harness/core-tools/src/server.test.ts harness/shared/src/env.test.ts
+sed -i '' "s#from './server.js'#from './env.js'#" harness/shared/src/env.test.ts
 ```
+
+The file crosses a package boundary, so run this from the repository root, not from inside
+`harness/core-tools`. `git mv` keeps the file's history; the test itself only ever imported
+`./server.js`, and that one specifier is the whole rewrite.
 
 The moved file's two describes — `numberFromEnv` and `booleanFromEnv` — keep every assertion
 exactly as written, including `` `${NAME} must be a number between 1 and 720` ``, which is why
 the unified wording had to produce that string verbatim for the no-integer, no-unit case.
 
-Append the new coverage to `src/shared/env.test.ts`:
+Append the new coverage to `harness/shared/src/env.test.ts`:
 
 ```ts
 describe('numberFromEnv with integer and unit', () => {
@@ -2644,16 +2762,16 @@ describe('optionalEnv', () => {
 and widen the import at the top of the file to
 `import { booleanFromEnv, numberFromEnv, optionalEnv, requiredEnv } from './env.js';`.
 
-- [ ] **Step 6: Run the environment tests**
+- [ ] **Step 7: Run the environment tests**
 
 ```bash
-pnpm --filter @harness/core-tools exec vitest run src/shared/env.test.ts
+pnpm --filter @harness/shared exec vitest run src/env.test.ts
 ```
 Expected: `Tests 22 passed` — the 16 that moved (`it.each` counts one per case: four numeric, one plus four plus seven boolean) plus the 6 above.
 
-- [ ] **Step 7: Write the paths module**
+- [ ] **Step 8: Write the paths module**
 
-Create `harness/core-tools/src/shared/paths.ts`:
+Create `harness/shared/src/paths.ts`:
 
 ```ts
 import { realpath } from 'node:fs/promises';
@@ -2747,9 +2865,9 @@ export async function assertInsideRoot(
 }
 ```
 
-- [ ] **Step 8: Write the failing paths test**
+- [ ] **Step 9: Write the failing paths test**
 
-Create `harness/core-tools/src/shared/paths.test.ts`:
+Create `harness/shared/src/paths.test.ts`:
 
 ```ts
 import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
@@ -2825,16 +2943,16 @@ describe('assertInsideRoot', () => {
 });
 ```
 
-- [ ] **Step 9: Run it**
+- [ ] **Step 10: Run it**
 
 ```bash
-pnpm --filter @harness/core-tools exec vitest run src/shared/paths.test.ts
+pnpm --filter @harness/shared exec vitest run src/paths.test.ts
 ```
 Expected: `Tests 8 passed`.
 
-- [ ] **Step 10: Write the logger**
+- [ ] **Step 11: Write the logger**
 
-Create `harness/core-tools/src/shared/log.ts`. Identical in shape to `@harness/db`'s copy —
+Create `harness/shared/src/log.ts`. Identical in shape to `@harness/db`'s copy —
 see ARCHITECTURE.md for why there are two — but this one is exported from the public API and
 is what `@harness/approvals`, `@harness/evals` and the pack use.
 
@@ -2873,7 +2991,7 @@ export function createLogger(scope: string): Logger {
 }
 ```
 
-Create `harness/core-tools/src/shared/log.test.ts`:
+Create `harness/shared/src/log.test.ts`:
 
 ```ts
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -2909,13 +3027,13 @@ describe('createLogger', () => {
 ```
 
 ```bash
-pnpm --filter @harness/core-tools exec vitest run src/shared/log.test.ts
+pnpm --filter @harness/shared exec vitest run src/log.test.ts
 ```
 Expected: `Tests 3 passed`.
 
-- [ ] **Step 11: Write the subprocess module**
+- [ ] **Step 12: Write the subprocess module**
 
-Create `harness/core-tools/src/shared/subprocess.ts`:
+Create `harness/shared/src/subprocess.ts`:
 
 ```ts
 import { execFile } from 'node:child_process';
@@ -2972,7 +3090,7 @@ export async function runBounded(
 }
 ```
 
-Create `harness/core-tools/src/shared/subprocess.test.ts`:
+Create `harness/shared/src/subprocess.test.ts`:
 
 ```ts
 import { describe, expect, it } from 'vitest';
@@ -3004,13 +3122,13 @@ describe('runBounded', () => {
 ```
 
 ```bash
-pnpm --filter @harness/core-tools exec vitest run src/shared/subprocess.test.ts
+pnpm --filter @harness/shared exec vitest run src/subprocess.test.ts
 ```
 Expected: `Tests 4 passed`.
 
-- [ ] **Step 12: Write the JSONL module**
+- [ ] **Step 13: Write the JSONL module**
 
-Create `harness/core-tools/src/shared/jsonl.ts`:
+Create `harness/shared/src/jsonl.ts`:
 
 ```ts
 import { readFile, writeFile } from 'node:fs/promises';
@@ -3059,7 +3177,7 @@ export async function writeJsonl(file: string, rows: readonly unknown[]): Promis
 }
 ```
 
-Create `harness/core-tools/src/shared/jsonl.test.ts`:
+Create `harness/shared/src/jsonl.test.ts`:
 
 ```ts
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
@@ -3110,13 +3228,13 @@ describe('writeJsonl', () => {
 ```
 
 ```bash
-pnpm --filter @harness/core-tools exec vitest run src/shared/jsonl.test.ts
+pnpm --filter @harness/shared exec vitest run src/jsonl.test.ts
 ```
 Expected: `Tests 4 passed`.
 
-- [ ] **Step 13: Move the CSV cell helper**
+- [ ] **Step 14: Move the CSV cell helper**
 
-Create `harness/core-tools/src/shared/csv.ts` with the three constants and `csvCell` lifted
+Create `harness/shared/src/csv.ts` with the three constants and `csvCell` lifted
 verbatim out of `src/forms/roster.ts` lines 42-69:
 
 ```ts
@@ -3153,14 +3271,14 @@ export function csvCell(value: string | null | undefined): string {
 Delete those lines from `src/forms/roster.ts` and add, at the top of what remains:
 
 ```ts
-import { csvCell } from '../shared/csv.js';
+import { csvCell } from '@harness/shared';
 ```
 
 `roster.ts` still re-exports nothing: `csvCell` was exported before and is now reached through
 the shared module, so update `src/forms/roster.test.ts` to import it from there.
 
 Move `describe('csvCell', ...)` — lines 24-60 of `src/forms/roster.test.ts`, assertions
-untouched — into a new `harness/core-tools/src/shared/csv.test.ts`:
+untouched — into a new `harness/shared/src/csv.test.ts`:
 
 ```ts
 import { describe, expect, it } from 'vitest';
@@ -3175,7 +3293,216 @@ import { csvCell } from './csv.js';
 import { ROSTER_COLUMNS, buildRosterCsv, type RosterRow } from './roster.js';
 ```
 
-- [ ] **Step 14: Write the redaction patterns module**
+- [ ] **Step 15: Wire `@harness/shared` into every manifest, into ESLint and into the cruiser**
+
+Write the barrel first. `harness/shared/src/index.ts`:
+
+```ts
+/**
+ * The public API of @harness/shared.
+ *
+ * Seven modules of pure helpers with no domain knowledge and no workspace dependency, so the
+ * packages at the bottom of the graph — @harness/db and every pack — can import them. Nothing
+ * that knows what a provider, a document or an approval is belongs here; that lives in a
+ * domain folder in the package that owns the concept. Redaction is the named exception and
+ * stays in @harness/core-tools, because deciding which field names are restricted and which
+ * SSN allocations are real is domain knowledge.
+ */
+export { ConfigError, ModelOutputError, ToolError, describeError } from './errors.js';
+export {
+  booleanFromEnv,
+  numberFromEnv,
+  optionalEnv,
+  requiredEnv,
+  type NumberEnvOptions,
+} from './env.js';
+export {
+  assertInsideRoot,
+  realOrNearestAncestor,
+  type EscapeReason,
+  type InsideRootOptions,
+} from './paths.js';
+export { createLogger, type Logger } from './log.js';
+export { runBounded, type RunBoundedOptions, type RunBoundedOutcome } from './subprocess.js';
+export { readJsonl, writeJsonl, type JsonlRow } from './jsonl.js';
+export { csvCell } from './csv.js';
+```
+
+Then add the dependency to all seven consumers. Each `package.json` gains one line in its
+`dependencies` (creating the block where there is none — `@harness/scripts` has no
+`dependencies` today):
+
+```bash
+for pkg in harness/db harness/gateway harness/core-tools harness/approvals evals scripts packs/healthcare; do
+  node -e '
+    const fs = require("node:fs");
+    const file = process.argv[1] + "/package.json";
+    const m = JSON.parse(fs.readFileSync(file, "utf8"));
+    m.dependencies = Object.fromEntries(
+      Object.entries({ ...(m.dependencies ?? {}), "@harness/shared": "workspace:*" }).sort(([a], [b]) => a.localeCompare(b)),
+    );
+    fs.writeFileSync(file, JSON.stringify(m, null, 2) + "\n");
+  ' "$pkg"
+done
+pnpm install
+```
+Expected: pnpm links `@harness/shared` into all seven and the lockfile changes. Re-run
+`pnpm format` over the seven manifests if Prettier disagrees with `JSON.stringify`'s spacing:
+
+```bash
+pnpm exec prettier --write harness/*/package.json evals/package.json scripts/package.json packs/healthcare/package.json
+```
+
+**ESLint.** Task 1's two exemption lists name `**/src/shared/log.ts` and `**/src/shared/env.ts`,
+globs that matched `harness/core-tools/src/shared/`. `harness/shared/src/log.ts` has no
+`shared` directory under its `src`, so it matches neither. Add the two new paths in
+`eslint.config.js`, keeping the old globs for `@harness/db`'s copy until Step 16 deletes it and
+for any package that grows one later:
+
+```js
+/** console.* belongs in the logger and in process entrypoints, nowhere else. */
+const CONSOLE_IS_FINE = [
+  'harness/shared/src/log.ts',
+  '**/src/shared/log.ts',
+  '**/src/app/**/*.ts',
+  'packs/healthcare/synthetic/cli.ts',
+  'packs/healthcare/forms/generate-templates.ts',
+];
+```
+
+```js
+const PROCESS_ENV_IS_FINE = [
+  'harness/shared/src/env.ts',
+  '**/src/shared/env.ts',
+  '**/src/app/**/*.ts',
+  '**/*.test.ts',
+  'harness/db/src/**/*.ts',
+  '**/drizzle.config.ts',
+];
+```
+
+Both lists appear twice in the file — once after the main block and once inside the
+`STRICT_LAYER_ROOTS` block — but they are the *same* constants, so editing the two declarations
+is the whole edit.
+
+**dependency-cruiser.** Add the package to both tables in `.dependency-cruiser.cjs`. In
+`PACKAGES`, at `'error'` from the start — the package is written correct in this task, so there
+is nothing to migrate:
+
+```js
+const PACKAGES = [
+  { name: 'shared', src: 'harness/shared/src', severity: 'error' },
+  { name: 'db', src: 'harness/db/src', severity: 'warn' },
+  { name: 'gateway', src: 'harness/gateway/src', severity: 'warn' },
+  { name: 'core-tools', src: 'harness/core-tools/src', severity: 'warn' },
+  { name: 'approvals', src: 'harness/approvals/src', severity: 'warn' },
+  { name: 'evals', src: 'evals/src', severity: 'warn' },
+];
+```
+
+and in `WORKSPACE_DIRS`, so the "reach it only through its declared entry points" rule covers it:
+
+```js
+const WORKSPACE_DIRS = [
+  'harness/shared',
+  'harness/db',
+  'harness/gateway',
+  'harness/core-tools',
+  'harness/approvals',
+  'evals',
+  'packs/healthcare',
+  'scripts',
+];
+```
+
+`layerRules` generates nothing useful for this package — it has no `shared/`, `domain/`,
+`tools/` or `app/` folder, because the whole package *is* the shared layer — so add the rule
+that actually matters, in `GLOBAL_RULES`, above the `WORKSPACE_DIRS` spread:
+
+```js
+  {
+    name: 'shared-has-no-workspace-dependencies',
+    comment:
+      '@harness/shared is the bottom of the graph. @harness/db and every pack import it, so a dependency on any other workspace package would be a cycle. Node built-ins only.',
+    severity: 'error',
+    from: { path: '^harness/shared/src/' },
+    to: { path: '^(harness|packs|evals|scripts)/', pathNot: '^harness/shared/src/' },
+  },
+```
+
+Add `harness/shared/src` to `STRICT_LAYER_ROOTS` in `eslint.config.js` at the same time — it is
+a new package with no backlog, so it can be strict from its first commit:
+
+```js
+const STRICT_LAYER_ROOTS = ['harness/db/src', 'harness/gateway/src', 'harness/shared/src'];
+```
+
+**Append, do not replace.** Tasks 2 and 3 already put `harness/db/src` and
+`harness/gateway/src` there; copy whatever the file says and add one entry.
+
+```bash
+pnpm -r typecheck && pnpm lint && pnpm arch
+```
+Expected: clean typecheck; no lint errors; `0 errors` from the cruiser. A
+`shared-has-no-workspace-dependencies` violation here means a module under
+`harness/shared/src/` imported something it must not.
+
+- [ ] **Step 16: Switch `@harness/db` onto the shared logger and delete its local copy**
+
+Task 2 gave `@harness/db` a ten-line `src/shared/log.ts` because importing `@harness/core-tools`
+from it would have been a cycle. `@harness/shared` sits *below* `@harness/db`, so the copy is no
+longer needed. This is spec section 9.4's first bullet.
+
+```bash
+cd harness/db
+git rm src/shared/log.ts src/shared/log.test.ts
+cd ../..
+```
+
+`src/shared/` still holds `crypto.ts` and `crypto.test.ts`, so the directory stays.
+
+Repoint the two call sites. In `harness/db/src/domain/client.ts`, the import line
+
+```ts
+import { createLogger } from '../shared/log.js';
+```
+
+becomes
+
+```ts
+import { createLogger } from '@harness/shared';
+```
+
+and the same substitution in `harness/db/src/app/migrate.ts`. Both files keep the
+`const log = createLogger('db');` line and every call below it exactly as Task 2 wrote them, so
+`db: postgres pool error: …`, `db: migrations applied` and `db: migration failed: …` come out
+byte-identical.
+
+`migrate.ts` also loses its hand-rolled `err instanceof Error ? err.message : String(err)` if
+Task 2 left one: `log.error('migration failed', err)` already formats it through
+`describeError`.
+
+Finally, correct the one line of `harness/db/README.md`'s layout table that Task 2 wrote:
+
+```
+src/shared/crypto.ts    AES-256-GCM encrypt/decrypt and the key loader
+```
+
+The `src/shared/log.ts   a scoped stderr logger (local: importing core-tools would be a cycle)`
+row is deleted; add one sentence under it instead:
+
+```markdown
+Logging, environment parsing and the error types come from `@harness/shared`, which sits below
+this package in the graph and has no workspace dependency of its own.
+```
+
+```bash
+pnpm --filter @harness/db test
+```
+Expected: the db suite passes with three fewer tests than after Task 2 (the three `createLogger`
+cases moved to `@harness/shared`).
+
+- [ ] **Step 17: Write the redaction patterns module**
 
 Create `harness/core-tools/src/shared/redaction/patterns.ts`. Two disjoint ranges of
 `src/documents/redact.ts` move here unchanged — lines 22-151 (`D` through `deaAccept`) and
@@ -3382,7 +3709,7 @@ export const RESTRICTED_PATTERNS: RestrictedPattern[] = [
 ];
 ```
 
-- [ ] **Step 15: Write the redaction names module**
+- [ ] **Step 18: Write the redaction names module**
 
 Create `harness/core-tools/src/shared/redaction/names.ts` with lines 28-65 of
 `src/tools/providers.ts` moved verbatim:
@@ -3422,7 +3749,7 @@ export function isRestrictedName(name: string): boolean {
 }
 ```
 
-- [ ] **Step 16: Write the redaction text module**
+- [ ] **Step 19: Write the redaction text module**
 
 Create `harness/core-tools/src/shared/redaction/text.ts` with lines 1-2 and 5-20 of
 `src/documents/redact.ts` (the imports and the `RedactionHit`/`RedactedText` interfaces —
@@ -3550,7 +3877,7 @@ export function assertRedacted(text: string): void {
 }
 ```
 
-- [ ] **Step 17: Split and move the redaction tests, then delete the old module**
+- [ ] **Step 20: Split and move the redaction tests, then delete the old module**
 
 ```bash
 cd harness/core-tools
@@ -3597,7 +3924,7 @@ describe('containsRestrictedPattern', () => {
 });
 ```
 
-- [ ] **Step 18: Run the redaction tests**
+- [ ] **Step 21: Run the redaction tests**
 
 ```bash
 pnpm --filter @harness/core-tools exec vitest run src/shared/redaction
@@ -3605,7 +3932,7 @@ pnpm --filter @harness/core-tools exec vitest run src/shared/redaction
 Expected: every assertion that was in `redact.test.ts` passes from its new home, plus the
 three new `containsRestrictedPattern` cases.
 
-- [ ] **Step 19: Switch every caller inside core-tools**
+- [ ] **Step 22: Switch every caller inside core-tools**
 
 Fourteen files. Each change is listed in full; none of them alters behaviour.
 
@@ -3613,7 +3940,7 @@ Fourteen files. Each change is listed in full; none of them alters behaviour.
 the 22 files importing `ToolError` from `./registry.js` keep working until Task 5 moves them:
 
 ```ts
-import { ToolError } from './shared/errors.js';
+import { ToolError } from '@harness/shared';
 export { ToolError };
 ```
 
@@ -3624,7 +3951,7 @@ Also replace both copies of `err instanceof Error ? err.message : String(err)` (
 re-export it for `server.ts`'s barrel:
 
 ```ts
-import { ModelOutputError, ToolError } from './shared/errors.js';
+import { ModelOutputError, ToolError } from '@harness/shared';
 export { ModelOutputError };
 ```
 
@@ -3643,7 +3970,7 @@ export function gatewayFromEnv(): GatewayConfig {
 }
 ```
 
-with `import { numberFromEnv, optionalEnv, requiredEnv } from './shared/env.js';` at the top.
+with `import { numberFromEnv, optionalEnv, requiredEnv } from '@harness/shared';` at the top.
 `models.test.ts`'s two `gatewayFromEnv` assertions — `/LITELLM_MASTER_KEY/` and the loopback
 default — both still hold.
 
@@ -3653,26 +3980,43 @@ default — both still hold.
 export async function loadPolicy(filePath: string | undefined = optionalEnv('HARNESS_POLICY_FILE')): Promise<Policy> {
 ```
 
-with `import { optionalEnv } from './shared/env.js';`.
+with `import { optionalEnv } from '@harness/shared';`.
 
 **`src/server.ts`** — delete `numberFromEnv` (lines 40-48) and `booleanFromEnv` (lines 63-66)
 entirely and import them:
 
 ```ts
-import { booleanFromEnv, numberFromEnv } from './shared/env.js';
+import { booleanFromEnv, numberFromEnv } from '@harness/shared';
 ```
 
 Then extend the re-export block at the bottom of the file so the other packages can reach the
 shared layer from `@harness/core-tools`:
 
 ```ts
-export { ToolError, ModelOutputError, ConfigError, describeError } from './shared/errors.js';
-export { numberFromEnv, booleanFromEnv, requiredEnv, optionalEnv, type NumberEnvOptions } from './shared/env.js';
-export { createLogger, type Logger } from './shared/log.js';
-export { realOrNearestAncestor, assertInsideRoot, type EscapeReason, type InsideRootOptions } from './shared/paths.js';
-export { runBounded, type RunBoundedOptions, type RunBoundedOutcome } from './shared/subprocess.js';
-export { readJsonl, writeJsonl, type JsonlRow } from './shared/jsonl.js';
-export { csvCell } from './shared/csv.js';
+export {
+  ToolError,
+  ModelOutputError,
+  ConfigError,
+  describeError,
+  numberFromEnv,
+  booleanFromEnv,
+  requiredEnv,
+  optionalEnv,
+  createLogger,
+  realOrNearestAncestor,
+  assertInsideRoot,
+  runBounded,
+  readJsonl,
+  writeJsonl,
+  csvCell,
+  type NumberEnvOptions,
+  type Logger,
+  type EscapeReason,
+  type InsideRootOptions,
+  type RunBoundedOptions,
+  type RunBoundedOutcome,
+  type JsonlRow,
+} from '@harness/shared';
 export { containsRestrictedPattern, isValidDea, type RestrictedKind } from './shared/redaction/patterns.js';
 export { isRestrictedName, MASKED } from './shared/redaction/names.js';
 export {
@@ -3699,8 +4043,8 @@ replacing the first of them with the same line minus `ToolError`:
 export { registerTools, defineTool, DEFAULT_CONFIDENCE_THRESHOLD, type ToolDeps, type AnyToolDef } from './registry.js';
 ```
 
-and dropping `ModelOutputError` from the `./models.js` export list, since `shared/errors.js`
-now provides it. Exporting the same name twice is a compile error, so the typecheck in Step 20
+and dropping `ModelOutputError` from the `./models.js` export list, since `@harness/shared`
+now provides it. Exporting the same name twice is a compile error, so the typecheck in Step 23
 catches any that is missed.
 
 **`src/storage.ts`** — two changes. `storageRoot` stops reading `process.env` directly and
@@ -3710,9 +4054,7 @@ catches any that is missed.
 import { mkdir, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
-import { ToolError, ConfigError } from './shared/errors.js';
-import { optionalEnv } from './shared/env.js';
-import { assertInsideRoot, realOrNearestAncestor } from './shared/paths.js';
+import { ToolError, ConfigError, optionalEnv, assertInsideRoot, realOrNearestAncestor } from '@harness/shared';
 
 export { realOrNearestAncestor };
 
@@ -3754,8 +4096,7 @@ nothing in that file checks.
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { ToolError } from '../shared/errors.js';
-import { assertInsideRoot } from '../shared/paths.js';
+import { ToolError, assertInsideRoot } from '@harness/shared';
 
 export async function resolveStoragePath(storageDir: string, requested: string): Promise<string> {
   if (requested.trim() === '') throw new ToolError('document path is empty');
@@ -3777,8 +4118,7 @@ import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { PDFParse } from 'pdf-parse';
-import { ToolError } from '../shared/errors.js';
-import { runBounded } from '../shared/subprocess.js';
+import { ToolError, runBounded } from '@harness/shared';
 ```
 
 `assertBinary`:
@@ -3829,7 +4169,7 @@ assert on.
 **`src/effects.ts`** — one `console.error` becomes a logger line:
 
 ```ts
-import { createLogger } from './shared/log.js';
+import { createLogger } from '@harness/shared';
 
 const log = createLogger('effects');
 ```
@@ -3897,16 +4237,16 @@ so the whole string is free to change:
           message: `restricted field "${f.name}" is not recognised by isRestrictedName; add its stem to RESTRICTED_NAME_KEYS in shared/redaction/names.ts`,
 ```
 
-`harness/core-tools/package.json` needs no edit in this task: no dependency is added and the
-subpath map does not change until Task 7 introduces `index.ts`.
+`harness/core-tools/package.json` gained `"@harness/shared": "workspace:*"` in Step 15 and
+needs no further edit here: its subpath map does not change until Task 7 introduces `index.ts`.
 
-- [ ] **Step 20: Run every gate**
+- [ ] **Step 23: Run every gate**
 
 ```bash
 pnpm -r typecheck
 ```
 Expected: no output, exit 0. A duplicate-export error from `server.ts` here means one of the
-superseded export lines in Step 19 was not deleted.
+superseded export lines in Step 22 was not deleted.
 
 ```bash
 pnpm lint
@@ -3917,28 +4257,39 @@ Expected: no errors. `harness/core-tools/src/effects.ts` should no longer appear
 ```bash
 pnpm arch
 ```
-Expected: `0 errors`. The `core-tools-shared-imports-only-libraries` rule is still at `warn`,
-and it should report nothing: `shared/` imports only `node:*` and its own siblings.
+Expected: `0 errors`. Two rules to read the output for: `shared-has-no-workspace-dependencies`
+is at `error` from Step 15 and must report nothing, and
+`only-public-entry-of-harness-shared` must report nothing either — every consumer imports
+`@harness/shared`, never `harness/shared/src/log.ts`.
 
 ```bash
 pnpm -r test
 ```
-Expected: 7 packages pass. The count rises from 528 to roughly 550: 5 error tests, 6 new
-environment tests, 8 path tests, 3 logger tests, 4 subprocess tests, 4 JSONL tests and 3
-`containsRestrictedPattern` tests are added, and nothing is removed — every moved `describe`
-keeps every `it`.
-
-- [ ] **Step 21: Commit**
-
-Two commits: the new layer, then the rewiring, so a reviewer can read the modules before
-reading their call sites.
+Expected: **8** packages pass, not 7: `@harness/shared` is a new one. The total rises from 528
+to roughly 550: 5 error tests, 6 new environment tests, 8 path tests, 3 logger tests, 4
+subprocess tests, 4 JSONL tests and 3 `containsRestrictedPattern` tests are added, the three
+`createLogger` cases move out of `@harness/db` rather than being added, and nothing else is
+removed — every moved `describe` keeps every `it`.
 
 ```bash
-git add harness/core-tools/src/shared
-git commit -m "feat(core-tools): add the shared layer for env, errors, paths, logging, subprocess, jsonl, csv and redaction"
+grep -rn "@harness/shared" harness/*/package.json evals/package.json scripts/package.json packs/healthcare/package.json
+```
+Expected: seven hits, one per consumer, plus nothing in `harness/shared/package.json` itself.
 
-git add -A harness/core-tools
-git commit -m "refactor(core-tools): read env, errors, paths, logging and redaction from shared/"
+- [ ] **Step 24: Commit**
+
+Three commits: the new package, then the redaction layer, then the rewiring, so a reviewer can
+read each module before reading its call sites.
+
+```bash
+git add harness/shared
+git commit -m "feat(shared): add @harness/shared for env, errors, paths, logging, subprocess, jsonl and csv"
+
+git add harness/core-tools/src/shared
+git commit -m "feat(core-tools): move the redaction patterns, names and text into shared/redaction"
+
+git add -A harness harness/db evals scripts packs/healthcare eslint.config.js .dependency-cruiser.cjs pnpm-lock.yaml
+git commit -m "refactor: read env, errors, paths and logging from @harness/shared"
 ```
 
 ---
@@ -3966,7 +4317,7 @@ beside it. The type-only import cycles between `registry.ts`, `models.ts`, `effe
 - Modify: `harness/core-tools/package.json` (`./in-process` and `./reconcile` retarget)
 
 **Interfaces:**
-- Consumes: `ToolError`, `describeError` from `shared/errors.js`; `optionalEnv` from `shared/env.js` (Task 4).
+- Consumes: `ToolError`, `describeError` from `@harness/shared`; `optionalEnv` from `@harness/shared` (Task 4).
 - Produces:
 
   ```ts
@@ -4334,7 +4685,7 @@ export async function createOrReuseApproval(
 ```ts
 import * as z from 'zod/v4';
 import { withTransaction, type Db } from '@harness/db';
-import { ToolError, describeError } from '../../shared/errors.js';
+import { ToolError, describeError } from '@harness/shared';
 import { createOrReuseApproval } from '../approvals/repository.js';
 import { writeAudit } from './audit.js';
 import { preservingContext, withCurrentTool } from './context.js';
@@ -4589,14 +4940,14 @@ one-level-down file's is `../domain/…`:
 cd harness/core-tools/src
 grep -rln "ToolError" tools documents forms domain storage.ts models.ts models.test.ts effects.ts testing.ts \
   | xargs sed -i '' \
-    -e "s#import { ToolError } from '\.\./domain/tooling/types\.js';#import { ToolError } from '../shared/errors.js';#" \
-    -e "s#import { ToolError } from '\./domain/tooling/types\.js';#import { ToolError } from './shared/errors.js';#"
+    -e "s#import { ToolError } from '\.\./domain/tooling/types\.js';#import { ToolError } from '@harness/shared';#" \
+    -e "s#import { ToolError } from '\./domain/tooling/types\.js';#import { ToolError } from '@harness/shared';#"
 cd ../../..
 ```
 
 That one-liner only catches the simplest import form. `pnpm -r typecheck` lists the rest;
 for each, move `ToolError` out of the `types.js` import list and into a
-`shared/errors.js` one.
+`@harness/shared` one.
 
 - [ ] **Step 7: Retarget the two subpath exports**
 
@@ -4632,7 +4983,7 @@ Expected: `0 errors`, and no `no-circular` warnings inside `harness/core-tools/s
 ```bash
 pnpm -r test
 ```
-Expected: 7 packages pass, same count as after Task 4. Not one `it` was added or removed.
+Expected: 8 packages pass, same count as after Task 4. Not one `it` was added or removed.
 
 - [ ] **Step 9: Commit**
 
@@ -4662,7 +5013,7 @@ reply parser in 341 lines.
 - Modify: `harness/core-tools/package.json` (`./storage`, `./models` and `./fake-gateway` retarget)
 
 **Interfaces:**
-- Consumes: `ToolDeps` and `ToolCallResult` from `domain/tooling/types.js`; `ToolError`, `ConfigError` from `shared/errors.js`; `assertInsideRoot`, `realOrNearestAncestor` from `shared/paths.js`; `runBounded` from `shared/subprocess.js`; `optionalEnv`, `numberFromEnv`, `requiredEnv` from `shared/env.js`; `redactPages`, `assertRedacted`, `isRestrictedName` from `shared/redaction/*` (Tasks 4 and 5).
+- Consumes: `ToolDeps` and `ToolCallResult` from `domain/tooling/types.js`; `ToolError`, `ConfigError` from `@harness/shared`; `assertInsideRoot`, `realOrNearestAncestor` from `@harness/shared`; `runBounded` from `@harness/shared`; `optionalEnv`, `numberFromEnv`, `requiredEnv` from `@harness/shared`; `redactPages`, `assertRedacted`, `isRestrictedName` from `shared/redaction/*` (Tasks 4 and 5).
 - Produces:
 
   ```ts
@@ -4832,7 +5183,7 @@ cd ../..
 moved verbatim out of `src/documents/storage.test.ts`; its imports become
 
 ```ts
-import { ToolError } from '../../shared/errors.js';
+import { ToolError } from '@harness/shared';
 import { contentTag, outRoot, storageRoot } from './layout.js';
 import { resolveOutFile, resolveStoragePath, sha256File, writeOutFile } from './file-store.js';
 ```
@@ -5076,7 +5427,7 @@ export async function callModel(deps: ToolDeps, opts: ModelCallOptions): Promise
 ```
 
 `callModelJson` (old lines 166-209) is unchanged except that `ModelOutputError` now comes from
-`../../shared/errors.js`. `gatewayFromEnv` is the version Task 4 rewrote over the shared
+`@harness/shared`. `gatewayFromEnv` is the version Task 4 rewrote over the shared
 readers.
 
 `src/domain/models/gateway.test.ts` needs two import rewrites after the move:
@@ -5092,7 +5443,7 @@ sed -i '' -e "s#from './models.js'#from './types.js'#" fake.ts
 cd ../../../../..
 ```
 
-`gateway.test.ts` imports `ModelOutputError`; point that at `'../../shared/errors.js'`.
+`gateway.test.ts` imports `ModelOutputError`; point that at `'@harness/shared'`.
 
 - [ ] **Step 4: Rewire the callers, and re-point `domain/tooling/types.ts` at the new `GatewayConfig`**
 
@@ -5145,13 +5496,13 @@ Then fix everything else by hand, guided by `pnpm -r typecheck`:
 
 `@harness/approvals` imports `outRoot` and `realOrNearestAncestor` from
 `@harness/core-tools/storage`. `outRoot` is in `layout.ts`; `realOrNearestAncestor` is not —
-it is in `shared/paths.ts` now. Add the re-export to `layout.ts` so the specifier keeps
-working until Task 8 switches approvals over:
+it is in `@harness/shared`'s `paths.ts` now. Add the re-export to `layout.ts` so the specifier keeps
+working until Task 9 switches approvals over:
 
 ```ts
 // Re-exported for @harness/approvals' Slack file sink, which checks containment again as
-// defence in depth. Task 8 points it at the public API and this line goes.
-export { realOrNearestAncestor } from '../../shared/paths.js';
+// defence in depth. Task 9 points it at the public API and this line goes.
+export { realOrNearestAncestor } from '@harness/shared';
 ```
 
 - [ ] **Step 6: Run every gate**
@@ -5176,7 +5527,7 @@ Task 4 already pointed it at `shared/`.
 ```bash
 pnpm -r test
 ```
-Expected: 7 packages pass, the same count as after Task 5 plus the two `fileStorage` tests.
+Expected: 8 packages pass, the same count as after Task 5 plus the two `fileStorage` tests.
 
 - [ ] **Step 7: Commit**
 
@@ -5328,7 +5679,7 @@ prefixes it could see:
 
 | File | Imports |
 |---|---|
-| `app/main.ts` | `buildDepsFromEnv` from `./server.js` (Step 9 creates it); `createCoreToolsServer` from `../tools/catalog.js`; `reconcile` from `../domain/tooling/reconcile.js`; `hashArgs`, `writeAudit` from `../domain/tooling/audit.js`; `createLogger` from `../shared/log.js` |
+| `app/main.ts` | `buildDepsFromEnv` from `./server.js` (Step 9 creates it); `createCoreToolsServer` from `../tools/catalog.js`; `reconcile` from `../domain/tooling/reconcile.js`; `hashArgs`, `writeAudit` from `../domain/tooling/audit.js`; `createLogger` from `@harness/shared` |
 | `app/record-surface.ts` | `connectInProcess` from `../domain/tooling/in-process.js`; `DEFAULT_POLICY` from `../domain/tooling/policy.js`; `DEFAULT_CONFIDENCE_THRESHOLD`, `type ToolDeps` from `../domain/tooling/types.js`; `createCoreToolsServer` from `../tools/catalog.js`; `NPPES_DEFAULT_BASE_URL` from `../domain/verify/nppes.js` |
 | `app/surface.test.ts` | unchanged — it imports only `./record-surface.js` |
 
@@ -5616,7 +5967,7 @@ then split it back: `src/domain/verify/names.test.ts` keeps `describe('namesMatc
 81-93) and imports `namesMatch` from `./names.js`; everything else — the local HTTP stub at
 the top of the file and `describe('verify_nppes')` and `describe('verify_state_license')` —
 moves into a new `src/tools/verify.test.ts` with its imports pointed at
-`../domain/tooling/types.js`, `../shared/errors.js`, `../testing.js`,
+`../domain/tooling/types.js`, `@harness/shared`, `../testing.js`,
 `../domain/providers/repository.js` and `./verify.js`.
 
 - [ ] **Step 5: Build `domain/approvals/execute.ts` and `domain/documents/pipeline.ts`**
@@ -5887,24 +6238,24 @@ export { NPPES_DEFAULT_BASE_URL, nppesRegistry } from './domain/verify/nppes.js'
 export { type NppesRecord, type VerifyConfig, type VerifyRegistry } from './domain/verify/types.js';
 
 // --- Shared helpers, for the packages above this one ---------------------------------------
-export { ConfigError, ModelOutputError, ToolError, describeError } from './shared/errors.js';
+export { ConfigError, ModelOutputError, ToolError, describeError } from '@harness/shared';
 export {
   booleanFromEnv,
   numberFromEnv,
   optionalEnv,
   requiredEnv,
   type NumberEnvOptions,
-} from './shared/env.js';
-export { createLogger, type Logger } from './shared/log.js';
+} from '@harness/shared';
+export { createLogger, type Logger } from '@harness/shared';
 export {
   assertInsideRoot,
   realOrNearestAncestor,
   type EscapeReason,
   type InsideRootOptions,
-} from './shared/paths.js';
-export { runBounded, type RunBoundedOptions, type RunBoundedOutcome } from './shared/subprocess.js';
-export { readJsonl, writeJsonl, type JsonlRow } from './shared/jsonl.js';
-export { csvCell } from './shared/csv.js';
+} from '@harness/shared';
+export { runBounded, type RunBoundedOptions, type RunBoundedOutcome } from '@harness/shared';
+export { readJsonl, writeJsonl, type JsonlRow } from '@harness/shared';
+export { csvCell } from '@harness/shared';
 export { containsRestrictedPattern, isValidDea, type RestrictedKind } from './shared/redaction/patterns.js';
 export { MASKED, isRestrictedName } from './shared/redaction/names.js';
 export {
@@ -5931,7 +6282,7 @@ import { gatewayFromEnv } from '../domain/models/gateway.js';
 import { storageRoot } from '../domain/storage/layout.js';
 import { defaultFormsDir } from '../domain/forms/templates.js';
 import { NPPES_DEFAULT_BASE_URL } from '../domain/verify/nppes.js';
-import { booleanFromEnv, numberFromEnv, optionalEnv } from '../shared/env.js';
+import { booleanFromEnv, numberFromEnv, optionalEnv } from '@harness/shared';
 
 export async function buildDepsFromEnv(): Promise<{ deps: ToolDeps; close: () => Promise<void> }> {
   const { db, close } = createDb();
@@ -5987,7 +6338,7 @@ git rm harness/core-tools/src/server.ts
 calls with a logger:
 
 ```ts
-import { createLogger } from '../shared/log.js';
+import { createLogger } from '@harness/shared';
 
 const log = createLogger('core-tools');
 ```
@@ -6080,7 +6431,7 @@ export {
 
 Every existing subpath keeps working and keeps its meaning; `.` moves from `server.ts` to
 `index.ts`, which is the point of the task. `./models`, `./reconcile` and `./testing` are
-imported by no other package today — Task 11 removes the first two. The root
+imported by no other package today — Task 12 removes the first two. The root
 `surface:record` script becomes `pnpm --filter @harness/core-tools surface`; update it in the
 root `package.json`.
 
@@ -6173,7 +6524,7 @@ Expected: `0 errors`.
 ```bash
 pnpm -r test
 ```
-Expected: 7 packages pass, the same count as after Task 6. **And the surface test still
+Expected: 8 packages pass, the same count as after Task 6. **And the surface test still
 passes** — that is the whole proof of this task. If `tool-surface.json` mismatches, a zod
 schema was retyped instead of moved; diff the failure and put the original characters back
 rather than re-recording.
@@ -6194,7 +6545,1526 @@ git commit -m "docs(core-tools): add the package README and enforce its layers"
 ```
 
 ---
-### Task 8: `@harness/approvals` — shared helpers, one redaction source, a logger, domain folders
+### Task 8: `@harness/pack-api`, the pack registry, and the healthcare pack as a plug-in
+
+Core stops knowing the pack's name. Today `domain/documents/manifest.ts` requires
+`@harness/pack-healthcare/schema` by name, `DOCUMENT_KINDS` is the healthcare kinds,
+`defaultFormsDir()` resolves `packs/healthcare/forms` and the skills test walks up to
+`packs/healthcare/skills`. After this task all four come from a `PackRegistry` that
+`app/server.ts` builds by dynamically importing whatever `HARNESS_PACKS` names, defaulting to
+`@harness/pack-healthcare` so nothing deployed behaves differently. This is spec section 9.
+
+Two things make it safe to do in one task. First, `ToolDeps.packs` is a **required** field, so
+every place that constructs a `ToolDeps` — `src/testing.ts`, `app/record-surface.ts` and
+`evals/src/pipeline.ts` — has to be fixed here rather than half-fixed across three tasks; the
+typechecker names each one. Second, the public-surface snapshot proves the result: the one
+tool schema that carries the document-kind list, `documents_ingest.input.kind`, must come out
+byte-identical, and `docs/architecture/tool-surface.json` is what says so.
+
+**Files:**
+- Create: `harness/pack-api/package.json`, `tsconfig.json`, `vitest.config.ts`, `README.md`
+- Create: `harness/pack-api/src/index.ts`, `credentials.ts`, `policy.ts`, `tool.ts`, `manifest.ts`, `pack.ts`
+- Create: `harness/pack-api/src/manifest.test.ts`, `pack.test.ts`
+- Create: `harness/core-tools/src/domain/packs/types.ts`, `registry.ts`, `registry.test.ts`
+- Create: `packs/healthcare/src/index.ts`
+- Modify: `harness/core-tools/src/domain/tooling/types.ts` (`ToolDef`, `AnyToolDef`, `ToolDeps.packs`)
+- Modify: `harness/core-tools/src/domain/tooling/policy.ts` (the five type declarations move out)
+- Modify: `harness/core-tools/src/domain/deadlines/compute.ts` (`CREDENTIAL_KINDS` moves out)
+- Modify: `harness/core-tools/src/domain/documents/manifest.ts`, `types.ts`, `pipeline.ts`, `manifest.test.ts`
+- Modify: `harness/core-tools/src/domain/forms/templates.ts` (`defaultFormsDir` deleted)
+- Modify: `harness/core-tools/src/tools/documents.ts`, `tools/catalog.ts`, `tools/skills-frontmatter.test.ts`
+- Modify: `harness/core-tools/src/app/server.ts`, `app/record-surface.ts`, `src/testing.ts`, `src/index.ts`
+- Modify: `harness/core-tools/src/domain/forms/templates.test.ts`, `fill.test.ts`, `src/tools/forms.test.ts` (each swaps `defaultFormsDir()` for the pack's `formsDir`)
+- Modify: `evals/src/pipeline.ts`, `evals/src/cases.ts`, `evals/src/run.ts`
+- Modify: `packs/healthcare/package.json`, `tsconfig.json`
+- Modify: `harness/core-tools/package.json` (adds `@harness/pack-api`)
+- Modify: `harness/approvals/src/app/child-env.ts`
+- Modify: `.env.example`, `clients/demo-practice/.env.example`, `clients/demo-practice/hermes.config.yaml`, `harness/compose/docker-compose.yml`
+- Modify: `eslint.config.js`, `.dependency-cruiser.cjs`
+- Re-record: `docs/architecture/compose-surface.yaml` (the two services gain `HARNESS_PACKS`)
+
+**Interfaces:**
+- Consumes: `@harness/shared` (`ConfigError`) from Task 4; `domain/tooling/types.ts`,
+  `domain/tooling/policy.ts` from Task 5; `domain/documents/manifest.ts`, `types.ts` from
+  Task 6; `tools/catalog.ts`, `app/server.ts`, `app/record-surface.ts`, `src/index.ts`,
+  `src/testing.ts` from Task 7.
+- Produces:
+
+  ```ts
+  // @harness/pack-api — credentials.ts
+  const CREDENTIAL_KINDS = ['license', 'dea', 'malpractice', 'board_cert'] as const
+  type CredentialKind = (typeof CREDENTIAL_KINDS)[number]
+
+  // @harness/pack-api — policy.ts
+  const ACTION_CLASSES = ['read', 'write.internal', 'external', 'financial', 'destructive'] as const
+  type ActionClass = (typeof ACTION_CLASSES)[number]
+  const BEHAVIORS = ['auto', 'approval', 'blocked'] as const
+  type Behavior = (typeof BEHAVIORS)[number]
+  type Policy = Record<ActionClass, Behavior>
+
+  // @harness/pack-api — tool.ts
+  interface ToolDef<I extends z.ZodObject, O extends z.ZodObject, TDeps = unknown> { … }
+  type AnyToolDef<TDeps = unknown> = ToolDef<any, any, TDeps>
+
+  // @harness/pack-api — manifest.ts
+  type ManifestField, ManifestCredential, ProviderManifest
+  interface ManifestChecks { isRestrictedName: (name: string) => boolean }
+  function parseManifest(raw: unknown, checks: ManifestChecks): ProviderManifest
+
+  // @harness/pack-api — pack.ts
+  interface Pack { name; version; documentKinds; extraction; formsDir; skillsDir; policy; evals?; tools? }
+  function definePack(pack: Pack): Pack
+
+  // @harness/core-tools — domain/packs/types.ts
+  interface PackRegistry {
+    all: Pack[];
+    byName(name: string): Pack;
+    documentKinds(): string[];
+    manifest(): ProviderManifest;
+    formsDir(): string;
+    skillsDirs(): string[];
+  }
+  // @harness/core-tools — domain/packs/registry.ts
+  function loadPacks(names: string[]): Promise<PackRegistry>
+  function registryOf(packs: Pack[]): PackRegistry
+
+  // @harness/core-tools — domain/tooling/types.ts, narrowed over the pack-api generics
+  type ToolDef<I extends z.ZodObject, O extends z.ZodObject> = PackToolDef<I, O, ToolDeps>
+  type AnyToolDef = PackAnyToolDef<ToolDeps>
+  interface ToolDeps { …; packs: PackRegistry }
+
+  // @harness/core-tools — tools/catalog.ts
+  function allTools(packs: PackRegistry): AnyToolDef[]
+  function createCoreToolsServer(deps: ToolDeps): McpServer
+
+  // @harness/pack-healthcare — src/index.ts
+  const pack: Pack
+  ```
+
+**What does not change.** Every tool name, every input and output JSON Schema, every error
+message, every environment variable that already existed. `HARNESS_PACKS` is the single
+addition and it has a default. `docs/architecture/tool-surface.json` is **not** re-recorded in
+this task; if it needs to be, something went wrong.
+
+---
+
+- [ ] **Step 1: Create the `@harness/pack-api` package skeleton**
+
+```bash
+mkdir -p harness/pack-api/src
+```
+
+`harness/pack-api/package.json`:
+
+```json
+{
+  "name": "@harness/pack-api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@harness/shared": "workspace:*",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "^26.5.1",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.0"
+  }
+}
+```
+
+`harness/pack-api/tsconfig.json`:
+
+```json
+{
+  "extends": "../../tsconfig.base.json",
+  "include": ["src", "vitest.config.ts"]
+}
+```
+
+`harness/pack-api/vitest.config.ts`:
+
+```ts
+import { defineConfig } from 'vitest/config';
+
+export default defineConfig({});
+```
+
+```bash
+pnpm install
+```
+Expected: pnpm reports one more project. `harness/pack-api/node_modules/@harness/shared` is a symlink to `harness/shared`.
+
+- [ ] **Step 2: Move the credential and policy vocabularies into the contract**
+
+`harness/pack-api/src/credentials.ts`. These four lines are lifted verbatim out of
+`harness/core-tools/src/domain/deadlines/compute.ts`. They move because a pack's extraction
+manifest and its form templates both declare credentials of these kinds, so the list is part
+of the contract between core and a pack, not a detail of the deadline calculator. `LEAD_DAYS`
+and everything else in `compute.ts` stays where it is.
+
+```ts
+/**
+ * The credential vocabulary, defined once for the whole workspace: the storage contract
+ * (`CredentialInput.kind`), a pack's form-template manifest, a pack's extraction manifest and
+ * core-tools' lead-day table all read it from here.
+ *
+ * It lives in the pack contract rather than in core-tools because a pack declares credentials
+ * in its own JSON and must be able to name the kinds without importing core-tools. Four copies
+ * of this list used to sit in four files; a kind added to the extraction schema but not to the
+ * template manifest is a credential a model reports and a template can never quote.
+ */
+export const CREDENTIAL_KINDS = ['license', 'dea', 'malpractice', 'board_cert'] as const;
+export type CredentialKind = (typeof CREDENTIAL_KINDS)[number];
+```
+
+`harness/pack-api/src/policy.ts`, lifted verbatim out of
+`harness/core-tools/src/domain/tooling/policy.ts` lines 5-11:
+
+```ts
+/**
+ * The action-class vocabulary and the shape of a policy table. A pack ships a
+ * `Partial<Policy>` of defaults for the actions it introduces, so these five declarations
+ * have to be reachable without importing core-tools. `DEFAULT_POLICY`, `parsePolicy`,
+ * `loadPolicy` and `decide` stay in core-tools: reading a YAML file and deciding what to do
+ * with a class is the kernel's job, not the contract's.
+ */
+export const ACTION_CLASSES = ['read', 'write.internal', 'external', 'financial', 'destructive'] as const;
+export type ActionClass = (typeof ACTION_CLASSES)[number];
+
+export const BEHAVIORS = ['auto', 'approval', 'blocked'] as const;
+export type Behavior = (typeof BEHAVIORS)[number];
+
+export type Policy = Record<ActionClass, Behavior>;
+```
+
+Delete those seven lines from `domain/tooling/policy.ts` and put an import and a re-export at
+the top of what remains, so every one of the ~30 files importing `ActionClass` or `Policy`
+from `'../domain/tooling/policy.js'` keeps resolving:
+
+```ts
+import { ACTION_CLASSES, BEHAVIORS, type ActionClass, type Behavior, type Policy } from '@harness/pack-api';
+export { ACTION_CLASSES, BEHAVIORS, type ActionClass, type Behavior, type Policy };
+```
+
+Do the same in `domain/deadlines/compute.ts`:
+
+```ts
+import { CREDENTIAL_KINDS, type CredentialKind } from '@harness/pack-api';
+export { CREDENTIAL_KINDS, type CredentialKind };
+```
+
+`LEAD_DAYS`, `URGENCY_BUCKETS`, `addDays`, `bucketFor`, `computeDeadlines`, `daysUntil` and
+`digestKeyFor` are untouched, and so is `policy.test.ts`, which asserts on `parsePolicy` and
+`decide` and imports both from the same module as before.
+
+- [ ] **Step 3: Write the generic tool definition**
+
+`harness/pack-api/src/tool.ts`. This is `ToolDef` from `domain/tooling/types.ts` with one
+extra type parameter. Core-tools' `ToolDef` names `ToolDeps` in its `handler` signature, and
+`ToolDeps` names a database handle, a policy and a `PackRegistry` — none of which the contract
+can see. Making the dependency bag a parameter is the whole fix: the contract says "a handler
+takes its arguments and some dependencies", and core-tools says which.
+
+```ts
+import type * as z from 'zod/v4';
+import type { ActionClass } from './policy.js';
+
+/**
+ * One agent-callable action.
+ *
+ * `TDeps` is the dependency bag the handler receives. A pack that ships tools leaves it at
+ * `unknown` — it cannot see core-tools' `ToolDeps` — and core-tools narrows it to `ToolDeps`
+ * for its own tools. A handler typed `(args, deps: unknown) => …` is assignable to one typed
+ * `(args, deps: ToolDeps) => …`, so a pack's tools drop straight into core-tools' catalogue.
+ */
+export interface ToolDef<I extends z.ZodObject, O extends z.ZodObject, TDeps = unknown> {
+  name: string;
+  description: string;
+  actionClass: ActionClass;
+  input: I;
+  output: O;
+  handler: (args: z.infer<I>, deps: TDeps) => Promise<z.infer<O>>;
+  recordIds?: (args: z.infer<I>, result: z.infer<O>) => string[];
+  /**
+   * Strip restricted values from the arguments before they are written to the approvals table
+   * in plaintext jsonb. The full arguments are still stored, encrypted, in
+   * `payload_encrypted`. Omit only for tools whose arguments can never carry a restricted
+   * value.
+   */
+  redact?: (args: z.infer<I>) => unknown;
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export type AnyToolDef<TDeps = unknown> = ToolDef<any, any, TDeps>;
+```
+
+In `harness/core-tools/src/domain/tooling/types.ts`, delete the local `ToolDef` interface and
+the `AnyToolDef` alias and replace them with two narrowing aliases. Both keep their names, so
+nothing that imports them changes:
+
+```ts
+import type { AnyToolDef as PackAnyToolDef, ToolDef as PackToolDef } from '@harness/pack-api';
+
+/** A core-tools tool: the contract's `ToolDef` with this package's dependency bag filled in. */
+export type ToolDef<I extends z.ZodObject, O extends z.ZodObject> = PackToolDef<I, O, ToolDeps>;
+export type AnyToolDef = PackAnyToolDef<ToolDeps>;
+```
+
+`defineTool` in `domain/tooling/registry.ts` keeps its body — `return def;` — and its
+signature, which now resolves through the alias. The `// eslint-disable-next-line` comment
+that sat above the old `AnyToolDef` moves to `pack-api/src/tool.ts` with the `any`s.
+
+- [ ] **Step 4: Move the extraction manifest into the contract**
+
+`harness/pack-api/src/manifest.ts`. Lines 10-76 of the pre-Task-6 `documents/extract.ts`, which
+Task 6 put in `domain/documents/manifest.ts`, with exactly two changes: `isRestrictedName`
+arrives as a parameter instead of an import (decision 7), and `document_kinds` is validated as
+non-empty strings instead of against core-tools' `DOCUMENT_KINDS` (decision 8).
+
+```ts
+import * as z from 'zod/v4';
+import { CREDENTIAL_KINDS } from './credentials.js';
+
+// Deliberately ordered for the prompt rather than shared with the template
+// manifest's list: this order is what the model reads in the schema.
+const CREDENTIAL_PROPERTIES = ['state', 'issuer', 'issued_at', 'expires_at'] as const;
+
+const ManifestField = z.object({
+  name: z.string().regex(/^[a-z][a-z0-9_]*$/),
+  type: z.enum(['string', 'number']),
+  description: z.string().min(1),
+  restricted: z.boolean().default(false),
+  /**
+   * Where the value comes from. `redaction` fields are filled from the regex
+   * pass over the document text and are dropped from the model-facing schema.
+   */
+  source: z.enum(['model', 'redaction']).default('model'),
+});
+export type ManifestField = z.infer<typeof ManifestField>;
+
+const ManifestCredential = z.object({
+  kind: z.enum(CREDENTIAL_KINDS),
+  description: z.string().min(1),
+  /**
+   * Reserved, and read by nothing today. No code path populates
+   * `CredentialInput.number` from a document — the pipeline does not extract
+   * credential numbers at all — so `credentials.number_encrypted` is always
+   * null from extraction and there is no value for this flag to govern. It
+   * stays in the manifest so the declaration is already in place if numbers
+   * are ever read; see the `$comment_credential_numbers` note in
+   * packs/healthcare/schema/provider.json.
+   */
+  number_restricted: z.boolean(),
+  properties: z.array(z.enum(CREDENTIAL_PROPERTIES)).min(1),
+});
+export type ManifestCredential = z.infer<typeof ManifestCredential>;
+
+/**
+ * `document_kinds` is plain strings, not an enum.
+ *
+ * Before the pack contract existed, this was checked against core-tools' `DOCUMENT_KINDS`.
+ * The pack is now the *source* of that list — `Pack.documentKinds` is this very field — so
+ * validating it against a copy of itself would be circular, and keeping the copy in core-tools
+ * is exactly the hard-coding the contract removes. What guards the list instead is the public
+ * surface snapshot: `documents_ingest.input.kind` is built from the loaded registry, and a
+ * changed or reordered list fails `surface.test.ts`.
+ */
+const ProviderManifestShape = z.object({
+  version: z.string().min(1),
+  fields: z.array(ManifestField).min(1),
+  credentials: z.array(ManifestCredential),
+  document_kinds: z.array(z.string().min(1)).min(1),
+});
+export type ProviderManifest = z.infer<typeof ProviderManifestShape>;
+
+/**
+ * The checks a manifest is validated against that the contract cannot make on its own.
+ *
+ * `isRestrictedName` decides which field names the storage layer will encrypt. That rule is
+ * domain knowledge and spec section 3 keeps it in core-tools' `shared/redaction/names.ts`, so
+ * the caller hands it in. core-tools re-exports a one-argument `parseManifest` bound to its
+ * own predicate, which is what every existing caller and test uses.
+ */
+export interface ManifestChecks {
+  isRestrictedName: (name: string) => boolean;
+}
+
+function schemaFor({ isRestrictedName }: ManifestChecks) {
+  return ProviderManifestShape.superRefine((m, ctx) => {
+    for (const f of m.fields) {
+      // A restricted value must never be something a model is asked to produce.
+      if (f.restricted && f.source !== 'redaction') {
+        ctx.addIssue({ code: 'custom', message: `field "${f.name}" is restricted but not sourced from redaction` });
+      }
+      if (f.source === 'redaction' && !f.restricted) {
+        ctx.addIssue({ code: 'custom', message: `field "${f.name}" is redaction-sourced but not marked restricted` });
+      }
+      // The storage layer decides what to encrypt from the field *name*. A
+      // restricted field whose name it does not recognise would be stored in
+      // plaintext, so the manifest refuses to declare one.
+      if (f.restricted && !isRestrictedName(f.name)) {
+        ctx.addIssue({
+          code: 'custom',
+          message: `restricted field "${f.name}" is not recognised by isRestrictedName; add its stem to RESTRICTED_NAME_KEYS in shared/redaction/names.ts`,
+        });
+      }
+    }
+  });
+}
+
+export function parseManifest(raw: unknown, checks: ManifestChecks): ProviderManifest {
+  const parsed = schemaFor(checks).safeParse(raw);
+  if (!parsed.success) throw new Error(`provider manifest is invalid: ${z.prettifyError(parsed.error)}`);
+  return parsed.data;
+}
+```
+
+`harness/pack-api/src/manifest.test.ts` — new, because the two existing `parseManifest`
+describes stay in core-tools where their `isRestrictedName` lives. These three cover what the
+contract itself owns:
+
+```ts
+import { describe, expect, it } from 'vitest';
+import { parseManifest } from './manifest.js';
+
+const always = { isRestrictedName: () => true };
+const never = { isRestrictedName: () => false };
+
+const minimal = {
+  version: '1.0.0',
+  fields: [{ name: 'npi', type: 'string', description: 'x' }],
+  credentials: [],
+  document_kinds: ['other'],
+};
+
+describe('parseManifest', () => {
+  it('fills the two defaults, so a plain field is model-sourced and not restricted', () => {
+    const m = parseManifest(minimal, never);
+    expect(m.fields[0]).toEqual({ name: 'npi', type: 'string', description: 'x', restricted: false, source: 'model' });
+  });
+
+  it('takes any non-empty document kind, because the pack is what defines the list', () => {
+    const m = parseManifest({ ...minimal, document_kinds: ['story', 'epic'] }, never);
+    expect(m.document_kinds).toEqual(['story', 'epic']);
+    expect(() => parseManifest({ ...minimal, document_kinds: [] }, never)).toThrow(/document_kinds/);
+  });
+
+  it('applies the caller restricted-name check rather than a rule of its own', () => {
+    const restricted = { ...minimal, fields: [{ name: 'zzz', type: 'string', description: 'x', restricted: true, source: 'redaction' }] };
+    expect(parseManifest(restricted, always).fields[0].restricted).toBe(true);
+    expect(() => parseManifest(restricted, never)).toThrow(/not recognised by isRestrictedName/);
+  });
+});
+```
+
+```bash
+pnpm --filter @harness/pack-api exec vitest run src/manifest.test.ts
+```
+Expected: `Tests 3 passed`.
+
+- [ ] **Step 5: Write the `Pack` contract and `definePack`**
+
+`harness/pack-api/src/pack.ts`. The interface is spec section 9.2 verbatim; `definePack` adds
+the three checks that are cheap to make at module load and expensive to debug at runtime.
+
+```ts
+import { ConfigError } from '@harness/shared';
+import path from 'node:path';
+import type { ProviderManifest } from './manifest.js';
+import type { Policy } from './policy.js';
+import type { AnyToolDef } from './tool.js';
+
+/**
+ * What core loads when it loads an area of the product.
+ *
+ * A pack is content plus a declaration: which documents exist, what to pull out of them, which
+ * forms and skills ship with them, and what the default policy for its actions is. It depends
+ * on this package and on `@harness/shared`, and on nothing else in the workspace — never on
+ * `@harness/core-tools`, which is what lets core load it by name instead of importing it.
+ */
+export interface Pack {
+  /** Short, stable, lowercase. `deps.packs.byName('healthcare')`. */
+  name: string;
+  version: string;
+  /** What `documents_classify` may return and `documents_ingest` may be told. */
+  documentKinds: readonly string[];
+  /** The fields and credentials the extractor asks a model for. */
+  extraction: ProviderManifest;
+  /** Absolute path to the directory holding `templates.json` and its PDFs. */
+  formsDir: string;
+  /** Absolute path to the directory of `<skill>/SKILL.md` folders. */
+  skillsDir: string;
+  /** Action-class defaults this pack ships. A client's `policy.yaml` still wins. */
+  policy: Partial<Policy>;
+  evals?: { casesFile?: string; injectionFile?: string };
+  /**
+   * Tools this pack adds to the catalogue. It receives core's dependency bag as `unknown`,
+   * because a pack cannot see `ToolDeps`; a pack that needs a field casts it deliberately.
+   * No pack ships tools today.
+   */
+  tools?: (deps: unknown) => AnyToolDef[];
+}
+
+const NAME = /^[a-z][a-z0-9-]*$/;
+
+/**
+ * Declare a pack. Identity at runtime, plus the checks that turn a typo into a startup failure
+ * naming the pack rather than a `forms_list_templates` that quietly reports no templates.
+ *
+ * The paths must be absolute: a pack resolves them from `import.meta.url`, and a relative one
+ * would resolve against whatever directory the harness process happened to start in.
+ */
+export function definePack(pack: Pack): Pack {
+  if (!NAME.test(pack.name)) {
+    throw new ConfigError(`pack name "${pack.name}" must be lowercase letters, digits and hyphens`);
+  }
+  if (pack.version.trim() === '') throw new ConfigError(`pack "${pack.name}" has no version`);
+  if (pack.documentKinds.length === 0) throw new ConfigError(`pack "${pack.name}" declares no document kinds`);
+  for (const [field, value] of [
+    ['formsDir', pack.formsDir],
+    ['skillsDir', pack.skillsDir],
+  ] as const) {
+    if (!path.isAbsolute(value)) {
+      throw new ConfigError(`pack "${pack.name}" ${field} must be an absolute path, got "${value}"`);
+    }
+  }
+  return pack;
+}
+```
+
+`harness/pack-api/src/pack.test.ts`:
+
+```ts
+import { describe, expect, it } from 'vitest';
+import { definePack, type Pack } from './pack.js';
+
+const base: Pack = {
+  name: 'healthcare',
+  version: '0.1.0',
+  documentKinds: ['other'],
+  extraction: { version: '1.0.0', fields: [], credentials: [], document_kinds: ['other'] } as Pack['extraction'],
+  formsDir: '/srv/pack/forms',
+  skillsDir: '/srv/pack/skills',
+  policy: {},
+};
+
+describe('definePack', () => {
+  it('returns the pack unchanged when it is well formed', () => {
+    expect(definePack(base)).toBe(base);
+  });
+
+  it('refuses a relative directory, because it would resolve against the process cwd', () => {
+    expect(() => definePack({ ...base, formsDir: 'forms' })).toThrow(/formsDir must be an absolute path/);
+    expect(() => definePack({ ...base, skillsDir: './skills' })).toThrow(/skillsDir must be an absolute path/);
+  });
+
+  it('refuses a pack with no name, no version or no document kinds', () => {
+    expect(() => definePack({ ...base, name: 'Health Care' })).toThrow(/must be lowercase/);
+    expect(() => definePack({ ...base, version: '' })).toThrow(/has no version/);
+    expect(() => definePack({ ...base, documentKinds: [] })).toThrow(/declares no document kinds/);
+  });
+});
+```
+
+```bash
+pnpm --filter @harness/pack-api exec vitest run src/pack.test.ts
+```
+Expected: `Tests 3 passed`.
+
+- [ ] **Step 6: Write the barrel and wire the package into the workspace**
+
+`harness/pack-api/src/index.ts`:
+
+```ts
+/**
+ * The contract between core and a pack.
+ *
+ * Everything here is either a type a pack declares or the one function it calls. It depends on
+ * `@harness/shared` and zod, and on nothing else in the workspace, so a pack that implements it
+ * never has to depend on `@harness/core-tools` — which is what lets core load a pack by name at
+ * runtime instead of importing it at build time. See ARCHITECTURE.md, "Adding a pack".
+ */
+export { CREDENTIAL_KINDS, type CredentialKind } from './credentials.js';
+export { ACTION_CLASSES, BEHAVIORS, type ActionClass, type Behavior, type Policy } from './policy.js';
+export { type AnyToolDef, type ToolDef } from './tool.js';
+export {
+  parseManifest,
+  type ManifestChecks,
+  type ManifestCredential,
+  type ManifestField,
+  type ProviderManifest,
+} from './manifest.js';
+export { definePack, type Pack } from './pack.js';
+```
+
+`harness/pack-api/README.md`:
+
+````markdown
+# @harness/pack-api
+
+The contract a pack implements and core loads. Two dependencies: `@harness/shared` and zod.
+
+```ts
+import { definePack } from '@harness/pack-api';
+export const pack = definePack({ … });
+```
+
+`Pack` is in `src/pack.ts`; the types it uses are in `credentials.ts`, `policy.ts`, `tool.ts`
+and `manifest.ts`. `@harness/core-tools` re-exports every one of them, so a module inside
+core-tools imports them from where it always did.
+
+## Why a pack never depends on core-tools
+
+The product is a foundation onto which project-specific areas are plugged: healthcare
+credentialing today, document scanning that produces stories and epics tomorrow. If core
+imported a pack by name it could serve exactly one. So the direction is reversed: core reads
+`HARNESS_PACKS`, imports each name dynamically, and reaches everything through `PackRegistry`.
+`pnpm arch` fails the build on a static `@harness/pack-*` import from core-tools source.
+
+## Adding a pack
+
+See CONTRIBUTING.md, "Adding a pack". The short version: create `packs/<name>/` exporting
+`pack` from `src/index.ts`, add it to `@harness/core-tools`'s `dependencies` so pnpm can
+resolve it, and name it in `HARNESS_PACKS`.
+````
+
+Add the dependency to core-tools and to the pack:
+
+```bash
+node -e '
+  const fs = require("node:fs");
+  for (const [file, deps] of [
+    ["harness/core-tools/package.json", ["@harness/pack-api"]],
+    ["packs/healthcare/package.json", ["@harness/pack-api", "@harness/shared"]],
+  ]) {
+    const m = JSON.parse(fs.readFileSync(file, "utf8"));
+    for (const d of deps) m.dependencies[d] = "workspace:*";
+    m.dependencies = Object.fromEntries(Object.entries(m.dependencies).sort(([a], [b]) => a.localeCompare(b)));
+    fs.writeFileSync(file, JSON.stringify(m, null, 2) + "\n");
+  }
+'
+pnpm exec prettier --write harness/core-tools/package.json packs/healthcare/package.json
+pnpm install
+```
+
+`@harness/shared` is already in both from Task 4 Step 15; the line above is idempotent.
+
+**ESLint.** Append the two new source roots in `eslint.config.js`:
+
+```js
+const STRICT_LAYER_ROOTS = [
+  'harness/db/src',
+  'harness/shared/src',
+  'harness/gateway/src',
+  'harness/core-tools/src',
+  'harness/pack-api/src',
+];
+```
+
+(Keep whatever roots Tasks 2, 3, 4 and 7 already appended; add `'harness/pack-api/src'`.)
+
+**dependency-cruiser.** Add the row and the directory in `.dependency-cruiser.cjs`:
+
+```js
+const PACKAGES = [
+  { name: 'shared', src: 'harness/shared/src', severity: 'error' },
+  { name: 'pack-api', src: 'harness/pack-api/src', severity: 'error' },
+  { name: 'db', src: 'harness/db/src', severity: 'error' },
+  …
+];
+```
+
+```js
+const WORKSPACE_DIRS = [
+  'harness/shared',
+  'harness/pack-api',
+  'harness/db',
+  'harness/gateway',
+  'harness/core-tools',
+  'harness/approvals',
+  'evals',
+  'packs/healthcare',
+  'scripts',
+];
+```
+
+and three rules in `GLOBAL_RULES`, beside the `shared-has-no-workspace-dependencies` rule Task 4
+added:
+
+```js
+  {
+    name: 'pack-api-imports-only-shared',
+    comment:
+      '@harness/pack-api is the contract a pack implements. It may import @harness/shared and zod, and no other workspace package: a contract that pulled in core-tools would defeat the point of having one.',
+    severity: 'error',
+    from: { path: '^harness/pack-api/src/' },
+    to: { path: '^(harness|packs|evals|scripts)/', pathNot: ['^harness/pack-api/src/', '^harness/shared/src/'] },
+  },
+  {
+    name: 'a-pack-never-imports-core-tools',
+    comment:
+      'A pack depends on @harness/pack-api and @harness/shared only. An edge back into core-tools would be a cycle and would make the pack unloadable by anything else.',
+    severity: 'error',
+    from: { path: '^packs/' },
+    to: { path: '^(harness|evals|scripts)/', pathNot: ['^harness/pack-api/src/', '^harness/shared/src/'] },
+  },
+  {
+    name: 'core-tools-never-statically-imports-a-pack',
+    comment:
+      'Packs are loaded at runtime from HARNESS_PACKS through a dynamic import in domain/packs/registry.ts. A static import would wire core to one pack by name, which is the coupling the contract exists to remove. src/testing.ts and *.test.ts build a registry from the healthcare pack directly and are exempt: they are not shipped and they need a registry synchronously.',
+    severity: 'warn',
+    from: {
+      path: '^harness/core-tools/src/',
+      pathNot: ['\\.test\\.ts$', '^harness/core-tools/src/testing\\.ts$'],
+    },
+    to: { path: '^packs/[^/]+/', dependencyTypesNot: ['dynamic-import'] },
+  },
+```
+
+The last one is `'warn'` here and becomes `'error'` in Task 12, like every other rule that has
+to survive a task where the code is still moving. The `dependencyTypesNot` clause is
+belt-and-braces: `loadPacks` imports a *variable* specifier, which dependency-cruiser cannot
+resolve to a module at all, so it records no edge either way.
+
+```bash
+pnpm -r typecheck && pnpm lint && pnpm arch
+```
+Expected: clean typecheck, no lint errors, `0 errors` from the cruiser.
+
+- [ ] **Step 7: Write the healthcare pack's `src/index.ts`**
+
+The pack becomes something core loads rather than something core reads files out of. Create
+`packs/healthcare/src/index.ts`:
+
+```ts
+import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { parse as parseYaml } from 'yaml';
+import { definePack, type Policy, type ProviderManifest } from '@harness/pack-api';
+
+/** The pack root: one level up from `src/`. Every path below is absolute, as the contract requires. */
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+
+// A JSON import would need an import attribute and a resolver flag; a require
+// keeps both files loadable from tsx, vitest and a built bundle alike.
+const requireJson = createRequire(import.meta.url);
+
+const extraction = requireJson('../schema/provider.json') as ProviderManifest;
+const { version } = requireJson('../package.json') as { version: string };
+
+/**
+ * The action-class defaults this pack ships, read from the file a human edits. A client's
+ * `HARNESS_POLICY_FILE` still wins: core merges `DEFAULT_POLICY`, then this, then the client's.
+ */
+const { classes = {} } = parseYaml(readFileSync(path.join(root, 'policy.yaml'), 'utf8')) as {
+  classes?: Partial<Policy>;
+};
+
+/**
+ * Healthcare credentialing.
+ *
+ * `extraction` is the manifest core validates on load — the shape check happens there, against
+ * core's own restricted-name rules, because those are the rules that decide what gets
+ * encrypted. `documentKinds` is taken from the manifest rather than written twice: the list a
+ * model may classify into and the list the manifest declares are the same list, and two copies
+ * would drift.
+ */
+export const pack = definePack({
+  name: 'healthcare',
+  version,
+  documentKinds: extraction.document_kinds,
+  extraction,
+  formsDir: path.join(root, 'forms'),
+  skillsDir: path.join(root, 'skills'),
+  policy: classes,
+  evals: { injectionFile: path.join(root, 'evals', 'injection.jsonl') },
+});
+```
+
+`packs/healthcare/package.json` gains the root export and `yaml`; `./schema` and `./generate`
+are untouched, because the synthetic generator and `judge.test.ts` still name them:
+
+```json
+  "exports": {
+    ".": "./src/index.ts",
+    "./schema": "./schema/provider.json",
+    "./generate": "./synthetic/generate.ts"
+  },
+```
+
+```bash
+node -e '
+  const fs = require("node:fs");
+  const m = JSON.parse(fs.readFileSync("packs/healthcare/package.json", "utf8"));
+  m.exports = { ".": "./src/index.ts", "./schema": "./schema/provider.json", "./generate": "./synthetic/generate.ts" };
+  m.dependencies.yaml = "^2.9.1";
+  m.dependencies = Object.fromEntries(Object.entries(m.dependencies).sort(([a], [b]) => a.localeCompare(b)));
+  fs.writeFileSync("packs/healthcare/package.json", JSON.stringify(m, null, 2) + "\n");
+'
+pnpm exec prettier --write packs/healthcare/package.json
+pnpm install
+```
+
+and `packs/healthcare/tsconfig.json` has to see the new directory:
+
+```json
+{
+  "extends": "../../tsconfig.base.json",
+  "include": ["src", "forms", "synthetic", "vitest.config.ts"]
+}
+```
+
+- [ ] **Step 8: Write the registry types**
+
+Create `harness/core-tools/src/domain/packs/types.ts`:
+
+```ts
+import type { Pack, ProviderManifest } from '@harness/pack-api';
+
+/**
+ * The loaded packs, as the rest of core-tools sees them. It hangs off `ToolDeps.packs`, so a
+ * handler reaches the active pack's manifest or forms directory the same way it reaches the
+ * database: through its dependencies, never through an import.
+ *
+ * Several packs can be loaded at once and `documentKinds()` unions them, but the three
+ * singular accessors — `manifest()`, `formsDir()` — answer for the **first** pack named in
+ * `HARNESS_PACKS`. One extraction manifest and one templates directory is what the document
+ * and forms pipelines take today; making them per-pack is a feature, not a refactor, and waits
+ * for the second pack that actually needs it. `byName` is there for a tool that knows which
+ * pack it belongs to.
+ */
+export interface PackRegistry {
+  /** Every loaded pack, in the order `HARNESS_PACKS` named them. */
+  readonly all: Pack[];
+  /** Throws `ConfigError` when no loaded pack has that name. */
+  byName(name: string): Pack;
+  /** Every document kind any loaded pack declares, deduplicated, first-pack order first. */
+  documentKinds(): string[];
+  /** The first pack's extraction manifest. */
+  manifest(): ProviderManifest;
+  /** The first pack's forms directory. `HARNESS_FORMS_DIR` overrides it in `app/server.ts`. */
+  formsDir(): string;
+  /** One skills directory per loaded pack, in order. */
+  skillsDirs(): string[];
+}
+```
+
+- [ ] **Step 9: Write the failing registry test**
+
+Create `harness/core-tools/src/domain/packs/registry.test.ts`. A test file may import the pack
+directly; the cruiser rule from Step 6 exempts `*.test.ts` by name.
+
+```ts
+import { describe, expect, it } from 'vitest';
+import { ConfigError } from '@harness/shared';
+import { pack as healthcarePack } from '@harness/pack-healthcare';
+import { loadPacks, registryOf } from './registry.js';
+
+describe('loadPacks', () => {
+  it('loads the healthcare pack by package name', async () => {
+    const packs = await loadPacks(['@harness/pack-healthcare']);
+    expect(packs.all.map((p) => p.name)).toEqual(['healthcare']);
+    expect(packs.byName('healthcare')).toBe(healthcarePack);
+  });
+
+  it('exposes the five document kinds in the manifest order, which the tool schema depends on', async () => {
+    const packs = await loadPacks(['@harness/pack-healthcare']);
+    expect(packs.documentKinds()).toEqual([
+      'state_license',
+      'dea_certificate',
+      'malpractice_certificate',
+      'w9',
+      'other',
+    ]);
+  });
+
+  it('answers for the first pack on manifest, formsDir and skillsDirs', async () => {
+    const packs = await loadPacks(['@harness/pack-healthcare']);
+    expect(packs.manifest().version).toBe('1.0.0');
+    expect(packs.formsDir().endsWith('packs/healthcare/forms')).toBe(true);
+    expect(packs.skillsDirs().map((d) => d.endsWith('packs/healthcare/skills'))).toEqual([true]);
+  });
+
+  it('names only the module when it cannot be resolved, never the resolver error', async () => {
+    await expect(loadPacks(['@harness/pack-nope'])).rejects.toThrow(ConfigError);
+    await expect(loadPacks(['@harness/pack-nope'])).rejects.toThrow('cannot load pack "@harness/pack-nope"');
+    await expect(loadPacks(['@harness/pack-nope'])).rejects.not.toThrow(/node_modules|ERR_MODULE/);
+  });
+
+  it('refuses a module that resolves but exports no pack', async () => {
+    await expect(loadPacks(['@harness/shared'])).rejects.toThrow('module "@harness/shared" exports no `pack`');
+  });
+
+  it('refuses an empty HARNESS_PACKS rather than starting with no document kinds', async () => {
+    await expect(loadPacks([])).rejects.toThrow('HARNESS_PACKS names no pack');
+  });
+});
+
+describe('byName', () => {
+  it('throws ConfigError for a pack that is not loaded', () => {
+    expect(() => registryOf([healthcarePack]).byName('scanning')).toThrow('no pack named "scanning" is loaded');
+  });
+});
+```
+
+```bash
+pnpm --filter @harness/core-tools exec vitest run src/domain/packs/registry.test.ts
+```
+Expected: FAIL — `Cannot find module './registry.js'`.
+
+- [ ] **Step 10: Write the registry**
+
+Create `harness/core-tools/src/domain/packs/registry.ts`:
+
+```ts
+import { ConfigError } from '@harness/shared';
+import type { Pack } from '@harness/pack-api';
+import { parseManifest } from '../documents/manifest.js';
+import type { PackRegistry } from './types.js';
+
+/** A registry over packs that are already in hand. `makeTestDeps` and the surface recorder use it. */
+export function registryOf(all: Pack[]): PackRegistry {
+  return {
+    all,
+    byName(name) {
+      const found = all.find((p) => p.name === name);
+      if (!found) throw new ConfigError(`no pack named "${name}" is loaded`);
+      return found;
+    },
+    documentKinds: () => [...new Set(all.flatMap((p) => [...p.documentKinds]))],
+    manifest: () => all[0].extraction,
+    formsDir: () => all[0].formsDir,
+    skillsDirs: () => all.map((p) => p.skillsDir),
+  };
+}
+
+/**
+ * Load the packs `HARNESS_PACKS` names.
+ *
+ * The specifier is a variable, so this is the one place in core-tools that reaches a pack at
+ * all, and it reaches it the way a plug-in host does: by name, at startup, with no build-time
+ * edge. `pnpm arch` forbids a static `@harness/pack-*` import anywhere else under `src/`.
+ *
+ * Every failure is a `ConfigError` naming the module and nothing else. A resolver error's
+ * message carries absolute filesystem paths and a node_modules layout, and this message can
+ * end up in a container log an operator pastes into a ticket.
+ */
+export async function loadPacks(names: string[]): Promise<PackRegistry> {
+  if (names.length === 0) throw new ConfigError('HARNESS_PACKS names no pack; at least one is required');
+  const all: Pack[] = [];
+  for (const name of names) {
+    let module: { pack?: Pack };
+    try {
+      module = (await import(name)) as { pack?: Pack };
+    } catch {
+      throw new ConfigError(`cannot load pack "${name}"; add it to @harness/core-tools dependencies and run pnpm install`);
+    }
+    if (!module.pack) throw new ConfigError(`module "${name}" exports no \`pack\``);
+    // Validate the manifest against *this build's* restricted-name rules rather than the
+    // pack's: the rules decide what gets encrypted, so they belong to whoever does the
+    // encrypting. A pack shipped against an older rule set fails here, at startup, named.
+    parseManifest(module.pack.extraction);
+    all.push(module.pack);
+  }
+  return registryOf(all);
+}
+```
+
+```bash
+pnpm --filter @harness/core-tools exec vitest run src/domain/packs/registry.test.ts
+```
+Expected: `Tests 7 passed`. If vitest warns that the dynamic import cannot be analysed, that is
+expected and harmless — the specifier is a variable on purpose.
+
+- [ ] **Step 11: Bind `parseManifest` and delete the three hard-coded pack references**
+
+**`domain/documents/manifest.ts`** loses the zod schema and `loadHealthcareManifest`, and keeps
+a bound `parseManifest` so that every existing caller and both existing test describes resolve
+unchanged:
+
+```ts
+import { parseManifest as parseManifestWith, type ProviderManifest } from '@harness/pack-api';
+import { isRestrictedName } from '../../shared/redaction/names.js';
+
+export { type ManifestCredential, type ManifestField, type ProviderManifest } from '@harness/pack-api';
+
+/**
+ * Validate a pack's extraction manifest against this build's restricted-name rules. The schema
+ * itself lives in `@harness/pack-api` so a pack can be typed against it; the rule that decides
+ * which names are encrypted stays here, and is handed in.
+ */
+export function parseManifest(raw: unknown): ProviderManifest {
+  return parseManifestWith(raw, { isRestrictedName });
+}
+```
+
+`loadHealthcareManifest()` and the `createRequire('@harness/pack-healthcare/schema')` beside it
+are deleted. `buildExtractionSchema`, `buildClassificationSchema`, `fieldSlot` and the rest of
+what Task 6 put in `schema.ts` and `prompts.ts` are untouched — they take a manifest as an
+argument and never loaded one.
+
+Its test file, `domain/documents/manifest.test.ts`, keeps `describe('parseManifest')` with both
+`it`s exactly as written, and its `describe('loadHealthcareManifest')` becomes a describe over
+the pack's manifest, with the same three expectations:
+
+```ts
+import { pack as healthcarePack } from '@harness/pack-healthcare';
+import { isRestrictedName } from '../../shared/redaction/names.js';
+import { parseManifest } from './manifest.js';
+
+const manifest = parseManifest(healthcarePack.extraction);
+
+describe('the healthcare pack manifest', () => {
+  // the two its, verbatim
+});
+```
+
+**`domain/documents/types.ts`** loses `DOCUMENT_KINDS` and `DocumentKind`. Find what used the
+type and widen it to `string` — the `documents.kind` column is `text`, so nothing narrows:
+
+```bash
+grep -rn "DOCUMENT_KINDS\|DocumentKind" harness/core-tools/src evals/src --include='*.ts'
+```
+Expected after the edits: hits only in `tools/documents.ts`, where the enum is built from the
+registry. `ingestDocument`'s `kind?: DocumentKind` parameter becomes `kind?: string`.
+
+**`domain/forms/templates.ts`** loses `defaultFormsDir()` and its `fileURLToPath` import. Three
+test files called it; each takes the pack's directory instead, which is the same string:
+
+```bash
+sed -i '' \
+  -e "s#import { defaultFormsDir, loadManifest, getTemplate, mappingLabel } from './templates.js';#import { pack as healthcarePack } from '@harness/pack-healthcare';\nimport { loadManifest, getTemplate, mappingLabel } from './templates.js';#" \
+  -e "s#^const dir = defaultFormsDir();#const dir = healthcarePack.formsDir;#" \
+  harness/core-tools/src/domain/forms/templates.test.ts
+```
+
+and by hand in `domain/forms/fill.test.ts` and `src/tools/forms.test.ts`: replace the
+`defaultFormsDir` import with `import { pack as healthcarePack } from '@harness/pack-healthcare';`
+and every `defaultFormsDir()` call with `healthcarePack.formsDir`. Not one `expect` line
+changes; `tools/forms.test.ts`'s `makeTestDeps(db, { storageDir, formsDir: … })` overrides keep
+the same value they had.
+
+Finally drop `defaultFormsDir` from `src/index.ts`'s `domain/forms/templates.js` export line
+and add the registry:
+
+```ts
+export { getTemplate, loadManifest, mappingLabel } from './domain/forms/templates.js';
+export { loadPacks, registryOf } from './domain/packs/registry.js';
+export { type PackRegistry } from './domain/packs/types.js';
+```
+
+and drop `DOCUMENT_KINDS` and `type DocumentKind` from its `domain/documents/types.js` export
+line, and `loadHealthcareManifest` from its `domain/documents/manifest.js` one. Then add the
+two names the contract introduces that nothing in core-tools re-exports yet:
+
+```ts
+// --- The pack contract ----------------------------------------------------------------------
+export { definePack, type Pack } from '@harness/pack-api';
+```
+
+Everything else the contract owns already reaches a consumer through a line that is now a
+re-export of it: `ACTION_CLASSES`, `BEHAVIORS`, `ActionClass`, `Behavior` and `Policy` through
+`./domain/tooling/policy.js`; `CREDENTIAL_KINDS` and `CredentialKind` through
+`./domain/deadlines/compute.js`; `ProviderManifest` through `./domain/documents/manifest.js`;
+`ToolDef` and `AnyToolDef` through `./domain/tooling/types.js`. Exporting one of those a second
+time is a compile error, which is how Step 15's typecheck catches a duplicate.
+
+- [ ] **Step 12: Put the registry on `ToolDeps` and build it in every composition root**
+
+`domain/tooling/types.ts` gains one required field, documented like its neighbours:
+
+```ts
+  /**
+   * The packs this process loaded, from `HARNESS_PACKS`. Document kinds, the extraction
+   * manifest and the forms directory all come from here rather than from an import, which is
+   * what lets one build serve credentialing today and a different area tomorrow.
+   */
+  packs: PackRegistry;
+```
+
+with `import type { PackRegistry } from '../packs/types.js';` at the top. It is **required**,
+not optional, so the typechecker enumerates every place that builds a `ToolDeps`. There are
+four, and all four are below.
+
+**`src/app/server.ts`.** Add the reader and the two lines it feeds:
+
+```ts
+import { loadPacks } from '../domain/packs/registry.js';
+```
+
+```ts
+/**
+ * Which packs this process serves, comma-separated package names. Defaults to the only pack
+ * that exists today, so a deployment that sets nothing behaves exactly as it did.
+ */
+function packNames(): string[] {
+  return (optionalEnv('HARNESS_PACKS') ?? '@harness/pack-healthcare')
+    .split(',')
+    .map((name) => name.trim())
+    .filter((name) => name !== '');
+}
+```
+
+and inside `buildDepsFromEnv`, above the `deps` literal:
+
+```ts
+  const packs = await loadPacks(packNames());
+```
+
+then two entries in the literal — `formsDir` changes and `packs` is new:
+
+```ts
+    formsDir: formsDir ? path.resolve(formsDir) : packs.formsDir(),
+    …
+    packs,
+```
+
+`defaultFormsDir` leaves the import list. `HARNESS_FORMS_DIR` keeps priority over the pack, so
+the Compose files that set it keep winning and nothing about the running stack changes.
+
+**`src/testing.ts`.** `makeTestDeps` is synchronous and every test calls it that way, so it
+builds the registry from the pack directly rather than through `loadPacks`. This file is one of
+the two the cruiser rule exempts by name:
+
+```ts
+import { pack as healthcarePack } from '@harness/pack-healthcare';
+import { registryOf } from './domain/packs/registry.js';
+
+/** The packs a test runs against: the shipped one, with no environment involved. */
+const TEST_PACKS = registryOf([healthcarePack]);
+```
+
+and in the returned literal, `formsDir: defaultFormsDir(),` becomes `formsDir: TEST_PACKS.formsDir(),`
+with `packs: TEST_PACKS,` beside it. The `defaultFormsDir` import goes. Every other line of
+`makeTestDeps` — the throwaway `mkdtempSync` storage directory, the unroutable `nppesBaseUrl`,
+the `...overrides` spread — is untouched.
+
+**`src/app/record-surface.ts`.** `surfaceDeps()` becomes async, because the registry is loaded:
+
+```ts
+import { loadPacks } from '../domain/packs/registry.js';
+
+export async function surfaceDeps(): Promise<ToolDeps> {
+  const packs = await loadPacks(['@harness/pack-healthcare']);
+  return {
+    // …every existing field unchanged, including storageDir and formsDir at '/nonexistent/surface'…
+    packs,
+  };
+}
+```
+
+The pack name is a literal here rather than `HARNESS_PACKS`, deliberately: the committed
+snapshot has to describe the shipped default, not whatever the machine recording it happens to
+have configured.
+
+`readToolSurface` awaits it before constructing the server:
+
+```ts
+export async function readToolSurface(): Promise<ToolSurfaceEntry[]> {
+  const deps = await surfaceDeps();
+  const { client, close } = await connectInProcess(() => createCoreToolsServer(deps));
+  // …the rest of the body unchanged…
+}
+```
+
+`app/surface.test.ts` imports `readToolSurface`, not `surfaceDeps`, so no test changes.
+
+**`evals/src/pipeline.ts`.** `openPipeline` builds its own registry. `OpenPipelineOptions` gains
+one optional field, which is an additive change to `@harness/evals`'s public API:
+
+```ts
+import { loadPacks, … } from '@harness/core-tools';
+```
+
+```ts
+  /** Packs to load, as `HARNESS_PACKS` would name them. Defaults to the shipped pack. */
+  packs?: readonly string[];
+```
+
+and inside `openPipeline`, above the `deps` literal:
+
+```ts
+  const packs = await loadPacks([...(opts.packs ?? ['@harness/pack-healthcare'])]);
+```
+
+The `formsDir` line keeps its comment and changes its value:
+
+```ts
+    // The pipeline under test reads documents; it fills no forms. The shipped
+    // templates directory is still the honest value: a tool that did reach for
+    // one would find what a deployment finds, not a stub.
+    formsDir: packs.formsDir(),
+    …
+    packs,
+```
+
+`defaultFormsDir` leaves the `@harness/core-tools` import list. `run.ts` passes nothing new, so
+`RunOptions` is unchanged and `run.test.ts`'s fixtures are untouched.
+
+- [ ] **Step 13: Build `documents_ingest` from the registry**
+
+`documents_ingest.input.kind` is the only place a tool's JSON Schema carries the document-kind
+list, so it is the only tool definition that becomes a function. In `src/tools/documents.ts`,
+wrap that one `defineTool` block:
+
+```ts
+import type { PackRegistry } from '../domain/packs/types.js';
+
+function documentsIngestFor(packs: PackRegistry) {
+  return defineTool({
+    name: 'documents_ingest',
+    // …description, actionClass, output, handler, recordIds: every line unchanged…
+    input: z.object({
+      path: z.string().min(1).describe('Path relative to the harness storage directory, e.g. incoming/license.pdf'),
+      provider_id: z.string().uuid().optional(),
+      kind: z
+        .enum(packs.documentKinds() as [string, ...string[]])
+        .optional()
+        .describe('Declare the kind when it is already known; otherwise documents_classify sets it'),
+    }),
+  });
+}
+```
+
+The cast is needed because `z.enum` wants a non-empty tuple and `documentKinds()` returns
+`string[]`; `loadPacks` refuses a pack with no kinds and `definePack` refuses one too, so the
+array is never empty.
+
+The exported array becomes a function:
+
+```ts
+export function documentTools(packs: PackRegistry): AnyToolDef[] {
+  return [documentsIngestFor(packs), documentsClassify, documentsExtract, documentsGet, documentsList];
+}
+```
+
+The other four definitions stay module-level constants. `documents_classify` and
+`documents_extract` already read their manifest inside the handler; change the two
+`loadHealthcareManifest()` calls — which Task 6 left in `domain/documents/pipeline.ts` — to
+`deps.packs.manifest()`. The `(manifest.document_kinds as string[]).includes(...)` line in
+`classifyDocument` keeps working and its cast is now redundant; leave it or drop it, no
+behaviour rides on it.
+
+Also delete the `export { DOCUMENT_KINDS, documentTextPath };` re-export at the top of
+`tools/documents.ts`, keeping `documentTextPath`.
+
+`src/tools/catalog.ts` follows:
+
+```ts
+import type { PackRegistry } from '../domain/packs/types.js';
+
+/**
+ * Every tool this server publishes, in the order they are registered. The order is not
+ * meaningful to MCP but it is what `docs/architecture/tool-surface.json` is sorted against, so
+ * adding a toolset here and forgetting to re-record the snapshot fails the suite.
+ *
+ * A function rather than a constant because `documents_ingest` declares the loaded packs'
+ * document kinds in its input schema, and because a pack may contribute tools of its own.
+ */
+export function allTools(packs: PackRegistry): AnyToolDef[] {
+  return [
+    ...providerTools,
+    ...deadlineTools,
+    ...auditTools,
+    ...approvalTools,
+    ...harnessTools,
+    ...documentTools(packs),
+    ...formTools,
+    ...verifyTools,
+    // A pack's own tools, last, so core's names always win a collision. No pack ships any today.
+    ...packs.all.flatMap((pack) => pack.tools?.(packs) ?? []),
+  ];
+}
+
+export function createCoreToolsServer(deps: ToolDeps): McpServer {
+  const server = new McpServer({ name: 'core-tools', version: '0.1.0' });
+  registerTools(server, allTools(deps.packs), deps);
+  return server;
+}
+```
+
+`src/index.ts`'s `export { ALL_TOOLS, createCoreToolsServer } from './tools/catalog.js';` becomes
+`export { allTools, createCoreToolsServer } from './tools/catalog.js';`. Nothing outside
+core-tools imported `ALL_TOOLS`:
+
+```bash
+grep -rn "ALL_TOOLS" harness packs evals scripts clients docs --exclude-dir=node_modules
+```
+Expected: hits only in `harness/core-tools/src/tools/catalog.ts` and
+`harness/core-tools/src/tools/skills-frontmatter.test.ts`, both of which this step and the next
+rewrite.
+
+- [ ] **Step 14: Take the skills directory from the registry too**
+
+`src/tools/skills-frontmatter.test.ts` currently walks four directory levels up to
+`packs/healthcare/skills` and imports `ALL_TOOLS`. Both go; the registry answers both questions,
+and the re-basing problem disappears with them. Replace the file's first ten lines with:
+
+```ts
+import { readFileSync, readdirSync } from 'node:fs';
+import path from 'node:path';
+import { describe, it, expect } from 'vitest';
+import { parse } from 'yaml';
+import { pack as healthcarePack } from '@harness/pack-healthcare';
+import { registryOf } from '../domain/packs/registry.js';
+import { allTools } from './catalog.js';
+
+const packs = registryOf([healthcarePack]);
+const SKILLS_DIR = packs.skillsDirs()[0];
+```
+
+and the `KNOWN_TOOL_NAMES` line with:
+
+```ts
+const KNOWN_TOOL_NAMES = new Set(allTools(packs).map((t) => t.name));
+```
+
+`__dirname` and `fileURLToPath` are no longer used; delete both. Every `describe`, every `it`
+and every `expect` in the file is untouched — including the one that names the four
+credentialing skills.
+
+`evals/src/cases.ts` has the same shape of problem: `INTAKE_SKILL_FILE` resolves
+`'../../packs/healthcare/skills/credentialing-intake/SKILL.md'` from `here`. `@harness/evals`
+already depends on `@harness/pack-healthcare`, and the pack now has a root export:
+
+```ts
+import { pack as healthcarePack } from '@harness/pack-healthcare';
+
+/** The skill whose declared tools the injection check is written against. */
+export const INTAKE_SKILL_FILE = path.join(healthcarePack.skillsDir, 'credentialing-intake', 'SKILL.md');
+```
+
+`here` and `fileURLToPath` may now be unused in that file; `pnpm lint` says so through
+`unused-imports/no-unused-vars` and it is an error, so delete whatever it names.
+`INTAKE_DECLARED_TOOLS` is unchanged — it still calls `declaredToolsOf(INTAKE_SKILL_FILE)` — and
+`cases.test.ts` re-reads the same path, so its four assertions hold.
+
+The last hard-coded pack path in evals is `run.ts`'s injection-file default, which is what
+`Pack.evals.injectionFile` exists for. The line
+
+```ts
+    injectionFile: flag('injection') ?? path.join(repoRoot, 'packs/healthcare/evals/injection.jsonl'),
+```
+
+becomes
+
+```ts
+    injectionFile: flag('injection') ?? healthcarePack.evals?.injectionFile ?? path.join(corpusDir, 'injection.jsonl'),
+```
+
+with the same `import { pack as healthcarePack } from '@harness/pack-healthcare';`. The pack
+declares that file, so the resolved string is byte-identical to today's and `run.test.ts`, which
+passes `injectionFile` explicitly in every fixture, never reaches the default. `--corpus` keeps
+its `packs/healthcare/synthetic/out` default: the corpus is generated output on disk, not part
+of the contract, and `pnpm synth` writes it there.
+
+- [ ] **Step 15: Run the code gates before touching the environment files**
+
+```bash
+pnpm -r typecheck
+```
+Expected: no output, exit 0. Failures here are the interesting ones and each names its cause:
+a missing `packs` on a `ToolDeps` literal is one of the four composition roots from Step 12; a
+duplicate export is `src/index.ts` re-exporting a contract name twice (Step 11).
+
+```bash
+pnpm lint && pnpm arch
+```
+Expected: no lint errors; `0 errors` from the cruiser. If
+`core-tools-never-statically-imports-a-pack` reports anything, a module under
+`harness/core-tools/src/` that is neither `testing.ts` nor a test wrote
+`import … from '@harness/pack-healthcare'`. Route it through `deps.packs`.
+
+```bash
+pnpm -r test
+```
+Expected: 9 packages pass — `@harness/pack-api` is the ninth. The count rises by the 3 manifest
+tests, the 3 `definePack` tests and the 7 registry tests, and falls by nothing.
+
+```bash
+pnpm --filter @harness/core-tools exec vitest run src/app/surface.test.ts
+```
+Expected: `Tests 3 passed` — and this is the one that matters. The tool surface came out of a
+registry this time instead of a hard-coded constant, and it has to be byte-identical.
+
+```bash
+git status --porcelain docs/architecture/tool-surface.json
+```
+Expected: no output. If the file is dirty, the enum order changed; compare
+`packs.documentKinds()` with `provider.json`'s `document_kinds` before touching the snapshot.
+
+- [ ] **Step 16: Add `HARNESS_PACKS` to the four places a deployment configures it**
+
+The variable is optional and defaults to the shipped pack, so nothing below changes how the
+stack runs. It is written down anyway, because the surface test fails on an environment
+variable the code reads and `.env.example` does not document, and because "which packs does
+this deployment serve" is the first question an operator will ask.
+
+**`.env.example`** — after the `HARNESS_POLICY_FILE` block:
+
+```
+# --- Packs ---------------------------------------------------------------------
+# Which product areas this deployment serves, as a comma-separated list of pack
+# package names. core-tools imports each one at startup and takes its document
+# kinds, extraction manifest, form templates and skills from it. A pack named
+# here must also be in @harness/core-tools' dependencies so pnpm can resolve it.
+HARNESS_PACKS=@harness/pack-healthcare
+```
+
+**`clients/demo-practice/.env.example`** — in the `--- Identity ---` block, under
+`HARNESS_FORMS_DIR`:
+
+```
+HARNESS_PACKS=@harness/pack-healthcare
+```
+
+**`harness/compose/docker-compose.yml`** — one line in each of the two services that run
+core-tools or launch it. In `hermes`, beside `HARNESS_FORMS_DIR`:
+
+```yaml
+      HARNESS_PACKS: "${HARNESS_PACKS:-@harness/pack-healthcare}"
+```
+
+and in `approvals`, beside its `HARNESS_FORMS_DIR`, the same line. The approvals service's
+`environment:` block is an explicit allowlist — its own comment says "Anything main.ts or its
+core-tools child reads must be listed here" — and the child would in fact start without it,
+because `loadPacks` falls back to the shipped pack. Add it anyway: the allowlist is the
+documentation of what the child reads, and the day a deployment serves a second pack, an
+approval replay that quietly served only the first would be very hard to see.
+
+**`clients/demo-practice/hermes.config.yaml`** — in `mcp_servers.core-tools.env`, beside
+`HARNESS_FORMS_DIR`:
+
+```yaml
+      HARNESS_PACKS: '@harness/pack-healthcare'
+```
+
+Hermes passes only the declared env plus a safe baseline, so an undeclared variable never
+reaches the child. A literal rather than `${HARNESS_PACKS}`: every other value in that block
+that is not a secret is a literal too, and an unset `${HARNESS_PACKS}` would expand to an empty
+string, which `loadPacks` rejects.
+
+**`harness/approvals/src/app/child-env.ts`** — one line in `coreToolsChildEnv`'s returned
+object, beside the other three optional pass-throughs:
+
+```ts
+    ...(env.HARNESS_PACKS ? { HARNESS_PACKS: env.HARNESS_PACKS } : {}),
+```
+
+`child-env.test.ts` asserts property by property and never compares the whole object, so it is
+untouched; the `NEVER_FORWARDED` test still passes because `HARNESS_PACKS` is not a secret and
+is not in that list.
+
+- [ ] **Step 17: Re-record the Compose surface**
+
+This is the one snapshot this plan deliberately re-records after Task 1, and the only surface
+change the whole branch makes. Do it in its own commit with the reason in the message.
+
+```bash
+pnpm surface:record
+```
+Expected on stderr: the same tool count Task 1 recorded, and the compose config written.
+
+```bash
+git diff --stat docs/architecture
+```
+Expected: `compose-surface.yaml` changed and **`tool-surface.json` unchanged**. If
+`tool-surface.json` moved, stop: the tool schemas were supposed to be identical and Step 15
+should already have caught it.
+
+```bash
+git diff docs/architecture/compose-surface.yaml
+```
+Expected: exactly two added lines, one per service, both reading
+`HARNESS_PACKS: ${HARNESS_PACKS:-@harness/pack-healthcare}`. `--no-interpolate` leaves the
+default literal, so no machine-specific value lands in the snapshot.
+
+```bash
+pnpm --filter @harness/core-tools exec vitest run src/app/surface.test.ts
+```
+Expected: `Tests 3 passed`. The environment-name check is the one that proves `.env.example`
+was updated: `readEnvNames` sees `optionalEnv('HARNESS_PACKS')` in `app/server.ts` and
+`envNamesFromExample` has to have it too.
+
+- [ ] **Step 18: Write the pack README section and run every gate**
+
+Add to `packs/healthcare/README.md`, above whatever Task 11 will rewrite, a short section
+saying what the pack now is. Task 11 rewrites the rest of this file; this paragraph is the part
+that belongs to the contract:
+
+````markdown
+## How core loads this pack
+
+`src/index.ts` exports `pack`, a `Pack` from `@harness/pack-api`: the document kinds, the
+extraction manifest, absolute paths to `forms/` and `skills/`, and the action-class defaults
+from `policy.yaml`. core-tools imports this module by name at startup, from `HARNESS_PACKS`,
+and reads everything through `deps.packs` — it never imports the pack statically and never
+resolves a path into it.
+
+This package depends on `@harness/pack-api` and `@harness/shared` and on nothing else in the
+workspace. An import of `@harness/core-tools` from here would be a cycle and `pnpm arch` fails
+the build on one.
+````
+
+```bash
+pnpm -r typecheck
+pnpm lint
+pnpm arch
+pnpm format:check
+pnpm -r test
+```
+Expected: clean typecheck; no lint errors; `0 errors`; Prettier reports nothing; 9 packages pass.
+
+```bash
+grep -rn "@harness/pack-healthcare" harness/core-tools/src --include='*.ts' | grep -v '\.test\.ts' | grep -v 'src/testing.ts'
+```
+Expected: no output. That is the whole point of the task in one command.
+
+```bash
+grep -rn "packs/healthcare" harness/core-tools/src evals/src --include='*.ts'
+```
+Expected: one hit, `evals/src/run.ts`'s `--corpus` default, which points at generated output
+rather than at anything the contract owns. Anything else is a path that still hard-codes the
+pack's location and should come from `deps.packs` or from `healthcarePack`.
+
+- [ ] **Step 19: Commit**
+
+Four commits, so a reviewer can read the contract, the registry, the pack and the wiring apart.
+
+```bash
+git add harness/pack-api
+git commit -m "feat(pack-api): add the Pack contract, definePack and the types it needs"
+
+git add harness/core-tools/src/domain/packs harness/core-tools/src/domain/tooling harness/core-tools/src/domain/deadlines harness/core-tools/src/domain/documents harness/core-tools/src/domain/forms
+git commit -m "feat(core-tools): load packs through a registry instead of importing one by name"
+
+git add packs/healthcare
+git commit -m "feat(pack-healthcare): export pack from src/index.ts"
+
+git add -A harness evals clients .env.example eslint.config.js .dependency-cruiser.cjs pnpm-lock.yaml
+git commit -m "feat: read HARNESS_PACKS in every composition root and pass it to the containers"
+
+git add docs/architecture/compose-surface.yaml
+git commit -m "test: re-record the compose surface for the new HARNESS_PACKS variable
+
+HARNESS_PACKS is the one environment variable this branch adds. It defaults to
+@harness/pack-healthcare, so no deployment behaves differently; the two services
+that run core-tools now name it explicitly."
+```
+
+---
+### Task 9: `@harness/approvals` — shared helpers, one redaction source, a logger, domain folders
 
 The package with the most duplication to remove: a byte-identical copy of the restricted-value
 regexes, its own `numberFromEnv` with a third option shape, a `useTestDb` Task 2 already
@@ -6215,7 +8085,8 @@ replaced, and 22 hand-formatted `console.error` calls.
 - Modify: `eslint.config.js`, `.dependency-cruiser.cjs`
 
 **Interfaces:**
-- Consumes, all from `@harness/core-tools`: `containsRestrictedPattern`, `createLogger`, `type Logger`, `numberFromEnv`, `requiredEnv`, `optionalEnv`, `assertInsideRoot`, `outRoot`, `describeError`. From `@harness/core-tools/effects`: `dispatchStagedEffects`, `type DispatchResult`, `type SinkHandler`, `type SinkRegistry`. From `@harness/db/testing`: `useTestDb`.
+- Consumes from `@harness/shared` (Task 4): `createLogger`, `type Logger`, `numberFromEnv`, `requiredEnv`, `optionalEnv`, `assertInsideRoot`, `describeError`. From `@harness/core-tools`: `containsRestrictedPattern`, `outRoot` — the two that carry domain knowledge and stay there. From `@harness/core-tools/effects`: `dispatchStagedEffects`, `type DispatchResult`, `type SinkHandler`, `type SinkRegistry`. From `@harness/db/testing`: `useTestDb`.
+- `harness/approvals/package.json` already gained `"@harness/shared": "workspace:*"` in Task 4 Step 15, so no manifest edit is needed here.
 - Produces: the same public API as today, from the same module, with new internal paths. `src/index.ts` keeps exporting `slackSinks`, `webClientApi`, `type SlackApi`, `postPendingApprovals`, `type PollDeps`, `type PollResult`, `approvalBlocks`, `decidedBlocks`, `editModalView`, `parseEditModalMetadata`, `containsRestrictedPattern`, `payloadPreview`, `type ApprovalRow`, `type EditModalMetadata`, `createMcpCoreToolsClient`, `type CoreToolsClient`, `type ExecuteOutcome`, `type McpLauncher`, `decideApproval`, `threadReplyText`, `type DecisionDeps`, `type DecisionInput`, `type DecisionResult`, `registerApprovalHandlers`, `parseAllowedUsers`, `type ActionArgs`, `type AppDeps`, `type HandlerRegistry`, `type ViewArgs`, `startRunner`, `runPollTick`, `runDispatchTick`, `runReconcileTick`, `collectHealth`, `type RunnerDeps`, `type RunnerHandle`, `type RunnerIntervals`, `type RunnerStatus`, `type RunnerLoopStatus`, `type HealthSnapshot`, `startHealthServer`, `DEFAULT_HEALTH_BIND`, `type HealthServer`. `src/testing.ts` keeps exporting `FakeSlack`, `FakeCoreToolsClient` and `useTestDb`.
 
 ---
@@ -6259,7 +8130,7 @@ Delete the function and keep the two wrappers, now over the shared reader. In wh
 `src/app/main.ts`:
 
 ```ts
-import { numberFromEnv, optionalEnv, requiredEnv } from '@harness/core-tools';
+import { numberFromEnv, optionalEnv, requiredEnv } from '@harness/shared';
 
 const seconds = (name: string, fallback: number): number =>
   numberFromEnv(name, fallback, { min: 1, max: 86_400, unit: 'seconds' });
@@ -6281,7 +8152,7 @@ function required(name: string): string {
 environment it was handed:
 
 ```ts
-import { requiredEnv } from '@harness/core-tools';
+import { requiredEnv } from '@harness/shared';
 
 export function coreToolsChildEnv({ env, client, storageRoot }: ChildEnvInput): Record<string, string> {
   return {
@@ -6318,7 +8189,7 @@ One logger per module, scoped `approvals`, so every line keeps the `approvals: `
 today and the hand-written prefix comes out of the message:
 
 ```ts
-import { createLogger, describeError } from '@harness/core-tools';
+import { createLogger, describeError } from '@harness/shared';
 
 const log = createLogger('approvals');
 ```
@@ -6459,7 +8330,7 @@ Then fix by hand, guided by `pnpm -r typecheck`:
 |---|---|
 | `domain/poller.ts` | `approvalBlocks`, `approvalFallbackText` from `./render/blocks.js`; `type SlackApi` from `./slack/types.js` |
 | `domain/decisions.ts` | `decidedBlocks` from `./render/blocks.js`; `containsRestrictedPattern` from `@harness/core-tools`; `type ApprovalRow` from `./render/types.js`; `type CoreToolsClient`, `type ExecuteOutcome` from `./execute/types.js` |
-| `domain/sinks.ts` | `type SinkHandler`, `type SinkRegistry` from `@harness/core-tools/effects`; `assertInsideRoot` from `@harness/core-tools`; `type SlackApi` from `./slack/types.js` |
+| `domain/sinks.ts` | `type SinkHandler`, `type SinkRegistry` from `@harness/core-tools/effects`; `assertInsideRoot` from `@harness/shared`; `type SlackApi` from `./slack/types.js` |
 | `domain/runner.ts` | `dispatchStagedEffects`, `type DispatchResult`, `type SinkRegistry` from `@harness/core-tools/effects`; `type SlackApi` from `./slack/types.js`; `type CoreToolsClient` from `./execute/types.js`; `postPendingApprovals`, `type PollResult` from `./poller.js` |
 | `domain/health.ts` | `type HealthSnapshot` from `./runner.js` |
 | `domain/slack/handlers.ts` | `decideApproval`, `type DecisionDeps` from `../decisions.js`; the ids from `../render/types.js`; `editModalView`, `parseEditModalMetadata` from `../render/modal.js` |
@@ -6695,11 +8566,11 @@ pnpm arch
 pnpm -r test
 ```
 Expected: clean typecheck; **zero `no-console` warnings anywhere in the repository** — this is
-the task that removes the last 22; `0 errors` from cruiser; 7 packages pass with the same
-count as after Task 7.
+the task that removes the last 22; `0 errors` from cruiser; 9 packages pass with the same
+count as after Task 8.
 
 ```bash
-grep -rn "console\." harness packs evals scripts --include='*.ts' | grep -v node_modules | grep -v '/app/' | grep -v 'shared/log.ts' | grep -v 'cli.ts' | grep -v 'generate-templates.ts'
+grep -rn "console\." harness packs evals scripts --include='*.ts' | grep -v node_modules | grep -v '/app/' | grep -v 'harness/shared/src/log.ts' | grep -v 'cli.ts' | grep -v 'generate-templates.ts'
 ```
 Expected: no output.
 
@@ -6712,7 +8583,7 @@ git commit -m "refactor(approvals): adopt domain folders, the shared helpers and
 ```
 
 ---
-### Task 9: `@harness/evals` — domain folders, `app/cli.ts`, README
+### Task 10: `@harness/evals` — domain folders, `app/cli.ts`, README
 
 `run.ts` is 394 lines holding flag parsing, orchestration, scoring aggregation and file I/O.
 Splitting it separates "what the eval measures" from "how the command line asks for it", and
@@ -6729,7 +8600,8 @@ lets the package finally have a public API that is not the CLI module.
 - Modify: `eslint.config.js`, `.dependency-cruiser.cjs`
 
 **Interfaces:**
-- Consumes from `@harness/core-tools`: `readJsonl`, `type JsonlRow`, `createLogger`, `describeError`, `optionalEnv`, plus everything it imports today (`DEFAULT_POLICY`, `DEFAULT_CONFIDENCE_THRESHOLD`, `MASKED`, `createCoreToolsServer`, `defaultFormsDir`, `gatewayFromEnv`, `assertRedacted`, `callModelJson`, `isRestrictedName`, `type GatewayConfig`, `type Policy`, `type ToolDeps`). From `@harness/core-tools/in-process`: `connectInProcess`. From `@harness/core-tools/fake-gateway` in tests: `startFakeGateway`.
+- Consumes from `@harness/shared` (Task 4): `readJsonl`, `type JsonlRow`, `createLogger`, `describeError`, `optionalEnv`. From `@harness/core-tools`: `DEFAULT_POLICY`, `DEFAULT_CONFIDENCE_THRESHOLD`, `MASKED`, `createCoreToolsServer`, `loadPacks`, `gatewayFromEnv`, `assertRedacted`, `callModelJson`, `isRestrictedName`, `type GatewayConfig`, `type Policy`, `type ToolDeps`. From `@harness/pack-healthcare`: `pack` (in `domain/cases.ts`, for the intake skill path). From `@harness/core-tools/in-process`: `connectInProcess`. From `@harness/core-tools/fake-gateway` in tests: `startFakeGateway`.
+- `defaultFormsDir` is **gone**: Task 8 deleted it and `openPipeline` takes the directory from the registry it loads. `evals/package.json` already has `@harness/shared` from Task 4 Step 15.
 - Produces, from the new `evals/src/index.ts`:
 
   ```ts
@@ -6776,7 +8648,7 @@ cd ..
 the shared reader, keeping both error messages exactly:
 
 ```ts
-import { readJsonl } from '@harness/core-tools';
+import { readJsonl } from '@harness/shared';
 
 export async function loadJsonl<T = unknown>(file: string): Promise<T[]> {
   return (await readJsonl<T>(file, 'case file')).map((r) => r.value);
@@ -6854,7 +8726,7 @@ cd ..
 `process.stderr.write` calls become logger lines:
 
 ```ts
-import { createLogger } from '@harness/core-tools';
+import { createLogger } from '@harness/shared';
 
 const log = createLogger('evals');
 ```
@@ -6986,7 +8858,7 @@ export {
 ```
 
 The root `evals` and `evals:baseline` scripts call `pnpm --filter @harness/evals start`, so
-they need no change. `./score` is imported by nothing outside this package; Task 11 removes it.
+they need no change. `./score` is imported by nothing outside this package; Task 12 removes it.
 
 - [ ] **Step 7: Write the README**
 
@@ -7045,7 +8917,7 @@ pnpm lint
 pnpm arch
 pnpm -r test
 ```
-Expected: clean; `0 errors`; 7 packages pass with the same count as after Task 8 — the four
+Expected: clean; `0 errors`; 9 packages pass with the same count as after Task 9 — the four
 split test files move describes, they add nothing.
 
 - [ ] **Step 9: Commit**
@@ -7056,19 +8928,20 @@ git commit -m "refactor(evals): split the runner into domain modules and an app 
 ```
 
 ---
-### Task 10: `packs/healthcare` synthetic split, `scripts` tidy, and both READMEs
+### Task 11: `packs/healthcare` synthetic split, `scripts` tidy, and both READMEs
 
 `synthetic/generate.ts` is 553 lines holding a random-number generator, five fixture tables, a
 PDF writer, a rasteriser, four document plans, the orchestration and a CLI. `scripts` is one
 177-line file that mixes a scaffolder with its command line.
 
-**A note before starting: neither package may import `@harness/core-tools`.**
-`packs/healthcare` is a *dependency* of core-tools (core-tools reads
-`@harness/pack-healthcare/schema`), so importing back would be a cycle, and `scripts` has no
-reason to. The pack therefore keeps its own bounded `execFile` call and its own two-line JSONL
-writer, exactly as `@harness/db` keeps its own logger and for the same reason. Both are
-flagged in ARCHITECTURE.md as the places to revisit if the declined `@harness/shared` package
-is ever revisited.
+**A note before starting: neither package may import `@harness/core-tools`, and neither needs
+to.** `packs/healthcare` is loaded *by* core-tools through `@harness/pack-api` (Task 8), so an
+import back would be a cycle, and `pnpm arch`'s `a-pack-never-imports-core-tools` rule fails
+the build on one. `scripts` has no reason to. Both do depend on `@harness/shared`, which Task 4
+added to their manifests and which sits below everything: this task is where the pack's last
+two hand-rolled helpers — the `execFile` wrapper in `synthetic/pdf.ts` and the JSONL writer in
+`synthetic/generate.ts` — become `runBounded` and `writeJsonl`. That retires spec section 3's
+last unmet item and shrinks ARCHITECTURE.md's "three deliberate duplications" to one.
 
 **Files:**
 - Create: `packs/healthcare/synthetic/types.ts`, `rng.ts`, `fixtures.ts`, `pdf.ts`, `plan.ts`, `cli.ts`, `rng.test.ts`
@@ -7138,20 +9011,41 @@ included. Nothing is reworded.
 | `types.ts` | lines 10-86 (`SyntheticKind` through `GenerateOptions`), plus `PageSpec` (206-209) and `DocumentPlan` (254-260) |
 | `rng.ts` | lines 88-129 (`mulberry32`, `pick`, `digits`, `luhnNpi`, `deaNumber`, `ssn`) |
 | `fixtures.ts` | lines 131-204 (the nine tables, `STATE_BOARD`, `isoDate`, `makeProvider`) |
-| `pdf.ts` | lines 1-8 and 211-252 (`execFile`, `promisify`, `writeTextPdf`, `writeScanPdf`) |
+| `pdf.ts` | lines 211-252 (`writeTextPdf`, `writeScanPdf`); the `execFile`/`promisify` preamble at lines 1-8 is **not** carried over — see below |
 | `plan.ts` | lines 262-422 (`planFor`, `injectionPlan`) |
 | `cli.ts` | lines 535-553 (`here`, the argument reader, the `generate` call, the banner) |
 
 `pick` and `digits` become exported, because `fixtures.ts` uses them.
 
-`pdf.ts` gains a hard timeout note where `writeScanPdf` shells out. The existing call already
-passes `{ timeout: 60_000 }`; add `killSignal: 'SIGKILL'`, which the core-tools wrapper
-always sets and this one never did, so a wedged `pdftoppm` that ignores SIGTERM cannot hang a
-corpus build:
+`pdf.ts` drops its own `execFile` plumbing and calls the shared runner. The two-line preamble
 
 ```ts
-  await run('pdftoppm', ['-r', '200', '-png', sourcePdf, prefix], { timeout: 60_000, killSignal: 'SIGKILL' });
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+const run = promisify(execFile);
 ```
+
+is replaced by
+
+```ts
+import { runBounded } from '@harness/shared';
+```
+
+and the one call site inside `writeScanPdf` becomes:
+
+```ts
+  const outcome = await runBounded('pdftoppm', ['-r', '200', '-png', sourcePdf, prefix], { timeoutMs: 60_000 });
+  if (!outcome.ok) {
+    throw new Error(`pdftoppm ${outcome.reason} while rasterising ${path.basename(sourcePdf)}`);
+  }
+```
+
+Two things change and both are improvements this plan states plainly. `runBounded` always sets
+`killSignal: 'SIGKILL'`, which this call never did, so a wedged `pdftoppm` that ignores SIGTERM
+can no longer hang a corpus build. And a failure now throws a message naming the file instead
+of propagating `execFile`'s rejection, whose message quotes the whole command line. The
+generator is a developer tool with no test asserting on either behaviour, and Step 2's
+byte-for-byte corpus diff is the guard that the happy path is unchanged.
 
 `generate.ts` keeps `assertSafeToClear` (lines 424-449) and `generate` (451-533) and gains its
 imports:
@@ -7159,6 +9053,7 @@ imports:
 ```ts
 import { mkdir, readdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { writeJsonl } from '@harness/shared';
 import { makeProvider } from './fixtures.js';
 import { writeScanPdf, writeTextPdf } from './pdf.js';
 import { injectionPlan, planFor } from './plan.js';
@@ -7177,6 +9072,32 @@ export type {
 
 The type re-export keeps `@harness/pack-healthcare/generate` serving everything it serves
 today; `evals` and the pack's own tests import `type GroundTruth` from it.
+
+`generate`'s own two-line JSONL writer goes too. Today it builds one long string and writes it:
+
+```ts
+  const cases = truth.documents
+    .map((d) =>
+      JSON.stringify({
+        // …the eight keys, unchanged…
+      }),
+    )
+    .join('\n');
+  await writeFile(path.join(outDir, 'cases.jsonl'), `${cases}\n`, 'utf8');
+```
+
+Keep the object literal exactly as it is, collect the rows instead of stringifying them, and
+hand them to the shared writer, which joins with `\n` and ends with one — byte for byte what
+the two lines above produce:
+
+```ts
+  const cases = truth.documents.map((d) => ({
+    // …the eight keys, unchanged…
+  }));
+  await writeJsonl(path.join(outDir, 'cases.jsonl'), cases);
+```
+
+`writeFile` stays in the import list: `ground-truth.json` still goes out through it.
 
 `cli.ts`:
 
@@ -7272,15 +9193,16 @@ Replace `packs/healthcare/README.md`:
 ````markdown
 # @harness/pack-healthcare
 
-Content, not code: everything the harness needs to do credentialing for a medical practice,
-with no harness logic in it. This package sits **below** `@harness/core-tools` in the
-dependency graph — core-tools reads `@harness/pack-healthcare/schema` — so nothing here may
-import core-tools, which is why the corpus generator keeps its own bounded `execFile` call and
-its own JSONL writer.
+Content plus one declaration: everything the harness needs to do credentialing for a medical
+practice, and a `Pack` that tells core where it all is. This package depends on
+`@harness/pack-api` and `@harness/shared` and on nothing else in the workspace. core-tools
+loads it by name from `HARNESS_PACKS` and never imports it, so an import of
+`@harness/core-tools` from here would be a cycle and `pnpm arch` fails the build on one.
 
 ## Layout
 
 ```
+src/index.ts              the Pack core loads: document kinds, manifest, forms, skills, policy
 schema/provider.json      the extraction manifest: fields, credentials, document kinds
 forms/templates.json      which PDF field each record value fills
 forms/*.pdf               two demo AcroForm templates (generated, committed)
@@ -7299,9 +9221,14 @@ synthetic/cli.ts          the `pnpm synth` entrypoint
 
 ## Public API
 
-`@harness/pack-healthcare/schema` is `schema/provider.json`. `@harness/pack-healthcare/generate`
-is `synthetic/generate.ts`: `generate`, `assertSafeToClear` and the ground-truth types. Nothing
-else is reachable.
+`@harness/pack-healthcare` is `src/index.ts`, which exports `pack`. That is what core loads,
+and the only thing a deployment names. `@harness/pack-healthcare/schema` is
+`schema/provider.json`, still read directly by the eval judge's schema test.
+`@harness/pack-healthcare/generate` is `synthetic/generate.ts`: `generate`, `assertSafeToClear`
+and the ground-truth types. Nothing else is reachable.
+
+`pack.formsDir` and `pack.skillsDir` are absolute paths resolved from `import.meta.url`, so a
+consumer never builds a path into this package by hand.
 
 ## Regenerating
 
@@ -7442,7 +9369,7 @@ pnpm lint
 pnpm arch
 pnpm -r test
 ```
-Expected: clean; `0 errors`; 7 packages pass with the same count as after Task 9.
+Expected: clean; `0 errors`; 9 packages pass with the same count as after Task 10.
 
 ```bash
 pnpm forms:generate && git status --porcelain packs/healthcare/forms
@@ -7461,14 +9388,14 @@ git commit -m "refactor(scripts): split the scaffolder from its command line"
 ```
 
 ---
-### Task 11: Every rule to error, unused subpaths removed, the graph, the final documents
+### Task 12: Every rule to error, unused subpaths removed, the graph, the final documents
 
 Everything has moved. This task turns the analysers from reporters into gates, deletes the two
 subpath exports nothing imports, generates the dependency graph, and finishes the two
 documents Task 1 drafted.
 
 **Files:**
-- Modify: `.dependency-cruiser.cjs` (every remaining `severity: 'warn'` → `'error'`)
+- Modify: `.dependency-cruiser.cjs` (every remaining `severity: 'warn'` → `'error'`, including `core-tools-never-statically-imports-a-pack`; `harness/shared` and `harness/pack-api` are already `'error'`)
 - Modify: `eslint.config.js` (`import-x/no-cycle`, `no-console` and `no-restricted-syntax` to error globally; `STRICT_LAYER_ROOTS` collapses)
 - Modify: `harness/core-tools/package.json` (remove `./models` and `./reconcile`)
 - Modify: `evals/package.json` (remove `./score`)
@@ -7476,7 +9403,7 @@ documents Task 1 drafted.
 - Modify: `ARCHITECTURE.md`, `README.md` (root)
 
 **Interfaces:**
-- Consumes: everything Tasks 1–10 produced.
+- Consumes: everything Tasks 1–11 produced.
 - Produces: no new code. `pnpm arch` and `pnpm lint` both fail the build on a layer violation
   from here on.
 
@@ -7528,7 +9455,7 @@ fails rather than resolving through a subpath nothing uses.
 
 - [ ] **Step 3: Flip every dependency-cruiser rule to error**
 
-In `.dependency-cruiser.cjs`, `PACKAGES` is already all `'error'` after Task 10. The three
+In `.dependency-cruiser.cjs`, `PACKAGES` is already all `'error'` after Task 11. The three
 global rules and the cross-package rule are still `'warn'`. Change them:
 
 ```js
@@ -7554,7 +9481,31 @@ global rules and the cross-package rule are still `'warn'`. Change them:
   },
 ```
 
+and the pack rule Task 8 landed at `warn`:
+
+```js
+  {
+    name: 'core-tools-never-statically-imports-a-pack',
+    comment:
+      'Packs are loaded at runtime from HARNESS_PACKS through a dynamic import in domain/packs/registry.ts. A static import would wire core to one pack by name, which is the coupling the contract exists to remove. src/testing.ts and *.test.ts are exempt.',
+    severity: 'error',
+    // …from/to unchanged…
+  },
+```
+
 and in `crossPackageRule`, `severity: 'warn'` becomes `severity: 'error'`.
+
+`shared-has-no-workspace-dependencies`, `pack-api-imports-only-shared` and
+`a-pack-never-imports-core-tools` are already `'error'` — Tasks 4 and 8 landed them that way,
+because both packages were written correct rather than migrated. Leave them alone.
+
+Confirm that the three new packages are covered before moving on:
+
+```bash
+grep -n "harness/shared\|harness/pack-api\|packs/healthcare" .dependency-cruiser.cjs
+```
+Expected: `harness/shared/src` and `harness/pack-api/src` in `PACKAGES`, all three in
+`WORKSPACE_DIRS`, and the four pack rules.
 
 Update the file's header comment: the "HOW A PACKAGE FLIPS TO ERROR" block described a
 migration that is now finished. Replace it with:
@@ -7567,8 +9518,9 @@ migration that is now finished. Replace it with:
 
 - [ ] **Step 4: Flip the three ESLint rules to error**
 
-`STRICT_LAYER_ROOTS` has done its job and now covers every package with layers, so collapse
-the conditional block into unconditional rules. In `eslint.config.js`, delete the
+`STRICT_LAYER_ROOTS` has done its job and now covers every source root in the workspace —
+`harness/shared/src` and `harness/pack-api/src` joined it in Tasks 4 and 8 — so collapse the
+conditional block into unconditional rules. In `eslint.config.js`, delete the
 `STRICT_LAYER_ROOTS` constant and its `...(STRICT_LAYER_ROOTS.length === 0 ? [] : [...])`
 block, and change three severities in the main `**/*.ts` block:
 
@@ -7624,7 +9576,7 @@ import, never the severity. The likely survivors and their fixes:
 pnpm lint
 ```
 Expected: warnings from the type-aware family only, and **no errors**. If `no-console` fires,
-the site is not in `app/`, not `shared/log.ts` and not a pack CLI — it should use a logger. If
+the site is not in `app/`, not `@harness/shared`'s `log.ts` and not a pack CLI — it should use a logger. If
 `no-restricted-syntax` fires on `process.env`, the read belongs in `app/` or behind an
 `env.ts` helper.
 
@@ -7647,9 +9599,12 @@ pnpm arch:graph
 ls -l docs/architecture/graph.svg
 ```
 Expected: a file of a few tens of kilobytes. Open it and check three things before committing:
-every package appears; the arrows between packages all point the same way
-(`db → core-tools → approvals/evals`, `gateway → core-tools`, `pack-healthcare → core-tools`);
-and no arrow enters an `app/` cluster from outside its own package. If the graph is an
+all **nine** packages appear; the arrows between packages all point the same way
+(`shared → everything`, `shared → pack-api → {core-tools, pack-healthcare}`,
+`shared → db → core-tools → {approvals, evals}`, `gateway → core-tools`); there is **no** arrow
+from `core-tools` to `pack-healthcare`, because the only edge between them is a runtime
+dynamic import the cruiser cannot resolve, which is exactly what the architecture claims; and
+no arrow enters an `app/` cluster from outside its own package. If the graph is an
 unreadable hairball, tighten `options.reporterOptions.dot.collapsePattern` in
 `.dependency-cruiser.cjs` rather than pruning modules out of the cruise — the graph and the
 gate must describe the same thing.
@@ -7673,7 +9628,7 @@ is now true:
 ```markdown
 Every architecture rule is an error. `pnpm arch` exits 1 on a layer violation and `pnpm test`
 runs it first, so a crossed layer cannot reach a review. ESLint's three project rules
-(`no-console`, `process.env` outside `shared/env.ts` and `app/`, `throw new Error` inside
+(`no-console`, `process.env` outside `@harness/shared`'s `env.ts` and `app/`, `throw new Error` inside
 `tools/`) are errors too.
 
 typescript-eslint's type-aware rules are the one thing still reported as warnings: the code
@@ -7681,29 +9636,80 @@ trips `require-await` and the `no-unsafe-*` family in places, and clearing that 
 work. `pnpm lint:strict` shows the backlog.
 ```
 
-Add a short section at the end, so the next reader knows which duplications are deliberate:
+Replace the draft's "Where each cross-cutting concern lives" table, whose modules are now in
+a package of their own, and its opening sentence:
 
 ```markdown
-## Three deliberate duplications
+## Where each cross-cutting concern lives
 
-Each of these is a copy that a reviewer will want to delete. Do not, without reading the
-reason.
+Seven of them are `@harness/shared`, a package with no workspace dependency of its own, so
+every package — `@harness/db` and every pack included — imports it rather than keeping a copy.
+`@harness/core-tools` re-exports all seven, so a module already importing them from there is
+not wrong, only indirect.
 
-1. **`harness/db/src/shared/log.ts`** duplicates core-tools' logger. `@harness/db` is the
-   bottom of the graph; importing core-tools from it is a cycle.
-2. **`packs/healthcare/synthetic/pdf.ts`** has its own bounded `execFile` and
-   `synthetic/generate.ts` its own JSONL writer, instead of `runBounded` and `writeJsonl`.
-   The pack is a *dependency* of core-tools — core-tools reads
-   `@harness/pack-healthcare/schema` — so the same cycle argument applies.
-3. **`shared/redaction/patterns.ts` carries two pattern sets.** The strict-shape set guards
-   text on its way to a human; the OCR-tolerant, validity-gated set decides what gets
-   encrypted onto a record. Merging them changes behaviour in both directions.
+| Concern | Module | Exports |
+|---|---|---|
+| environment parsing | `@harness/shared` `env.ts` | `numberFromEnv`, `booleanFromEnv`, `requiredEnv`, `optionalEnv` |
+| errors | `@harness/shared` `errors.ts` | `ToolError`, `ModelOutputError`, `ConfigError`, `describeError` |
+| path containment | `@harness/shared` `paths.ts` | `realOrNearestAncestor`, `assertInsideRoot` |
+| logging | `@harness/shared` `log.ts` | `createLogger` |
+| bounded subprocesses | `@harness/shared` `subprocess.ts` | `runBounded` |
+| JSONL | `@harness/shared` `jsonl.ts` | `readJsonl`, `writeJsonl` |
+| CSV quoting | `@harness/shared` `csv.ts` | `csvCell` |
+| restricted patterns | core-tools `shared/redaction/patterns.ts` | `containsRestrictedPattern`, `isValidDea` |
+| restricted field names | core-tools `shared/redaction/names.ts` | `isRestrictedName`, `MASKED` |
+| redaction | core-tools `shared/redaction/text.ts` | `redactPages`, `assertRedacted`, `fieldNameFor` |
 
-Items 1 and 2 are what spec section 8 meant by "revisit if a package that does not depend on
-core-tools ever needs the helpers". Two now do. A `@harness/shared` package holding `log.ts`,
-`subprocess.ts` and `jsonl.ts`, depended on by db, the pack and core-tools alike, is the
-obvious next move and is deliberately out of scope here.
+The three redaction modules stay in core-tools on purpose: deciding which field names are
+restricted and which SSN allocations are real is domain knowledge, and `@harness/shared` holds
+none.
 ```
+
+Add a section on packs, after "The packages":
+
+```markdown
+## Packs
+
+An area of the product — healthcare credentialing today, document scanning tomorrow — is a
+pack, and core loads one rather than importing it. `@harness/pack-api` holds the contract:
+`Pack`, `definePack()`, and the types a pack declares against (`ProviderManifest`, `Policy`,
+`ToolDef`, `CREDENTIAL_KINDS`). It depends on `@harness/shared` and zod, and on nothing else.
+
+At startup `app/server.ts` reads `HARNESS_PACKS` — comma-separated package names, default
+`@harness/pack-healthcare` — and `loadPacks` imports each one dynamically into a
+`PackRegistry` on `ToolDeps`. Document kinds, the extraction manifest, the forms directory and
+the skills directories all come from `deps.packs`. No module under `harness/core-tools/src/`
+names a pack: `pnpm arch` fails the build on a static `@harness/pack-*` import, with
+`src/testing.ts` and `*.test.ts` exempt because they need a registry synchronously.
+
+A pack is therefore a leaf that depends on the contract, never on core. The graph is
+`shared ← pack-api ← {core-tools, packs}` and `shared ← db ← core-tools ← {approvals, evals}`,
+with the core-tools-to-pack edge existing only at runtime.
+```
+
+And a short section at the end, so the next reader knows which duplication is deliberate:
+
+```markdown
+## One deliberate duplication
+
+`shared/redaction/patterns.ts` carries **two** pattern sets, and a reviewer will want to merge
+them. Do not. The strict-shape set behind `containsRestrictedPattern` guards text on its way to
+a human channel and over-reports on purpose; the OCR-tolerant, validity-gated set behind
+`redactPages` decides what gets encrypted onto a provider record, where a false positive
+fabricates an identifier that was never on the page. Merging them changes behaviour in both
+directions: a shape-only `AB1234567` would stop tripping the Slack guard, and an OCR-noisy
+`O12-34-5678` would start tripping it.
+
+The two duplications an earlier draft of this document listed — `@harness/db`'s own logger and
+the pack's own `execFile` and JSONL helpers — are gone. Both existed because those packages
+could not import `@harness/core-tools`; `@harness/shared` sits below all of them and they
+import it.
+```
+
+`@harness/db` still throws plain `Error` from `loadKey` and `createDb` rather than
+`ConfigError`. It can reach `ConfigError` now, and changing those two throws is the one small
+piece of work this revamp deliberately left for a follow-up: it is observable, and this branch
+changed no behaviour. Note it in "The three error types" where the old cycle argument was.
 
 Finally, replace the draft's `src/app/surface.test.ts` path reference if Task 7 moved it
 elsewhere, and re-read the whole document against the tree as it now stands: every path it
@@ -7726,12 +9732,14 @@ Replace the "Layout" block so it names the layers and the new documents:
 ## Layout
 
 ```
+harness/shared/      env, errors, paths, logging, subprocess, JSONL, CSV. No dependencies.
+harness/pack-api/    the Pack contract every pack implements and core loads
 harness/db/          schema, migrations, the pool, encryption
 harness/gateway/     the routing table and the LiteLLM config renderer
 harness/core-tools/  the MCP server: shared/, domain/, tools/, app/
 harness/approvals/   the Slack approval app and the effects dispatcher
 harness/compose/     the Docker stack
-packs/healthcare/    schema, forms, skills, eval sets, the synthetic corpus
+packs/healthcare/    the credentialing pack: schema, forms, skills, eval sets, synthetic corpus
 clients/             one folder per deployment: SOUL, routing, policy, env
 evals/               the runner, scorers, judge and report
 scripts/             the client scaffolder
@@ -7739,9 +9747,11 @@ docs/                specs, runbook, demo, promotion gate, architecture
 ```
 
 Every package has the same four layers — `shared` → `domain` → `tools` → `app` — with one
-public entry point. **[ARCHITECTURE.md](ARCHITECTURE.md)** explains them, the path of one tool
-call and the three invariants; **[CONTRIBUTING.md](CONTRIBUTING.md)** is how to add a tool, a
-domain, a pack, a client, a migration or a test.
+public entry point. A **pack** is an area of the product core loads at runtime rather than
+imports: set `HARNESS_PACKS` to choose. **[ARCHITECTURE.md](ARCHITECTURE.md)** explains the
+layers, the packs, the path of one tool call and the three invariants;
+**[CONTRIBUTING.md](CONTRIBUTING.md)** is how to add a tool, a domain, a pack, a client, a
+migration or a test.
 ````
 
 and add a documents section just before "Run locally":
@@ -7756,7 +9766,7 @@ and add a documents section just before "Run locally":
 | [docs/runbook.md](docs/runbook.md) | operating it: audit, effects, reconciliation, storage, the Slack app, onboarding |
 | [docs/demo.md](docs/demo.md) | the five-minute demo script |
 | [docs/promotion-gate.md](docs/promotion-gate.md) | what an eval run has to clear |
-| package READMEs | [db](harness/db/README.md), [gateway](harness/gateway/README.md), [core-tools](harness/core-tools/README.md), [approvals](harness/approvals/README.md), [evals](evals/README.md), [pack-healthcare](packs/healthcare/README.md), [scripts](scripts/README.md) |
+| package READMEs | [shared](harness/shared/README.md), [pack-api](harness/pack-api/README.md), [db](harness/db/README.md), [gateway](harness/gateway/README.md), [core-tools](harness/core-tools/README.md), [approvals](harness/approvals/README.md), [evals](evals/README.md), [pack-healthcare](packs/healthcare/README.md), [scripts](scripts/README.md) |
 ````
 
 Also extend the "Run locally" block with the four new commands:
@@ -7770,7 +9780,63 @@ pnpm test            # lint, then every package's suite
 ```
 ````
 
-- [ ] **Step 9: Run every gate, one last time, from a clean tree**
+- [ ] **Step 9: Rewrite CONTRIBUTING.md's "Adding a pack"**
+
+Task 1's draft said a pack is "content, not code" and that `package.json#exports` declares what
+core-tools may read. That is no longer how it works. Replace the section:
+
+````markdown
+## Adding a pack
+
+A pack is an area of the product — credentialing, document scanning, whatever comes next — that
+core loads through a contract instead of importing by name.
+
+1. `mkdir -p packs/<name>/src` and give it a `package.json` named `@harness/pack-<name>`, with
+   `"." : "./src/index.ts"` in `exports` and `@harness/pack-api` and `@harness/shared` in
+   `dependencies`. **Never** depend on `@harness/core-tools`; `pnpm arch` fails the build on it.
+2. Export `pack` from `src/index.ts`:
+
+   ```ts
+   import path from 'node:path';
+   import { fileURLToPath } from 'node:url';
+   import { definePack } from '@harness/pack-api';
+
+   const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+
+   export const pack = definePack({
+     name: 'scanning',
+     version: '0.1.0',
+     documentKinds: extraction.document_kinds,
+     extraction,                       // the parsed schema/provider.json
+     formsDir: path.join(root, 'forms'),
+     skillsDir: path.join(root, 'skills'),
+     policy: { external: 'approval' },
+     evals: { injectionFile: path.join(root, 'evals', 'injection.jsonl') },
+   });
+   ```
+
+   `formsDir` and `skillsDir` must be absolute and resolved from `import.meta.url`:
+   `definePack` refuses a relative one, because it would resolve against whatever directory the
+   harness process started in.
+3. Write `schema/provider.json` — fields, credentials, `document_kinds`. Every field marked
+   `restricted` must be `source: 'redaction'` and must satisfy core's `isRestrictedName`, or
+   the value would be stored in plaintext; `loadPacks` validates this at startup and names the
+   field it rejected.
+4. Add the package to `@harness/core-tools`'s `dependencies` so pnpm can resolve the dynamic
+   import, and name it in `HARNESS_PACKS` in the client's `.env`:
+   `HARNESS_PACKS=@harness/pack-healthcare,@harness/pack-scanning`.
+5. Pack-specific tools are optional: `tools: (deps) => [...]` on the `Pack`. They receive core's
+   dependency bag as `unknown`, because a pack cannot see `ToolDeps`. Core's own tool names win
+   a collision.
+6. Run `pnpm surface:record` if the pack changes the published tool list, and say so in the
+   commit.
+
+The first pack named in `HARNESS_PACKS` answers `deps.packs.manifest()` and
+`deps.packs.formsDir()`; `documentKinds()` unions them all. If a second pack needs its own
+manifest per document, that is a feature to design, not a line to change.
+````
+
+- [ ] **Step 10: Run every gate, one last time, from a clean tree**
 
 ```bash
 pnpm -r typecheck
@@ -7780,15 +9846,17 @@ pnpm format:check
 pnpm -r test
 ```
 Expected: clean typecheck; no lint errors; `✔ no dependency violations found`; Prettier
-reports nothing; 7 packages pass.
+reports nothing; **9** packages pass — `@harness/shared` and `@harness/pack-api` joined in
+Tasks 4 and 8.
 
 Then the three proofs that nothing changed:
 
 ```bash
 pnpm --filter @harness/core-tools exec vitest run src/app/surface.test.ts
 ```
-Expected: `Tests 3 passed` — the 23 tool names and both schemas, the environment variable set
-and the Compose config all match what Task 1 recorded, eleven tasks ago.
+Expected: `Tests 3 passed` — the 23 tool names and both schemas match exactly what Task 1
+recorded, twelve tasks ago, and the environment variable set and the Compose config match the
+snapshot as Task 8 re-recorded it for `HARNESS_PACKS`.
 
 ```bash
 cd harness/db && pnpm drizzle-kit generate; cd ../..
@@ -7802,7 +9870,7 @@ pnpm gateway:config && pnpm forms:generate && git status --porcelain
 Expected: no output. Both generators are deterministic and neither their inputs nor their code
 changed meaningfully.
 
-- [ ] **Step 10: Commit**
+- [ ] **Step 11: Commit**
 
 ```bash
 git add .dependency-cruiser.cjs eslint.config.js package.json harness/core-tools/package.json evals/package.json
@@ -7811,8 +9879,8 @@ git commit -m "chore(tooling): make every layer rule an error and drop the unuse
 git add docs/architecture/graph.svg
 git commit -m "docs: generate the module graph"
 
-git add ARCHITECTURE.md README.md
-git commit -m "docs: finish ARCHITECTURE.md and point the root README at it"
+git add ARCHITECTURE.md CONTRIBUTING.md README.md
+git commit -m "docs: finish ARCHITECTURE.md, describe the pack contract and point the root README at both"
 ```
 
 ---
@@ -7822,8 +9890,10 @@ git commit -m "docs: finish ARCHITECTURE.md and point the root README at it"
 The branch is ready for the final whole-branch review when all of these hold:
 
 - `pnpm -r typecheck`, `pnpm lint`, `pnpm arch`, `pnpm format:check` and `pnpm -r test` are all clean.
-- `docs/architecture/tool-surface.json` is unchanged since Task 1 — `git log --oneline -- docs/architecture/tool-surface.json` shows exactly one commit.
-- `docs/architecture/compose-surface.yaml` likewise.
+- `docs/architecture/tool-surface.json` is unchanged since Task 1 — `git log --oneline -- docs/architecture/tool-surface.json` shows exactly **one** commit. Not one tool name or schema moved, packs and all.
+- `docs/architecture/compose-surface.yaml` shows exactly **two** commits: Task 1's recording and Task 8's re-recording for `HARNESS_PACKS`. `git log -p -- docs/architecture/compose-surface.yaml` shows the second one adding two lines and nothing else.
+- No module under `harness/core-tools/src/` names a pack: `grep -rn "@harness/pack-healthcare\|packs/healthcare" harness/core-tools/src --include='*.ts' | grep -v '\.test\.ts' | grep -v 'src/testing.ts'` is empty.
+- `@harness/shared` has no workspace dependency: `harness/shared/package.json` has no `dependencies` block.
 - `git log --oneline --format='%b' | grep -i 'co-authored\|generated with'` finds nothing.
 - `harness/db/drizzle/` is untouched: `git diff --stat main -- harness/db/drizzle` is empty.
-- Every package has a README, and `ARCHITECTURE.md` and `CONTRIBUTING.md` name only paths that exist.
+- All nine packages have a README, and `ARCHITECTURE.md` and `CONTRIBUTING.md` name only paths that exist.
