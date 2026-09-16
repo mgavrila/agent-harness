@@ -4,13 +4,8 @@ import * as z from 'zod/v4';
 import { eq } from 'drizzle-orm';
 import { approvals, auditLog, decrypt, providers, runs } from '@harness/db';
 import { ToolError } from '@harness/shared';
-import { approvalIdOf, connectTools, makeTestDeps, useTestDb } from '../../testing.js';
+import { approvalIdOf, connectTools, makeTestDeps, textOf, useTestDb } from '../../testing.js';
 import { defineTool } from './registry.js';
-
-function textOf(res: { content: unknown }): string {
-  const content = res.content as Array<{ type: string; text?: string }>;
-  return content[0]?.text ?? '';
-}
 
 const echo = defineTool({
   name: 'echo_read',

@@ -5,19 +5,13 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { and, eq } from 'drizzle-orm';
 import { auditLog, credentials, fields, providers, approvals, toolEffects } from '@harness/db';
 import { pack as healthcarePack } from '@harness/pack-healthcare';
-import { useTestDb, makeTestDeps, connectTools, resultOf, approvalIdOf } from '../testing.js';
+import { useTestDb, makeTestDeps, connectTools, resultOf, approvalIdOf, textOf } from '../testing.js';
 import { ROSTER_COLUMNS } from '../domain/forms/types.js';
 import type { ToolDeps } from '../domain/tooling/types.js';
 import { approvalTools } from './approvals.js';
 import { formTools } from './forms.js';
 
 const eqField = (providerId: string, name: string) => and(eq(fields.providerId, providerId), eq(fields.name, name));
-
-/** The text content of a tool result, for asserting on error messages. */
-function textOf(res: { content?: unknown }): string {
-  const content = (res.content ?? []) as { type: string; text?: string }[];
-  return content.map((c) => c.text ?? '').join('\n');
-}
 
 const db = useTestDb();
 let storageDir: string;

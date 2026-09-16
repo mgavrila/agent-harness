@@ -88,6 +88,16 @@ export function approvalIdOf(res: { structuredContent?: unknown }): string {
   return envelope.approval_id;
 }
 
+/**
+ * The text content of a tool result, for asserting on the message a failure
+ * put in front of the agent. Every block is joined, not just the first: a
+ * `not.toContain` that read one block would pass on a leak in the next.
+ */
+export function textOf(res: { content?: unknown }): string {
+  const content = (res.content ?? []) as { type: string; text?: string }[];
+  return content.map((c) => c.text ?? '').join('\n');
+}
+
 /** The one `useTestDb`, from the package that owns the truncation list. */
 export { useTestDb } from '@harness/db/testing';
 /** The fake lives beside the interface it implements; this is where tests reach it. */
