@@ -3,6 +3,7 @@ packages:
   - 'packs/*'
   - 'surfaces/*'
   - 'identities/*'
+  - 'runtimes/*'
   - 'evals'
   - 'scripts'
 allowBuilds:

@@ -47,6 +47,7 @@ const PACKAGES = [
   { name: 'surface-slack', src: 'surfaces/slack/src', severity: 'error' },
   { name: 'surface-memory', src: 'surfaces/memory/src', severity: 'error' },
   { name: 'identity-static', src: 'identities/static/src', severity: 'error' },
+  { name: 'runtime-deepagents', src: 'runtimes/deepagents/src', severity: 'error' },
   { name: 'scripts', src: 'scripts/src', severity: 'error' },
 ];
 
@@ -113,6 +114,7 @@ const WORKSPACE_DIRS = [
   'surfaces/slack',
   'surfaces/memory',
   'identities/static',
+  'runtimes/deepagents',
   'scripts',
 ];
 
@@ -321,6 +323,17 @@ const GLOBAL_RULES = [
     },
   },
   {
+    name: 'a-runtime-imports-only-api-and-shared',
+    comment:
+      'A runtime plug-in depends on @harness/runtime-api, @harness/shared and third-party packages only. It receives its tools as an MCP client and everything else on the request, so an edge into core-tools, @harness/db, a surface, a pack or the host would be the runtime reaching past the contract \u2014 and a cycle, because the host loads it. Its own tests are not exempt: the fake gateway and the tool fixture it needs live under @harness/runtime-api/testing for exactly that reason.',
+    severity: 'error',
+    from: { path: '^runtimes/([^/]+)/' },
+    to: {
+      path: '^(harness|packs|surfaces|identities|runtimes|evals|scripts)/',
+      pathNot: ['^harness/runtime-api/src/', '^harness/shared/src/', '^runtimes/$1/'],
+    },
+  },
+  {
     name: 'shared-has-no-workspace-dependencies',
     comment:
       '@harness/shared is the bottom of the graph. @harness/db and every pack import it, so a dependency on any other workspace package would be a cycle. Node built-ins only.',
@@ -357,6 +370,7 @@ module.exports = {
           '^packs/[^/]+/(synthetic|forms)/',
           '^surfaces/[^/]+/src/(?!index[.]ts)',
           '^identities/[^/]+/src/(?!index[.]ts)',
+          '^runtimes/[^/]+/src/(?!index[.]ts)',
         ],
       },
     },
