@@ -50,8 +50,8 @@ export interface ModelCallResult {
  *
  * The seam exists so that "talk to a model" is a named interface rather than a `fetch` buried
  * in a helper: `httpGateway(config)` is the LiteLLM adapter, and `startFakeGateway` in
- * `fake.ts` is the test double — an actual loopback HTTP server, which exercises the header,
- * the usage block and the cost header that a hand-written stub would skip.
+ * `@harness/runtime-api/testing` is the test double — an actual loopback HTTP server, which
+ * exercises the header, the usage block and the cost header that a hand-written stub would skip.
  *
  * Budget accounting and the per-run breaker are deliberately NOT here: they need `ToolDeps`
  * and the database, so they live in `callModel`, which wraps this.

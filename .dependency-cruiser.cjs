@@ -35,6 +35,7 @@ const PACKAGES = [
   { name: 'pack-api', src: 'harness/pack-api/src', severity: 'error' },
   { name: 'surface-api', src: 'harness/surface-api/src', severity: 'error' },
   { name: 'identity-api', src: 'harness/identity-api/src', severity: 'error' },
+  { name: 'runtime-api', src: 'harness/runtime-api/src', severity: 'error' },
   { name: 'db', src: 'harness/db/src', severity: 'error' },
   { name: 'gateway', src: 'harness/gateway/src', severity: 'error' },
   { name: 'core-tools', src: 'harness/core-tools/src', severity: 'error' },
@@ -100,6 +101,7 @@ const WORKSPACE_DIRS = [
   'harness/pack-api',
   'harness/surface-api',
   'harness/identity-api',
+  'harness/runtime-api',
   'harness/db',
   'harness/gateway',
   'harness/core-tools',
@@ -234,7 +236,7 @@ const GLOBAL_RULES = [
     severity: 'error',
     from: { path: '^harness/pack-api/src/' },
     to: {
-      path: '^(harness|packs|surfaces|identities|evals|scripts)/',
+      path: '^(harness|packs|surfaces|identities|runtimes|evals|scripts)/',
       pathNot: ['^harness/pack-api/src/', '^harness/shared/src/'],
     },
   },
@@ -245,7 +247,7 @@ const GLOBAL_RULES = [
     severity: 'error',
     from: { path: '^harness/surface-api/src/' },
     to: {
-      path: '^(harness|packs|surfaces|identities|evals|scripts)/',
+      path: '^(harness|packs|surfaces|identities|runtimes|evals|scripts)/',
       pathNot: ['^harness/surface-api/src/', '^harness/shared/src/'],
     },
   },
@@ -256,8 +258,19 @@ const GLOBAL_RULES = [
     severity: 'error',
     from: { path: '^harness/identity-api/src/' },
     to: {
-      path: '^(harness|packs|surfaces|identities|evals|scripts)/',
+      path: '^(harness|packs|surfaces|identities|runtimes|evals|scripts)/',
       pathNot: ['^harness/identity-api/src/', '^harness/shared/src/'],
+    },
+  },
+  {
+    name: 'runtime-api-imports-only-shared',
+    comment:
+      '@harness/runtime-api is the contract a runtime plug-in implements. It may import @harness/shared, zod and the MCP client type, and no other workspace package: a contract that pulled in core-tools would defeat the point of having one, and one that pulled in @harness/identity-api would tie the loop to one way of knowing who is asking. RunPrincipal is written out here for exactly that reason.',
+    severity: 'error',
+    from: { path: '^harness/runtime-api/src/' },
+    to: {
+      path: '^(harness|packs|surfaces|identities|runtimes|evals|scripts)/',
+      pathNot: ['^harness/runtime-api/src/', '^harness/shared/src/'],
     },
   },
   {
@@ -267,7 +280,7 @@ const GLOBAL_RULES = [
     severity: 'error',
     from: { path: '^harness/files/src/' },
     to: {
-      path: '^(harness|packs|surfaces|identities|evals|scripts)/',
+      path: '^(harness|packs|surfaces|identities|runtimes|evals|scripts)/',
       pathNot: ['^harness/files/src/', '^harness/shared/src/'],
     },
   },
@@ -278,7 +291,7 @@ const GLOBAL_RULES = [
     severity: 'error',
     from: { path: '^packs/', pathNot: ['\\.test\\.ts$', '\\.test-helpers\\.ts$'] },
     to: {
-      path: '^(harness|surfaces|identities|evals|scripts)/',
+      path: '^(harness|surfaces|identities|runtimes|evals|scripts)/',
       pathNot: ['^harness/pack-api/src/', '^harness/shared/src/'],
     },
   },
@@ -292,7 +305,7 @@ const GLOBAL_RULES = [
       // `surfaces` is in the alternation so one adapter cannot import another: two transports
       // sharing code is a third package, not an edge. `^surfaces/$1/` is the group captured
       // above, so an adapter still reaches its own modules and only its own.
-      path: '^(harness|packs|surfaces|identities|evals|scripts)/',
+      path: '^(harness|packs|surfaces|identities|runtimes|evals|scripts)/',
       pathNot: ['^harness/surface-api/src/', '^harness/shared/src/', '^surfaces/$1/'],
     },
   },
@@ -303,7 +316,7 @@ const GLOBAL_RULES = [
     severity: 'error',
     from: { path: '^identities/([^/]+)/' },
     to: {
-      path: '^(harness|packs|surfaces|identities|evals|scripts)/',
+      path: '^(harness|packs|surfaces|identities|runtimes|evals|scripts)/',
       pathNot: ['^harness/identity-api/src/', '^harness/shared/src/', '^identities/$1/'],
     },
   },
@@ -313,7 +326,7 @@ const GLOBAL_RULES = [
       '@harness/shared is the bottom of the graph. @harness/db and every pack import it, so a dependency on any other workspace package would be a cycle. Node built-ins only.',
     severity: 'error',
     from: { path: '^harness/shared/src/' },
-    to: { path: '^(harness|packs|surfaces|identities|evals|scripts)/', pathNot: '^harness/shared/src/' },
+    to: { path: '^(harness|packs|surfaces|identities|runtimes|evals|scripts)/', pathNot: '^harness/shared/src/' },
   },
   ...WORKSPACE_DIRS.map(crossPackageRule),
 ];
@@ -340,7 +353,7 @@ module.exports = {
         // their own, as do the pack's two generator directories.
         collapsePattern: [
           '^(harness|packs|evals|scripts)/[^/]+/(src/)?(shared|domain|tools|app)',
-          '^harness/(shared|pack-api|surface-api|identity-api)/src/(?!index[.]ts)',
+          '^harness/(shared|pack-api|surface-api|identity-api|runtime-api)/src/(?!index[.]ts)',
           '^packs/[^/]+/(synthetic|forms)/',
           '^surfaces/[^/]+/src/(?!index[.]ts)',
           '^identities/[^/]+/src/(?!index[.]ts)',

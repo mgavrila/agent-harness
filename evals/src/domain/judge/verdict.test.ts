@@ -2,7 +2,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import type { ToolDeps } from '@harness/core-tools';
-import { startFakeGateway, type FakeGateway } from '@harness/core-tools/fake-gateway';
+import { startFakeGateway, type FakeGateway } from '@harness/runtime-api/testing';
 import { runMigrations } from '@harness/db';
 import { EVALS_DATABASE_URL } from '../../corpus.test-helpers.js';
 import { openJudgeDeps } from '../../judge-deps.test-helpers.js';

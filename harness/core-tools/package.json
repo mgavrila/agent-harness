@@ -7,7 +7,6 @@
     ".": "./src/index.ts",
     "./testing": "./src/testing.ts",
     "./effects": "./src/domain/effects/outbox.ts",
-    "./fake-gateway": "./src/domain/models/fake.ts",
     "./in-process": "./src/domain/tooling/in-process.ts",
     "./redaction": "./src/shared/redaction/index.ts",
     "./storage": "./src/domain/storage/layout.ts"
@@ -37,6 +36,7 @@
   },
   "devDependencies": {
     "@harness/pack-stories": "workspace:*",
+    "@harness/runtime-api": "workspace:*",
     "@modelcontextprotocol/client": "^2.0.0",
     "@types/node": "^26.5.1",
     "@types/pg": "^8.23.1",

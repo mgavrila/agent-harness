@@ -28,6 +28,7 @@ export {
   type NumberEnvOptions,
 } from './env.js';
 export { assertInsideRoot, realOrNearestAncestor, type EscapeReason, type InsideRootOptions } from './paths.js';
+export { canonicalize, hashArgs } from './hash.js';
 export { createLogger, type Logger } from './log.js';
 export { runBounded, type RunBoundedOptions, type RunBoundedOutcome } from './subprocess.js';
 export { readJsonl, writeJsonl, type JsonlRow } from './jsonl.js';

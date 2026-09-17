@@ -4,7 +4,7 @@ import path from 'node:path';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import type { ToolDeps } from '@harness/core-tools';
 import { pack as healthcarePack } from '@harness/pack-healthcare';
-import { startFakeGateway, type FakeGateway } from '@harness/core-tools/fake-gateway';
+import { startFakeGateway, type FakeGateway } from '@harness/runtime-api/testing';
 import { EVALS_DATABASE_URL, EXTRACTION, VERDICTS, writeEvalCorpus } from '../corpus.test-helpers.js';
 import { openJudgeDeps } from '../judge-deps.test-helpers.js';
 import { runEvals, selectCases, injectionCasesFor } from './orchestrate.js';

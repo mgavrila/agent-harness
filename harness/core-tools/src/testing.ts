@@ -161,11 +161,11 @@ export function textOf(res: { content?: unknown }): string {
 
 /** The one `useTestDb`, from the package that owns the truncation list. */
 export { useTestDb } from '@harness/db/testing';
-/** The fake lives beside the interface it implements; this is where tests reach it. */
+/** The fake lives beside the contract whose wire shape it fakes; this is where kernel tests reach it. */
 export {
   startFakeGateway,
   type FakeGateway,
   type FakeGatewayCall,
   type FakeReply,
   type Responder,
-} from './domain/models/fake.js';
+} from '@harness/runtime-api/testing';
