@@ -216,7 +216,8 @@ describe('two packs in one process', () => {
     expect(document.document).toMatchObject({ record_id: extracted.record_id, kind: 'meeting_notes' });
   });
 
-  it('computes no deadline for an attachment kind that never expires', async () => {
+  /** One epic with one `source_link`, so the two deadline cases below differ in one argument. */
+  async function deadlinesForLink(attachment: Record<string, string>): Promise<string[]> {
     const deps = makeTestDeps(db, { packs });
     const client = await connectTestClient(() => createCoreToolsServer(deps));
     const epic = resultOf<{ record_id: string }>(
@@ -225,16 +226,28 @@ describe('two packs in one process', () => {
         arguments: {
           kind: 'epic',
           name: 'Usage-based billing',
-          attachments: [{ kind: 'source_link', issuer: 'JIRA', expires_at: '2027-12-31' }],
+          attachments: [{ kind: 'source_link', issuer: 'JIRA', ...attachment }],
         },
       }),
     );
     const computed = resultOf<{ deadlines: { kind: string }[] }>(
       await client.callTool({ name: 'deadlines_compute', arguments: { provider_id: epic.record_id } }),
     );
-    // An expiry date still produces the expiration deadline; `leadDays: 0` is what removes the
-    // renewal_start one, rather than scheduling a renewal for the day the thing lapses.
-    expect(computed.deadlines.map((d) => d.kind)).toEqual(['expiration']);
+    return computed.deadlines.map((d) => d.kind);
+  }
+
+  it('computes an expiration but no renewal for an attachment kind with no lead days', async () => {
+    // A date was given, so there is something to expire. `leadDays: 0` is what removes the
+    // renewal_start deadline, rather than scheduling a renewal for the day the thing lapses.
+    expect(await deadlinesForLink({ expires_at: '2027-12-31' })).toEqual(['expiration']);
+  });
+
+  it('computes no deadline at all for an attachment that carries no expiry date', async () => {
+    // The case the previous test was named for and did not make: `source_link` declares no
+    // `expires_at` property, so a tracker link is stored without one and nothing about it is ever
+    // due. A kernel that assumed everything hung off a record lapses would schedule against
+    // `null` here, which is how an epic ended up in a renewals digest.
+    expect(await deadlinesForLink({})).toEqual([]);
   });
 
   it('gives every loaded pack an evals block whose judged fields hold no restricted name', () => {
