@@ -17,9 +17,10 @@ export function defineSurface(surface: Surface): Surface {
   if (surface.version.trim() === '') throw new ConfigError(`surface "${surface.name}" has no version`);
   const seen = new Set<string>();
   for (const secret of surface.secrets) {
-    // Every entry is subtracted from the environment of a child process, by name. A lowercase
-    // or misspelled entry subtracts nothing and the credential travels, which is the failure
-    // this check exists to make loud.
+    // Every entry names a credential this surface reads from the environment the host hands
+    // it, so an operator wiring a container that should never hold one knows which name to
+    // leave out. A lowercase or misspelled entry names nothing an operator can act on, which is
+    // the failure this check exists to make loud.
     if (!ENV_NAME.test(secret)) {
       throw new ConfigError(
         `surface "${surface.name}" secret "${secret}" must be an environment variable name (A-Z, digits, underscores)`,

@@ -213,18 +213,12 @@ complete one; read it alongside this.
 
 10. **Name it where a deployment is configured.** Add the package to `@harness/core-tools`'s
     `dependencies` so pnpm can resolve the dynamic import, then set
-    `HARNESS_PACKS=@harness/pack-healthcare,@harness/pack-stories` in the client's `.env`. `.env`
-    alone is what reaches `@harness/host`: it has no child process and no separate env block of
-    its own to keep in step, so naming the variable once is enough.
+    `HARNESS_PACKS=@harness/pack-healthcare,@harness/pack-stories` in the client's `.env`.
+    `HARNESS_PACKS` in `.env` is the whole answer: `@harness/host` runs core-tools in-process,
+    with no child process and no separate env block of its own to keep in step, so naming the
+    variable once is enough.
 
-    `clients/<name>/hermes.config.yaml`'s `mcp_servers.core-tools.env` block still exists and is
-    still an allowlist, but only for Hermes's own core-tools child, which serves chat until Plan
-    8b retires it — a variable that child reads has to be named there too, written as
-    `'${HARNESS_PACKS}'` and never pinned to a pack name, or Hermes's agent sees a different set
-    of packs than the host does.
-
-    Every scaffolded client inherits both, because `pnpm new-client` copies
-    `clients/demo-practice/`.
+    Every scaffolded client inherits it, because `pnpm new-client` copies `clients/demo-practice/`.
 
 11. **Run the gates.** `pnpm -r typecheck && pnpm lint && pnpm arch && pnpm test`. If your pack
     changes the published tool list for the default deployment, run `pnpm surface:record` and
@@ -293,18 +287,28 @@ complete one; read it alongside this, and read `surfaces/slack` for the real thi
 4. **Implement `SurfaceSession`.** Post and update a card, post text with an optional reply
    target, send a private note, upload a file, open a form, deliver actions and submissions,
    start and stop — and deliver an inbound human message. `onMessage` registers the one handler
-   for a `MessageEvent`; `startStream` begins a streamed reply and throws `SurfaceError` when
-   `capabilities.streaming` is false, so a transport with no streaming API declares
-   `streaming: false` and implements `startStream` as exactly that throw; `typing`, where the
-   transport has one, shows that a reply is coming and is optional. Declare honestly what you
-   cannot do:
+   for a `MessageEvent`, whose `mentioned` flag is your adapter's answer to the group-chat rule:
+   true for a direct message and for a channel message that addresses the bot by name, false for
+   every other channel message — the host's whole rule is to return without running when it is
+   false. `surfaces/slack`'s `classifyMessage` (`src/transport/bolt.ts`) is the worked example: it
+   takes Slack's `message` and `app_mention` events, drops the one that double-reports a mention
+   the bot already saw as `app_mention`, and sets `mentioned` true for a direct message.
 
-   | Surface            | forms                  | privateReply                    | update | streaming    | inlineConfirm |
-   | ------------------ | ---------------------- | ------------------------------- | ------ | ------------ | ------------- |
-   | `slack`            | yes (a modal)          | yes (ephemeral)                 | yes    | no (Plan 8b) | no            |
-   | `memory`           | yes                    | yes                             | yes    | yes          | no            |
-   | Teams (planned)    | yes (a task module)    | no — post in the thread instead | yes    | yes          | no            |
-   | Telegram (planned) | no — there is no modal | no                              | yes    | no           | no            |
+   `startStream` begins a streamed reply and throws `SurfaceError` when `capabilities.streaming`
+   is false, so a transport with no streaming API declares `streaming: false` and implements
+   `startStream` as exactly that throw; `typing`, where the transport has one, shows that a reply
+   is coming and is optional. `surfaces/slack`'s `createEditStream` (`src/stream.ts`) is the
+   worked example for a transport with no native streaming call: it posts the first delta as a
+   message, folds every later delta into an edit of that message no sooner than
+   `STREAM_EDIT_INTERVAL_MS` apart, and edits once more with the whole text when the run ends.
+   Declare honestly what you cannot do:
+
+   | Surface            | forms                  | privateReply                    | update | streaming | inlineConfirm |
+   | ------------------ | ---------------------- | ------------------------------- | ------ | --------- | ------------- |
+   | `slack`            | yes (a modal)          | yes (ephemeral)                 | yes    | yes       | no            |
+   | `memory`           | yes                    | yes                             | yes    | yes       | no            |
+   | Teams (planned)    | yes (a task module)    | no — post in the thread instead | yes    | yes       | no            |
+   | Telegram (planned) | no — there is no modal | no                              | yes    | no        | no            |
 
    The host reads those flags rather than trying and catching: a surface without `forms` gets an
    approval card with no Edit button, and one without `streaming` gets the whole reply posted

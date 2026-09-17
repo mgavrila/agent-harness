@@ -3,8 +3,7 @@
 Self-hosted, model-agnostic agent harness built to be deployed for many
 clients by adding content and configuration, not code.
 
-- **Runtime**: Deep Agents JS behind `@harness/runtime-api`, hosted by `@harness/host`; Hermes
-  serves Slack chat until Plan 8b.
+- **Runtime**: Deep Agents JS behind `@harness/runtime-api`, hosted by `@harness/host`.
 - **Models**: any provider behind one model gateway. Hosted keys today,
   local vLLM later.
 - **Core**: tool policy and audit, approval engine, record store, playbook
@@ -153,6 +152,9 @@ pnpm install
 pnpm db:up && pnpm db:migrate
 pnpm demo:up
 ```
+
+One Slack app, in Socket Mode with Interactivity on, carries both chat and approvals; see
+`docs/runbook.md`, "Slack credentials: one app", for the scopes and how to invite it.
 
 `docs/demo.md` is the five-minute script. `docs/runbook.md` covers the
 operational side: effects outbox, the host and its surfaces, playbooks, and storage.

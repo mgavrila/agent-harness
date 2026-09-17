@@ -93,9 +93,9 @@ failures. The raw arguments are not stored in the audit log.
 
 `caller` is the principal id since Plan 7 — `u-…` for a person, `svc-…` for a service — so a
 row's `caller` and its run's `principal_id` always agree. A row written before migration 0010
-keeps its old string (`hermes`, `approvals-app`, `eval-runner`), and that migration's backfill
-copied that same string into the run's `principal_id` verbatim, so the two still agree on old
-rows too.
+keeps its old caller string — a bare service name rather than a principal id, e.g.
+`approvals-app` or `eval-runner` — and that migration's backfill copied that same string into
+the run's `principal_id` verbatim, so the two still agree on old rows too.
 
 ## What is not audited
 
@@ -186,16 +186,16 @@ erroring (check `/healthz` and the log), or the rows belong to a different
 
 `harness_reconcile` (also run once at process start) expires approvals past
 their TTL and parks stuck dispatches. The host's reconcile loop calls
-it every `RECONCILE_SECONDS`, and `clients/demo-practice/cron/playbooks.sh`
-installs a `harness-reconcile-watchdog` job that checks it is happening. It
-never re-sends anything.
+it every `RECONCILE_SECONDS`. It never re-sends anything. A scheduled watch
+beyond that loop — a job that checks reconciliation is actually happening —
+is Plan 9's, on the scheduler.
 
 The MCP tool repairs **only the calling client's rows**, so an agent acting for
 one practice can never retire another practice's approvals. The startup pass in
 `main.ts` runs **unscoped**, as an operator-level task across every tenant; when
 it actually repairs something it writes one `audit_log` row with `caller` set to
-the principal the process runs as (`svc-local`, `svc-hermes` or `svc-host`
-in the shipped configs) and `tool = 'harness_reconcile'`.
+the principal the process runs as (`svc-local` or `svc-host` in the shipped
+configs) and `tool = 'harness_reconcile'`.
 
 ## Runs and principals
 
@@ -210,16 +210,13 @@ host's own service principal. Every `audit_log`, `tool_effects`, `model_calls`, 
 column that says who a run acted as, and it always agrees with `audit_log.caller` on that run's
 rows. A run whose principal the identity file does not declare never opens.
 
-Who is who in the demo: `svc-hermes` is the child the chat runtime launches (set in
-`hermes.config.yaml`) — Hermes still serves Slack chat until Plan 8b, and nothing resolves a
-Slack user talking to Hermes to one of the humans, so every call from that side is
-`svc-hermes`, at level `service`. `svc-host` is the host's own identity
-(`HARNESS_HOST_PRINCIPAL`, default `svc-host`): reconciliation runs as it, and playbooks will
-from Plan 9. `svc-local` is the stdio server on an operator's machine (the default). The two
-humans are `u-practice-manager` (`admin`) and `u-coordinator` (`lead`). On the host's own
-surfaces — the ones `HARNESS_SURFACES` names — every message from a person now runs as that
-person's own principal: the identity plug-in resolves the surface user id before the turn
-starts, and an unresolved sender gets one refusal and no run at all.
+Who is who in the demo: `svc-host` is the host's own identity (`HARNESS_HOST_PRINCIPAL`,
+default `svc-host`): reconciliation runs as it, and playbooks will from Plan 9. `svc-local` is
+the stdio server on an operator's machine (the default). The two humans are
+`u-practice-manager` (`admin`) and `u-coordinator` (`lead`). On the host's own surfaces — the
+ones `HARNESS_SURFACES` names — every message from a person runs as that person's own
+principal: the identity plug-in resolves the surface user id before the turn starts, and an
+unresolved sender gets one refusal and no run at all.
 
 A multi-run host builds one `KernelConfig` and calls `openRun` and `depsForRun` per run; it
 must never reuse one `ToolDeps` across runs, or one run's id would be stamped on another's rows.
@@ -342,8 +339,7 @@ group by 1, 2 order by 4 desc;
   handler's transaction. A handler that throws after a successful model call
   rolls the row back — the money was spent, the row is gone.
 - A call made outside a tool handler (the eval runner's judge) writes a row
-  with a null run id, and a call made by Hermes itself never reaches this
-  process at all.
+  with a null run id.
 
 LiteLLM's own spend tables in the `litellm` database are what enforce
 `max_budget`, and they are authoritative. When the two disagree, LiteLLM is
@@ -415,7 +411,7 @@ free-text field exactly, reports `judge: null`, and omits `judge.agreement_rate`
 from the metric map rather than recording a rate nobody measured. A metric
 present on only one side of a comparison is listed as not comparable and cannot
 open the promotion gate. The judge needs a second database handle and a session
-the CLI does not have; Plan 3 wires it up when Hermes supplies one.
+the CLI does not have; that wiring is still future work.
 `evals/src/domain/orchestrate.test.ts` exercises the judge end to end against the fake gateway,
 including the route being down.
 
@@ -455,10 +451,11 @@ the symlink-resolved path against its root, so neither an absolute path, nor a
 `@harness/shared` and `domain/storage/file-store.ts` reaches it through
 `assertInsideRoot`, so there is one implementation to keep right.
 
-In Compose, the same named volume is mounted into the `hermes` container (where
-the core-tools child writes the file) and the `host` container (where the
-`surface_file` sink reads it). If a file upload fails with ENOENT, the two mounts have
-drifted apart — check both services' `volumes:` entries before anything else.
+In Compose, `host` and `files` share the same named volume, mounted at
+`/srv/harness-storage`: `host` is where core-tools, hosted in-process, writes the file and
+where the `surface_file` sink reads it back — one process now — and `files` mounts it too, to
+parse a document core-tools sends it. If a file upload fails with ENOENT, check both services'
+`volumes:` entries before anything else.
 
 Storage isolation is per process, not per request: a core-tools process is
 started with one `HARNESS_STORAGE_DIR` and one `HARNESS_CLIENT`, and that scopes
@@ -525,43 +522,43 @@ naming a surface this host has not loaded fails that one effect, and only that o
 row is retried until `maxAttempts` (default 3) and then marked `failed` for a human, as under
 "Effects outbox".
 
-### Slack credentials: two apps are required
+### Inbound messages
 
-Not a hardening recommendation — one app does not work.
-Slack delivers each Socket Mode event to exactly one of
-an app's open connections, which is what makes rolling restarts possible. With
-the Hermes gateway and the host both connected on one
-`SLACK_APP_TOKEN`, roughly half of every `block_actions` and `view_submission`
-payload goes to Hermes, which has no handler for the approval buttons or the
-note modal. Those clicks do nothing at all: the approval stays `pending` and
-the approver has no signal other than pressing again.
+A surface delivers a `MessageEvent` with `mentioned` set: true for a direct message and for a
+channel message that mentions the bot, false for every other channel message. The host's whole
+rule is to return without running when `mentioned` is false — a channel message is answered only
+when the bot is mentioned; a direct message always runs. Each turn still runs as the principal of
+whoever wrote it, never the principal who started the thread.
+
+A file attached to the message has already been downloaded, by the surface, into
+`<HARNESS_STORAGE_DIR>/incoming/`; `MessageEvent.attachments[].path` names it relative to
+`incoming/`. A reply streams as edits to one message, at a bounded rate, on a surface whose
+`capabilities.streaming` is true; otherwise it posts once when the run finishes.
+
+### Slack credentials: one app
+
+One Slack app carries chat and approvals, because the host is the only process that holds a
+Socket Mode connection now. Two apps used to be required — Slack delivers each Socket Mode event
+to exactly one of an app's open connections, so a second connected process would only ever see
+about half of every `block_actions` and `view_submission` payload — and that reasoning is gone
+with the second process.
 
 | App | Variables | Bot scopes | Other settings |
 |---|---|---|---|
-| Hermes gateway | `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN` | `chat:write`, `app_mentions:read`, `channels:history`, `groups:history`, `im:history`, `im:read`, `im:write`, `mpim:history`, `users:read`, `files:read`, `files:write` | Socket Mode on |
-| Host's approvals app | `APPROVALS_SLACK_BOT_TOKEN`, `APPROVALS_SLACK_APP_TOKEN` | `chat:write`, `users:read`, `files:write` | Socket Mode on, Interactivity on |
+| The host's Slack app | `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN` | `chat:write`, `app_mentions:read`, `channels:history`, `groups:history`, `im:history`, `im:read`, `im:write`, `mpim:history`, `users:read`, `files:read`, `files:write` | Socket Mode on, Interactivity on |
 
-The host has no fallback to the Hermes variables. A fallback would
-make the broken configuration the default again and fail intermittently
-instead of at startup, so both `APPROVALS_SLACK_*` variables are required and
-the process refuses to start without them.
+Subscribe the app to the `message.channels`, `message.groups`, `message.im`, `message.mpim` and
+`app_mention` events, listed in `.env.example`. Invite the bot to `SLACK_APPROVALS_CHANNEL` and
+to every channel it should answer messages in.
 
-Compose keeps the two sets apart. The `host` service has no `env_file`:
-it gets an explicit `environment:` allowlist interpolated from `.env`, so
-Hermes's tokens never enter that container. In the other direction the
-`hermes` service blanks `APPROVALS_SLACK_*` over what `env_file` brought in,
-and `hermes-init` strips those lines out of the `.env` it copies to
-`$HERMES_HOME/.env`. Who may decide an approval is gated by the identity
-plug-in — level `lead` or above, resolved on the surface the card was posted
-on — regardless of which token is present; see "The host and its surfaces" above.
+Compose's `host` service has no `env_file`: it gets an explicit `environment:` allowlist
+interpolated from `.env`, so nothing outside that list reaches the container. Who may decide an
+approval is gated by the identity plug-in — level `lead` or above, resolved on the surface the
+card was posted on — not by which token is present; see "The host and its surfaces" above.
 
-**Hermes's own chat surface is a separate thing.** The two apps above are the harness's: one for
-the agent's gateway, one for the host's Slack adapter. Which platform *Hermes* speaks
-is Hermes's own configuration, not this repository's code:
-`clients/<client>/hermes.config.yaml` selects it, under `platforms:` and `platform_toolsets:`,
-where the demo names `slack` and `cli`. Pointing the agent at a platform Hermes supports and the
-host at Slack is a supported combination; they are two independent connections and
-neither knows about the other.
+**Finding a Slack member id for `identity.yaml`.** Open the person's profile in Slack, click the
+"More" (•••) menu, and choose "Copy member ID"; it is a string starting with `U`. Paste it into
+`identity.yaml`'s `surfaces.slack` field for that principal.
 
 ### Health
 
@@ -574,17 +571,20 @@ Inside the container the server binds every interface (`APPROVALS_HEALTH_BIND`,
 default `0.0.0.0`). That is not the exposure boundary: the Compose port mapping
 is, and it is pinned to `127.0.0.1:${APPROVALS_HEALTH_HOST_PORT:-8787}:8787`, so
 the endpoint is reachable from the operator's own machine and from the Compose
-network, and from nowhere else. A container-loopback bind would answer neither —
-Docker's port publish DNATs to the container's bridge address, and Hermes
-reaches the same address at `http://host:8787/healthz`. Set
-`APPROVALS_HEALTH_BIND=127.0.0.1` only for a bare-metal run, where the process
-itself is the boundary. Both watchdog scripts default to
-`http://host:8787/healthz` and read `APPROVALS_HEALTH_URL` to override it,
-which is how they are pointed at `http://127.0.0.1:8787/healthz` for a manual
-check outside Compose. The variable names — `APPROVALS_HEALTH_PORT`,
-`APPROVALS_HEALTH_BIND`, `APPROVALS_HEALTH_URL` — are unchanged from when
-`@harness/approvals` hosted its own process; renaming them would touch Compose,
-the snapshot and these scripts for no behaviour.
+network, and from nowhere else. A container-loopback bind would answer neither.
+Set `APPROVALS_HEALTH_BIND=127.0.0.1` only for a bare-metal run, where the
+process itself is the boundary.
+
+There are no watchdogs any more — a scheduled watch is Plan 9's, on the
+scheduler — so the manual check is:
+
+```bash
+curl http://127.0.0.1:8787/healthz
+```
+
+The variable names — `APPROVALS_HEALTH_PORT`, `APPROVALS_HEALTH_BIND` — are
+unchanged from when `@harness/approvals` hosted its own process; renaming them
+would touch Compose and the snapshot for no behaviour.
 
 ### Keeping restricted values off a surface
 
@@ -602,18 +602,18 @@ wrote a restricted-looking value where it should not be; read the audit row.
 ## Onboarding a client
 
 `pnpm new-client --pack <pack> --name <slug>` scaffolds `clients/<slug>/` — `SOUL.md`,
-`identity.yaml`, `policy.yaml`, `routing.yaml`, the runtime config, the cron and watchdog
-scripts and an `.env.example`. Compose derives every client path from `HARNESS_CLIENT`, so
-there is nothing to edit under `harness/compose/`:
+`identity.yaml`, `policy.yaml`, `routing.yaml` and an `.env.example`: a client is content and
+configuration, never code. Compose derives every client path from `HARNESS_CLIENT`, so there is
+nothing to edit under `harness/compose/`:
 
 1. `cp clients/<slug>/.env.example .env` and fill it in, with `HARNESS_CLIENT=<slug>` and a
    storage directory this client does not share.
-2. Declare the people and services in `clients/<slug>/identity.yaml`: the two service ids the
-   containers use (`svc-hermes`, `svc-host`), `svc-local` for the operator, and one
-   `u-…` principal per human with their level. A container whose principal is missing from the
-   file refuses to start.
-3. Create the two Slack apps described under **Slack credentials** above and paste both pairs
-   of tokens.
+2. Declare the people and services in `clients/<slug>/identity.yaml`: `svc-host` for the
+   container, `svc-local` for the operator, and one `u-…` principal per human with their level
+   and their Slack member id ("Finding a Slack member id" above). A container whose principal
+   is missing from the file refuses to start.
+3. Create one Slack app as described under **Slack credentials** above and paste its tokens and
+   the approvals channel id.
 4. Review `clients/<slug>/SOUL.md` and `policy.yaml` before the first run.
 5. Start it under its own Compose project so it does not collide with another client's
    containers and volumes:
@@ -634,32 +634,8 @@ levels:
 
 ## Playbooks
 
-Three jobs run in the Hermes cron fleet. Install or repair them with:
-
-```bash
-docker compose --env-file .env -f harness/compose/docker-compose.yml exec hermes \
-  bash /opt/data/cron/playbooks.sh
-```
-
-The script is idempotent: a job whose name already exists is left alone.
-
-| Job | Schedule | Mode | Silence |
-|---|---|---|---|
-| `credentialing-expirations` | `0 7 * * *` | agent, skill-backed | replies `{"wakeAgent": false}` when nothing is due |
-| `harness-outbox-watchdog` | `*/15 * * * *` | `no_agent` script | empty stdout |
-| `harness-reconcile-watchdog` | `17 */6 * * *` | `no_agent` script | empty stdout |
-
-The expirations job delivers `local`: the skill stages its own message with
-`harness_notify`, so the digest is audited, carries `derived_from` back to the
-`deadlines_upcoming` query, and is sent exactly once per continuity key. A
-digest for the same bucket and count as last night is staged again, hits the
-unique index on `tool_effects.idempotency_key`, and sends nothing.
-
-The record format of `~/.hermes/cron/jobs.json` is not documented, so jobs are
-only ever created through `hermes cron create`. The init container seeds that
-file when it is absent and never overwrites it, so Hermes's own writes to it
-(next run times, run history) survive a redeploy.
-
-Diagnose a fleet that has gone quiet with `hermes cron doctor` inside the
-container: it flags a missing script, a job parked in the past, and a delivery
-that failed after the job succeeded.
+The Hermes runtime was retired in Plan 8, taking its cron fleet, the nightly
+`credentialing-expirations` job, `pnpm demo:playbooks` and the two watchdogs with it. Scheduled
+work returns in Plan 9 as `playbooks.yaml` and a scheduler inside the host, running as a service
+principal. Until then, the `credentialing-expirations` skill stays in the pack, and a human can
+ask for it in a message.

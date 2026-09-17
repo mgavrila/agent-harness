@@ -24,7 +24,7 @@ src/domain/poller.ts     claim a pending row, post its card, record the message 
 src/domain/decisions.ts  the one writer of approvals.status outside core-tools
 src/domain/sinks.ts      surface_message and surface_file senders for the outbox
 src/domain/runner.ts     three independent loops: poll, dispatch, reconcile
-src/domain/health.ts     GET /healthz for the cron watchdogs
+src/domain/health.ts     GET /healthz for a manual check
 src/index.ts             the public API
 src/testing.ts           ./testing: MemorySurface, FakeCoreToolsClient, useTestDb
 ```
@@ -56,8 +56,8 @@ that thread, as the thread's own principal, reporting what already happened.
 
 ## Slack
 
-See `surfaces/slack/README.md`. The short version is that the host needs its own Slack app, not
-Hermes's.
+See `surfaces/slack/README.md`. The short version is that one Slack app, held by the host,
+carries both chat and approvals.
 
 ## What it must never do
 

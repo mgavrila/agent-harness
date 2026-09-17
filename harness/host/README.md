@@ -22,12 +22,21 @@ with an error the human sees, and LiteLLM's own daily budget is the other half o
 `HARNESS_HISTORY_MAX_MESSAGES` (40), how many prior turns of a thread the runtime is handed
 (also capped at 24,000 characters; the runtime's own checkpoint carries the rest).
 
+At startup the host also `mkdir -p`s `<storageDir>/incoming` and `<storageDir>/out` — a belt to
+`node.Dockerfile`'s own braces, which already give the image that layout — so a bare-metal run or
+a bind-mounted storage directory still has both.
+
 ## The flows
 
 - **A message** (`handleMessage`, wired to every surface by `attachMessageHandlers`): resolve the
   principal (an unknown sender gets one refusal, once, and one audit row), find or create their
-  thread, and run one turn (`runTurn`) — append the turn, ask the runtime, stream or post the
-  reply, append the answer, close the run.
+  thread, and — when the surface says the message is addressed to it (`MessageEvent.mentioned`:
+  true for a direct message or a mention, false for a channel message that is neither, in which
+  case the host returns without running) — run one turn (`runTurn`): append the turn, ask the
+  runtime, stream the reply as it arrives on a surface whose `capabilities.streaming` is true or
+  post it once at `done` otherwise, append the answer, close the run. An inbound file is already
+  downloaded into `<storageDir>/incoming/` by the surface before the host ever sees the message;
+  `MessageEvent.attachments[].path` names it relative to that directory.
 - **A decision** (`resumeOnDecision`, the approvals package's `onDecided` hook, wired through
   `decisionDeps`): once `@harness/approvals` records a decision and executes the approved action,
   find the thread the action was parked from and run one more turn on it, as the thread's own

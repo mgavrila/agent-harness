@@ -14,29 +14,23 @@ cp clients/demo-practice/.env.example .env        # fill in the blanks
 pnpm install
 pnpm db:up && pnpm db:migrate
 pnpm demo:up
-pnpm demo:playbooks                               # installs the three cron jobs
 ```
 
-Create **two** Slack apps before filling in `.env`, both with Socket Mode on:
-
-| App | Variables | Bot scopes | Other |
-|---|---|---|---|
-| Hermes gateway | `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN` | `chat:write`, `app_mentions:read`, `channels:history`, `groups:history`, `im:history`, `im:read`, `im:write`, `mpim:history`, `users:read`, `files:read`, `files:write` | — |
-| Approvals app | `APPROVALS_SLACK_BOT_TOKEN`, `APPROVALS_SLACK_APP_TOKEN` | `chat:write`, `users:read`, `files:write` | Interactivity on |
-
-One app cannot serve both. Slack routes each Socket Mode event to exactly one
-open connection, so a shared app sends about half the button clicks to Hermes,
-which has no handler for them, and step 4 below fails silently.
+Create one Slack app before filling in `.env`, with Socket Mode and Interactivity both on. Its
+bot scopes are `chat:write`, `app_mentions:read`, `channels:history`, `groups:history`,
+`im:history`, `im:read`, `im:write`, `mpim:history`, `users:read`, `files:read`, `files:write`.
+Paste `SLACK_BOT_TOKEN` and `SLACK_APP_TOKEN` into `.env`, along with `SLACK_APPROVALS_CHANNEL`.
+One app now carries both chat and approvals, because the host is the only process that holds a
+Socket Mode connection.
 
 The host posts on whichever surface `HARNESS_SURFACES` names first. It has no default of its
 own; the demo's `.env` and the `host` service both set `@harness/surface-slack`, which is why
 Slack is what you see here.
 
-Then in Slack, invite the Hermes bot to `SLACK_HOME_CHANNEL` and the approvals
-bot to `SLACK_APPROVALS_CHANNEL`. Generate the synthetic provider files with the
-generator from the document-pipeline plan (`packs/healthcare/synthetic/`) and
-keep three of them — a state licence, a malpractice certificate and a W-9 for
-one doctor — open in a folder.
+Then in Slack, invite the bot to `SLACK_APPROVALS_CHANNEL` and to every other channel it should
+answer in. Generate the synthetic provider files with the generator from the document-pipeline
+plan (`packs/healthcare/synthetic/`) and keep three of them — a state licence, a malpractice
+certificate and a W-9 for one doctor — open in a folder.
 
 Run the smoke checklist at the bottom once before you demo. It takes two
 minutes and catches every failure that is embarrassing in front of a room.
@@ -50,7 +44,7 @@ say:
 
 > New doctor joining us, Dr. Ada Reyes. Please file these.
 
-Hermes loads `credentialing-intake`, ingests each file, classifies it, extracts
+The host loads `credentialing-intake`, ingests each file, classifies it, extracts
 it, and writes the record. Point out while it works: the W-9's tax identifier
 goes straight into an encrypted column and is never sent to the model.
 
@@ -71,8 +65,8 @@ is attributed to the person who answered.
 > Who expires in the next 90 days?
 
 `deadlines_upcoming` answers with no model call behind it: the date maths is
-deterministic. Mention that the same skill runs nightly at 07:00 and says
-nothing at all on a night when nothing is due.
+deterministic. There is no nightly digest yet — that returns with Plan 9's
+scheduler; until then the skill runs only when a human asks for it.
 
 ### 4. Ask for the Aetna roster and approve it (90 seconds)
 
@@ -98,9 +92,9 @@ columns read `yes` and `no`. The numbers are not in the file.
 reads and internal writes as `auto`, the release as `approval` and then as
 `auto` against the approval id. Point at the `caller` column — every call
 carries the principal the harness bound to the session, never one the agent
-chose — and at `derived_from` on the nightly digest, which points back at the
-query it was built from. `skill` and `skill_version` on the audit rows are
-back: the runtime stamps the skill it activated.
+chose — and at `derived_from`, which points back at the query an answer was
+built from. `skill` and `skill_version` on the audit rows are back: the
+runtime stamps the skill it activated.
 
 ### 6. Swap the model provider (30 seconds)
 
@@ -134,12 +128,11 @@ design anticipated:
 Run this before the demo. Each line either passes or tells you what is wrong.
 
 - [ ] `pnpm test` passes and `pnpm typecheck` is clean.
-- [ ] `docker compose --env-file .env -f harness/compose/docker-compose.yml --profile demo ps` shows `postgres`, `litellm`, `hermes` and `host` up, and `hermes-init` exited 0.
-- [ ] `curl -s localhost:${APPROVALS_HEALTH_HOST_PORT:-8787}/healthz | python3 -m json.tool` returns `"ok": true`.
-- [ ] `docker compose --env-file .env -f harness/compose/docker-compose.yml exec hermes hermes config get skills.write_approval` prints `true`.
-- [ ] `docker compose --env-file .env -f harness/compose/docker-compose.yml exec hermes hermes cron list` shows all three jobs.
-- [ ] The two Slack apps are separate: `docker compose --env-file .env -f harness/compose/docker-compose.yml --profile demo exec host printenv APPROVALS_SLACK_APP_TOKEN` and `... exec hermes printenv SLACK_APP_TOKEN` print **different** tokens, and `... exec hermes printenv APPROVALS_SLACK_APP_TOKEN` prints nothing.
-- [ ] In Slack, `/credentialing-intake` autocompletes: the pack skills were discovered through `skills.external_dirs`.
+- [ ] `docker compose --env-file .env -f harness/compose/docker-compose.yml --profile demo ps` shows `postgres`, `litellm`, `files` and `host` up.
+- [ ] `curl http://127.0.0.1:8787/healthz` answers `"ok": true`.
+- [ ] `docker compose --env-file .env -f harness/compose/docker-compose.yml --profile demo exec host printenv SLACK_APP_TOKEN` prints the one token.
+- [ ] A direct message to the bot is answered.
+- [ ] A mention in a channel is answered, and an unmentioned message in that channel is not.
 - [ ] Asking the bot "what tools do you have?" lists `mcp_core_tools_*` names and **no** terminal or file tools.
 - [ ] A test release round-trips: ask for a roster of one provider, approve the card, and confirm the file arrives.
 - [ ] `psql "$DATABASE_URL" -c "select tool, decision from audit_log order by created_at desc limit 5"` shows that round-trip.

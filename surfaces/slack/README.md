@@ -19,9 +19,9 @@ src/testing.ts           ./testing: FakeSlack, FakeSlackEvents, fakeSlackSession
 This adapter reads `SLACK_BOT_TOKEN` and `SLACK_APP_TOKEN` (Socket Mode) and
 `SLACK_APPROVALS_CHANNEL` (where approval cards and released files go). One app carries chat and
 approvals, because one process — the host — holds both connections; two apps were needed only
-while Hermes and the approvals process were separate, and that reasoning is gone with the second
-process. The app needs Interactivity on (for the approval buttons and the note modal) and is
-subscribed to `message.channels`, `message.groups`, `message.im`, `message.mpim` and
+while the chat runtime and the approvals process were separate, and that reasoning is gone with
+the second process. The app needs Interactivity on (for the approval buttons and the note modal)
+and is subscribed to `message.channels`, `message.groups`, `message.im`, `message.mpim` and
 `app_mention`; its bot scopes are `chat:write`, `app_mentions:read`, `channels:history`,
 `groups:history`, `im:history`, `im:read`, `im:write`, `mpim:history`, `users:read`,
 `files:read`, `files:write`. `SLACK_ALLOWED_USERS` is gone: who may decide is the identity
