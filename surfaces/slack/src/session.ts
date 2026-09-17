@@ -103,8 +103,10 @@ export function createSlackSession(transport: SlackTransport, config: SlackConfi
       const res = await guarded('chat.postMessage', () =>
         api.chat.postMessage({ channel: conversation, text, thread_ts: opts.replyTo?.id }),
       );
-      if (!res.ts) throw new SurfaceError(`${NAME}: the message was accepted without a timestamp`);
-      return ref(conversation, res.ts);
+      // A text reply is never written to a row and nothing sweeps it, so an accepted post
+      // without a timestamp is still a success: an empty id here only means "no reference".
+      // Raising would make the outbox retry an already-delivered message.
+      return ref(conversation, res.ts ?? '');
     },
 
     async postPrivate(conversation, userId, text) {

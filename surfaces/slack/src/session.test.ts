@@ -172,6 +172,16 @@ describe('the Slack session', () => {
     expect(api.posts).toHaveLength(1);
   });
 
+  it('treats a text reply Slack accepted without a timestamp as sent, not refused', async () => {
+    const { session, api } = fakeSlackSession();
+    api.acceptWithoutTs = true;
+    // Nothing stores a reply's reference, so an empty id is a success with no reference; a
+    // rejection here would make the outbox retry a message that is already in the channel.
+    const sent = await session.postText('C0DEMO', 'decided', {});
+    expect(sent).toEqual({ surface: 'slack', conversation: 'C0DEMO', id: '' });
+    expect(api.posts).toHaveLength(1);
+  });
+
   it('refuses a conversation id that is not a Slack one, before it calls Slack', async () => {
     const { session, api } = fakeSlackSession();
     // An id the kernel's shape check admits and Slack's does not, spelling an SSN. The message
