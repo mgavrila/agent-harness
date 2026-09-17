@@ -1,6 +1,6 @@
 import { createLogger } from '@harness/shared';
 import { allowsUser, type ActionEvent, type FormEvent, type SurfaceSession } from '@harness/surface-api';
-import { decideApproval, type DecisionDeps, type DecisionResult } from './decisions.js';
+import { decideApproval, type DecisionDeps } from './decisions.js';
 import {
   APPROVE_ACTION_ID,
   DECLINE_ACTION_ID,
@@ -32,35 +32,30 @@ async function tellUser(session: SurfaceSession, conversation: string, userId: s
 }
 
 /**
- * True when this person may act on approvals *on this surface at all*. Checked before every
- * decision and before the id is even looked at, so someone unauthorised learns nothing about
- * whether the approval exists. Allowlists are per surface: an identity on one surface and an
- * identity on another are different people until something says otherwise.
+ * True when this person may act on this approval, which is two questions in a fixed order.
+ *
+ * Authorisation comes first and the id is not looked at until it passes, so someone unauthorised
+ * learns nothing about whether the approval exists. Allowlists are per surface: an identity on one
+ * surface and an identity on another are different people until something says otherwise. Then the
+ * id itself, because a value that is not a well-formed uuid can never name a row.
  */
-async function authorize(
+async function mayAct(
   session: SurfaceSession,
   conversation: string,
   userId: string,
   approvalId: string,
 ): Promise<boolean> {
-  if (allowsUser(session.allowedUsers, userId)) return true;
-  log.warn(`user ${userId} is not an approver on surface "${session.name}"; refused action on ${approvalId}`);
-  await tellUser(session, conversation, userId, UNAUTHORIZED_TEXT);
-  return false;
-}
-
-/** A value that is not a well-formed uuid can never name a row. */
-async function validId(session: SurfaceSession, conversation: string, userId: string, id: string): Promise<boolean> {
-  if (UUID_RE.test(id)) return true;
-  log.warn(`rejected a malformed approval id from ${userId}`);
-  await tellUser(session, conversation, userId, NOT_FOUND_TEXT);
-  return false;
-}
-
-function report(approvalId: string, result: DecisionResult): void {
-  if (result.outcome === 'not_actionable') {
-    log.info(`${approvalId} was not actionable (already decided, expired, or another client's)`);
+  if (!allowsUser(session.allowedUsers, userId)) {
+    log.warn(`user ${userId} is not an approver on surface "${session.name}"; refused action on ${approvalId}`);
+    await tellUser(session, conversation, userId, UNAUTHORIZED_TEXT);
+    return false;
   }
+  if (!UUID_RE.test(approvalId)) {
+    log.warn(`rejected a malformed approval id from ${userId}`);
+    await tellUser(session, conversation, userId, NOT_FOUND_TEXT);
+    return false;
+  }
+  return true;
 }
 
 /**
@@ -77,8 +72,7 @@ async function decide(
   decision: 'approved' | 'declined',
   note?: string,
 ): Promise<void> {
-  if (!(await authorize(session, event.conversation, event.userId, event.value))) return;
-  if (!(await validId(session, event.conversation, event.userId, event.value))) return;
+  if (!(await mayAct(session, event.conversation, event.userId, event.value))) return;
   const result = await decideApproval(deps, {
     approvalId: event.value,
     decision,
@@ -91,13 +85,14 @@ async function decide(
     await tellUser(session, event.conversation, event.userId, NOT_FOUND_TEXT);
     return;
   }
-  report(event.value, result);
+  if (result.outcome === 'not_actionable') {
+    log.info(`${event.value} was not actionable (already decided, expired, or another client's)`);
+  }
 }
 
 /** Edit never releases anything: it opens a note box, and submitting it declines with that note. */
 async function openEdit(session: SurfaceSession, event: ActionEvent): Promise<void> {
-  if (!(await authorize(session, event.conversation, event.userId, event.value))) return;
-  if (!(await validId(session, event.conversation, event.userId, event.value))) return;
+  if (!(await mayAct(session, event.conversation, event.userId, event.value))) return;
   if (!event.trigger) {
     log.warn(`Edit on ${event.value} arrived with no trigger; cannot open the form`);
     return;
