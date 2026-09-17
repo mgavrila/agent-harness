@@ -35,11 +35,11 @@ GRANT INSERT, SELECT ON TABLE audit_log TO harness_app;
 
 -- Everything else is read/write but never destructive.
 GRANT SELECT, INSERT, UPDATE ON TABLE
-  providers, documents, fields, credentials, deadlines,
+  records, documents, fields, attachments, deadlines,
   approvals, runs, model_calls
 TO harness_app;
 
--- `deadlines_compute` retires deadlines whose credential lost its expiry date,
+-- `deadlines_compute` retires deadlines whose attachment lost its expiry date,
 -- so this one table also needs DELETE.
 GRANT DELETE ON TABLE deadlines TO harness_app;
 ```
@@ -62,7 +62,7 @@ must not.
 ## Reading audit errors
 
 The MCP `audit_query` tool deliberately never returns error text. A failure
-message can contain record identifiers, provider names or values copied out of a
+message can contain record identifiers, record names or values copied out of a
 restricted field, and `audit_query` is callable by the agent. The tool reports
 only `has_error: true`.
 
@@ -214,6 +214,29 @@ the schema changed. Migration `0003` needed its snapshot patched by hand
 because of exactly this mistake. `--custom` is only for a migration with no
 corresponding `schema.ts` change (e.g. a one-off data backfill).
 
+### Migration 0008 and the record model
+
+`0008_generic_records` replaced `providers` and `credentials` with `records` and `attachments`,
+re-keyed `fields`, `documents` and `deadlines` onto them, and copied the healthcare rows across
+inside the same file. It is the one migration in the tree with a hand-written data section,
+bracketed by `-- harness:data-section:begin` and `-- harness:data-section:end`.
+`harness/db/src/domain/migration-0008.test.ts` replays the shipped file, statement by statement,
+over a fixture of the pre-0008 schema and asserts the row counts and two decrypted values. It
+does that in a scratch database of its own, `harness_test_migration_<pid>`, created and dropped
+around the run, so it never touches `harness_test`.
+
+**Primary keys were preserved on purpose.** `deadlines_upcoming` returns a `digest_key` that is
+a hash over `<attachment id>:<deadline kind>:<bucket>` triples, and a playbook passes it
+straight through as `harness_notify`'s idempotency key. A new id would have changed every key,
+and every nightly digest would have been sent a second time on the first run after the
+migration.
+
+**There is no down migration and there will not be one.** The two tables are dropped after the
+copy, so a reverse would have to invent the `pack`/`kind` split back out of `records` and would
+lose any row a second pack wrote in the meantime. If `0008` has to be undone, restore the
+database from a backup taken before it ran, as the migration role described under "Database
+roles".
+
 ## Model calls
 
 Every gateway call inserts a `model_calls` row: run id, client, route, model,
@@ -253,7 +276,8 @@ the call, not that the harness declined to make it. Raise `daily_budget_usd` in
 ## Document pipeline
 
 `documents_extract` does five things in one transaction: read the text, redact
-it, prompt the `extract` route, upsert the provider, and write the redacted text
+it, prompt the `extract` route, upsert the record the document's kind routes to, and write
+the redacted text
 beside the document. If any step throws, none of them happened — including the
 `documents.text_path` update, so a document with `text_path = null` has never
 been successfully extracted.
@@ -311,7 +335,7 @@ and until then the deployment behind a route is whatever
 `HARNESS_STORAGE_DIR` is the root of the file store, and there is exactly one
 root. It is **required and has no default**: `storageRoot()` throws at startup
 rather than let a deployment that has not said where files live scatter
-provider documents into whatever directory happened to be the working
+ingested documents into whatever directory happened to be the working
 directory. Give it an absolute path; a relative one is resolved against the
 process working directory, which is rarely what was meant.
 
