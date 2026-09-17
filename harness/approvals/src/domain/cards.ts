@@ -38,10 +38,15 @@ export function payloadPreview(payload: unknown, limit = 2000): string {
   return text.length > limit ? `${text.slice(0, limit)}…` : text;
 }
 
-/** A human-written note may contain anything, so it passes the same check as a payload. */
-function safeNote(note: string | null): string | null {
-  if (!note) return null;
-  return containsRestrictedPattern(note) ? 'note withheld: it did not pass the redaction check' : note;
+/**
+ * Free text a human wrote, or `withheld` when it does not pass the same check a payload does.
+ *
+ * Shared with the thread reply in `decisions.ts`, which asks the same question of the same note
+ * and answers it in its own wording: the guard is one rule, the replacement is per reader.
+ */
+export function orWithheld(text: string | null, withheld: string): string | null {
+  if (!text) return null;
+  return containsRestrictedPattern(text) ? withheld : text;
 }
 
 const EXECUTION_FAILURE_FALLBACK = 'Execution failed; see the audit log. Nothing was sent.';
@@ -120,7 +125,7 @@ export function decidedCard(row: ApprovalRow, outcome: { executed: boolean; tool
     }
   } else {
     parts.push({ icon: 'declined' }, { text: ' Declined by ' }, who, ...when, { text: '. Nothing was sent.' });
-    const note = safeNote(row.decisionNote);
+    const note = orWithheld(row.decisionNote, 'note withheld: it did not pass the redaction check');
     if (note) parts.push({ text: `\nNote: ${note}` });
   }
   return {

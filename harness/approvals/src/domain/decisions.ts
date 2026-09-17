@@ -1,10 +1,9 @@
 import { and, eq, gt, isNull, or } from 'drizzle-orm';
 import { approvals, type Db } from '@harness/db';
-import { containsRestrictedPattern } from '@harness/core-tools/redaction';
 import { createLogger, describeError } from '@harness/shared';
 import type { MessageRef } from '@harness/surface-api';
 import type { CoreToolsClient, ExecuteOutcome } from './execute/types.js';
-import { decidedCard, type ApprovalRow } from './cards.js';
+import { decidedCard, orWithheld, type ApprovalRow } from './cards.js';
 import type { LoadedSurfaces } from './surfaces/registry.js';
 
 const log = createLogger('approvals');
@@ -31,11 +30,8 @@ export type DecisionResult =
   | { outcome: 'wrong_surface' }
   | { outcome: 'decided'; status: 'approved' | 'declined'; execution?: ExecuteOutcome };
 
-/** A human-written note may contain anything; the same guard as the card applies. */
-function safeText(text: string | null): string | null {
-  if (!text) return null;
-  return containsRestrictedPattern(text) ? '(withheld: it did not pass the redaction check)' : text;
-}
+/** What the agent reads in place of free text that did not pass the card's own redaction check. */
+const WITHHELD = '(withheld: it did not pass the redaction check)';
 
 /**
  * The reply Hermes reads as a new turn. It reports what already happened — the host executes
@@ -53,10 +49,10 @@ export function threadReplyText(
     if (execution?.status === 'executed') {
       return `Approval ${row.id} approved by ${who}. Executed \`${execution.tool}\`; delivery is queued in the effects outbox.`;
     }
-    const reason = safeText(execution?.status === 'failed' ? execution.error : null) ?? 'see the audit log';
+    const reason = orWithheld(execution?.status === 'failed' ? execution.error : null, WITHHELD) ?? 'see the audit log';
     return `Approval ${row.id} approved by ${who}, but execution failed: ${reason}. Nothing was sent.`;
   }
-  const note = safeText(row.decisionNote);
+  const note = orWithheld(row.decisionNote, WITHHELD);
   const tail = note ? ` Note: ${note}` : '';
   return `Approval ${row.id} declined by ${who}. Nothing was sent. Redo the action with the correction and request approval again.${tail}`;
 }
