@@ -42,12 +42,18 @@ async function guarded<T>(op: string, call: () => Promise<T>): Promise<T> {
  * `end` sets a flag that both that wait and the timer's own callback check before doing anything
  * further, so a trailing edit still waiting on the post, or already timed and about to fire, is
  * folded into `end`'s own final edit rather than sent a second time; a timer that has already
- * been armed is cleared outright, so nothing keeps the event loop alive past `end`. A mid-stream
- * edit's failure is swallowed — the text it carried arrives with the next edit or the final one,
- * so failing the whole stream over one rate-limited or transient edit would only drop text
- * nothing else ever resends. A failed first post, or a failed final edit, rejects `end` with a
- * `SurfaceError`, so the host logs it once. `append` after `end` is a no-op: the reply already
- * told the world it was done, and nothing reopens it.
+ * been armed is cleared outright, so nothing keeps the event loop alive past `end`. Every actual
+ * edit — a periodic one and the final one — is queued onto `editQueue`, one at a time, so `end`'s
+ * final edit always waits for whatever edit is already in flight rather than racing it to the
+ * same message. `posting` itself never rejects: a failed first post is recorded in `failed` and
+ * surfaced only when something actually needs to know, in `end`, as a `SurfaceError`; that keeps
+ * `append`'s fire-and-forget `void post()` from ever becoming an unhandled rejection no matter
+ * how long it sits before anything awaits it. A mid-stream edit's failure is swallowed the same
+ * way — the text it carried arrives with the next edit or the final one, so failing the whole
+ * stream over one rate-limited or transient edit would only drop text nothing else ever resends.
+ * A failed final edit still rejects `end` with a `SurfaceError`, so the host logs it once.
+ * `append` after `end` is a no-op: the reply already told the world it was done, and nothing
+ * reopens it.
  */
 export function createEditStream(deps: StreamDeps): StreamHandle {
   const now = deps.now ?? (() => Date.now());
@@ -55,23 +61,48 @@ export function createEditStream(deps: StreamDeps): StreamHandle {
   let text = '';
   let ts: string | null = null;
   let posting: Promise<void> | null = null;
+  let failed: SurfaceError | null = null;
   let lastCall = 0;
   let pending = false;
   let timer: NodeJS.Timeout | null = null;
   let ended = false;
+  let editQueue: Promise<void> = Promise.resolve();
 
-  const post = (): Promise<void> =>
-    (posting ??= guarded('chat.postMessage', () =>
+  const post = (): Promise<void> => {
+    posting ??= guarded('chat.postMessage', () =>
       deps.api.chat.postMessage({ channel: deps.conversation, text, thread_ts: deps.threadTs }),
-    ).then((res) => {
-      ts = res.ts ?? '';
-      lastCall = now();
-    }));
+    ).then(
+      (res) => {
+        ts = res.ts ?? '';
+        lastCall = now();
+      },
+      // Caught here, not left to whoever eventually awaits `posting`: `append` calls `post`
+      // fire-and-forget, and a rejection nobody has attached a handler to yet by the time it
+      // settles is flagged unhandled by Node even if `end` awaits the same promise moments
+      // later. `posting` resolving unconditionally means it never can be.
+      (err: unknown) => {
+        failed =
+          err instanceof SurfaceError
+            ? err
+            : new SurfaceError(`${NAME}: chat.postMessage failed: ${describeError(err)}`);
+      },
+    );
+    return posting;
+  };
 
-  const edit = async (): Promise<void> => {
-    if (!ts || ended) return;
-    lastCall = now();
-    await deps.api.chat.update({ channel: deps.conversation, ts, text }).catch(() => undefined);
+  /** Queue one edit onto `editQueue`, so it runs after whatever edit is already in flight. */
+  const runEdit = (final: boolean): Promise<void> => {
+    editQueue = editQueue.then(async () => {
+      if (!ts) return;
+      lastCall = now();
+      const postedTs = ts;
+      if (final) {
+        await guarded('chat.update', () => deps.api.chat.update({ channel: deps.conversation, ts: postedTs, text }));
+      } else {
+        await deps.api.chat.update({ channel: deps.conversation, ts: postedTs, text }).catch(() => undefined);
+      }
+    });
+    return editQueue;
   };
 
   const scheduleEdit = (): void => {
@@ -91,7 +122,7 @@ export function createEditStream(deps: StreamDeps): StreamHandle {
       });
       pending = false;
       if (ended) return;
-      await edit();
+      await runEdit(false);
     })().catch(() => undefined);
   };
 
@@ -111,10 +142,8 @@ export function createEditStream(deps: StreamDeps): StreamHandle {
       pending = false;
       if (!posting) return { surface: NAME, conversation: deps.conversation, id: '' };
       await posting;
-      if (ts) {
-        const postedTs = ts;
-        await guarded('chat.update', () => deps.api.chat.update({ channel: deps.conversation, ts: postedTs, text }));
-      }
+      if (failed) throw failed;
+      if (ts) await runEdit(true);
       return { surface: NAME, conversation: deps.conversation, id: ts ?? '' };
     },
   };
