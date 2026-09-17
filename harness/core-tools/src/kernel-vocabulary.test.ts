@@ -165,6 +165,20 @@ const SCANNED = [
     minFiles: 1,
     skip: [/\.test\.ts$/],
   },
+  {
+    what: 'framework and vendor vocabulary',
+    root: 'harness/files/src',
+    forbidden: FRAMEWORK_FORBIDDEN,
+    minFiles: 4,
+    skip: [/\.test\.ts$/],
+  },
+  {
+    what: 'deployment vocabulary',
+    root: 'harness/files/src',
+    forbidden: DEPLOYMENT_FORBIDDEN,
+    minFiles: 4,
+    skip: [/\.test\.ts$/],
+  },
 ];
 
 /**

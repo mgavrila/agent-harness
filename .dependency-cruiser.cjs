@@ -39,6 +39,7 @@ const PACKAGES = [
   { name: 'gateway', src: 'harness/gateway/src', severity: 'error' },
   { name: 'core-tools', src: 'harness/core-tools/src', severity: 'error' },
   { name: 'approvals', src: 'harness/approvals/src', severity: 'error' },
+  { name: 'files', src: 'harness/files/src', severity: 'error' },
   { name: 'evals', src: 'evals/src', severity: 'error' },
   { name: 'pack-healthcare', src: 'packs/healthcare/src', severity: 'error' },
   { name: 'pack-stories', src: 'packs/stories/src', severity: 'error' },
@@ -103,6 +104,7 @@ const WORKSPACE_DIRS = [
   'harness/gateway',
   'harness/core-tools',
   'harness/approvals',
+  'harness/files',
   'evals',
   'packs/healthcare',
   'packs/stories',
@@ -256,6 +258,17 @@ const GLOBAL_RULES = [
     to: {
       path: '^(harness|packs|surfaces|identities|evals|scripts)/',
       pathNot: ['^harness/identity-api/src/', '^harness/shared/src/'],
+    },
+  },
+  {
+    name: 'files-imports-only-shared',
+    comment:
+      '@harness/files parses untrusted documents in a process that holds no key and no database URL. It may import @harness/shared and node built-ins, and no other workspace package: an edge into @harness/db or core-tools would put the key back next to the parser, which is the boundary this package exists to draw.',
+    severity: 'error',
+    from: { path: '^harness/files/src/' },
+    to: {
+      path: '^(harness|packs|surfaces|identities|evals|scripts)/',
+      pathNot: ['^harness/files/src/', '^harness/shared/src/'],
     },
   },
   {
