@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { createDb, loadKey } from '@harness/db';
-import { booleanFromEnv, ConfigError, numberFromEnv, optionalEnv } from '@harness/shared';
+import { booleanFromEnv, envOrDefault, numberFromEnv, optionalEnv } from '@harness/shared';
 import { loadPolicy } from '../domain/tooling/policy.js';
 import { DEFAULT_CONFIDENCE_THRESHOLD, type ToolDeps } from '../domain/tooling/types.js';
 import { gatewayFromEnv } from '../domain/models/gateway.js';
@@ -8,22 +8,6 @@ import { storageRoot } from '../domain/storage/layout.js';
 import { PACK_KERNEL } from '../domain/packs/kernel.js';
 import { loadPacks } from '../domain/packs/registry.js';
 import type { PackRegistry } from '../domain/packs/types.js';
-
-/**
- * A variable with a default, where an empty value is a mistake rather than a request for that
- * default. `optionalEnv` reads an empty string as absent, so a half-filled `.env` would leave
- * this process serving the `default` client or auditing every call as `hermes`, either of them
- * silently. Unset keeps the default; set-but-empty fails startup naming the variable. A pack
- * that reads a variable of its own keeps a copy of this — see `packs/healthcare/src/config.ts`.
- */
-export function envOrDefault(name: string, fallback: string, env: NodeJS.ProcessEnv = process.env): string {
-  const raw = env[name];
-  if (raw === undefined) return fallback;
-  if (raw.trim() === '') {
-    throw new ConfigError(`${name} is set but empty; give it a value, or unset it to use the default`);
-  }
-  return raw;
-}
 
 /**
  * Where the form templates live.

@@ -1,14 +1,14 @@
 import path from 'node:path';
 import { describe, it, expect } from 'vitest';
-import { ConfigError } from '@harness/shared';
-import { envOrDefault, formsDirFrom } from './server.js';
+import { ConfigError, envOrDefault } from '@harness/shared';
+import { formsDirFrom } from './server.js';
 
 /**
  * The two variables `buildDepsFromEnv` reads with a default. Each one used to go through
  * `optionalEnv`, which reads an empty string as absent, so a half-filled `.env` changed the
- * client or the audited caller without saying so. The healthcare pack keeps a copy of this
- * helper for `NPPES_BASE_URL`, which it reads itself now; `packs/healthcare/src/config.test.ts`
- * is where that variable's version of this assertion lives.
+ * client or the audited caller without saying so. The healthcare pack calls the same helper for
+ * `NPPES_BASE_URL`, which it reads itself now; `packs/healthcare/src/config.test.ts` is where
+ * that variable's version of this assertion lives.
  */
 describe('envOrDefault', () => {
   it('refuses an empty HARNESS_CLIENT rather than serving the default client', () => {

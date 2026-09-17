@@ -11,6 +11,7 @@
 export { ConfigError, ModelOutputError, ToolError, describeError } from './errors.js';
 export {
   booleanFromEnv,
+  envOrDefault,
   numberFromEnv,
   optionalEnv,
   requiredEnv,

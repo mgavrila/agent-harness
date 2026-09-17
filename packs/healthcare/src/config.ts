@@ -1,21 +1,6 @@
-import { ConfigError, booleanFromEnv, numberFromEnv, type EnvSource } from '@harness/shared';
+import { booleanFromEnv, envOrDefault, numberFromEnv, type EnvSource } from '@harness/shared';
 import { NPPES_DEFAULT_BASE_URL } from './domain/verify/nppes.js';
 import type { VerifyConfig } from './domain/verify/types.js';
-
-/**
- * A variable with a default, where an empty value is a mistake rather than a request for that
- * default. `optionalEnv` reads an empty string as absent, so a half-filled `.env` would point
- * the registry lookup at the live CMS endpoint silently, and only fail much later on an
- * outbound path. This is `app/server.ts`'s `envOrDefault`, kept behaviour-identical.
- */
-function envOrDefault(name: string, fallback: string, env: EnvSource): string {
-  const raw = env[name];
-  if (raw === undefined) return fallback;
-  if (raw.trim() === '') {
-    throw new ConfigError(`${name} is set but empty; give it a value, or unset it to use the default`);
-  }
-  return raw;
-}
 
 /**
  * The pack's registry configuration, read at the moment `tools(deps)` builds the catalogue.
