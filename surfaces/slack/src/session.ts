@@ -59,10 +59,6 @@ async function guarded<T>(op: string, call: () => Promise<T>): Promise<T> {
 export function createSlackSession(transport: SlackTransport, config: SlackConfig): SurfaceSession {
   const { api, events } = transport;
 
-  // Deliberately no state between opening a form and reading its submission back. Slack's
-  // `view_submission` carries the answers under the block ids this adapter wrote, so `valuesOf`
-  // reads them out of the payload; a `Map` of open forms would lose a modal opened before a
-  // restart, which today's `main.ts` never does.
   const ref = (conversation: string, id: string): MessageRef => ({ surface: NAME, conversation, id });
 
   return {
@@ -154,6 +150,10 @@ export function createSlackSession(transport: SlackTransport, config: SlackConfi
       });
     },
 
+    // Deliberately no state between opening a form and reading its submission back. Slack's
+    // `view_submission` carries the answers under the block ids this adapter wrote, so `valuesOf`
+    // reads them out of the payload; a `Map` of open forms would lose a modal opened before a
+    // restart.
     onFormSubmit(handler: (event: FormEvent) => Promise<void>) {
       events.onView(async (view) => {
         await handler({
