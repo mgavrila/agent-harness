@@ -45,11 +45,11 @@ export async function executeApproval(deps: ToolDeps, approvalId: string): Promi
   if (!target) throw new ToolError(`approval ${approvalId} references unknown tool ${parsed.tool}`);
   // Policy is re-read at replay time: an approval granted before the class was blocked must not
   // become a way around the current policy. It is re-checked at the level the action was parked
-  // under, never at the replaying process's level, because the approvals host always replays as
-  // a service principal, which would otherwise block or (wrongly) permit the action on its own
-  // level rather than the requester's. A row parked before this level was recorded falls back to
-  // the replaying process's level. Throwing here rolls the `executed` transition back to
-  // `approved`.
+  // under; a row parked before that level was recorded falls back to the replaying principal's
+  // own level, which since Plan 8 is the approver's — the in-process client opens the run as
+  // whoever decided the approval, always a lead or admin — so a legitimate approval is never
+  // blocked on that fallback, while a policy tightened after the row was parked still applies.
+  // Throwing here rolls the `executed` transition back to `approved`.
   const parkedLevel = parsed.level && (LEVELS as readonly string[]).includes(parsed.level) ? parsed.level : undefined;
   if (decide(target.actionClass, parkedLevel ?? deps.principal.level, deps.policy) === 'blocked') {
     throw new ToolError(`approval ${approvalId} cannot execute: ${target.name} is now blocked by policy`);

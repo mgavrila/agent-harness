@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { approvals } from '@harness/db';
 import { StaticIdentity } from '@harness/identity-api/testing';
-import type { Principal } from '@harness/identity-api';
+import type { IdentitySession, Principal } from '@harness/identity-api';
 import { MemorySurface } from '@harness/surface-api/testing';
 import { FakeCoreToolsClient, pendingApproval, useTestDb } from '../testing.js';
 import { APPROVE_ACTION_ID, DECLINE_ACTION_ID, EDIT_ACTION_ID, EDIT_FORM_ID, EDIT_NOTE_FIELD_ID } from './cards.js';
@@ -172,6 +172,35 @@ describe('approval handlers', () => {
     await surface.press(APPROVE_ACTION_ID, row.id, 'UBOT');
     expect(core.executed).toEqual([]);
     expect(surface.privates[0].text).toBe('You are not an approver for this workspace.');
+  });
+
+  it('fails closed with the same refusal when the identity plug-in itself rejects', async () => {
+    const row = await seed();
+    const surface = new MemorySurface();
+    const core = new FakeCoreToolsClient();
+    const identity: IdentitySession = {
+      name: 'broken',
+      resolve: () => Promise.reject(new Error('identity backend unreachable')),
+      get: async () => null,
+      list: async () => [],
+      stop: async () => {},
+    };
+    registerApprovalHandlers(surface, {
+      db,
+      surfaces: surfacesOf([surface]),
+      core,
+      identity,
+      client: 'demo-practice',
+      now,
+    });
+    await surface.press(APPROVE_ACTION_ID, row.id, 'U012');
+    expect(core.executed).toEqual([]);
+    const [after] = await db.select().from(approvals).where(eq(approvals.id, row.id));
+    expect(after.status).toBe('pending');
+    expect(surface.privates[0]).toMatchObject({
+      userId: 'U012',
+      text: 'You are not an approver for this workspace.',
+    });
   });
 
   it('leaves the row pending when the presser is refused, whatever the reason', async () => {

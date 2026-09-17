@@ -37,6 +37,10 @@ async function tellUser(session: SurfaceSession, conversation: string, userId: s
  * they have to be a person rather than a service (spec invariant 2), and their level has to clear
  * `lead` (invariant 3). Every refusal says the same thing, so an outsider learns nothing about
  * whether the approval exists; then the id itself, because a malformed uuid can name no row.
+ *
+ * A plug-in that itself fails to resolve — a network error to whatever backs it — is fail-closed
+ * exactly like an unknown user, with the identical refusal: the presser gets an answer rather
+ * than silence, and learns nothing about why.
  */
 async function mayAct(
   session: SurfaceSession,
@@ -45,7 +49,13 @@ async function mayAct(
   userId: string,
   approvalId: string,
 ): Promise<Principal | null> {
-  const principal = await deps.identity.resolve({ surface: session.name, userId });
+  let principal: Principal | null;
+  try {
+    principal = await deps.identity.resolve({ surface: session.name, userId });
+  } catch (err) {
+    log.error(`the identity plug-in failed resolving ${userId} on surface "${session.name}"`, err);
+    principal = null;
+  }
   if (!principal || principal.kind !== 'user' || !levelAtLeast(principal.level, 'lead')) {
     log.warn(`user ${userId} on surface "${session.name}" may not decide approvals; refused action on ${approvalId}`);
     await tellUser(session, conversation, userId, UNAUTHORIZED_TEXT);

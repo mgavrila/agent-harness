@@ -9,8 +9,10 @@ import {
 } from '@harness/core-tools';
 import type { Db } from '@harness/db';
 import type { Principal } from '@harness/identity-api';
-import { describeError } from '@harness/shared';
+import { createLogger, describeError } from '@harness/shared';
 import type { CallResult, CoreToolsClient, ExecuteOutcome } from './types.js';
+
+const log = createLogger('approvals');
 
 export interface InProcessCoreToolsOptions {
   db: Db;
@@ -29,6 +31,29 @@ function textOf(res: CallResult): string {
 }
 
 /**
+ * Close the in-process transport, then close the run — in that order, but never let the first
+ * step's failure skip the second. A `close()` that itself rejects (the client or its handler
+ * failing to tear down cleanly) is logged and swallowed rather than thrown, because the run
+ * ending with the call's real status matters more than a clean transport shutdown, and a throw
+ * here would otherwise escape the `finally` it runs in and skip `closeRun` entirely. Exported so
+ * this guarantee is directly testable without needing the real transport to misbehave.
+ */
+export async function finishRun(
+  db: Db,
+  runId: string,
+  status: 'done' | 'error',
+  now: () => Date,
+  close: () => Promise<void>,
+): Promise<void> {
+  try {
+    await close();
+  } catch (err) {
+    log.error(`could not close the in-process core-tools client for run ${runId}`, err);
+  }
+  await closeRun(db, runId, status, now);
+}
+
+/**
  * The kernel, hosted in this process, one run per call.
  *
  * Every call opens a `runs` row as the given principal, builds one `ToolDeps` for it, connects an
@@ -42,17 +67,21 @@ export function createInProcessCoreToolsClient(opts: InProcessCoreToolsOptions):
 
   async function withRun<T>(principal: Principal, fn: (client: Client) => Promise<T>): Promise<T> {
     const context = await openRun(opts.db, { client: opts.client, principal });
-    const deps = depsForRun(opts.config, { db: opts.db, principal, context });
-    const { client, close } = await connectInProcess(() => createCoreToolsServer(deps));
     let status: 'done' | 'error' = 'done';
+    // Undefined until `connectInProcess` actually hands one back: if building the server or
+    // connecting the client throws, there is nothing to close, but the run — already open —
+    // still has to end, which is why this is armed before the try rather than the source of it.
+    let close: (() => Promise<void>) | undefined;
     try {
-      return await fn(client);
+      const deps = depsForRun(opts.config, { db: opts.db, principal, context });
+      const connected = await connectInProcess(() => createCoreToolsServer(deps));
+      close = connected.close;
+      return await fn(connected.client);
     } catch (err) {
       status = 'error';
       throw err;
     } finally {
-      await close();
-      await closeRun(opts.db, context.runId, status, now);
+      await finishRun(opts.db, context.runId, status, now, close ?? (() => Promise.resolve()));
     }
   }
 

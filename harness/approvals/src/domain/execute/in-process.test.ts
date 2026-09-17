@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { approvals, auditLog, runs } from '@harness/db';
+import { openRun } from '@harness/core-tools';
 import type { Principal } from '@harness/identity-api';
 import { TEST_PRINCIPAL, makeTestDeps } from '@harness/core-tools/testing';
 import { pendingApproval, useTestDb } from '../../testing.js';
-import { createInProcessCoreToolsClient } from './in-process.js';
+import { createInProcessCoreToolsClient, finishRun } from './in-process.js';
 
 const db = useTestDb();
 const LEAD: Principal = {
@@ -71,5 +72,29 @@ describe('createInProcessCoreToolsClient', () => {
     const audit = await db.select().from(auditLog).where(eq(auditLog.tool, 'harness_reconcile'));
     expect(audit[0].caller).toBe('svc-host');
     await client.close();
+  });
+
+  it('ends the run as error, with an end time, when building the in-process server throws before any call is made', async () => {
+    // `packs` missing breaks `createCoreToolsServer` before `fn` ever runs: the open run must
+    // still be closed rather than left `running` forever.
+    const broken = { ...config(), packs: undefined } as unknown as ReturnType<typeof config>;
+    const client = createInProcessCoreToolsClient({ db, config: broken, client: 'test', servicePrincipal: HOST });
+    await expect(client.reconcile(10)).rejects.toThrow();
+    const [run] = await db.select().from(runs);
+    expect(run.status).toBe('error');
+    expect(run.endedAt).not.toBeNull();
+  });
+});
+
+describe('finishRun', () => {
+  it("still closes the run with the call's status when closing the transport itself rejects", async () => {
+    const context = await openRun(db, { client: 'test', principal: HOST });
+    const rejectingClose = () => Promise.reject(new Error('transport already gone'));
+    await expect(
+      finishRun(db, context.runId, 'done', () => new Date('2026-09-15T12:00:00Z'), rejectingClose),
+    ).resolves.toBeUndefined();
+    const [run] = await db.select().from(runs).where(eq(runs.id, context.runId));
+    expect(run).toMatchObject({ status: 'done' });
+    expect(run.endedAt).not.toBeNull();
   });
 });
