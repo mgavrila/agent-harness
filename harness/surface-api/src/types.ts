@@ -182,6 +182,15 @@ export interface SurfaceSession {
   readonly defaultConversation: string;
   /** How this surface spells a mention of a user inside plain text. */
   mention(userId: string): string;
+  /**
+   * Post a card and say where it landed.
+   *
+   * Two rejections, and the difference is what the host does next. A plain `SurfaceError` means
+   * nothing reached the conversation, so the host is free to post the card again. A
+   * `SurfaceAcceptedError` means the transport took it and only the reference is missing: a card
+   * is live, a human can press its buttons, and posting again would put a duplicate beside it.
+   * An adapter whose send call succeeds but returns no id raises the second one, never the first.
+   */
   postCard(conversation: string, card: Card): Promise<MessageRef>;
   /** Rejects with a `SurfaceError` when `capabilities.update` is false. */
   updateCard(ref: MessageRef, card: Card): Promise<void>;

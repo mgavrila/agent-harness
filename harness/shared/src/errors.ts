@@ -1,5 +1,5 @@
 /**
- * The only four error types this codebase raises deliberately. Everything else is a plain
+ * The only five error types this codebase raises deliberately. Everything else is a plain
  * `Error`, which the tooling kernel masks before it can reach an agent — see `runAuto`.
  *
  * The distinction is not stylistic. A raw error message can carry a provider's name, a row id
@@ -66,5 +66,23 @@ export class SurfaceError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'SurfaceError';
+  }
+}
+
+/**
+ * The surface took the message but answered without anything to address it by later.
+ *
+ * A `SurfaceError` subclass, so a caller that only wants "this did not work" needs no change.
+ * The distinction is for the caller that has to decide whether to try again: the message is out
+ * and a human can already see it, so retrying posts a second copy. A plain `SurfaceError` from
+ * the same method means the opposite — nothing was sent, and trying again is the repair.
+ *
+ * An adapter raises this only when its own transport reported success: Slack answering `ok` with
+ * no `ts`, or a surface whose send API returns nothing addressable. Never for a refusal.
+ */
+export class SurfaceAcceptedError extends SurfaceError {
+  constructor(message: string) {
+    super(message);
+    this.name = 'SurfaceAcceptedError';
   }
 }

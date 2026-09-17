@@ -1,5 +1,5 @@
 import { readFile } from 'node:fs/promises';
-import { describeError, SurfaceError } from '@harness/shared';
+import { describeError, SurfaceAcceptedError, SurfaceError } from '@harness/shared';
 import type {
   ActionEvent,
   Card,
@@ -71,7 +71,11 @@ export function createSlackSession(transport: SlackTransport, config: SlackConfi
       const res = await guarded('chat.postMessage', () =>
         api.chat.postMessage({ channel: conversation, text: card.notice, blocks: cardBlocks(card) }),
       );
-      if (!res.ts) throw new SurfaceError(`${NAME}: the message was accepted without a timestamp`);
+      // Slack answered, so the card is in the channel even though this call cannot say where.
+      // `SurfaceAcceptedError`, not a plain one: the host must keep whatever claim it holds and
+      // let its stale sweep decide, rather than post a second card with a second live set of
+      // buttons on the next tick.
+      if (!res.ts) throw new SurfaceAcceptedError(`${NAME}: the card was accepted without a timestamp`);
       return ref(conversation, res.ts);
     },
 

@@ -23,6 +23,11 @@ export class FakeSlack implements SlackApi {
   ephemeral: SlackEphemeralArgs[] = [];
   /** When set, every call rejects with this message. */
   failWith?: string;
+  /**
+   * When set, `chat.postMessage` records the message and answers `ok` with no `ts`, which Slack's
+   * own response type allows. The message is sent; there is just nothing to address it by later.
+   */
+  acceptWithoutTs = false;
 
   private seq = 0;
 
@@ -39,6 +44,7 @@ export class FakeSlack implements SlackApi {
     postMessage: async (args: SlackPostMessageArgs): Promise<SlackPostResult> => {
       this.guard();
       this.posts.push(args);
+      if (this.acceptWithoutTs) return { ok: true, channel: args.channel };
       return { ok: true, ts: this.nextTs(), channel: args.channel };
     },
     update: async (args: SlackUpdateArgs): Promise<SlackPostResult> => {

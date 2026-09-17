@@ -27,4 +27,9 @@ trying and catching:
 | Teams (planned)    | yes (a task module)    | no — post in the thread instead | yes    |
 | Telegram (planned) | no — there is no modal | no                              | yes    |
 
+Every method rejects with a `SurfaceError` whose message is safe for a plaintext column.
+`postCard` has one more: `SurfaceAcceptedError`, thrown when the transport took the card and
+answered with nothing to address it by. It says a card is live, so a host holding a claim on the
+row keeps it instead of posting a second one.
+
 `CONTRIBUTING.md`, "Adding a surface", is the worked how-to.

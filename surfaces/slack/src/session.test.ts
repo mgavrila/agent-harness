@@ -2,7 +2,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { SurfaceError } from '@harness/shared';
+import { SurfaceAcceptedError, SurfaceError } from '@harness/shared';
 import type { ActionEvent, Card, Form, FormEvent } from '@harness/surface-api';
 import { fakeSlackSession } from './testing.js';
 
@@ -159,6 +159,17 @@ describe('the Slack session', () => {
     await session.openForm('T1', form);
     expect(api.opened[0].trigger_id).toBe('T1');
     expect(api.opened[0].view.callback_id).toBe('harness_approval_edit_modal');
+  });
+
+  it('says a card Slack accepted without a timestamp was accepted, not refused', async () => {
+    const { session, api } = fakeSlackSession();
+    api.acceptWithoutTs = true;
+    const err = await rejection(session.postCard('C0DEMO', card));
+    // The distinction the host acts on: the card is in the channel, so whoever holds a claim on
+    // it must keep it rather than post a second card on the next tick.
+    expect(err).toBeInstanceOf(SurfaceAcceptedError);
+    expect(err.message).toBe('slack: the card was accepted without a timestamp');
+    expect(api.posts).toHaveLength(1);
   });
 
   it('refuses a conversation id that is not a Slack one, before it calls Slack', async () => {

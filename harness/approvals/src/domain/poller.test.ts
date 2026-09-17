@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { approvals, type Db } from '@harness/db';
+import { SurfaceAcceptedError } from '@harness/shared';
 import type { Card, MessageRef } from '@harness/surface-api';
 import { MemorySurface, pendingApproval, useTestDb } from '../testing.js';
 import { postPendingApprovals, type PollResult } from './poller.js';
@@ -26,6 +27,21 @@ function dbWithFailingMessageRefWrite(real: Db): Db {
       };
     },
   } as unknown as Db;
+}
+
+/**
+ * A surface whose transport takes the card and then answers with nothing to address it by — the
+ * Slack `ok` with no `ts`. The card is recorded first, because that is the state the adapter is
+ * reporting: the message is live and only the reference is missing.
+ */
+class AcceptsWithoutReferenceSurface extends MemorySurface {
+  accepting = true;
+
+  override async postCard(conversation: string, card: Card): Promise<MessageRef> {
+    const ref = await super.postCard(conversation, card);
+    if (!this.accepting) return ref;
+    throw new SurfaceAcceptedError('memory: the card was accepted without a reference');
+  }
 }
 
 /** A surface that starts a second poll run in the middle of the first one's post. */
@@ -82,7 +98,7 @@ describe('postPendingApprovals', () => {
     expect(surface.cards).toHaveLength(0);
   });
 
-  it('releases the claim when the surface rejects the post, and posts it on the next run', async () => {
+  it('releases the claim when the surface rejects the post outright, and posts it on the next run', async () => {
     await db.insert(approvals).values(pendingApproval());
     const surface = new MemorySurface();
     surface.failWith = 'conversation_not_found';
@@ -160,6 +176,32 @@ describe('postPendingApprovals', () => {
 
     // The next tick, on a healthy database, must not post a second card.
     const out2 = await postPendingApprovals({ db, surface, client: 'demo-practice', now });
+    expect(out2).toMatchObject({ posted: 0, orphaned: 0 });
+    expect(surface.cards).toHaveLength(1);
+
+    errors.mockRestore();
+  });
+
+  it('keeps the claim when the surface accepted the card without a reference, so the next tick posts nothing', async () => {
+    await db.insert(approvals).values(pendingApproval());
+    const surface = new AcceptsWithoutReferenceSurface();
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const deps = { db, surface, client: 'demo-practice', now };
+
+    const out1 = await postPendingApprovals(deps);
+    // A card is live with a working set of buttons, but there is no reference to record, so
+    // nothing counts as posted and — unlike an outright rejection — nothing is released.
+    expect(out1).toMatchObject({ posted: 0, orphaned: 0 });
+    expect(surface.cards).toHaveLength(1);
+    const [afterAccept] = await db.select().from(approvals);
+    expect(afterAccept.surface).toBe('memory');
+    expect(afterAccept.conversationId).toBe('memory');
+    expect(afterAccept.messageRef).toBeNull();
+
+    // The next tick, against a surface that now answers with a reference, must not post a second
+    // card: the claim is what keeps the row out of the pending select until the stale sweep.
+    surface.accepting = false;
+    const out2 = await postPendingApprovals(deps);
     expect(out2).toMatchObject({ posted: 0, orphaned: 0 });
     expect(surface.cards).toHaveLength(1);
 

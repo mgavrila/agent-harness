@@ -8,7 +8,14 @@
  * stays in @harness/core-tools, because deciding which field names are restricted and which
  * SSN allocations are real is domain knowledge.
  */
-export { ConfigError, ModelOutputError, SurfaceError, ToolError, describeError } from './errors.js';
+export {
+  ConfigError,
+  ModelOutputError,
+  SurfaceAcceptedError,
+  SurfaceError,
+  ToolError,
+  describeError,
+} from './errors.js';
 export { CONVERSATION_ID_PATTERN, SURFACE_NAME_PATTERN } from './ids.js';
 export {
   booleanFromEnv,

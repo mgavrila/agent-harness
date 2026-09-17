@@ -1,6 +1,6 @@
 import { and, asc, eq, gt, isNotNull, isNull, lte } from 'drizzle-orm';
 import { approvals, type Db } from '@harness/db';
-import { createLogger } from '@harness/shared';
+import { createLogger, SurfaceAcceptedError } from '@harness/shared';
 import type { SurfaceSession } from '@harness/surface-api';
 import { approvalCard } from './cards.js';
 
@@ -39,10 +39,11 @@ const STALE_CLAIM_MS = 2 * 60 * 1000;
  * `message_ref` is written on success, and a failed post releases the claim so the row stays
  * postable on the next run instead of being stranded.
  *
- * Only a *failed post* releases the claim. If the post succeeds and writing `message_ref` is what
- * fails, the claim stays: the card is already in the conversation, and releasing it would post a
- * second one on the very next tick. That row is then recovered by the stale sweep below rather
- * than at once.
+ * Only a post that never reached the conversation releases the claim. Two failures leave it in
+ * place, because in both of them a card is already live and releasing would post a second one on
+ * the very next tick: writing `message_ref` failing after a successful post, and the surface
+ * rejecting with a `SurfaceAcceptedError`, which says it took the card and could not say where.
+ * Either row is then recovered by the stale sweep below rather than at once.
  */
 export async function postPendingApprovals(deps: PollDeps, limit = 20): Promise<PollResult> {
   const now = deps.now();
@@ -98,6 +99,17 @@ export async function postPendingApprovals(deps: PollDeps, limit = 20): Promise<
     try {
       ref = await deps.surface.postCard(conversation, approvalCard(row, deps.surface.capabilities));
     } catch (err) {
+      if (err instanceof SurfaceAcceptedError) {
+        // The surface took the card and only the reference is missing, so this belongs on the
+        // far side of the split even though it arrived as a rejection. Same treatment as a
+        // failed message_ref write below: no release, and the stale sweep recovers the row.
+        log.error(
+          `the card for ${row.id} was accepted without a reference; ` +
+            `leaving the claim in place so no duplicate is posted`,
+          err,
+        );
+        continue;
+      }
       log.error(`could not post the card for ${row.id}`, err);
       await deps.db
         .update(approvals)

@@ -266,6 +266,13 @@ argument name, because skills use it, but validate it only as a conversation-id 
 cannot know a surface's id format, so the adapter checks at dispatch and a bad id fails that one
 effect, visible through `harness_reconcile`.
 
+**A card that was accepted is not a card that failed.** An adapter whose transport takes a card
+and answers with nothing to address it by rejects `postCard` with `SurfaceAcceptedError`. The
+poller keeps its claim on that row rather than release it, because a card with working buttons is
+already in the conversation and the next tick would put a second one beside it; the two-minute
+stale sweep recovers the row instead. A plain `SurfaceError` from `postCard` means the opposite —
+nothing was sent — and does release the claim.
+
 **Secrets.** An adapter declares the environment variables it reads that are credentials, and the
 host subtracts the union of them from the environment of the core-tools child it spawns. The
 allowlist in `app/child-env.ts` therefore names no surface.

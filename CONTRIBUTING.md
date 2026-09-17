@@ -304,6 +304,11 @@ complete one; read it alongside this, and read `surfaces/slack` for the real thi
    `tool_effects.last_error`, which is plaintext and which an operator pastes into a ticket, so
    name the surface and the operation and never a path, a token or a payload value.
 
+   One rejection is not a failure: when your transport **accepts** a card and answers with nothing
+   to address it by, throw `SurfaceAcceptedError`, the `SurfaceError` subclass that says so. A
+   card is live and a human can press its buttons, and the host reads that to keep its claim on
+   the row rather than post a second card on the next tick.
+
 7. **Test it against fakes.** Split the transport out behind an interface of your own, the way
    `surfaces/slack/src/transport/` does, and export a wired-to-fakes session from a `./testing`
    subpath. No test makes a real network call.
