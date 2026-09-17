@@ -39,6 +39,7 @@ const PACKAGES = [
   { name: 'approvals', src: 'harness/approvals/src', severity: 'error' },
   { name: 'evals', src: 'evals/src', severity: 'error' },
   { name: 'pack-healthcare', src: 'packs/healthcare/src', severity: 'error' },
+  { name: 'pack-stories', src: 'packs/stories/src', severity: 'error' },
   { name: 'scripts', src: 'scripts/src', severity: 'error' },
 ];
 
@@ -97,6 +98,7 @@ const WORKSPACE_DIRS = [
   'harness/approvals',
   'evals',
   'packs/healthcare',
+  'packs/stories',
   'scripts',
 ];
 

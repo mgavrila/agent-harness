@@ -173,6 +173,9 @@ importers:
         specifier: ^4.6.5
         version: 4.6.5
     devDependencies:
+      '@harness/pack-stories':
+        specifier: workspace:*
+        version: link:../../packs/stories
       '@modelcontextprotocol/client':
         specifier: ^2.0.0
         version: 2.0.0
@@ -303,6 +306,31 @@ importers:
       pdf-parse:
         specifier: 2.4.5
         version: 2.4.5
+      tsx:
+        specifier: ^4.23.13
+        version: 4.23.13
+      typescript:
+        specifier: ^7.0.2
+        version: 7.0.2
+      vitest:
+        specifier: ^5.0.0
+        version: 5.0.0(@types/node@26.5.1)(vite@8.3.0(@types/node@26.5.1)(esbuild@0.28.2)(tsx@4.23.13)(yaml@2.9.1))
+
+  packs/stories:
+    dependencies:
+      '@harness/pack-api':
+        specifier: workspace:*
+        version: link:../../harness/pack-api
+      '@harness/shared':
+        specifier: workspace:*
+        version: link:../../harness/shared
+      pdf-lib:
+        specifier: ^1.17.1
+        version: 1.17.1
+    devDependencies:
+      '@types/node':
+        specifier: ^26.5.1
+        version: 26.5.1
       tsx:
         specifier: ^4.23.13
         version: 4.23.13

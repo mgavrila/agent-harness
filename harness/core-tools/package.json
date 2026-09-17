@@ -34,6 +34,7 @@
     "zod": "^4.6.5"
   },
   "devDependencies": {
+    "@harness/pack-stories": "workspace:*",
     "@modelcontextprotocol/client": "^2.0.0",
     "@types/node": "^26.5.1",
     "@types/pg": "^8.23.1",
