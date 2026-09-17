@@ -41,22 +41,26 @@ describe('the deepagents runtime', () => {
 
   it('creates the checkpoint tables in schema langgraph when it connects, and stops cleanly', async () => {
     const session = await runtime.connect({ env: {}, log, databaseUrl: url, storageDir: '/nonexistent' });
-    expect(session.name).toBe('deepagents');
-    const pool = new pg.Pool({ connectionString: url });
     try {
-      const { rows } = await pool.query(
-        "select table_name from information_schema.tables where table_schema = 'langgraph' order by table_name",
-      );
-      expect(rows.map((r: { table_name: string }) => r.table_name)).toEqual([
-        'checkpoint_blobs',
-        'checkpoint_migrations',
-        'checkpoint_writes',
-        'checkpoints',
-      ]);
+      expect(session.name).toBe('deepagents');
+      const pool = new pg.Pool({ connectionString: url });
+      try {
+        const { rows } = await pool.query(
+          "select table_name from information_schema.tables where table_schema = 'langgraph' order by table_name",
+        );
+        expect(rows.map((r: { table_name: string }) => r.table_name)).toEqual([
+          'checkpoint_blobs',
+          'checkpoint_migrations',
+          'checkpoint_writes',
+          'checkpoints',
+        ]);
+      } finally {
+        await pool.end();
+      }
     } finally {
-      await pool.end();
+      // A failed assertion must still close the saver's pool, or the worker never exits.
+      await session.stop();
     }
-    await session.stop();
   });
 
   it('resumes a thread from the checkpoint it wrote, without being told the history again', async () => {

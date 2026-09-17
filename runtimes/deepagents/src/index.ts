@@ -1,5 +1,5 @@
 import { defineRuntime, type RunEvent, type Runtime } from '@harness/runtime-api';
-import { openCheckpointer } from './domain/checkpointer.js';
+import { CHECKPOINT_SCHEMA, openCheckpointer } from './domain/checkpointer.js';
 import { EventQueue } from './domain/events.js';
 import { runDeepAgent } from './domain/run.js';
 
@@ -15,7 +15,7 @@ export const runtime: Runtime = defineRuntime({
   secrets: [],
   connect: async (deps) => {
     const checkpointer = await openCheckpointer(deps.databaseUrl);
-    deps.log.info('deepagents: checkpointer ready in schema langgraph');
+    deps.log.info(`deepagents: checkpointer ready in schema ${CHECKPOINT_SCHEMA}`);
     return {
       name: 'deepagents',
       run(request) {
