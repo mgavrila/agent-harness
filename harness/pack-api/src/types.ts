@@ -78,8 +78,13 @@ export interface PackKernel {
   /**
    * Whether the kernel will always encrypt a field of this name, whatever a caller says. A
    * pack's `redact` uses it to mask the arguments a parked approval stores in plaintext jsonb.
+   *
+   * `this: void` is part of the contract, not decoration: a `redact` has no `deps` of its own,
+   * so every caller pulls this off the bag and closes over it or passes it as a value. Declaring
+   * that it never reads `this` is what makes doing so correct — and it is why the implementation
+   * in `domain/packs/kernel.ts` is a plain module function rather than a method.
    */
-  isRestrictedName(name: string): boolean;
+  isRestrictedName(this: void, name: string): boolean;
   /** Write bytes into this client's out tree under a content-addressed id. */
   writeOutFile(deps: PackToolDeps, input: WriteOutFileInput): Promise<WrittenFile>;
   /** Stage one generated file for delivery through the effects outbox. Sends nothing. */

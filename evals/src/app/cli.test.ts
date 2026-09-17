@@ -15,6 +15,13 @@ const evalsDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../
 const tsxBin = path.join(evalsDir, 'node_modules', '.bin', 'tsx');
 const runScript = path.join(evalsDir, 'src', 'app', 'cli.ts');
 
+/**
+ * `expect.stringContaining` is typed `any`, so dropping it straight into a `toMatchObject`
+ * literal is an unchecked assignment. Pinning it to `string` once here keeps the four usage-error
+ * cases below honest about what they match, and keeps the type-aware lint rules quiet.
+ */
+const stderrContaining = (text: string): string => expect.stringContaining(text) as string;
+
 let dir: string;
 let corpus: string;
 let casesFile: string;
@@ -148,7 +155,7 @@ describe('CLI', () => {
           },
         },
       ),
-    ).rejects.toMatchObject({ code: 2, stderr: expect.stringContaining('--limit must be a positive integer') });
+    ).rejects.toMatchObject({ code: 2, stderr: stderrContaining('--limit must be a positive integer') });
 
     await expect(readFile(path.join(outDir, 'report.json'), 'utf8')).rejects.toThrow();
   }, 60_000);
@@ -161,7 +168,7 @@ describe('CLI', () => {
         cwd: evalsDir,
         env: { ...process.env, LITELLM_MASTER_KEY: '', HARNESS_GATEWAY_URL: '', EVALS_DATABASE_URL },
       }),
-    ).rejects.toMatchObject({ code: 2, stderr: expect.stringContaining('--pack') });
+    ).rejects.toMatchObject({ code: 2, stderr: stderrContaining('--pack') });
   }, 60_000);
 
   it('exits 2 when --pack is given no name, before the gateway or the database is touched', async () => {
@@ -170,7 +177,7 @@ describe('CLI', () => {
         cwd: evalsDir,
         env: { ...process.env, LITELLM_MASTER_KEY: '', HARNESS_GATEWAY_URL: '', EVALS_DATABASE_URL },
       }),
-    ).rejects.toMatchObject({ code: 2, stderr: expect.stringContaining('--pack needs the name of a loaded pack') });
+    ).rejects.toMatchObject({ code: 2, stderr: stderrContaining('--pack needs the name of a loaded pack') });
   }, 60_000);
 
   it('exits 2 naming the flag when the space-separated --pack does not match a loaded pack', async () => {
@@ -179,7 +186,7 @@ describe('CLI', () => {
         cwd: evalsDir,
         env: { ...process.env, LITELLM_MASTER_KEY: '', HARNESS_GATEWAY_URL: '', EVALS_DATABASE_URL },
       }),
-    ).rejects.toMatchObject({ code: 2, stderr: expect.stringContaining('no pack named "no-such-pack"') });
+    ).rejects.toMatchObject({ code: 2, stderr: stderrContaining('no pack named "no-such-pack"') });
   }, 60_000);
 
   it('writes the new baseline to the --baseline path when --update-baseline is given bare', async () => {

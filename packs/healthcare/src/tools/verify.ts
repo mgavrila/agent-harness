@@ -104,15 +104,17 @@ export function verifyTools(deps: PackToolDeps, config: VerifyConfig): AnyToolDe
       status: z.literal('unsupported'),
       detail: z.string(),
     }),
-    handler: async ({ state }) => {
+    // Not `async`: there is no board adapter to call, so this handler awaits nothing. It returns
+    // a resolved promise rather than carrying an `async` that only exists to match the signature.
+    handler: ({ state }) => {
       const code = state.toUpperCase();
-      return {
+      return Promise.resolve({
         state: code,
         status: 'unsupported' as const,
         detail: config.stateLicenseEnabled
           ? `No board adapter is implemented for ${code}. Verify this licence by hand at the ${code} medical board.`
           : `State licence verification is switched off for this client, and no board adapter exists for ${code} yet.`,
-      };
+      });
     },
     // The licence number is restricted, so it must not be echoed into the
     // plaintext approval payload if a client ever reclassifies this tool.
