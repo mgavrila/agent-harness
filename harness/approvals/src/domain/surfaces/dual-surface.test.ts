@@ -15,40 +15,46 @@ import { registerApprovalHandlers } from '../handlers.js';
 import { postPendingApprovals } from '../poller.js';
 import { surfaceSinks } from '../sinks.js';
 import { surfacesOf } from './registry.js';
+import { STUB_SECRET, stubSurface } from './stub-surface.test-helpers.js';
 
 const db = useTestDb();
 const key = randomBytes(32);
 const now = () => new Date('2026-09-15T12:00:00Z');
 
 /**
- * Two surfaces at once: Slack, through the real adapter on a fake transport, and the memory
- * adapter beside it. This is the suite that proves the host is not a Slack app with an interface
- * in front of it — cards go to the primary, effects go where they are addressed, and a decision
- * can only be taken where the card is.
+ * Three surfaces at once: Slack, through the real adapter on a fake transport, the memory adapter
+ * beside it, and a credential-declaring stub third. This is the suite that proves the host is not
+ * a Slack app with an interface in front of it — cards go to the primary, effects go where they
+ * are addressed, and a decision can only be taken where the card is.
+ *
+ * The stub earns its place in the last case: the memory adapter declares no credentials, so
+ * without a third adapter the union below is Slack's own list and asserts nothing.
  */
 function wire() {
   const slack = fakeSlackSession({ allowedUsers: parseAllowedUsers('U012') });
   const memory = new MemorySurface({ allowedUsers: parseAllowedUsers('U012') });
-  // The secrets come off the two adapters' own `Surface.secrets`, the way `loadSurfaces` builds
+  const stub = new MemorySurface({ name: 'stub', conversation: 'stub' });
+  // The secrets come off the three adapters' own `Surface.secrets`, the way `loadSurfaces` builds
   // them, rather than out of an array written here. Otherwise the last case below proves only
   // that the host collected what this file remembered.
-  const declared = [...new Set([...slackSurface.secrets, ...memorySurface.secrets])];
-  const surfaces = surfacesOf([slack.session, memory], declared);
+  const declared = [...new Set([slackSurface, memorySurface, stubSurface].flatMap((s) => [...s.secrets]))];
+  const surfaces = surfacesOf([slack.session, memory, stub], declared);
   const core = new FakeCoreToolsClient();
   for (const session of surfaces.all) {
     registerApprovalHandlers(session, { db, surfaces, core, client: 'demo-practice', now });
   }
-  return { slack, memory, surfaces, core };
+  return { slack, memory, stub, surfaces, core };
 }
 
-describe('a host with two surfaces loaded', () => {
+describe('a host with several surfaces loaded', () => {
   it('posts every approval card on the primary surface only', async () => {
     await db.insert(approvals).values(pendingApproval());
-    const { slack, memory, surfaces } = wire();
+    const { slack, memory, stub, surfaces } = wire();
     const out = await postPendingApprovals({ db, surface: surfaces.primary, client: 'demo-practice', now });
     expect(out).toMatchObject({ posted: 1 });
     expect(slack.api.posts).toHaveLength(1);
     expect(memory.cards).toHaveLength(0);
+    expect(stub.cards).toHaveLength(0);
     const [row] = await db.select().from(approvals);
     expect(row).toMatchObject({ surface: 'slack', conversationId: 'C0DEMO' });
     expect(row.messageRef).not.toBeNull();
@@ -132,12 +138,14 @@ describe('a host with two surfaces loaded', () => {
    */
   it('collects the credentials of every loaded adapter, from the adapters themselves', () => {
     const { surfaces } = wire();
-    // The adapters declare these; nothing here does. If the Slack adapter's list ever changes,
-    // this test follows it.
-    expect(surfaces.secrets).toEqual(expect.arrayContaining([...slackSurface.secrets]));
-    expect(surfaces.secrets).toEqual(expect.arrayContaining([...memorySurface.secrets]));
-    expect(surfaces.secrets.length).toBeGreaterThan(0);
-    // A union, not a concatenation: a name two adapters both read is stripped once.
-    expect(new Set(surfaces.secrets).size).toBe(surfaces.secrets.length);
+    // Stated so the case below cannot go quietly hollow: with only these two loaded, the union
+    // would be Slack's list and a host that dropped every list but the first would pass.
+    expect([...memorySurface.secrets]).toEqual([]);
+    expect([...slackSurface.secrets].length).toBeGreaterThan(0);
+    // Exact membership, from the adapters' own declarations rather than a list written here. A
+    // set, because the order is load order and nothing depends on it.
+    expect(new Set(surfaces.secrets)).toEqual(new Set([...slackSurface.secrets, STUB_SECRET]));
+    // A union, not a concatenation: a name two adapters both read is carried once.
+    expect(surfaces.secrets).toHaveLength(slackSurface.secrets.length + 1);
   });
 });

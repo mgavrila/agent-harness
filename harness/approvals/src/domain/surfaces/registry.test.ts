@@ -1,9 +1,13 @@
-import { describe, expect, it } from 'vitest';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ConfigError, createLogger } from '@harness/shared';
 import { MemorySurface } from '@harness/surface-api/testing';
 import { loadSurfaces, surfacesOf } from './registry.js';
 
 const deps = { env: {}, log: createLogger('test'), storageDir: '/nonexistent' };
+const here = path.dirname(fileURLToPath(import.meta.url));
 
 describe('loadSurfaces', () => {
   it('loads an adapter by name and makes the first one primary', async () => {
@@ -49,5 +53,63 @@ describe('surfacesOf', () => {
 
   it('refuses an empty list, because `primary` would be undefined and every caller assumes it', () => {
     expect(() => surfacesOf([])).toThrow(ConfigError);
+  });
+});
+
+/**
+ * Connecting fails the same three ways importing does, and an adapter that cannot reach its
+ * transport must say so at startup rather than leave an approval nobody sees. Each fixture is a
+ * throwaway module written under a temp directory next to this test and loaded by its absolute
+ * `file://` URL, so none of them touches a real workspace package. Every temp directory is
+ * removed after its test, pass or fail.
+ */
+describe('loadSurfaces when an adapter cannot connect', () => {
+  const tempDirs: string[] = [];
+
+  afterEach(() => {
+    for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+  });
+
+  function fixture(connectBody: string): string {
+    const dir = mkdtempSync(path.join(here, '.tmp-surface-fixture-'));
+    tempDirs.push(dir);
+    const file = path.join(dir, 'surface.ts');
+    writeFileSync(
+      file,
+      `
+      import { ConfigError } from '@harness/shared';
+      import { defineSurface } from '@harness/surface-api';
+      export const surface = defineSurface({
+        name: 'unreachable',
+        version: '0.0.0',
+        secrets: [],
+        connect: () => { ${connectBody} },
+      });
+      `,
+      'utf8',
+    );
+    return pathToFileURL(file).href;
+  }
+
+  it('re-raises a ConfigError from connect with the adapter named in front', async () => {
+    // A missing credential is the ordinary way this happens, and the operator needs to know
+    // which of the surfaces they listed is the one complaining.
+    const url = fixture(`throw new ConfigError('MY_ADAPTER_TOKEN is not set');`);
+    await expect(loadSurfaces([url], deps)).rejects.toThrow(ConfigError);
+    await expect(loadSurfaces([url], deps)).rejects.toThrow(`surface "${url}": MY_ADAPTER_TOKEN is not set`);
+  });
+
+  it('replaces any other connect failure with a message naming only the adapter, and logs the original', async () => {
+    const secret = '/etc/only-the-log-should-see-this';
+    const url = fixture(`throw new Error('could not read ${secret}');`);
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      await expect(loadSurfaces([url], deps)).rejects.toThrow(ConfigError);
+      await expect(loadSurfaces([url], deps)).rejects.toThrow(`surface "${url}" failed to connect`);
+      await expect(loadSurfaces([url], deps)).rejects.not.toThrow(new RegExp(secret.replace(/\//g, '\\/')));
+      expect(errorSpy.mock.calls.some((call) => call.some((arg) => String(arg).includes(secret)))).toBe(true);
+    } finally {
+      errorSpy.mockRestore();
+    }
   });
 });

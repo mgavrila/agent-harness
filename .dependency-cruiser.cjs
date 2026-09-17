@@ -177,11 +177,11 @@ const GLOBAL_RULES = [
   {
     name: 'the-host-never-statically-imports-a-surface',
     comment:
-      'Adapters are loaded at runtime from HARNESS_SURFACES through a dynamic import in domain/surfaces/registry.ts. A static import would wire the approvals host to one messaging transport by name, which is the coupling the surface contract exists to remove. src/testing.ts and *.test.ts are exempt: they drive a real adapter on a fake transport and are not shipped.',
+      'Adapters are loaded at runtime from HARNESS_SURFACES through a dynamic import in domain/surfaces/registry.ts. A static import would wire the approvals host to one messaging transport by name, which is the coupling the surface contract exists to remove. *.test.ts is exempt: a test drives a real adapter on a fake transport because that is the only way to prove the host against the thing that ships, and it is not shipped itself.',
     severity: 'error',
     from: {
       path: '^harness/approvals/src/',
-      pathNot: ['\\.test\\.ts$', '^harness/approvals/src/testing\\.ts$'],
+      pathNot: ['\\.test\\.ts$'],
     },
     to: { path: '^surfaces/[^/]+/', dependencyTypesNot: ['dynamic-import'] },
   },

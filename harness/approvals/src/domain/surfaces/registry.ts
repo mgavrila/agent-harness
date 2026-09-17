@@ -57,36 +57,38 @@ export function surfacesOf(sessions: SurfaceSession[], secrets: readonly string[
  *    with the adapter's name in front;
  *  - anything else — logged in full and replaced with a message naming only the adapter.
  *
- * Connecting happens here too, in order, so a surface that cannot be reached is a startup
- * failure rather than an approval nobody sees.
+ * Connecting happens here too, in order, and through the same three-way funnel, so a surface
+ * that cannot be reached is a startup failure naming the adapter rather than an approval nobody
+ * sees. Each entry keeps the specifier it was named by: that is the string the operator wrote in
+ * `HARNESS_SURFACES`, so it is the string every message here quotes.
  */
 export async function loadSurfaces(names: string[], deps: SurfaceDeps): Promise<LoadedSurfaces> {
   if (names.length === 0) throw new ConfigError(NO_SURFACES_MESSAGE);
-  const declared: Surface[] = [];
-  for (const name of names) {
+  const declared: { specifier: string; surface: Surface }[] = [];
+  for (const specifier of names) {
     let module: { surface?: Surface };
     try {
-      module = (await import(name)) as { surface?: Surface };
+      module = (await import(specifier)) as { surface?: Surface };
     } catch (err) {
       const code = (err as { code?: unknown } | null)?.code;
       if (code === 'ERR_MODULE_NOT_FOUND' || code === 'ERR_PACKAGE_PATH_NOT_EXPORTED') {
         throw new ConfigError(
-          `cannot load surface "${name}"; add it to @harness/approvals dependencies and run pnpm install`,
+          `cannot load surface "${specifier}"; add it to @harness/approvals dependencies and run pnpm install`,
         );
       }
-      if (err instanceof ConfigError) throw new ConfigError(`surface "${name}": ${err.message}`);
-      log.error(`surface "${name}" failed to initialise`, err);
-      throw new ConfigError(`surface "${name}" failed to initialise`);
+      if (err instanceof ConfigError) throw new ConfigError(`surface "${specifier}": ${err.message}`);
+      log.error(`surface "${specifier}" failed to initialise`, err);
+      throw new ConfigError(`surface "${specifier}" failed to initialise`);
     }
-    if (!module.surface) throw new ConfigError(`module "${name}" exports no \`surface\``);
-    declared.push(module.surface);
+    if (!module.surface) throw new ConfigError(`module "${specifier}" exports no \`surface\``);
+    declared.push({ specifier, surface: module.surface });
   }
 
   // Two adapters answering to one name would make `approvals.surface` ambiguous: a decision
   // would be authorised against whichever allowlist loaded first, and a named effect would
   // reach whichever one `find` happened to return.
   const seen = new Set<string>();
-  for (const surface of declared) {
+  for (const { surface } of declared) {
     if (seen.has(surface.name)) {
       throw new ConfigError(
         `two loaded surfaces are both named "${surface.name}"; a surface name identifies one adapter`,
@@ -96,6 +98,17 @@ export async function loadSurfaces(names: string[], deps: SurfaceDeps): Promise<
   }
 
   const sessions: SurfaceSession[] = [];
-  for (const surface of declared) sessions.push(await surface.connect(deps));
-  return surfacesOf(sessions, [...new Set(declared.flatMap((s) => [...s.secrets]))]);
+  for (const { specifier, surface } of declared) {
+    // Reading a missing credential is the ordinary way `connect` fails, and an adapter reports
+    // it as a `ConfigError` — safe by construction, so it is re-raised with the adapter in
+    // front. Anything else may carry a token or a socket path, so it is logged and replaced.
+    try {
+      sessions.push(await surface.connect(deps));
+    } catch (err) {
+      if (err instanceof ConfigError) throw new ConfigError(`surface "${specifier}": ${err.message}`);
+      log.error(`surface "${specifier}" failed to connect`, err);
+      throw new ConfigError(`surface "${specifier}" failed to connect`);
+    }
+  }
+  return surfacesOf(sessions, [...new Set(declared.flatMap((d) => [...d.surface.secrets]))]);
 }

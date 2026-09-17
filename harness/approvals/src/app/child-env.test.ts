@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { surface as memorySurface } from '@harness/surface-memory';
 import { surface as slackSurface } from '@harness/surface-slack';
+import { STUB_SECRET, stubSurface } from '../domain/surfaces/stub-surface.test-helpers.js';
 import { coreToolsChildEnv, neverForwarded } from './child-env.js';
 
 /**
@@ -62,15 +62,20 @@ describe('coreToolsChildEnv', () => {
 
   /**
    * The same property with two adapters loaded, which is the arrangement `LoadedSurfaces.secrets`
-   * exists for: the union of what both declared is what the child does not get. The host names
-   * none of these variables, so a third adapter needs no edit here.
+   * exists for: the union of what both declared is what the child does not get. The second
+   * adapter is a stub rather than the memory one because the memory adapter declares nothing, so
+   * the union would be Slack's list and a host that kept only the first list would pass.
    */
   it('strips the union of two loaded adapters, not one adapter it happens to know about', () => {
-    const union = [...new Set([...slackSurface.secrets, ...memorySurface.secrets])];
-    expect(union.length).toBeGreaterThan(0);
+    const union = [...new Set([...slackSurface.secrets, ...stubSurface.secrets])];
+    expect(union).toContain(STUB_SECRET);
+    expect(union).toEqual(expect.arrayContaining([...slackSurface.secrets]));
     const secrets = Object.fromEntries(neverForwarded(union).map((name) => [name, `secret-${name}`]));
     const env = coreToolsChildEnv({ ...input(secrets), surfaceSecrets: union });
     for (const name of neverForwarded(union)) expect(env).not.toHaveProperty(name);
+    // Named on its own, because it is the one the first adapter does not declare: this is the
+    // assertion that fails if the host ever strips only `surfaceSecrets[0]`'s list.
+    expect(env).not.toHaveProperty(STUB_SECRET);
     expect(JSON.stringify(env)).not.toContain('secret-');
   });
 
