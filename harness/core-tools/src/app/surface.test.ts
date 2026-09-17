@@ -155,9 +155,9 @@ describe('the files worker boundary', () => {
     expect(services.files.ports).toBeUndefined();
   });
 
-  it('is reached by the two services that spawn a core-tools child, which tell the child where it is', async () => {
+  it('is reached by the two services that run core-tools, which tell it where the worker is', async () => {
     const { services } = await rendered();
-    for (const name of ['hermes', 'approvals']) {
+    for (const name of ['hermes', 'host']) {
       expect(Object.keys(services[name].networks ?? {}).sort(), name).toEqual(['default', 'files']);
       expect(services[name].environment?.HARNESS_FILES_URL, name).toBe('http://files:8790');
     }
@@ -184,5 +184,17 @@ describe('the Compose stack names no client and mounts no socket', () => {
 
   it('pins no forms directory', async () => {
     expect(await rendered()).not.toContain('HARNESS_FORMS_DIR');
+  });
+
+  it('runs the host, not an approvals process, and gives it the three plug-in names', async () => {
+    const { services } = parseYaml(await rendered()) as {
+      services: Record<string, { environment?: Record<string, string>; image?: string }>;
+    };
+    expect(services.approvals).toBeUndefined();
+    expect(services.host.image).toBe('harness-host');
+    for (const name of ['HARNESS_SURFACES', 'HARNESS_IDENTITY', 'HARNESS_RUNTIME', 'HARNESS_HOST_PRINCIPAL']) {
+      expect(services.host.environment?.[name], name).toBeDefined();
+    }
+    expect(services.host.environment?.SLACK_ALLOWED_USERS).toBeUndefined();
   });
 });

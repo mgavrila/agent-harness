@@ -5,8 +5,8 @@
 # else needs. `core-tools` is build-only (Hermes launches it over stdio, not as
 # a service). Every client path is derived from `HARNESS_CLIENT`; onboarding a
 # client is a folder and a `.env`, never an edit here. No service mounts the
-# Docker socket. The rest is in the `demo` profile, and `pnpm demo:up` brings
-# up the whole client instance.
+# Docker socket. The rest is in the `demo` profile (`files`, `hermes-init`,
+# `hermes`, `host`), and `pnpm demo:up` brings up the whole client instance.
 #
 # Every variable below is interpolated from the repository-root `.env`, so run
 # these through the `pnpm` scripts, which pass `--env-file .env`. Compose's own
@@ -257,11 +257,15 @@ services:
       - ../../clients:/srv/agent-harness/clients:ro
     command: ['gateway', 'run']
 
-  approvals:
+  # The one long-running harness process per client: the runtime, the surfaces and the identity
+  # plug-in it loads by name, the approvals loops, and core-tools hosted in-process. Hermes still
+  # serves Slack chat beside it until Plan 8b; the host serves approvals on Slack and chat on
+  # whatever other surface HARNESS_SURFACES names.
+  host:
     build:
       context: ../..
       dockerfile: harness/compose/node.Dockerfile
-    image: harness-approvals
+    image: harness-host
     profiles: ['demo']
     restart: unless-stopped
     networks:
@@ -270,51 +274,42 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      litellm:
+        condition: service_healthy
       files:
         condition: service_healthy
-    # No env_file here, deliberately. This service gets an explicit allowlist
-    # interpolated from ../../.env, so Hermes's Slack tokens never enter the
-    # approver's container and the approver's tokens never enter Hermes's.
-    # Anything main.ts or its core-tools child reads must be listed here.
+    # No env_file here, deliberately: an explicit allowlist interpolated from ../../.env, so
+    # Hermes's Slack tokens never enter this container. Anything main.ts reads is listed here.
     environment:
       DATABASE_URL: 'postgres://harness:harness@postgres:5432/harness'
       HARNESS_ENCRYPTION_KEY: '${HARNESS_ENCRYPTION_KEY:-}'
       HARNESS_CLIENT: '${HARNESS_CLIENT:-demo-practice}'
       HARNESS_STORAGE_DIR: '/srv/harness-storage'
       HARNESS_PACKS: '${HARNESS_PACKS:-@harness/pack-healthcare}'
-      # Which messaging surfaces this host serves, first one primary. Same shape
-      # as HARNESS_PACKS: the adapter is loaded by name at startup, so switching
-      # the demo to another surface is this line plus that adapter's variables.
       HARNESS_SURFACES: '${HARNESS_SURFACES:-@harness/surface-slack}'
+      HARNESS_IDENTITY: '${HARNESS_IDENTITY:-@harness/identity-static}'
+      HARNESS_RUNTIME: '${HARNESS_RUNTIME:-@harness/runtime-deepagents}'
+      HARNESS_HOST_PRINCIPAL: '${HARNESS_HOST_PRINCIPAL:-svc-host}'
       HARNESS_POLICY_FILE: '/srv/agent-harness/clients/${HARNESS_CLIENT:?set HARNESS_CLIENT in .env}/policy.yaml'
-      # Passed to the core-tools child this app spawns, which refuses to start
-      # without a gateway key. Same proxy as Hermes, reached on the compose
-      # network rather than the host loopback the .env value names.
       HARNESS_GATEWAY_URL: 'http://litellm:4000'
-      # Same worker, same network: the child this app spawns parses documents there.
       HARNESS_FILES_URL: 'http://files:8790'
       LITELLM_MASTER_KEY: '${LITELLM_MASTER_KEY:?set LITELLM_MASTER_KEY in .env}'
-      # The approver's own Slack app — a second app, not Hermes's. One app
-      # token cannot serve two Socket Mode connections: Slack delivers each
-      # event to exactly one of them, so the buttons would work half the time.
+      HARNESS_RUN_MAX_MODEL_CALLS: '${HARNESS_RUN_MAX_MODEL_CALLS:-30}'
+      HARNESS_RUN_MAX_TOOL_CALLS: '${HARNESS_RUN_MAX_TOOL_CALLS:-60}'
+      HARNESS_RUN_TIMEOUT_S: '${HARNESS_RUN_TIMEOUT_S:-600}'
+      HARNESS_HISTORY_MAX_MESSAGES: '${HARNESS_HISTORY_MAX_MESSAGES:-40}'
+      # The approver's Slack app, until Plan 8b makes it the one app.
       APPROVALS_SLACK_BOT_TOKEN: '${APPROVALS_SLACK_BOT_TOKEN:-}'
       APPROVALS_SLACK_APP_TOKEN: '${APPROVALS_SLACK_APP_TOKEN:-}'
       SLACK_APPROVALS_CHANNEL: '${SLACK_APPROVALS_CHANNEL:-}'
-      SLACK_ALLOWED_USERS: '${SLACK_ALLOWED_USERS:-}'
       APPROVALS_POLL_SECONDS: '${APPROVALS_POLL_SECONDS:-5}'
       EFFECTS_DISPATCH_SECONDS: '${EFFECTS_DISPATCH_SECONDS:-5}'
       RECONCILE_SECONDS: '${RECONCILE_SECONDS:-300}'
       APPROVALS_HEALTH_PORT: '8787'
       APPROVALS_HEALTH_BIND: '${APPROVALS_HEALTH_BIND:-0.0.0.0}'
     ports:
-      # Localhost only: the health endpoint is for the watchdogs, not the LAN.
-      # The host side is configurable because 8787 is not always free on the
-      # operator's machine; the container always listens on 8787.
       - '127.0.0.1:${APPROVALS_HEALTH_HOST_PORT:-8787}:8787'
     volumes:
-      # The same named volume as hermes: core-tools writes the file there and
-      # the surface_file sink reads it back. Drifting mounts are the usual cause
-      # of an upload failing with ENOENT.
       - storage:/srv/harness-storage
       - ../../packs:/srv/agent-harness/packs:ro
       - ../../clients:/srv/agent-harness/clients:ro

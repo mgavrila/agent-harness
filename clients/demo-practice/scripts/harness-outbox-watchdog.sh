@@ -13,7 +13,7 @@
 # "failed"/"needs_review" counts either, so it falls into the same branch.
 set -uo pipefail
 
-HEALTH_URL="${APPROVALS_HEALTH_URL:-http://approvals:8787/healthz}"
+HEALTH_URL="${APPROVALS_HEALTH_URL:-http://host:8787/healthz}"
 
 # Said the same way whether the request failed outright or the body carried no
 # counts: both mean nobody is watching the outbox, and the reader needs one

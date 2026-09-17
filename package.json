@@ -29,11 +29,11 @@
     "synth:fast": "pnpm --filter @harness/pack-healthcare generate -- --scans=false",
     "evals": "pnpm --filter @harness/evals start",
     "evals:baseline": "pnpm --filter @harness/evals start -- --update-baseline=true",
-    "approvals": "pnpm --filter @harness/approvals start",
+    "host": "pnpm --filter @harness/host start",
     "new-client": "pnpm --filter @harness/scripts exec tsx src/app/cli.ts",
     "demo:up": "docker compose --env-file .env -f harness/compose/docker-compose.yml --profile demo up -d --build",
     "demo:down": "docker compose --env-file .env -f harness/compose/docker-compose.yml --profile demo down",
-    "demo:logs": "docker compose --env-file .env -f harness/compose/docker-compose.yml --profile demo logs -f hermes approvals",
+    "demo:logs": "docker compose --env-file .env -f harness/compose/docker-compose.yml --profile demo logs -f hermes host",
     "demo:playbooks": "docker compose --env-file .env -f harness/compose/docker-compose.yml exec hermes bash /opt/data/cron/playbooks.sh"
   },
   "devDependencies": {

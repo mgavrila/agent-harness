@@ -6,63 +6,6 @@ networks:
     internal: true
     name: agent-harness_files
 services:
-  approvals:
-    build:
-      context: ../..
-      dockerfile: harness/compose/node.Dockerfile
-    depends_on:
-      files:
-        condition: service_healthy
-        required: true
-      postgres:
-        condition: service_healthy
-        required: true
-    environment:
-      APPROVALS_HEALTH_BIND: ${APPROVALS_HEALTH_BIND:-0.0.0.0}
-      APPROVALS_HEALTH_PORT: "8787"
-      APPROVALS_POLL_SECONDS: ${APPROVALS_POLL_SECONDS:-5}
-      APPROVALS_SLACK_APP_TOKEN: ${APPROVALS_SLACK_APP_TOKEN:-}
-      APPROVALS_SLACK_BOT_TOKEN: ${APPROVALS_SLACK_BOT_TOKEN:-}
-      DATABASE_URL: postgres://harness:harness@postgres:5432/harness
-      EFFECTS_DISPATCH_SECONDS: ${EFFECTS_DISPATCH_SECONDS:-5}
-      HARNESS_CLIENT: ${HARNESS_CLIENT:-demo-practice}
-      HARNESS_ENCRYPTION_KEY: ${HARNESS_ENCRYPTION_KEY:-}
-      HARNESS_FILES_URL: http://files:8790
-      HARNESS_GATEWAY_URL: http://litellm:4000
-      HARNESS_PACKS: ${HARNESS_PACKS:-@harness/pack-healthcare}
-      HARNESS_POLICY_FILE: /srv/agent-harness/clients/${HARNESS_CLIENT:?set HARNESS_CLIENT in .env}/policy.yaml
-      HARNESS_STORAGE_DIR: /srv/harness-storage
-      HARNESS_SURFACES: ${HARNESS_SURFACES:-@harness/surface-slack}
-      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?set LITELLM_MASTER_KEY in .env}
-      RECONCILE_SECONDS: ${RECONCILE_SECONDS:-300}
-      SLACK_ALLOWED_USERS: ${SLACK_ALLOWED_USERS:-}
-      SLACK_APPROVALS_CHANNEL: ${SLACK_APPROVALS_CHANNEL:-}
-    image: harness-approvals
-    networks:
-      default: null
-      files: null
-    ports:
-      - 127.0.0.1:${APPROVALS_HEALTH_HOST_PORT:-8787}:8787
-    profiles:
-      - demo
-    restart: unless-stopped
-    volumes:
-      - source: storage
-        target: /srv/harness-storage
-        type: volume
-        volume: {}
-      - bind:
-          create_host_path: true
-        read_only: true
-        source: ../../packs
-        target: /srv/agent-harness/packs
-        type: bind
-      - bind:
-          create_host_path: true
-        read_only: true
-        source: ../../clients
-        target: /srv/agent-harness/clients
-        type: bind
   core-tools:
     build:
       context: ../..
@@ -265,6 +208,72 @@ services:
         read_only: true
         source: ../../.env
         target: /srv/env/.env
+        type: bind
+  host:
+    build:
+      context: ../..
+      dockerfile: harness/compose/node.Dockerfile
+    depends_on:
+      files:
+        condition: service_healthy
+        required: true
+      litellm:
+        condition: service_healthy
+        required: true
+      postgres:
+        condition: service_healthy
+        required: true
+    environment:
+      APPROVALS_HEALTH_BIND: ${APPROVALS_HEALTH_BIND:-0.0.0.0}
+      APPROVALS_HEALTH_PORT: "8787"
+      APPROVALS_POLL_SECONDS: ${APPROVALS_POLL_SECONDS:-5}
+      APPROVALS_SLACK_APP_TOKEN: ${APPROVALS_SLACK_APP_TOKEN:-}
+      APPROVALS_SLACK_BOT_TOKEN: ${APPROVALS_SLACK_BOT_TOKEN:-}
+      DATABASE_URL: postgres://harness:harness@postgres:5432/harness
+      EFFECTS_DISPATCH_SECONDS: ${EFFECTS_DISPATCH_SECONDS:-5}
+      HARNESS_CLIENT: ${HARNESS_CLIENT:-demo-practice}
+      HARNESS_ENCRYPTION_KEY: ${HARNESS_ENCRYPTION_KEY:-}
+      HARNESS_FILES_URL: http://files:8790
+      HARNESS_GATEWAY_URL: http://litellm:4000
+      HARNESS_HISTORY_MAX_MESSAGES: ${HARNESS_HISTORY_MAX_MESSAGES:-40}
+      HARNESS_HOST_PRINCIPAL: ${HARNESS_HOST_PRINCIPAL:-svc-host}
+      HARNESS_IDENTITY: ${HARNESS_IDENTITY:-@harness/identity-static}
+      HARNESS_PACKS: ${HARNESS_PACKS:-@harness/pack-healthcare}
+      HARNESS_POLICY_FILE: /srv/agent-harness/clients/${HARNESS_CLIENT:?set HARNESS_CLIENT in .env}/policy.yaml
+      HARNESS_RUN_MAX_MODEL_CALLS: ${HARNESS_RUN_MAX_MODEL_CALLS:-30}
+      HARNESS_RUN_MAX_TOOL_CALLS: ${HARNESS_RUN_MAX_TOOL_CALLS:-60}
+      HARNESS_RUN_TIMEOUT_S: ${HARNESS_RUN_TIMEOUT_S:-600}
+      HARNESS_RUNTIME: ${HARNESS_RUNTIME:-@harness/runtime-deepagents}
+      HARNESS_STORAGE_DIR: /srv/harness-storage
+      HARNESS_SURFACES: ${HARNESS_SURFACES:-@harness/surface-slack}
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?set LITELLM_MASTER_KEY in .env}
+      RECONCILE_SECONDS: ${RECONCILE_SECONDS:-300}
+      SLACK_APPROVALS_CHANNEL: ${SLACK_APPROVALS_CHANNEL:-}
+    image: harness-host
+    networks:
+      default: null
+      files: null
+    ports:
+      - 127.0.0.1:${APPROVALS_HEALTH_HOST_PORT:-8787}:8787
+    profiles:
+      - demo
+    restart: unless-stopped
+    volumes:
+      - source: storage
+        target: /srv/harness-storage
+        type: volume
+        volume: {}
+      - bind:
+          create_host_path: true
+        read_only: true
+        source: ../../packs
+        target: /srv/agent-harness/packs
+        type: bind
+      - bind:
+          create_host_path: true
+        read_only: true
+        source: ../../clients
+        target: /srv/agent-harness/clients
         type: bind
   litellm:
     command:

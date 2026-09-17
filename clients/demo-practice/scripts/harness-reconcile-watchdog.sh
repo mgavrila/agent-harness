@@ -13,7 +13,7 @@
 # is a distinct, legitimate state handled below.
 set -uo pipefail
 
-HEALTH_URL="${APPROVALS_HEALTH_URL:-http://approvals:8787/healthz}"
+HEALTH_URL="${APPROVALS_HEALTH_URL:-http://host:8787/healthz}"
 STALE_MINUTES="${RECONCILE_STALE_MINUTES:-90}"
 
 # Said the same way whether the request failed outright or the body carried no
