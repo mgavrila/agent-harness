@@ -17,7 +17,7 @@ Every task's requirements implicitly include this section.
 - Node `>=22`; pnpm `11.4.0`; TypeScript strict ESM everywhere; zod is always imported as `import * as z from 'zod/v4'`.
 - **The four layers hold.** `shared → domain → tools → app`, imports only downward, other packages reached only through `index.ts` or a declared subpath export. Every gate is at **0 errors after every task**: `pnpm -r typecheck`, `pnpm lint`, `pnpm arch`, `pnpm format:check`, `pnpm surface:record` leaves the working tree clean, and the full suite (`pnpm -r test`) is green.
 - **Environment variable names are unchanged.** Nothing is renamed and nothing is removed. Two names are added, each documented in `.env.example` by the task that first reads it, because `harness/core-tools/src/app/surface.test.ts` scans the source and fails on an undocumented name: `HARNESS_SURFACES` (Task 4) and `MEMORY_ALLOWED_USERS` (Task 3, and see decision 18 — the spec's section 6 asks for it and it changes nothing for the demo deployment, which loads no memory surface).
-- **The Slack adapter's rendered Block Kit is byte-identical to today's** for the three fixture cases — the pending card, the decided card and the edit modal. Task 3 pins each one as a whole-object `toEqual` against the literal today's code produces, and no later task edits those expectations.
+- **The Slack adapter's rendered Block Kit is byte-identical to today's** for the four fixture cases — the pending card, the approved decided card, the declined decided card and the edit modal. Task 3 pins each one by comparing `JSON.stringify` of the adapter's output against `JSON.stringify` of the literal today's code produces, so the pin holds key order as well as values, and no later task edits those expectations.
 - **`docs/architecture/tool-surface.json` changes in exactly four places, in Task 5, and nowhere else.** The two `channel` patterns become the neutral conversation-id pattern, and `forms_release` and `harness_notify` each gain one optional `surface` property. Tasks 1, 2, 3, 4 and 6 leave the file byte-identical; if it moves in one of them, something is wrong. Task 5 re-records it with `pnpm surface:record` and commits the diff.
 - **`packs/*/skills/*/SKILL.md` is not edited by any task in this plan.** A skill is a prompt; editing one changes agent behaviour, which this plan is not for.
 - **Restricted values never appear in plaintext.** `approvals.surface`, `approvals.conversation_id`, `approvals.message_ref`, `tool_effects.summary`, `tool_effects.last_error` and `tool_effects.result` are plaintext columns: an adapter's error message, a sink's result and a card's notice line must carry identifiers only, never payload content and never a filesystem path.
@@ -65,7 +65,7 @@ Everything below was read out of the Plan 5 branch checked out at `.claude/workt
 | The env scan recognises a helper call with the name first | `\b(?:numberFromEnv|booleanFromEnv|requiredEnv|optionalEnv|envOrDefault|required|seconds|port)\(\s*(?:env,\s*)?'([A-Z][A-Z0-9_]*)'` | `record-surface.ts:159-162` |
 | The kernel vocabulary test is a grep over two source roots with an empty allowlist | `SCANNED = [{ root: 'harness/core-tools/src', skip: [/\.test\.ts$/, /\/shared\/redaction\//] }, { root: 'evals/src', … }]` | `harness/core-tools/src/kernel-vocabulary.test.ts:38-50` |
 | A bare `blocks` cannot join that regex as written | `evals/src/domain/report/render.ts:116` and `build.ts:76` both say "blocks promotion" | those files |
-| Five comments and three strings in core-tools name Slack today | `tools/harness.ts:39,49`, `domain/session/repository.ts:70,77,83,86`, `domain/files/release.ts:8,66,69`, `domain/storage/file-store.ts:32`, `domain/tooling/types.ts:86`, `shared/redaction/index.ts:7`, `shared/redaction/patterns.ts:7,18` | grep, non-test sources |
+| Fourteen lines across seven files in core-tools name Slack today | `tools/harness.ts:39,49`, `domain/session/repository.ts:70,77,83,86`, `domain/files/release.ts:8,66,69`, `domain/storage/file-store.ts:32`, `domain/tooling/types.ts:86`, `shared/redaction/index.ts:7`, `shared/redaction/patterns.ts:7,18` | grep, non-test sources |
 | The packs name Slack in three places, none of them a skill | `packs/healthcare/src/tools/forms.ts:140,147`, `packs/healthcare/src/domain/forms/types.ts:6` | those files |
 | A pack is loaded by name through one dynamic import with three named failure modes | `loadPacks(names)`: `ERR_MODULE_NOT_FOUND`/`ERR_PACKAGE_PATH_NOT_EXPORTED` → one message; a `ConfigError` re-raised with the pack's name; anything else logged and replaced | `harness/core-tools/src/domain/packs/registry.ts:184-208` |
 | …and the list comes from a comma-separated variable with a default | `(optionalEnv('HARNESS_PACKS') ?? '@harness/pack-healthcare').split(',').map(trim).filter(≠'')` | `harness/core-tools/src/app/server.ts:48-53` |
@@ -81,7 +81,7 @@ Everything below was read out of the Plan 5 branch checked out at `.claude/workt
 | The approvals image copies four directories and no more | `COPY harness ./harness`, `COPY packs ./packs`, `COPY clients ./clients`, `COPY scripts ./scripts` | `harness/compose/node.Dockerfile:13-16` |
 | The approvals service has no `env_file`, only an explicit allowlist | `APPROVALS_SLACK_BOT_TOKEN`, `APPROVALS_SLACK_APP_TOKEN`, `SLACK_APPROVALS_CHANNEL`, `SLACK_ALLOWED_USERS`, plus `HARNESS_PACKS` | `harness/compose/docker-compose.yml:216-244` |
 | Nothing in the workspace imports `@harness/approvals` | the only mentions are the root `approvals` script and three comments | grep over `*.ts`/`*.json` |
-| `@harness/shared` has no id module today | eight exports across seven modules: errors, env, paths, log, subprocess, jsonl, csv | `harness/shared/src/index.ts` |
+| `@harness/shared` has no id module today | seven export statements, one per module: errors, env, paths, log, subprocess, jsonl, csv | `harness/shared/src/index.ts` |
 
 ---
 
@@ -193,7 +193,7 @@ Paths are relative to the repository root. The workspace grows from ten packages
 | — | `harness/approvals/src/domain/handlers.ts` (was `domain/slack/handlers.ts`, minus `parseAllowedUsers`) |
 | `harness/approvals/src/domain/{poller,decisions,sinks,runner}.ts` | same paths, typed on `SurfaceSession` |
 | `harness/approvals/src/app/{main,child-env}.ts` | same paths |
-| — | `harness/approvals/src/host-vocabulary.test.ts`, `src/domain/surfaces/dual-surface.test.ts` |
+| — | `harness/approvals/src/domain/surfaces/dual-surface.test.ts` |
 | `harness/approvals/src/{index,testing}.ts` | same paths, rewritten |
 
 ### Kernel and packs (Task 5)
@@ -206,6 +206,7 @@ Paths are relative to the repository root. The workspace grows from ten packages
 | `packs/healthcare/src/tools/forms.ts` | same path; the same three changes |
 | `harness/pack-api/src/{models or index}.ts` | `CONVERSATION_ID_PATTERN`, `SURFACE_NAME_PATTERN` re-exported |
 | `harness/core-tools/src/kernel-vocabulary.test.ts` | same path; the messaging regex and its roots |
+| — | `harness/approvals/src/host-vocabulary.test.ts` (the same rule over the host, added with the alias deletion) |
 | `harness/core-tools/src/app/surface.test.ts` | same path; the four-places assertions |
 | `docs/architecture/tool-surface.json` | re-recorded |
 
@@ -225,7 +226,7 @@ Strictly sequential. Nothing can be reordered:
 - **Task 4** (host) before Task 5: the generic sinks have to exist before the kernel stages effects addressed to them.
 - **Task 5** (kernel and packs) before Task 6: the documents describe the finished vocabulary, and the tool surface has to be settled before the runbook quotes it.
 
-Tasks 1, 2, 3 and 4 leave `docs/architecture/tool-surface.json` byte-identical. **Task 2 keeps the host green by renaming its three column references in place** — `slackChannel` → `conversationId`, `slackTs` → `messageRef`, plus `surface: 'slack'` on the claim — and nothing else about the host moves until Task 4. **Task 4 keeps the kernel green by having the host register its generic sinks under both the new names and the two old ones**, so a `slack_message` staged by the not-yet-changed kernel still dispatches; Task 5 deletes the two aliases in the same commit that stops staging them. No gate is ever parked and no task ends red.
+Tasks 1, 2, 3 and 4 leave `docs/architecture/tool-surface.json` byte-identical. **Task 2 keeps the host green by renaming its three column references in place** — `slackChannel` → `conversationId`, `slackTs` → `messageRef`, plus `surface: 'slack'` on the claim — and nothing else about the host moves until Task 4. **Task 4 keeps the kernel green by having the host register its generic sinks under both the new names and the two old ones**, so a `slack_message` staged by the not-yet-changed kernel still dispatches; Task 5 deletes the two aliases in the same commit that stops staging them, and adds `harness/approvals/src/host-vocabulary.test.ts` there too — those two keys are host source, so the rule forbidding a surface's vocabulary in the host cannot hold until they are gone. No gate is ever parked and no task ends red.
 
 ---
 ## Tasks
@@ -305,8 +306,8 @@ Nothing outside these two packages changes. `docs/architecture/tool-surface.json
   function parseAllowedUsers(raw: string | undefined): ReadonlySet<string>
 
   // @harness/surface-api — models.ts
-  const SurfaceMessagePayloadShape: z.ZodObject   // { surface?, conversation?, channel?, text, reply_to? }
-  const SurfaceFilePayloadShape: z.ZodObject      // { surface?, conversation?, channel?, path, filename, reply_to?, file_id? }
+  const SurfaceMessagePayloadShape: z.ZodObject   // { surface?, conversation?, channel?, text }
+  const SurfaceFilePayloadShape: z.ZodObject      // { surface?, conversation?, channel?, path, filename, file_id? }
   type SurfaceMessagePayload, SurfaceFilePayload
 
   // @harness/surface-api/testing — testing.ts
@@ -907,65 +908,7 @@ export function allowsUser(allowedUsers: ReadonlySet<string>, userId: string): b
 Run: `pnpm --filter @harness/surface-api test`
 Expected: PASS, 9 tests.
 
-- [ ] **Step 11: Write the outbox payload shapes and their test**
-
-Create `harness/surface-api/src/models.ts`:
-
-```ts
-import * as z from 'zod/v4';
-import { CONVERSATION_ID_PATTERN, SURFACE_NAME_PATTERN } from '@harness/shared';
-
-export { CONVERSATION_ID_PATTERN, SURFACE_NAME_PATTERN } from '@harness/shared';
-
-/**
- * The two payload shapes that cross an untyped boundary.
- *
- * Everything else in this contract is checked by the compiler: the host builds a `Card` and
- * hands it to an adapter in the same process. These two are different — they come out of
- * `tool_effects.payload_encrypted`, written by a kernel that may be a version behind — so they
- * are parsed, and they are parsed here rather than in the host because the addressing they carry
- * is this contract's, not the host's.
- *
- * `surface` and `conversation` are nullable as well as optional: a staging tool writes an
- * explicit null when the caller named neither, and that means "the default", not "invalid".
- * `channel` is the same field under its pre-0009 name — rows staged before the upgrade are still
- * in the outbox and still have to deliver.
- */
-const surfaceName = z
-  .string()
-  .regex(SURFACE_NAME_PATTERN, 'surface must be a loaded surface name')
-  .nullable()
-  .optional();
-
-const conversation = z
-  .string()
-  .regex(CONVERSATION_ID_PATTERN, 'conversation must be a conversation id')
-  .nullable()
-  .optional();
-
-export const SurfaceMessagePayloadShape = z.object({
-  surface: surfaceName,
-  conversation,
-  /** Pre-0009 rows carry the conversation here. */
-  channel: conversation,
-  text: z.string().min(1).max(3000),
-  /** A message id on the same surface, to reply under rather than beside. */
-  reply_to: z.string().min(1).optional(),
-});
-
-export const SurfaceFilePayloadShape = z.object({
-  surface: surfaceName,
-  conversation,
-  channel: conversation,
-  path: z.string().min(1),
-  filename: z.string().min(1),
-  reply_to: z.string().min(1).optional(),
-  file_id: z.string().optional(),
-});
-
-export type SurfaceMessagePayload = z.infer<typeof SurfaceMessagePayloadShape>;
-export type SurfaceFilePayload = z.infer<typeof SurfaceFilePayloadShape>;
-```
+- [ ] **Step 11: Write the failing payload-shape test, then the shapes**
 
 Create `harness/surface-api/src/models.test.ts`:
 
@@ -1012,6 +955,68 @@ describe('SurfaceFilePayloadShape', () => {
     expect(SurfaceFilePayloadShape.safeParse({ filename: 'a.csv' }).success).toBe(false);
   });
 });
+```
+
+Run: `pnpm --filter @harness/surface-api test`
+Expected: FAIL — `Failed to resolve import "./models.js"`.
+
+Then create `harness/surface-api/src/models.ts`:
+
+```ts
+import * as z from 'zod/v4';
+import { CONVERSATION_ID_PATTERN, SURFACE_NAME_PATTERN } from '@harness/shared';
+
+export { CONVERSATION_ID_PATTERN, SURFACE_NAME_PATTERN } from '@harness/shared';
+
+/**
+ * The two payload shapes that cross an untyped boundary.
+ *
+ * Everything else in this contract is checked by the compiler: the host builds a `Card` and
+ * hands it to an adapter in the same process. These two are different — they come out of
+ * `tool_effects.payload_encrypted`, written by a kernel that may be a version behind — so they
+ * are parsed, and they are parsed here rather than in the host because the addressing they carry
+ * is this contract's, not the host's.
+ *
+ * `surface` and `conversation` are nullable as well as optional: a staging tool writes an
+ * explicit null when the caller named neither, and that means "the default", not "invalid".
+ * `channel` is the same field under its pre-0009 name — rows staged before the upgrade are still
+ * in the outbox and still have to deliver.
+ */
+const surfaceName = z
+  .string()
+  .regex(SURFACE_NAME_PATTERN, 'surface must be a loaded surface name')
+  .nullable()
+  .optional();
+
+const conversation = z
+  .string()
+  .regex(CONVERSATION_ID_PATTERN, 'conversation must be a conversation id')
+  .nullable()
+  .optional();
+
+export const SurfaceMessagePayloadShape = z.object({
+  surface: surfaceName,
+  conversation,
+  /** Pre-0009 rows carry the conversation here. */
+  channel: conversation,
+  text: z.string().min(1).max(3000),
+});
+
+export const SurfaceFilePayloadShape = z.object({
+  surface: surfaceName,
+  conversation,
+  channel: conversation,
+  path: z.string().min(1),
+  filename: z.string().min(1),
+  file_id: z.string().optional(),
+});
+
+// Deliberately no `reply_to`. Nothing stages one: the only reply this host posts is the
+// decisions thread reply, which goes through `postText({ replyTo })` inside the process and never
+// crosses the outbox. A field no writer fills is a field the next reader trusts by mistake.
+
+export type SurfaceMessagePayload = z.infer<typeof SurfaceMessagePayloadShape>;
+export type SurfaceFilePayload = z.infer<typeof SurfaceFilePayloadShape>;
 ```
 
 - [ ] **Step 12: Write the failing memory-surface test**
@@ -1721,7 +1726,8 @@ describe('migration 0009_surface_addressing', () => {
     try {
       await db.transaction(async (tx) => {
         // Four approvals: one posted and decided, one posted but not yet answered, one claimed
-        // whose post never recorded a timestamp, and one nobody has picked up.
+        // whose post never recorded a timestamp, and one nobody has picked up. Then six effects,
+        // one per status the rename has to decide about.
         await tx.execute(
           sql.raw(`
         INSERT INTO approvals (id, client, action, payload, summary, requested_by, status, expires_at, idempotency_key, slack_channel, slack_ts, claimed_at) VALUES
@@ -1733,7 +1739,9 @@ describe('migration 0009_surface_addressing', () => {
           ('aaaaaaaa-0000-4000-8000-000000000001', 'demo', 'harness_notify', 'slack_message', 'demo:n1', '\\x00'::bytea, 'digest', 'staged'),
           ('aaaaaaaa-0000-4000-8000-000000000002', 'demo', 'forms_release', 'slack_file', 'demo:f1', '\\x00'::bytea, 'release', 'needs_review'),
           ('aaaaaaaa-0000-4000-8000-000000000003', 'demo', 'harness_notify', 'slack_message', 'demo:n2', '\\x00'::bytea, 'already sent', 'dispatched'),
-          ('aaaaaaaa-0000-4000-8000-000000000004', 'demo', 'other_tool', 'email', 'demo:e1', '\\x00'::bytea, 'an email', 'staged');
+          ('aaaaaaaa-0000-4000-8000-000000000004', 'demo', 'other_tool', 'email', 'demo:e1', '\\x00'::bytea, 'an email', 'staged'),
+          ('aaaaaaaa-0000-4000-8000-000000000005', 'demo', 'harness_notify', 'slack_message', 'demo:d1', '\\x00'::bytea, 'in flight', 'dispatching'),
+          ('aaaaaaaa-0000-4000-8000-000000000006', 'demo', 'forms_release', 'slack_file', 'demo:x1', '\\x00'::bytea, 'gave up', 'failed');
       `),
         );
 
@@ -1764,12 +1772,20 @@ describe('migration 0009_surface_addressing', () => {
         ).rows[0];
         expect(stranded).toEqual({ conversation_id: 'C0DEMO', message_ref: null, claimed: true });
 
-        // In-flight effects are renamed; a dispatched one keeps the name it was sent under, and
-        // a sink nobody renamed is untouched.
+        // Every status decision 7 names, proved in both directions: the three sendable statuses
+        // are renamed, the two terminal ones keep the name they were sent under, and a sink
+        // nobody renamed is untouched.
         const sinks = (
           await tx.execute(sql.raw(`SELECT id, sink FROM tool_effects ORDER BY idempotency_key`))
         ).rows.map((r) => r.sink);
-        expect(sinks).toEqual(['email', 'surface_file', 'surface_message', 'slack_message']);
+        expect(sinks).toEqual([
+          'surface_message', // demo:d1, dispatching
+          'email', // demo:e1, a sink this migration does not touch
+          'surface_file', // demo:f1, needs_review
+          'surface_message', // demo:n1, staged
+          'slack_message', // demo:n2, dispatched — history, left alone
+          'slack_file', // demo:x1, failed — terminal, left alone
+        ]);
 
         // And the two columns the migration replaced are gone.
         const columns = (
@@ -1788,8 +1804,8 @@ describe('migration 0009_surface_addressing', () => {
 });
 ```
 
-The `ORDER BY idempotency_key` above sorts `demo:e1`, `demo:f1`, `demo:n1`, `demo:n2`, which is
-the order the expected array is written in.
+The `ORDER BY idempotency_key` above sorts `demo:d1`, `demo:e1`, `demo:f1`, `demo:n1`, `demo:n2`,
+`demo:x1`, which is the order the expected array is written in.
 
 - [ ] **Step 7: Run the migration test**
 
@@ -1888,21 +1904,30 @@ rendering, transport and Web API code rewritten to take a `Card` and a `Form` in
 are green in isolation and neither is loaded by anything yet: the host still has its own copy of
 the Slack code and still uses it, and Task 4 is where the copies are deleted.
 
-**The whole point of this task is the byte pin.** Three `toEqual` assertions — the pending card,
-the decided card, the edit modal — hold the adapter's output against the literal objects today's
-`blocks.ts` and `modal.ts` produce for the shared approval fixture. Deep equality on a plain
-object is what "byte-identical" means for something that is about to be `JSON.stringify`d, and no
-later task edits those three expectations.
+**For the length of this one commit the Slack transport exists twice**, verbatim, in
+`surfaces/slack/src/transport/` and in `harness/approvals/src/domain/slack/`. That is deliberate
+and transitional: the green-at-every-commit constraint forbids deleting the host's copy before
+the host is rewritten, and Task 4 deletes it. A reviewer reading this commit alone should expect
+the duplication and should not try to share the two.
+
+**The whole point of this task is the byte pin.** Four assertions — the pending card, the
+approved decided card, the declined decided card, the edit modal — hold `JSON.stringify` of the
+adapter's output against `JSON.stringify` of the literal objects today's `blocks.ts` and
+`modal.ts` produce for the shared approval fixture. Comparing the serialised string rather than
+the object is what makes "byte-identical" literal: key order counts, which a `toEqual` would let
+drift. No later task edits those four expectations.
 
 **Files:**
-- Create: `surfaces/slack/{package.json,tsconfig.json,vitest.config.ts,README.md}`
+- Create: `surfaces/slack/{package.json,tsconfig.json,vitest.config.ts}`
 - Create: `surfaces/slack/src/{config.ts,session.ts,index.ts,testing.ts}`
 - Create: `surfaces/slack/src/render/{blocks.ts,modal.ts}` and their tests
 - Create: `surfaces/slack/src/transport/{types.ts,web-client.ts,bolt.ts,fake.ts}`
 - Create: `surfaces/slack/src/session.test.ts`, `surfaces/slack/src/index.test.ts`
-- Create: `surfaces/memory/{package.json,tsconfig.json,vitest.config.ts,README.md}`, `src/index.ts`, `src/index.test.ts`
+- Create: `surfaces/memory/{package.json,tsconfig.json,vitest.config.ts}`, `src/index.ts`, `src/index.test.ts`
 - Modify: `pnpm-workspace.yaml`, root `package.json` (`arch`, `arch:graph`), `.dependency-cruiser.cjs`
 - Modify: `harness/core-tools/src/app/record-surface.ts` (`SOURCE_ROOTS`), `.env.example` (`MEMORY_ALLOWED_USERS`)
+
+Both adapters' `README.md` files are written in Task 6, with the rest of the documents.
 
 **Interfaces:**
 - Consumes: from `@harness/surface-api` — `defineSurface`, `parseAllowedUsers`, `ANY_USER`,
@@ -2005,7 +2030,7 @@ with the same `tsconfig.json` and `vitest.config.ts`.
 Run: `pnpm install`
 Expected: `+2` workspace projects.
 
-- [ ] **Step 3: Write the failing render test — the three byte pins**
+- [ ] **Step 3: Write the failing render test — the four byte pins**
 
 Create `surfaces/slack/src/render/blocks.test.ts`:
 
@@ -2069,9 +2094,18 @@ const header = [
 
 const footer = { type: 'context', elements: [{ type: 'mrkdwn', text: `Approval \`${APPROVAL_ID}\`` }] };
 
+/**
+ * The pin. `JSON.stringify` on both sides rather than `toEqual`, because what Slack receives is
+ * the serialised bytes: a renderer that emitted `block_id` before `type` would satisfy deep
+ * equality and change the payload. Key order in every literal in this file is today's order.
+ */
+function pin(actual: unknown, expected: unknown): void {
+  expect(JSON.stringify(actual)).toBe(JSON.stringify(expected));
+}
+
 describe('cardBlocks', () => {
   it('renders the pending approval card exactly as the Slack app rendered it before Plan 6', () => {
-    expect(cardBlocks(pendingCard)).toEqual([
+    pin(cardBlocks(pendingCard), [
       ...header,
       {
         type: 'actions',
@@ -2103,7 +2137,7 @@ describe('cardBlocks', () => {
     ]);
   });
 
-  it('renders the decided card exactly as it did before, with no buttons left on it', () => {
+  it('renders the approved decided card exactly as it did before, with no buttons left on it', () => {
     const decided: Card = {
       ...pendingCard,
       notice: `Approval ${APPROVAL_ID} approved`,
@@ -2125,7 +2159,7 @@ describe('cardBlocks', () => {
       ],
       actions: [],
     };
-    expect(cardBlocks(decided)).toEqual([
+    pin(cardBlocks(decided), [
       ...header,
       {
         type: 'context',
@@ -2140,9 +2174,39 @@ describe('cardBlocks', () => {
     ]);
   });
 
-  it('renders the declined icon', () => {
-    const blocks = cardBlocks({ ...pendingCard, actions: [], body: [{ note: [{ icon: 'declined' }, { text: ' Declined.' }] }] });
-    expect(blocks[1]).toEqual({ type: 'context', elements: [{ type: 'mrkdwn', text: ':no_entry: Declined.' }] });
+  it('renders the declined decided card exactly as it did before, note and all', () => {
+    const declined: Card = {
+      ...pendingCard,
+      notice: `Approval ${APPROVAL_ID} declined`,
+      body: [
+        ...pendingCard.body,
+        {
+          note: [
+            { icon: 'declined' },
+            { text: ' Declined by ' },
+            { user: 'U012' },
+            { text: ' at ' },
+            { at: new Date('2026-09-15T12:05:00Z') },
+            { text: '. Nothing was sent.' },
+            { text: '\nNote: Use the Q4 roster.' },
+          ],
+        },
+      ],
+      actions: [],
+    };
+    pin(cardBlocks(declined), [
+      ...header,
+      {
+        type: 'context',
+        elements: [
+          {
+            type: 'mrkdwn',
+            text: ':no_entry: Declined by <@U012> at <!date^1789473900^{date_short_pretty} {time}|2026-09-15T12:05:00.000Z>. Nothing was sent.\nNote: Use the Q4 roster.',
+          },
+        ],
+      },
+      footer,
+    ]);
   });
 
   it('renders a plain line and a labelled one as their own sections', () => {
@@ -2191,35 +2255,39 @@ const form: Form = {
 
 describe('formView', () => {
   it('renders the edit modal exactly as the Slack app rendered it before Plan 6', () => {
-    expect(formView(form)).toEqual({
-      type: 'modal',
-      callback_id: 'harness_approval_edit_modal',
-      private_metadata: '{"approval_id":"11111111-1111-4111-8111-111111111111","conversation":"C0DEMO"}',
-      title: { type: 'plain_text', text: 'Send it back' },
-      submit: { type: 'plain_text', text: 'Decline with note' },
-      close: { type: 'plain_text', text: 'Cancel' },
-      blocks: [
-        {
-          type: 'section',
-          text: {
-            type: 'mrkdwn',
-            text: 'This declines the request and sends your note back to the agent, which will redo the action and ask again. It releases nothing.',
+    // Serialised on both sides, for the same reason `blocks.test.ts` does it: what Slack receives
+    // is the bytes, so key order is part of the pin.
+    expect(JSON.stringify(formView(form))).toBe(
+      JSON.stringify({
+        type: 'modal',
+        callback_id: 'harness_approval_edit_modal',
+        private_metadata: '{"approval_id":"11111111-1111-4111-8111-111111111111","conversation":"C0DEMO"}',
+        title: { type: 'plain_text', text: 'Send it back' },
+        submit: { type: 'plain_text', text: 'Decline with note' },
+        close: { type: 'plain_text', text: 'Cancel' },
+        blocks: [
+          {
+            type: 'section',
+            text: {
+              type: 'mrkdwn',
+              text: 'This declines the request and sends your note back to the agent, which will redo the action and ask again. It releases nothing.',
+            },
           },
-        },
-        {
-          type: 'input',
-          block_id: 'harness_approval_note',
-          label: { type: 'plain_text', text: 'What should change?' },
-          element: {
-            type: 'plain_text_input',
-            action_id: 'harness_approval_note_input',
-            multiline: true,
-            max_length: 1000,
-            placeholder: { type: 'plain_text', text: 'Do not include patient or provider identifiers here.' },
+          {
+            type: 'input',
+            block_id: 'harness_approval_note',
+            label: { type: 'plain_text', text: 'What should change?' },
+            element: {
+              type: 'plain_text_input',
+              action_id: 'harness_approval_note_input',
+              multiline: true,
+              max_length: 1000,
+              placeholder: { type: 'plain_text', text: 'Do not include patient or provider identifiers here.' },
+            },
           },
-        },
-      ],
-    });
+        ],
+      }),
+    );
   });
 
   it('marks an optional field optional and leaves out what the field does not declare', () => {
@@ -2238,17 +2306,17 @@ describe('formView', () => {
     });
   });
 
-  it("reads a submitted view's values back under the field ids", () => {
+  it("reads a submitted view's values back under the block ids, with no form in hand", () => {
     expect(
-      valuesOf({ harness_approval_note: { harness_approval_note_input: { value: 'Use the Q4 roster.' } } }, form),
+      valuesOf({ harness_approval_note: { harness_approval_note_input: { value: 'Use the Q4 roster.' } } }),
     ).toEqual({ harness_approval_note: 'Use the Q4 roster.' });
   });
 
-  it('reads an empty answer as an empty string rather than dropping the key', () => {
-    expect(valuesOf({ harness_approval_note: { harness_approval_note_input: { value: null } } }, form)).toEqual({
+  it('reads an empty answer as an empty string, and a view with no state as no values', () => {
+    expect(valuesOf({ harness_approval_note: { harness_approval_note_input: { value: null } } })).toEqual({
       harness_approval_note: '',
     });
-    expect(valuesOf({}, form)).toEqual({ harness_approval_note: '' });
+    expect(valuesOf({})).toEqual({});
   });
 });
 ```
@@ -2325,11 +2393,12 @@ export function cardBlocks(card: Card): unknown[] {
   for (const line of card.body) blocks.push(renderLine(line));
   if (card.actions.length > 0) {
     blocks.push({
+      type: 'actions',
       // Derived from the card's own id rather than hard-coded, so this module never learns what
       // kind of card it is rendering. For `harness_approval` it is the block id the demo
-      // deployment's interaction payloads already carry.
+      // deployment's interaction payloads already carry. It follows `type` because that is the
+      // order today's `blocks.ts` emits, and the render test compares serialised bytes.
       block_id: `${card.id}_actions`,
-      type: 'actions',
       elements: card.actions.map(button),
     });
   }
@@ -2389,14 +2458,23 @@ export function formView(form: Form): Record<string, unknown> {
 }
 
 /**
- * Read a submitted view's state into `FormEvent.values`.
+ * Read a submitted view's state into `FormEvent.values`, keyed by block id — which is the field
+ * id `inputBlock` wrote.
  *
- * Every declared field gets a key, empty string included: a handler that reads
- * `values[field.id]` must not have to tell "left blank" from "Slack changed its payload shape".
+ * Derived from the payload alone, with no `Form` in hand, so this adapter remembers nothing
+ * between opening a modal and its submission: a note box opened before a restart still submits
+ * afterwards. That is what today's `main.ts` does when it reads the note straight out of
+ * `view.state.values` under the two ids it already knows.
+ *
+ * A field left blank arrives with a null value and becomes `''`, so a handler reading
+ * `values[id]` never has to tell "left blank" from "Slack changed its payload shape".
  */
-export function valuesOf(state: Record<string, Record<string, { value?: string | null }>>, form: Form): Record<string, string> {
+export function valuesOf(state: Record<string, Record<string, { value?: string | null }>>): Record<string, string> {
   const values: Record<string, string> = {};
-  for (const field of form.fields) values[field.id] = state[field.id]?.[inputActionId(field)]?.value ?? '';
+  for (const [blockId, elements] of Object.entries(state)) {
+    // One element per input block, which is the only shape `inputBlock` produces.
+    values[blockId] = Object.values(elements)[0]?.value ?? '';
+  }
   return values;
 }
 ```
@@ -2520,7 +2598,11 @@ import type { SlackAction, SlackEvents, SlackTransport, SlackView } from './type
  * default again and fail intermittently rather than at startup.
  *
  * Both registrations are catch-alls. The contract takes one action handler and one view handler
- * and dispatches on the id itself, so there is nothing for Bolt to route.
+ * and dispatches on the id itself, so there is nothing for Bolt to route. This is a change from
+ * today's three action ids and one callback id: every interaction Slack delivers is now
+ * acknowledged, and one this host did not post is acked and dropped by the handler above rather
+ * than ignored by Bolt. Acking something unknown costs nothing; leaving it unacked makes Slack
+ * show the user an error for a message the host has no opinion about.
  */
 export function boltTransport(config: SlackConfig, log: Logger): SlackTransport {
   const bolt = new App({
@@ -2777,13 +2859,14 @@ describe('the Slack session', () => {
     });
   });
 
-  it('turns a view submission into a FormEvent, reading the values under their field ids', async () => {
+  it('turns a view submission into a FormEvent without having been told about the form', async () => {
     const { session, events } = fakeSlackSession();
     const seen: FormEvent[] = [];
     session.onFormSubmit(async (event) => {
       seen.push(event);
     });
-    await session.openForm('T1', form);
+    // No `openForm` first, on purpose: a modal opened before a restart submits after it, and the
+    // adapter reads the answers out of the payload rather than out of anything it remembered.
     await events.emitView({
       userId: 'U012',
       callbackId: 'harness_approval_edit_modal',
@@ -2841,9 +2924,6 @@ const NAME = 'slack';
  */
 const SLACK_CONVERSATION = /^[CGD][A-Z0-9]{2,}$/;
 
-/** The one place a form's fields are remembered, so a submission can be read back by field id. */
-type OpenForms = Map<string, Form>;
-
 function assertConversation(conversation: string): void {
   if (!SLACK_CONVERSATION.test(conversation)) {
     throw new SurfaceError(`${NAME}: "${conversation}" is not a Slack conversation id`);
@@ -2852,11 +2932,11 @@ function assertConversation(conversation: string): void {
 
 export function createSlackSession(transport: SlackTransport, config: SlackConfig): SurfaceSession {
   const { api, events } = transport;
-  // A form is declared by the host when it opens one and read back when it is submitted. Slack's
-  // `view_submission` reports answers under the element ids this adapter derived, so the form
-  // has to be in hand to map them back; keyed by callback id, which is the form's own id.
-  const forms: OpenForms = new Map();
 
+  // Deliberately no state between opening a form and reading its submission back. Slack's
+  // `view_submission` carries the answers under the block ids this adapter wrote, so `valuesOf`
+  // reads them out of the payload; a `Map` of open forms would lose a modal opened before a
+  // restart, which today's `main.ts` never does.
   const ref = (conversation: string, id: string): MessageRef => ({ surface: NAME, conversation, id });
 
   return {
@@ -2921,7 +3001,6 @@ export function createSlackSession(transport: SlackTransport, config: SlackConfi
     },
 
     async openForm(trigger, form: Form) {
-      forms.set(form.id, form);
       await api.views.open({ trigger_id: trigger, view: formView(form) });
     },
 
@@ -2941,7 +3020,6 @@ export function createSlackSession(transport: SlackTransport, config: SlackConfi
 
     onFormSubmit(handler: (event: FormEvent) => Promise<void>) {
       events.onView(async (view) => {
-        const form = forms.get(view.callbackId);
         await handler({
           surface: NAME,
           userId: view.userId,
@@ -2950,7 +3028,7 @@ export function createSlackSession(transport: SlackTransport, config: SlackConfi
           conversation: '',
           formId: view.callbackId,
           metadata: view.privateMetadata,
-          values: form ? valuesOf(view.state, form) : {},
+          values: valuesOf(view.state),
         });
       });
     },
@@ -3047,7 +3125,7 @@ describe('the Slack surface declaration', () => {
 - [ ] **Step 11: Run the Slack adapter's suite**
 
 Run: `pnpm --filter @harness/surface-slack test`
-Expected: PASS, 22 tests across four files.
+Expected: PASS, 21 tests across four files (blocks 4, modal 4, session 12, index 1).
 
 - [ ] **Step 12: Write the memory adapter and its test**
 
@@ -3140,7 +3218,12 @@ const SOURCE_ROOTS = ['harness', 'packs', 'surfaces', 'evals', 'scripts'];
 
 and extend that constant's comment with one sentence: "`surfaces/` is there for the same reason
 `packs/` is: an adapter reads its own variables, and a scan that did not walk it would let them
-go undocumented — and would lose `SLACK_APPROVALS_CHANNEL`, which `surface.test.ts` anchors on."
+go undocumented — including the primary adapter's conversation variable, which `surface.test.ts`
+anchors on."
+
+The sentence deliberately names no variable. This file is inside the messaging vocabulary scan
+Task 5 adds, which has no exemption for it, so a comment spelling out a `SLACK_…` name here would
+fail that scan two tasks later.
 
 In `.env.example`, under the existing `# --- Slack ---` heading and after `SLACK_ALLOWED_USERS=`,
 add:
@@ -3184,7 +3267,9 @@ and one `GLOBAL_RULES` entry after `a-pack-never-imports-core-tools`:
     severity: 'error',
     from: { path: '^surfaces/' },
     to: {
-      path: '^(harness|packs|evals|scripts)/',
+      // `surfaces` is in the alternation so one adapter cannot import another: two transports
+      // sharing code is a third package, not an edge.
+      path: '^(harness|packs|surfaces|evals|scripts)/',
       pathNot: ['^harness/surface-api/src/', '^harness/shared/src/'],
     },
   },
@@ -3204,7 +3289,7 @@ pnpm -r typecheck     # 0 errors
 pnpm lint             # 0 errors
 pnpm arch             # 0 violations, now cruising surfaces/
 pnpm format:check
-pnpm -r test          # green, including the three byte pins
+pnpm -r test          # green, including the four byte pins
 pnpm surface:record && git status --porcelain docs/architecture   # no output
 ```
 
@@ -3234,7 +3319,6 @@ byte-pinned, behind `@harness/surface-slack`.
 - Create: `harness/approvals/src/domain/cards.ts` + `cards.test.ts`
 - Create: `harness/approvals/src/domain/surfaces/registry.ts` + `registry.test.ts` + `dual-surface.test.ts`
 - Create: `harness/approvals/src/domain/handlers.ts` + `handlers.test.ts`
-- Create: `harness/approvals/src/host-vocabulary.test.ts`
 - Modify: `harness/approvals/src/domain/{poller,decisions,sinks,runner}.ts` and their tests
 - Modify: `harness/approvals/src/app/{main,child-env}.ts`, `child-env.test.ts`
 - Modify: `harness/approvals/src/{index,testing}.ts`, `package.json`
@@ -3324,7 +3408,6 @@ Create `harness/approvals/src/domain/cards.test.ts`:
 
 ```ts
 import { describe, expect, it } from 'vitest';
-import { containsRestrictedPattern } from '@harness/core-tools/redaction';
 import { approvalRow as row } from '../testing.js';
 import {
   APPROVE_ACTION_ID,
@@ -3340,20 +3423,6 @@ import {
 } from './cards.js';
 
 const CAN = { forms: true };
-
-describe('containsRestrictedPattern', () => {
-  it('matches the shapes the redaction regexes protect', () => {
-    expect(containsRestrictedPattern('ssn 123-45-6789 on file')).toBe(true);
-    expect(containsRestrictedPattern('EIN 12-3456789')).toBe(true);
-    expect(containsRestrictedPattern('DEA BR1234563')).toBe(true);
-  });
-
-  it('does not match ordinary roster content', () => {
-    expect(containsRestrictedPattern('roster/aetna-abc123def456.csv')).toBe(false);
-    expect(containsRestrictedPattern('license expires 2027-03-31 in TX')).toBe(false);
-    expect(containsRestrictedPattern('NPI 1234567893')).toBe(false);
-  });
-});
 
 describe('payloadPreview', () => {
   it('pretty-prints an ordinary payload', () => {
@@ -3528,8 +3597,9 @@ import type { Card, CardLine, Form, NotePart } from '@harness/surface-api';
  * What an approval looks like to a human, in the contract's own words.
  *
  * Every string a reader sees is built here and nothing here knows how it will be drawn: no
- * markup, no emoji, no date format, no mention syntax. An adapter turns a `Card` into Block Kit,
- * an Adaptive Card or a plain message, and the host stays the same either way.
+ * markup, no emoji, no date format, no mention syntax. An adapter turns a `Card` into whatever
+ * its own surface draws — rich layout blocks, an Adaptive Card, a plain message — and the host
+ * stays the same either way.
  */
 
 export type ApprovalRow = typeof approvals.$inferSelect;
@@ -3664,8 +3734,8 @@ export function decidedCard(
  * The note box Edit opens.
  *
  * The conversation travels in the metadata because a surface need not tell us where a form was
- * submitted from — Slack's view submission carries no conversation of its own for a modal opened
- * from a button — and the reply to the submission has to go somewhere.
+ * submitted from — some surfaces report none at all for a form opened from a button — and the
+ * reply to the submission has to go somewhere.
  */
 export function editForm(approvalId: string, conversation: string): Form {
   return {
@@ -3713,7 +3783,12 @@ export function parseApprovalMetadata(raw: string): ApprovalMetadata | null {
 - [ ] **Step 5: Run it and watch it pass, then delete the render folder**
 
 Run: `pnpm --filter @harness/approvals test cards`
-Expected: PASS, 18 tests.
+Expected: PASS, 16 tests.
+
+Today's `blocks.test.ts` opens with a `containsRestrictedPattern` block, which tests a function
+`@harness/core-tools` owns and exports and asserts nothing about the card renderer. It is not
+carried over: `@harness/core-tools`' own suite covers those patterns, and this file's job is what
+`cards.ts` does with the answer — the three `withholds …` cases below.
 
 Then delete `harness/approvals/src/domain/render/` entirely — `types.ts`, `blocks.ts`,
 `blocks.test.ts`, `modal.ts`, `modal.test.ts`. Their assertions live on in two places: the
@@ -3992,7 +4067,7 @@ export async function postPendingApprovals(deps: PollDeps, limit = 20): Promise<
       continue;
     }
 
-    // Two separate try blocks, because the right recovery differs on each side of the post.
+    // Two separate try/catch pairs, because the right recovery differs on each side of the post.
     // Before it, nothing was sent, so the claim is released and the next tick retries
     // immediately. After it, a card is live: releasing the claim there would put a second card
     // with a second set of working buttons next to it on the next tick.
@@ -4383,8 +4458,8 @@ async function tellUser(session: SurfaceSession, conversation: string, userId: s
 /**
  * True when this person may act on approvals *on this surface at all*. Checked before every
  * decision and before the id is even looked at, so someone unauthorised learns nothing about
- * whether the approval exists. Allowlists are per surface: a Teams identity and a Slack identity
- * are different people until something says otherwise.
+ * whether the approval exists. Allowlists are per surface: an identity on one surface and an
+ * identity on another are different people until something says otherwise.
  */
 async function authorize(
   session: SurfaceSession,
@@ -4458,7 +4533,7 @@ export function registerApprovalHandlers(session: SurfaceSession, deps: Decision
     try {
       if (event.actionId === APPROVE_ACTION_ID) await decide(session, deps, event, 'approved');
       else if (event.actionId === DECLINE_ACTION_ID) await decide(session, deps, event, 'declined');
-      else if (event.actionId === EDIT_ACTION_ID) await openEdit(session, deps, event);
+      else if (event.actionId === EDIT_ACTION_ID) await openEdit(session, event);
       // Anything else belongs to a card this host did not post.
     } catch (err) {
       log.error(`the ${event.actionId} handler failed`, err);
@@ -4492,7 +4567,7 @@ export function registerApprovalHandlers(session: SurfaceSession, deps: Decision
 }
 
 /** Edit never releases anything: it opens a note box, and submitting it declines with that note. */
-async function openEdit(session: SurfaceSession, deps: DecisionDeps, event: ActionEvent): Promise<void> {
+async function openEdit(session: SurfaceSession, event: ActionEvent): Promise<void> {
   if (!(await authorize(session, event.conversation, event.userId, event.value))) return;
   if (!(await validId(session, event.conversation, event.userId, event.value))) return;
   if (!event.trigger) {
@@ -4507,9 +4582,10 @@ async function openEdit(session: SurfaceSession, deps: DecisionDeps, event: Acti
 }
 ```
 
-`deps` is unused by `openEdit` today but is on its signature deliberately: every other handler
-takes it, and a future confirmation step reads the row before opening the box. If the linter
-objects, take it off and add it back when it is needed — do not silence the rule with a disable.
+`openEdit` takes no `deps`: it reads no row and writes none, it only opens a box. The linter would
+not have objected — `unused-imports/no-unused-vars` is configured `args: 'after-used'`, so a dead
+parameter in the middle of a list ships silently — which is exactly why it is left off rather than
+carried for a confirmation step nobody has asked for yet.
 
 - [ ] **Step 12: Rewrite the sinks**
 
@@ -4523,7 +4599,6 @@ import {
   SurfaceFilePayloadShape,
   SurfaceMessagePayloadShape,
   type Conversation,
-  type MessageRef,
   type SurfaceSession,
 } from '@harness/surface-api';
 import * as z from 'zod/v4';
@@ -4601,9 +4676,6 @@ async function viaSurface<T>(sink: string, effectId: string, run: () => Promise<
   }
 }
 
-const replyRef = (session: SurfaceSession, conversation: string, id: string | undefined): MessageRef | undefined =>
-  id === undefined ? undefined : { surface: session.name, conversation, id };
-
 /**
  * The two senders the effects outbox drains through.
  *
@@ -4615,9 +4687,9 @@ export function surfaceSinks(surfaces: LoadedSurfaces, opts: { outDir?: string }
   const messageSink: SinkHandler = async (payload, effect) => {
     const p = parsePayload(SurfaceMessagePayloadShape, payload, 'surface_message');
     const { session, conversation } = target(surfaces, p, 'surface_message', effect.id);
-    const ref = await viaSurface('surface_message', effect.id, () =>
-      session.postText(conversation, p.text, { replyTo: replyRef(session, conversation, p.reply_to) }),
-    );
+    // No reply target: an outbox message is a standalone post. The only reply this host writes is
+    // the decisions thread reply, which goes straight through `postText({ replyTo })`.
+    const ref = await viaSurface('surface_message', effect.id, () => session.postText(conversation, p.text));
     return { surface: session.name, conversation, message_id: ref.id };
   };
 
@@ -4635,7 +4707,6 @@ export function surfaceSinks(surfaces: LoadedSurfaces, opts: { outDir?: string }
         // The staging tool already wrote a restricted-free label; reuse it rather than composing
         // a new comment out of payload values.
         comment: effect.summary,
-        replyTo: replyRef(session, conversation, p.reply_to),
       }),
     );
     return { surface: session.name, conversation, filename: p.filename };
@@ -4647,7 +4718,9 @@ export function surfaceSinks(surfaces: LoadedSurfaces, opts: { outDir?: string }
     // The two names the kernel still stages under until the next task renames them. Migration
     // 0009 renamed the rows that were in flight; these cover the ones a running kernel writes
     // between this commit and that one. **Task 5 deletes both lines in the commit that stops
-    // staging them** — a sink name nothing writes is a name nobody can look up.
+    // staging them** — a sink name nothing writes is a name nobody can look up — and adds
+    // `host-vocabulary.test.ts` in that same commit, because these two keys are the last
+    // adapter-specific word left in host source.
     slack_message: messageSink,
     slack_file: fileSink,
   };
@@ -4976,8 +5049,12 @@ function makeDeps(surface: MemorySurface, core: FakeCoreToolsClient): RunnerDeps
 ```
 
 every staged fixture's `sink` becomes `surface_message` or `surface_file`, `api.posts.map(p => p.text)`
-becomes `surface.texts.map(t => t.text)`, `api.uploads[0].filename` becomes
-`surface.uploads[0].filename`, and the two `summary` strings lose their "to Slack" tail.
+becomes `surface.texts.map(t => t.text)`, and `api.uploads[0].filename` becomes
+`surface.uploads[0].filename`. Four strings lose their Slack tail: the three `summary` fixtures at
+lines 86, 104 and 175 (`'Release gone.csv to Slack'`, `'Release x to Slack'`,
+`'Release aetna-roster.csv to Slack'` — drop the ` to Slack`, matching the kernel's new summary in
+Task 5) and the test name at line 164, "writes an out-file effect to Slack when the file exists",
+which becomes "writes an out-file effect to the surface when the file exists".
 
 - [ ] **Step 15: Rewrite the entrypoint and the child environment**
 
@@ -4989,7 +5066,7 @@ import { fileURLToPath } from 'node:url';
 import { config as loadEnv } from 'dotenv';
 import { createDb, loadKey } from '@harness/db';
 import { outRoot } from '@harness/core-tools/storage';
-import { createLogger, numberFromEnv, optionalEnv, requiredEnv } from '@harness/shared';
+import { createLogger, numberFromEnv, requiredEnv } from '@harness/shared';
 import { surfaceSinks } from '../domain/sinks.js';
 import { loadSurfaces } from '../domain/surfaces/registry.js';
 import { createMcpCoreToolsClient } from '../domain/execute/mcp-client.js';
@@ -5013,11 +5090,18 @@ const port = (name: string, fallback: number): number =>
 
 /**
  * Which messaging surfaces this host serves, comma-separated package names, the first of them
- * primary. Defaults to the only adapter a deployment has today, so a deployment that sets nothing
- * behaves exactly as it did. Same shape as the kernel's `HARNESS_PACKS`.
+ * primary. Same shape as the kernel's `HARNESS_PACKS`.
+ *
+ * **Required, with no default.** `requiredEnv` fails startup naming the variable when it is unset
+ * or empty, and `loadSurfaces` refuses a list that trims away to nothing — also naming it. A
+ * default here would be a package name in host source, which is the one coupling this task
+ * removes, and it would post approval cards somewhere the deployment never asked for. The demo's
+ * value is supplied where a deployment's defaults belong: Compose sets
+ * `HARNESS_SURFACES: '${HARNESS_SURFACES:-@harness/surface-slack}'` (Task 6), and `.env.example`
+ * documents it below.
  */
 function surfaceNames(): string[] {
-  return (optionalEnv('HARNESS_SURFACES') ?? '@harness/surface-slack')
+  return requiredEnv('HARNESS_SURFACES')
     .split(',')
     .map((name) => name.trim())
     .filter((name) => name !== '');
@@ -5099,6 +5183,10 @@ process.on('SIGTERM', () => void shutdown('SIGTERM'));
 them from `deps.env`, which is `process.env` here. The `required()` helper with its Slack hint
 goes with them — the hint now lives in `surfaces/slack/src/config.ts`, where it is true.
 
+**No adapter package name appears anywhere in this file, or anywhere else under
+`harness/approvals/src`.** That is the property Task 5's `host-vocabulary.test.ts` checks, and it
+is why `HARNESS_SURFACES` has no default here.
+
 In `harness/approvals/src/app/child-env.ts`, replace `NEVER_FORWARDED` and widen the input:
 
 ```ts
@@ -5119,10 +5207,10 @@ export const MODEL_PROVIDER_KEYS = ['GEMINI_API_KEY', 'GROQ_API_KEY', 'OPENROUTE
 /**
  * Variables that must never reach the child, computed rather than listed.
  *
- * The messaging half of this list used to name four Slack variables. It cannot any more and
- * should not: which credentials exist is the loaded adapters' knowledge, declared as
- * `Surface.secrets`, and a host that hard-coded them would be wrong the day a Teams adapter is
- * loaded.
+ * The messaging half of this list used to name four variables belonging to one adapter. It
+ * cannot any more and should not: which credentials exist is the loaded adapters' knowledge,
+ * declared as `Surface.secrets`, and a host that hard-coded them would be wrong the day a second
+ * adapter is loaded.
  */
 export function neverForwarded(surfaceSecrets: readonly string[]): string[] {
   return [...new Set([...surfaceSecrets, ...MODEL_PROVIDER_KEYS])];
@@ -5165,19 +5253,35 @@ export function coreToolsChildEnv({ env, client, storageRoot, surfaceSecrets }: 
 Also update the function's doc comment: "this process holds the approver's Slack tokens" becomes
 "this process holds whatever credentials its messaging adapters need".
 
-In `harness/approvals/src/app/child-env.test.ts`: `input()` gains
-`surfaceSecrets: ['APPROVALS_SLACK_BOT_TOKEN', 'APPROVALS_SLACK_APP_TOKEN']`, the import becomes
-`{ coreToolsChildEnv, neverForwarded }`, and the allowlist case becomes:
+In `harness/approvals/src/app/child-env.test.ts`: the import becomes
+`{ coreToolsChildEnv, neverForwarded }`, the file gains
+`import { surface as slackSurface } from '@harness/surface-slack';`, `input()` gains
+`surfaceSecrets: declared`, and the allowlist case becomes:
+
+```ts
+/**
+ * The names the real adapter declares, read off its own `Surface.secrets` rather than written out
+ * here. A hand-written array would keep passing on the day someone adds a fifth credential to the
+ * adapter and forgets this list, which is the failure the test exists to catch.
+ */
+const declared = [...slackSurface.secrets];
+```
 
 ```ts
   it('is an allowlist: no credential an adapter declared, and no provider key, reaches the child', () => {
-    const declared = ['APPROVALS_SLACK_BOT_TOKEN', 'APPROVALS_SLACK_APP_TOKEN', 'SLACK_BOT_TOKEN', 'SLACK_APP_TOKEN'];
+    // A guard against the vacuous version of this test: an adapter declaring nothing would make
+    // every assertion below pass over an empty list.
+    expect(declared.length).toBeGreaterThan(0);
     const secrets = Object.fromEntries(neverForwarded(declared).map((name) => [name, `secret-${name}`]));
     const env = coreToolsChildEnv({ ...input(secrets), surfaceSecrets: declared });
     for (const name of neverForwarded(declared)) expect(env).not.toHaveProperty(name);
     expect(JSON.stringify(env)).not.toContain('secret-');
   });
 ```
+
+`.test.ts` is exempt from `the-host-never-statically-imports-a-surface`, so importing the adapter
+here is allowed and is the point: the test proves the host strips what *this* adapter says it
+holds, not what the test author remembered.
 
 - [ ] **Step 16: Rewrite the barrel and the fixtures**
 
@@ -5307,7 +5411,9 @@ import { approvals, encrypt, toolEffects } from '@harness/db';
 import { dispatchStagedEffects } from '@harness/core-tools/effects';
 import { parseAllowedUsers } from '@harness/surface-api';
 import { MemorySurface } from '@harness/surface-api/testing';
+import { surface as slackSurface } from '@harness/surface-slack';
 import { fakeSlackSession } from '@harness/surface-slack/testing';
+import { surface as memorySurface } from '@harness/surface-memory';
 import { coreToolsChildEnv, neverForwarded } from '../../app/child-env.js';
 import { FakeCoreToolsClient, pendingApproval, useTestDb } from '../../testing.js';
 import { APPROVE_ACTION_ID } from '../cards.js';
@@ -5330,7 +5436,11 @@ const now = () => new Date('2026-09-15T12:00:00Z');
 function wire() {
   const slack = fakeSlackSession({ allowedUsers: parseAllowedUsers('U012') });
   const memory = new MemorySurface({ allowedUsers: parseAllowedUsers('U012') });
-  const surfaces = surfacesOf([slack.session, memory], ['APPROVALS_SLACK_BOT_TOKEN', 'APPROVALS_SLACK_APP_TOKEN']);
+  // The secrets come off the two adapters' own `Surface.secrets`, the way `loadSurfaces` builds
+  // them, rather than out of an array written here. Otherwise the child-env case below proves
+  // only that the host strips what this file remembered.
+  const declared = [...new Set([...slackSurface.secrets, ...memorySurface.secrets])];
+  const surfaces = surfacesOf([slack.session, memory], declared);
   const core = new FakeCoreToolsClient();
   for (const session of surfaces.all) registerApprovalHandlers(session, { db, surfaces, core, client: 'demo-practice', now });
   return { slack, memory, surfaces, core };
@@ -5424,6 +5534,10 @@ describe('a host with two surfaces loaded', () => {
 
   it('keeps every credential the loaded adapters declared out of the core-tools child', () => {
     const { surfaces } = wire();
+    // The adapter declares these; nothing here does. If the Slack adapter's list ever changes,
+    // this test follows it.
+    expect(surfaces.secrets).toEqual(expect.arrayContaining([...slackSurface.secrets]));
+    expect(surfaces.secrets.length).toBeGreaterThan(0);
     const env = coreToolsChildEnv({
       env: {
         PATH: '/usr/bin',
@@ -5431,104 +5545,21 @@ describe('a host with two surfaces loaded', () => {
         DATABASE_URL: 'postgres://harness:harness@postgres:5432/harness',
         HARNESS_ENCRYPTION_KEY: 'a'.repeat(44),
         LITELLM_MASTER_KEY: 'sk-test',
-        APPROVALS_SLACK_BOT_TOKEN: 'xoxb-secret',
-        APPROVALS_SLACK_APP_TOKEN: 'xapp-secret',
+        // Every name the loaded adapters declared, present in the parent environment, so the
+        // assertion below is about stripping rather than about absence.
+        ...Object.fromEntries(neverForwarded(surfaces.secrets).map((name) => [name, `secret-${name}`])),
       },
       client: 'demo-practice',
       storageRoot: '/srv/harness-storage',
       surfaceSecrets: surfaces.secrets,
     });
     for (const name of neverForwarded(surfaces.secrets)) expect(env).not.toHaveProperty(name);
-    expect(JSON.stringify(env)).not.toContain('secret');
+    expect(JSON.stringify(env)).not.toContain('secret-');
   });
 });
 ```
 
-- [ ] **Step 18: Write the host vocabulary test**
-
-Create `harness/approvals/src/host-vocabulary.test.ts`:
-
-```ts
-import { readFile, readdir } from 'node:fs/promises';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { describe, expect, it } from 'vitest';
-
-const here = path.dirname(fileURLToPath(import.meta.url));
-const root = path.resolve(here);
-
-/**
- * Words that belong to one messaging surface and must not appear in the host.
- *
- * The host posts a card, replies under a message and uploads a file. Which of those is a Block
- * Kit block, a Bolt listener or a `thread_ts` is the Slack adapter's business, and a word here in
- * host source is either an identifier the next reader will copy or a comment that teaches the
- * wrong model — and both end with the second adapter needing a special case.
- *
- * `*.test.ts` is excluded because a test names what it tests: the dual-surface suite drives the
- * real Slack adapter through its fake transport and says so.
- *
- * **The allowlist is empty and must stay empty.** A word that has to appear belongs in
- * `surfaces/slack`, or the comment carrying it should say what the host actually means: a
- * surface, a conversation, a message, a card.
- */
-const FORBIDDEN = /slack|bolt|block ?kit|thread_ts|\bblocks\b/i;
-
-const ALLOWLIST: { file: string; contains: string; reason: string }[] = [];
-
-async function sourceFiles(dir: string): Promise<string[]> {
-  const found: string[] = [];
-  for (const entry of await readdir(dir, { withFileTypes: true })) {
-    if (entry.name === 'node_modules') continue;
-    const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) found.push(...(await sourceFiles(full)));
-    else if (entry.name.endsWith('.ts') && !entry.name.endsWith('.test.ts')) found.push(full);
-  }
-  return found;
-}
-
-describe('the approvals host names no messaging surface', () => {
-  it('finds no Slack vocabulary in harness/approvals/src', async () => {
-    const hits: string[] = [];
-    const files = await sourceFiles(root);
-    // A scan that reached nothing would pass silently, which is the one way this test can lie.
-    expect(files.length).toBeGreaterThan(10);
-    for (const file of files) {
-      const relative = path.relative(root, file).split(path.sep).join('/');
-      const text = await readFile(file, 'utf8');
-      text.split('\n').forEach((line, i) => {
-        const match = FORBIDDEN.exec(line);
-        if (!match) return;
-        const exempt = ALLOWLIST.some((a) => a.file === relative && line.includes(a.contains));
-        if (!exempt) hits.push(`${relative}:${i + 1}: ${match[0]} — ${line.trim()}`);
-      });
-    }
-    expect(hits).toEqual([]);
-  });
-
-  it('keeps the allowlist empty, because every entry is a host that still knows one transport', () => {
-    expect(ALLOWLIST).toEqual([]);
-  });
-
-  it('catches the words it claims to, so an empty result means the rule ran', () => {
-    for (const line of [
-      "import { App } from '@slack/bolt';",
-      'const blocks = approvalBlocks(row);',
-      '// the Block Kit card',
-      'thread_ts: row.messageRef,',
-      'a Slack channel id',
-    ]) {
-      expect(FORBIDDEN.test(line), line).toBe(true);
-    }
-    // And the shapes it must not catch: the words the host is supposed to use.
-    for (const line of ['await session.postCard(conversation, card);', 'const ref: MessageRef = { surface, id };']) {
-      expect(FORBIDDEN.test(line), line).toBe(false);
-    }
-  });
-});
-```
-
-- [ ] **Step 19: Add the last architecture rule and document `HARNESS_SURFACES`**
+- [ ] **Step 18: Add the last architecture rule and document `HARNESS_SURFACES`**
 
 In `.dependency-cruiser.cjs`, add to `GLOBAL_RULES` after
 `evals-never-statically-imports-a-pack`:
@@ -5556,10 +5587,14 @@ In `.env.example`, add a new block above the `# --- Slack ---` heading:
 # are posted. Decisions are accepted from whichever surface posted the card, and a
 # staged effect may name any loaded one. An adapter named here must also be in
 # @harness/approvals' dependencies so pnpm can resolve it.
+#
+# Required: the host has no default and fails at startup naming this variable if it
+# is unset or empty, because where an approval card is posted is a deployment's
+# decision and not the code's. Under Compose the service supplies this value.
 HARNESS_SURFACES=@harness/surface-slack
 ```
 
-- [ ] **Step 20: Run every gate**
+- [ ] **Step 19: Run every gate**
 
 ```bash
 pnpm -r typecheck     # 0 errors
@@ -5575,7 +5610,7 @@ longer reads `SLACK_APPROVALS_CHANNEL`, which moved into `surfaces/slack` — th
 must still find both, or `surface.test.ts`'s anchors fail. If it reports
 `SLACK_APPROVALS_CHANNEL` missing, Task 3's `SOURCE_ROOTS` edit did not land.
 
-- [ ] **Step 21: Commit**
+- [ ] **Step 20: Commit**
 
 ```bash
 git add harness/approvals .dependency-cruiser.cjs .env.example pnpm-lock.yaml
@@ -5593,10 +5628,12 @@ channel id — which is the one Slack shape that has leaked all the way out into
 `docs/architecture/tool-surface.json`, where an agent reads it.
 
 This task renames the two sinks, makes both schemas neutral, adds the optional `surface` argument
-that lets a playbook address a second surface, rewords the seven comments and three strings that
-name Slack in the kernel and the healthcare pack, and extends the vocabulary test to catch the
-next one. **It is the only task that re-records the tool surface**, and it changes it in exactly
-the four places spec decision 10 names.
+that lets a playbook address a second surface, and reworks the fourteen lines across seven kernel
+files and the three in the healthcare pack that name Slack today. It then extends the kernel
+vocabulary test to catch the next one — and adds the host's own copy of that rule, which belongs
+here because this is the commit that takes the last two Slack-named sink keys off the host.
+**It is the only task that re-records the tool surface**, and it changes it in exactly the four
+places spec decision 10 names.
 
 **Files:**
 - Modify: `harness/pack-api/src/index.ts` (two re-exports)
@@ -5607,6 +5644,8 @@ the four places spec decision 10 names.
 - Modify: `harness/core-tools/src/tools/harness.test.ts`, `harness/core-tools/src/app/pack-healthcare/forms.test.ts`
 - Modify: `harness/core-tools/src/kernel-vocabulary.test.ts`, `harness/core-tools/src/app/surface.test.ts`
 - Modify: `harness/approvals/src/domain/sinks.ts` and `sinks.test.ts` (the two legacy aliases go)
+- Modify: `harness/approvals/src/domain/execute/mcp-client.test.ts` (one asserted sink name)
+- Create: `harness/approvals/src/host-vocabulary.test.ts`
 - Modify: `docs/architecture/tool-surface.json` (re-recorded)
 
 **Interfaces:**
@@ -5859,10 +5898,111 @@ and the comment above them: from this commit the kernel stages neither. In
 `harness/approvals/src/domain/sinks.test.ts`, delete the case named "is still registered under
 the two names the kernel stages today".
 
-This is the one pair of edits that must land in **this** commit rather than the previous one: an
-alias that outlives the thing it aliases is a sink name nothing writes and nobody can find.
+One more assertion moves with them. `harness/approvals/src/domain/execute/mcp-client.test.ts:60`
+runs a real kernel through the MCP client and reads the row it staged:
 
-- [ ] **Step 9: Extend the vocabulary test**
+```ts
+      expect(effects[0]).toMatchObject({ sink: 'surface_file', tool: 'forms_release', status: 'staged' });
+```
+
+It is the only place outside the kernel's own suite that names the old sink, and Step 5 above is
+what changes the value it reads.
+
+These edits must land in **this** commit rather than the previous one: an alias that outlives the
+thing it aliases is a sink name nothing writes and nobody can find.
+
+- [ ] **Step 9: Write the host vocabulary test**
+
+This lands here rather than in Task 4, and it has to. The rule it enforces is that no word
+belonging to one messaging surface appears in `harness/approvals/src`, and until Step 8 above the
+host still registered its two sinks under `slack_message` and `slack_file` — transitional keys the
+not-yet-renamed kernel was still staging against. A test written a task earlier would have failed
+on the very aliases that kept the kernel green. The same commit that deletes them is the first one
+in which the rule can hold, so it is the commit that adds the rule.
+
+Create `harness/approvals/src/host-vocabulary.test.ts`:
+
+```ts
+import { readFile, readdir } from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { describe, expect, it } from 'vitest';
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+const root = path.resolve(here);
+
+/**
+ * Words that belong to one messaging surface and must not appear in the host.
+ *
+ * The host posts a card, replies under a message and uploads a file. Which of those is a Block
+ * Kit block, a Bolt listener or a `thread_ts` is the Slack adapter's business, and a word here in
+ * host source is either an identifier the next reader will copy or a comment that teaches the
+ * wrong model — and both end with the second adapter needing a special case.
+ *
+ * `*.test.ts` is excluded because a test names what it tests: the dual-surface suite drives the
+ * real Slack adapter through its fake transport and says so.
+ *
+ * **The allowlist is empty and must stay empty.** A word that has to appear belongs in
+ * `surfaces/slack`, or the comment carrying it should say what the host actually means: a
+ * surface, a conversation, a message, a card.
+ */
+const FORBIDDEN = /slack|bolt|block ?kit|thread_ts|\bblocks\b/i;
+
+const ALLOWLIST: { file: string; contains: string; reason: string }[] = [];
+
+async function sourceFiles(dir: string): Promise<string[]> {
+  const found: string[] = [];
+  for (const entry of await readdir(dir, { withFileTypes: true })) {
+    if (entry.name === 'node_modules') continue;
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) found.push(...(await sourceFiles(full)));
+    else if (entry.name.endsWith('.ts') && !entry.name.endsWith('.test.ts')) found.push(full);
+  }
+  return found;
+}
+
+describe('the approvals host names no messaging surface', () => {
+  it('finds no Slack vocabulary in harness/approvals/src', async () => {
+    const hits: string[] = [];
+    const files = await sourceFiles(root);
+    // A scan that reached nothing would pass silently, which is the one way this test can lie.
+    expect(files.length).toBeGreaterThan(10);
+    for (const file of files) {
+      const relative = path.relative(root, file).split(path.sep).join('/');
+      const text = await readFile(file, 'utf8');
+      text.split('\n').forEach((line, i) => {
+        const match = FORBIDDEN.exec(line);
+        if (!match) return;
+        const exempt = ALLOWLIST.some((a) => a.file === relative && line.includes(a.contains));
+        if (!exempt) hits.push(`${relative}:${i + 1}: ${match[0]} — ${line.trim()}`);
+      });
+    }
+    expect(hits).toEqual([]);
+  });
+
+  it('keeps the allowlist empty, because every entry is a host that still knows one transport', () => {
+    expect(ALLOWLIST).toEqual([]);
+  });
+
+  it('catches the words it claims to, so an empty result means the rule ran', () => {
+    for (const line of [
+      "import { App } from '@slack/bolt';",
+      'const blocks = approvalBlocks(row);',
+      '// the Block Kit card',
+      'thread_ts: row.messageRef,',
+      'a Slack channel id',
+    ]) {
+      expect(FORBIDDEN.test(line), line).toBe(true);
+    }
+    // And the shapes it must not catch: the words the host is supposed to use.
+    for (const line of ['await session.postCard(conversation, card);', 'const ref: MessageRef = { surface, id };']) {
+      expect(FORBIDDEN.test(line), line).toBe(false);
+    }
+  });
+});
+```
+
+- [ ] **Step 10: Extend the kernel vocabulary test**
 
 Rewrite the head of `harness/core-tools/src/kernel-vocabulary.test.ts`. The credentialing regex
 and its two roots are unchanged; a second regex and three more roots are added:
@@ -5952,7 +6092,7 @@ and the "catches the words it claims to" case gains the messaging half:
     }
 ```
 
-- [ ] **Step 10: Write the four-places test**
+- [ ] **Step 11: Write the four-places test**
 
 Append to `harness/core-tools/src/app/surface.test.ts`:
 
@@ -6027,7 +6167,7 @@ describe('the four places Plan 6 moved the tool surface', () => {
 with `import { CONVERSATION_ID_PATTERN, SURFACE_NAME_PATTERN } from '@harness/pack-api';` added to
 the file's imports.
 
-- [ ] **Step 11: Re-record the surface and read the diff**
+- [ ] **Step 12: Re-record the surface and read the diff**
 
 ```bash
 pnpm surface:record
@@ -6040,18 +6180,18 @@ and two added `surface` property blocks, one in `forms_release` and one in `harn
 `compose-surface.yaml` must not appear. **If the diff has a fifth hunk, stop and find out why
 before committing**: a tool schema moved that this plan did not intend to move.
 
-- [ ] **Step 12: Run every gate**
+- [ ] **Step 13: Run every gate**
 
 ```bash
 pnpm -r typecheck     # 0 errors
 pnpm lint             # 0 errors
 pnpm arch             # 0 violations
 pnpm format:check
-pnpm -r test          # green, including the five vocabulary scans and the four-places test
+pnpm -r test          # green, including the five kernel vocabulary scans, the host's three and the four-places test
 pnpm surface:record && git status --porcelain docs/architecture   # no output, now that it is committed
 ```
 
-- [ ] **Step 13: Commit**
+- [ ] **Step 14: Commit**
 
 ```bash
 git add harness/pack-api harness/core-tools packs/healthcare harness/approvals docs/architecture/tool-surface.json
@@ -6114,9 +6254,13 @@ In `harness/compose/node.Dockerfile`, add `COPY surfaces ./surfaces` after `COPY
 and change the header comment's first line from "The Slack approvals app." to "The approvals
 host and its messaging adapters."
 
-Without that line the image has no `@harness/surface-slack` to resolve, and the container fails
-at startup with `cannot load surface "@harness/surface-slack"` — which is the error working
-exactly as designed, and not one anybody wants to meet in the demo.
+Without that line the **build** fails, not the container: the `pnpm install --frozen-lockfile`
+further down the file cannot resolve `@harness/surface-slack`, which `@harness/approvals` now
+declares as a `workspace:*` dependency and which the lockfile expects to find under `surfaces/`. That is the
+better place to find out. The runtime version of the same mistake — a surface named in
+`HARNESS_SURFACES` that is not installed — is `cannot load surface "@harness/surface-slack"` at
+startup, which is the registry's message working exactly as designed and not one anybody wants to
+meet in the demo.
 
 In `harness/compose/docker-compose.yml`, in the `approvals` service's `environment:` block,
 directly after the `HARNESS_PACKS` line:
@@ -6444,7 +6588,7 @@ are one implementation.
 
 - [ ] **Step 6: docs/runbook.md**
 
-Rename the section at line 349 from `## The Slack approvals app` to
+Rename the section at line 373 from `## The Slack approvals app` to
 `## The approvals host and its surfaces` and rewrite its first half; the Slack half stays,
 demoted to a sub-heading.
 
@@ -6501,16 +6645,19 @@ naming a surface this host has not loaded fails that one effect with
 (everything from "Not a hardening recommendation" onwards is unchanged, including the table, the
 no-fallback paragraph and the Compose paragraph.)
 
-Further down the same section, the "Restricted values are kept out of Slack in three places"
-heading becomes "Restricted values are kept away from a human in three places" and its third
-bullet's wording stays as it is.
+Further down the same section, the sentence at line 457, "Restricted values are kept out of Slack
+in three places, on purpose:", becomes "Restricted values are kept away from a human in three
+places, on purpose:". It is body text, not a heading, and its three bullets stay as they are.
 
 Two more edits outside that section:
 
-- the "Effects outbox" section's two sink names, `slack_message` and `slack_file`, become
-  `surface_message` and `surface_file` wherever they appear (lines around 127, 144, 164, 166,
-  339), and the troubleshooting line "did the Slack message arrive?" becomes "did the message
-  arrive on the surface?";
+- the four Slack words in "Effects outbox" go. Line 127's "External side effects (Slack messages,
+  file uploads)" becomes "External side effects (messages on a surface, file uploads)"; line 144's
+  "did the Slack message arrive?" becomes "did the message arrive on the surface?"; line 164's
+  "the `slack_message` and `slack_file` sinks" becomes "the `surface_message` and `surface_file`
+  sinks"; line 166's "so a Slack outage never crashes the loop" becomes "so an outage on one
+  surface never crashes the loop". The same two sink names appear once more in the loops table at
+  line 381, inside the section being rewritten above;
 - add a subsection after "### Migration 0008 and the record model":
 
 ```markdown
@@ -6611,8 +6758,9 @@ and these five statements are true, each of which a test now enforces:
 1. `harness/approvals/src` contains no Slack word (`host-vocabulary.test.ts`).
 2. `harness/core-tools/src`, `packs/healthcare/src` and `packs/stories/src` contain no messaging
    word (`kernel-vocabulary.test.ts`).
-3. The Slack adapter renders the pending card, the decided card and the edit modal exactly as the
-   approvals app rendered them before this plan (`surfaces/slack/src/render/*.test.ts`).
+3. The Slack adapter renders the pending card, the approved and declined decided cards and the
+   edit modal exactly as the approvals app rendered them before this plan, compared as serialised
+   bytes (`surfaces/slack/src/render/*.test.ts`).
 4. `docs/architecture/tool-surface.json` differs from main in four places and no others
    (`harness/core-tools/src/app/surface.test.ts`).
 5. Two surfaces can be loaded at once, cards go to the primary, effects go where they are
