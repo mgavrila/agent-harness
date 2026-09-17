@@ -20,10 +20,14 @@ export {
   DEFAULT_POLICY,
   decide,
   loadPolicy,
+  mergePolicy,
   parsePolicy,
   type ActionClass,
   type Behavior,
+  type ClassTable,
+  type LevelOverrides,
   type Policy,
+  type PolicyOverrides,
 } from './domain/tooling/policy.js';
 export { expireApprovals, parkStuckDispatches, reconcile, type ReconcileResult } from './domain/tooling/reconcile.js';
 export { connectInProcess } from './domain/tooling/in-process.js';
@@ -97,8 +101,12 @@ export { type Storage, type WriteFileInput, type WrittenFile } from './domain/st
 // --- The pack contract ----------------------------------------------------------------------
 export { definePack, type Pack } from '@harness/pack-api';
 
+// --- The identity contract ------------------------------------------------------------------
+export { type Principal } from '@harness/identity-api';
+
 // --- Shared helpers, for the packages above this one ---------------------------------------
 export { ConfigError, ModelOutputError, ToolError, describeError } from '@harness/shared';
+export { LEVELS, USER_LEVELS, type Level } from '@harness/shared';
 export { booleanFromEnv, numberFromEnv, optionalEnv, requiredEnv, type NumberEnvOptions } from '@harness/shared';
 export { createLogger, type Logger } from '@harness/shared';
 export { assertInsideRoot, realOrNearestAncestor, type EscapeReason, type InsideRootOptions } from '@harness/shared';

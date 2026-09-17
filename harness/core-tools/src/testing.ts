@@ -6,10 +6,11 @@ import { onTestFinished } from 'vitest';
 import type { Client } from '@modelcontextprotocol/client';
 import { McpServer } from '@modelcontextprotocol/server';
 import type { Db } from '@harness/db';
+import type { Principal } from '@harness/identity-api';
 import { pack as healthcarePack } from '@harness/pack-healthcare';
 import { connectInProcess } from './domain/tooling/in-process.js';
 import { registerTools } from './domain/tooling/registry.js';
-import { DEFAULT_POLICY } from './domain/tooling/policy.js';
+import { DEFAULT_POLICY, mergePolicy } from './domain/tooling/policy.js';
 import { DEFAULT_CONFIDENCE_THRESHOLD, type AnyToolDef, type ToolDeps } from './domain/tooling/types.js';
 import { registryOf } from './domain/packs/registry.js';
 import type { PackRegistry } from './domain/packs/types.js';
@@ -31,6 +32,21 @@ const TEST_PACKS = registryOf([healthcarePack]);
 export const TEST_PACK_ENV: Readonly<Record<string, string>> = {};
 
 /**
+ * The principal every test runs as unless it says otherwise. A practitioner, because that row of
+ * `DEFAULT_POLICY` is exactly the flat table the kernel shipped before levels existed: `read`
+ * auto, `write.internal` auto, `external` approval, `financial` blocked, `destructive` approval.
+ * A test about levels passes its own principal with a different `level`.
+ */
+export const TEST_PRINCIPAL: Principal = {
+  id: 'u-test',
+  kind: 'user',
+  level: 'practitioner',
+  displayName: 'Test user',
+  surfaces: {},
+  attributes: {},
+};
+
+/**
  * The base map plus every loaded pack's `evals.testEnv`, in load order.
  *
  * A pack later in `HARNESS_PACKS` wins a collision, which matches how a registry answers
@@ -46,8 +62,8 @@ export function makeTestDeps(db: Db, overrides: Partial<ToolDeps> = {}): ToolDep
   const deps: ToolDeps = {
     db,
     client: 'test',
-    caller: 'test-caller',
-    policy: { ...DEFAULT_POLICY },
+    principal: TEST_PRINCIPAL,
+    policy: mergePolicy(DEFAULT_POLICY, {}),
     encryptionKey: randomBytes(32),
     now: () => new Date('2026-09-15T12:00:00Z'),
     approvalTtlHours: 24,

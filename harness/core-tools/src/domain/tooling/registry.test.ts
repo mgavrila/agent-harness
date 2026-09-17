@@ -4,7 +4,7 @@ import * as z from 'zod/v4';
 import { eq } from 'drizzle-orm';
 import { approvals, auditLog, decrypt, records, runs } from '@harness/db';
 import { ToolError } from '@harness/shared';
-import { approvalIdOf, connectTools, makeTestDeps, textOf, useTestDb } from '../../testing.js';
+import { TEST_PRINCIPAL, approvalIdOf, connectTools, makeTestDeps, textOf, useTestDb } from '../../testing.js';
 import { defineTool } from './registry.js';
 
 const echo = defineTool({
@@ -41,6 +41,15 @@ const pay = defineTool({
   description: 'Move money (financial)',
   actionClass: 'financial',
   input: z.object({ amount: z.number() }),
+  output: z.object({ ok: z.boolean() }),
+  handler: async () => ({ ok: true }),
+});
+
+const purge = defineTool({
+  name: 'purge',
+  description: 'Delete beyond repair (destructive)',
+  actionClass: 'destructive',
+  input: z.object({}),
   output: z.object({ ok: z.boolean() }),
   handler: async () => ({ ok: true }),
 });
@@ -89,7 +98,7 @@ const mutateContextThenThrow = defineTool({
     const runId = randomUUID();
     d.context.runId = runId;
     d.context.skill = 'ghost-skill';
-    await d.db.insert(runs).values({ id: runId, client: d.client, caller: d.caller });
+    await d.db.insert(runs).values({ id: runId, client: d.client, caller: d.principal.id });
     throw new ToolError('rolled back after mutating context');
   },
 });
@@ -120,7 +129,7 @@ describe('registerTools', () => {
     expect(res.structuredContent).toEqual({ status: 'ok', result: { text: 'hi' } });
     const rows = await db.select().from(auditLog);
     expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ tool: 'echo_read', decision: 'auto', recordIds: ['rec-1'], caller: 'test-caller' });
+    expect(rows[0]).toMatchObject({ tool: 'echo_read', decision: 'auto', recordIds: ['rec-1'], caller: 'u-test' });
   });
 
   it('parks approval-class tools and creates one approval row per identical request', async () => {
@@ -131,7 +140,7 @@ describe('registerTools', () => {
     expect(second.structuredContent).toEqual(first.structuredContent);
     const rows = await db.select().from(approvals);
     expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ action: 'send_external', status: 'pending', requestedBy: 'test-caller' });
+    expect(rows[0]).toMatchObject({ action: 'send_external', status: 'pending', requestedBy: 'u-test' });
     expect(rows[0].payload).toEqual({ tool: 'send_external', args: { to: 'payer@example.com' } });
     const audits = await db.select().from(auditLog);
     expect(audits.every((a) => a.decision === 'approval' && a.approvalId === rows[0].id)).toBe(true);
@@ -143,6 +152,27 @@ describe('registerTools', () => {
     expect(res.isError).toBe(true);
     const rows = await db.select().from(auditLog);
     expect(rows[0]).toMatchObject({ tool: 'pay', decision: 'blocked' });
+  });
+
+  it('decides by the principal level: a member is parked on an internal write and a service is refused a destructive one', async () => {
+    const asMember = makeTestDeps(db, { principal: { ...TEST_PRINCIPAL, id: 'u-member', level: 'member' } });
+    const member = await connectTools('registry-test-member', [writeOk], asMember);
+    const parked = await member.callTool({ name: 'write_ok', arguments: { name: 'Dr. Parked' } });
+    expect(parked.structuredContent).toMatchObject({ status: 'pending' });
+    expect(await db.select().from(records)).toHaveLength(0);
+    const [row] = await db.select().from(approvals);
+    expect(row.requestedBy).toBe('u-member');
+
+    const asService = makeTestDeps(db, {
+      principal: { ...TEST_PRINCIPAL, id: 'svc-nightly', kind: 'service', level: 'service' },
+    });
+    const service = await connectTools('registry-test-service', [purge], asService);
+    const refused = await service.callTool({ name: 'purge', arguments: {} });
+    expect(refused.isError).toBe(true);
+    expect(textOf(refused)).toContain('blocked by policy');
+    const audits = await db.select().from(auditLog).where(eq(auditLog.tool, 'purge'));
+    expect(audits).toHaveLength(1);
+    expect(audits[0]).toMatchObject({ decision: 'blocked', caller: 'svc-nightly' });
   });
 
   it('converts thrown errors into isError results and audits them, without leaking the raw message', async () => {

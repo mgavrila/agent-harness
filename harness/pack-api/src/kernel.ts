@@ -3,6 +3,7 @@ export type {
   PackKernel,
   PackRegistryView,
   PackToolDeps,
+  PrincipalView,
   StagedRelease,
   WriteOutFileInput,
   WrittenFile,

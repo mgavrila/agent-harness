@@ -38,7 +38,7 @@ try {
 }
 
 serveStdio(() => createCoreToolsServer(deps));
-log.info(`listening on stdio (client=${deps.client}, caller=${deps.caller})`);
+log.info(`listening on stdio (client=${deps.client}, principal=${deps.principal.id})`);
 
 async function shutdown(signal: string): Promise<void> {
   try {

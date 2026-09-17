@@ -35,7 +35,14 @@ export async function surfaceDeps(): Promise<ToolDeps> {
   return {
     db: null as unknown as ToolDeps['db'],
     client: 'surface',
-    caller: 'surface',
+    principal: {
+      id: 'svc-surface',
+      kind: 'service',
+      level: 'service',
+      displayName: 'Surface recorder',
+      surfaces: {},
+      attributes: {},
+    },
     policy: { ...DEFAULT_POLICY },
     encryptionKey: Buffer.alloc(32),
     now: () => new Date('2026-01-01T00:00:00Z'),

@@ -45,7 +45,7 @@ export async function executeApproval(deps: ToolDeps, approvalId: string): Promi
   // Policy is re-read at replay time: an approval granted before the class
   // was blocked must not become a way around the current policy. Throwing
   // here rolls the `executed` transition back to `approved`.
-  if (decide(target.actionClass, deps.policy) === 'blocked') {
+  if (decide(target.actionClass, deps.principal.level, deps.policy) === 'blocked') {
     throw new ToolError(`approval ${approvalId} cannot execute: ${target.name} is now blocked by policy`);
   }
 

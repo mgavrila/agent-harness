@@ -9,6 +9,7 @@ import {
   type GatewayConfig,
   type PackRegistry,
   type Policy,
+  type Principal,
   type ToolDeps,
 } from '@harness/core-tools';
 import { connectInProcess } from '@harness/core-tools/in-process';
@@ -27,6 +28,16 @@ import type { CaseOutcome, StoredAttachment, StoredField } from './score.js';
  * variable never does.
  */
 const EVAL_PACK_ENV: Readonly<Record<string, string>> = {};
+
+/** The eval runner's own identity: a service, because nobody is asking. */
+export const EVAL_PRINCIPAL: Principal = {
+  id: 'svc-evals',
+  kind: 'service',
+  level: 'service',
+  displayName: 'Eval runner',
+  surfaces: {},
+  attributes: {},
+};
 
 /**
  * The base map plus every loaded pack's `evals.testEnv`, in load order.
@@ -190,7 +201,7 @@ export async function openPipeline(opts: OpenPipelineOptions): Promise<PipelineH
   const deps: ToolDeps = {
     db,
     client: opts.client ?? 'evals',
-    caller: 'eval-runner',
+    principal: EVAL_PRINCIPAL,
     policy,
     // Ephemeral: the eval database is truncated between cases and dropped
     // afterwards, so nothing encrypted here has to be readable later.

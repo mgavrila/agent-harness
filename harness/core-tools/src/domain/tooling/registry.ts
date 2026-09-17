@@ -34,7 +34,7 @@ export function registerTools(server: McpServer, tools: AnyToolDef[], deps: Tool
         const { derived_from, ...handlerArgs } = args as Record<string, unknown> & { derived_from?: string[] };
         const base = auditBaseFor(deps, tool, hashArgs(handlerArgs), derived_from ?? []);
 
-        switch (decide(tool.actionClass, deps.policy)) {
+        switch (decide(tool.actionClass, deps.principal.level, deps.policy)) {
           case 'blocked':
             return await runBlocked(deps, tool, base);
           case 'approval':

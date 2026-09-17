@@ -13,6 +13,7 @@ describe('ToolDeps satisfies PackToolDeps', () => {
     // of these members, breaks every pack in the workspace and this is where it says so.
     const view: PackToolDeps = deps;
     expect(view.client).toBe('test');
+    expect(view.principal).toMatchObject({ id: 'u-test', level: 'practitioner' });
     expect(view.kernel.MASKED).toBe('[restricted]');
     expect(view.kernel.isRestrictedName('ssn')).toBe(true);
     expect(view.kernelTools).toBeInstanceOf(Map);

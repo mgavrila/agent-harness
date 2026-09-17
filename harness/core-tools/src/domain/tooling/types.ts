@@ -1,5 +1,6 @@
 import type * as z from 'zod/v4';
 import type { Db } from '@harness/db';
+import type { Principal } from '@harness/identity-api';
 import type { AnyToolDef as PackAnyToolDef, PackKernel, ToolDef as PackToolDef } from '@harness/pack-api';
 import type { EnvSource } from '@harness/shared';
 import type { SinkRegistry } from '../effects/types.js';
@@ -49,8 +50,13 @@ export interface ToolDeps {
   db: Db;
   /** The client this process serves. Every query is scoped by it; nothing crosses clients. */
   client: string;
-  /** Who is calling (the agent identity recorded on every audit row). */
-  caller: string;
+  /**
+   * Who this run acts as. Bound by whoever built the bag — the stdio server from
+   * `HARNESS_PRINCIPAL`, a host per run — and never by a tool: nothing a model sends can set it.
+   * `principal.id` is what every audit row, approval and run row carries, and `principal.level`
+   * is what policy decides with.
+   */
+  principal: Principal;
   /** Action-class → behaviour table that decides auto / approval / blocked for each tool. */
   policy: Policy;
   /** 32-byte AES-256-GCM key for restricted values and approval payloads. Never logged. */

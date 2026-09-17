@@ -7,6 +7,7 @@ import { auditLog, attachments, fields, records, approvals, toolEffects, decrypt
 import { ROSTER_COLUMNS, pack as healthcarePack } from '@harness/pack-healthcare';
 import { useTestDb, makeTestDeps, connectTools, resultOf, approvalIdOf, textOf } from '../../testing.js';
 import type { ToolDeps } from '../../domain/tooling/types.js';
+import { mergePolicy } from '../../domain/tooling/policy.js';
 import { approvalTools } from '../../tools/approvals.js';
 
 const eqField = (providerId: string, name: string) => and(eq(fields.recordId, providerId), eq(fields.name, name));
@@ -435,7 +436,7 @@ describe('forms_release', () => {
     const strict = makeTestDeps(db, {
       storageDir,
       formsDir: healthcarePack.formsDir!,
-      policy: { ...deps.policy, external: 'auto' },
+      policy: mergePolicy(deps.policy, { classes: { external: 'auto' } }),
     });
     const client = await connectTools('forms-test', [...healthcarePack.tools!(strict), ...approvalTools], strict);
     const res = await client.callTool({ name: 'forms_release', arguments: { file_id: '../../etc/passwd' } });
@@ -447,7 +448,7 @@ describe('forms_release', () => {
     const strict = makeTestDeps(db, {
       storageDir,
       formsDir: healthcarePack.formsDir!,
-      policy: { ...deps.policy, external: 'auto' },
+      policy: mergePolicy(deps.policy, { classes: { external: 'auto' } }),
     });
     const client = await connectTools('forms-test', [...healthcarePack.tools!(strict), ...approvalTools], strict);
     const res = await client.callTool({

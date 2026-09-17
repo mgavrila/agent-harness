@@ -30,7 +30,7 @@ export async function createOrReuseApproval(
     await db.update(approvals).set({ status: 'expired', decidedAt: deps.now() }).where(eq(approvals.id, existing.id));
   }
 
-  const summary = `${tool.name} (${tool.actionClass}) requested by ${deps.caller}`;
+  const summary = `${tool.name} (${tool.actionClass}) requested by ${deps.principal.id}`;
   const expiresAt = new Date(deps.now().getTime() + deps.approvalTtlHours * 3600 * 1000);
   await db
     .insert(approvals)
@@ -42,7 +42,7 @@ export async function createOrReuseApproval(
       payload: { tool: tool.name, args: tool.redact ? tool.redact(args) : args },
       payloadEncrypted: encrypt(JSON.stringify({ tool: tool.name, args }), deps.encryptionKey),
       summary,
-      requestedBy: deps.caller,
+      requestedBy: deps.principal.id,
       expiresAt,
       idempotencyKey,
     })

@@ -41,6 +41,16 @@ const DOMAIN_FORBIDDEN =
 const MESSAGING_FORBIDDEN = /slack|bolt|block ?kit|thread_ts|\bblocks\b/i;
 
 /**
+ * Words that belong to one agent framework or one identity vendor and must not appear in the
+ * kernel, the identity contract or the evals (spec decision 20). The runtime plug-in of Plan 8 is
+ * the only place the first three may live; the Entra plug-in and the Teams surface are Weave's
+ * and live in `identities/entra` and `surfaces/teams` when they exist. `teams` and `entra` are
+ * word-bounded: "teams" is also English, and `agreementRate` in the evals contains the five
+ * letters of the other.
+ */
+const FRAMEWORK_FORBIDDEN = /deepagents|langchain|langgraph|\bentra\b|\bteams\b/i;
+
+/**
  * What is scanned for what, and what is left out of each.
  *
  * `*.test.ts` is excluded everywhere because a test names what it tests: the healthcare suites in
@@ -92,6 +102,27 @@ const SCANNED = [
     minFiles: 1,
     skip: [/\.test\.ts$/],
   },
+  {
+    what: 'framework and vendor vocabulary',
+    root: 'harness/core-tools/src',
+    forbidden: FRAMEWORK_FORBIDDEN,
+    minFiles: 10,
+    skip: [/\.test\.ts$/],
+  },
+  {
+    what: 'framework and vendor vocabulary',
+    root: 'evals/src',
+    forbidden: FRAMEWORK_FORBIDDEN,
+    minFiles: 10,
+    skip: [/\.test\.ts$/, /\.test-helpers\.ts$/],
+  },
+  {
+    what: 'framework and vendor vocabulary',
+    root: 'harness/identity-api/src',
+    forbidden: FRAMEWORK_FORBIDDEN,
+    minFiles: 5,
+    skip: [/\.test\.ts$/],
+  },
 ];
 
 /**
@@ -114,7 +145,7 @@ async function sourceFiles(dir: string, skip: RegExp[]): Promise<string[]> {
   return found.filter((file) => !skip.some((pattern) => pattern.test(file.split(path.sep).join('/'))));
 }
 
-describe('the kernel, the packs and the evals name no area of the product', () => {
+describe('the kernel, the packs, the identity contract and the evals name no area of the product, no surface and no framework', () => {
   for (const { what, root, forbidden, minFiles, skip } of SCANNED) {
     it(`finds no ${what} in ${root}`, async () => {
       const hits: string[] = [];
@@ -173,6 +204,20 @@ describe('the kernel, the packs and the evals name no area of the product', () =
     // And the shapes it must not catch: an ordinary identifier, and the words the kernel uses.
     for (const line of ['const prompt = dataBlockSystemPrompt(role);', "sink: 'surface_message',"]) {
       expect(MESSAGING_FORBIDDEN.test(line), line).toBe(false);
+    }
+    for (const line of [
+      "import { createDeepAgent } from 'deepagents';",
+      "import { ChatOpenAI } from '@langchain/openai';",
+      'const saver = new LangGraphPostgresSaver();',
+      '// resolved through Entra ID',
+      'a Teams activity id',
+    ]) {
+      expect(FRAMEWORK_FORBIDDEN.test(line), line).toBe(true);
+    }
+    // And the two shapes it must not catch: an identifier that happens to contain "teams",
+    // and the evals' `agreementRate`, which contains the letters of "entra".
+    for (const line of ['const teamsize = 3;', 'agreementRate: number;']) {
+      expect(FRAMEWORK_FORBIDDEN.test(line), line).toBe(false);
     }
   });
 });

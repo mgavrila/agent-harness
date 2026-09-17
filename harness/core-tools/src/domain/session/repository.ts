@@ -50,7 +50,7 @@ export async function setRunContext(deps: ToolDeps, args: SetContextArgs): Promi
   if (skill !== undefined) deps.context.skill = skill ?? undefined;
   if (skill_version !== undefined) deps.context.skillVersion = skill_version ?? undefined;
   if (runToCreate) {
-    await deps.db.insert(runs).values({ id: runToCreate, client: deps.client, caller: deps.caller });
+    await deps.db.insert(runs).values({ id: runToCreate, client: deps.client, caller: deps.principal.id });
   }
   return {
     run_id: deps.context.runId ?? null,

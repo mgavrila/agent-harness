@@ -14,7 +14,7 @@ export function auditBaseFor(
 ): AuditBase {
   return {
     client: deps.client,
-    caller: deps.caller,
+    caller: deps.principal.id,
     tool: tool.name,
     actionClass: tool.actionClass,
     argsHash,

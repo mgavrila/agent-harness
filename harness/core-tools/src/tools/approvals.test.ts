@@ -5,7 +5,7 @@ import { approvals, auditLog, records } from '@harness/db';
 import { ToolError } from '@harness/shared';
 import { defineTool } from '../domain/tooling/registry.js';
 import { approvalIdOf, connectTools, makeTestDeps, resultOf, useTestDb, type TestClient } from '../testing.js';
-import { DEFAULT_POLICY } from '../domain/tooling/policy.js';
+import { DEFAULT_POLICY, mergePolicy } from '../domain/tooling/policy.js';
 import { approvalTools } from './approvals.js';
 
 const db = useTestDb();
@@ -132,7 +132,7 @@ describe('approvals_execute', () => {
     // Same key as the parking deps, so the stored payload still decrypts and
     // the policy re-check is the only thing that can stop the replay.
     const strictDeps = makeTestDeps(db, {
-      policy: { ...DEFAULT_POLICY, external: 'blocked' },
+      policy: mergePolicy(DEFAULT_POLICY, { classes: { external: 'blocked' } }),
       encryptionKey: deps.encryptionKey,
     });
     const strictClient = await connectTools('approvals-test-blocked', replayableTools, strictDeps);

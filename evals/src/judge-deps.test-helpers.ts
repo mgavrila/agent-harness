@@ -39,7 +39,14 @@ export function openJudgeDeps(opts: { gatewayUrl: string; storageDir: string }):
     deps: {
       db,
       client: 'evals',
-      caller: 'judge',
+      principal: {
+        id: 'svc-judge',
+        kind: 'service',
+        level: 'service',
+        displayName: 'Eval judge',
+        surfaces: {},
+        attributes: {},
+      },
       policy: { ...DEFAULT_POLICY },
       // Ephemeral: the eval database is truncated between cases, so nothing
       // encrypted under this key has to be readable later.

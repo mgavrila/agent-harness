@@ -21,6 +21,7 @@
   "dependencies": {
     "@harness/db": "workspace:*",
     "@harness/gateway": "workspace:*",
+    "@harness/identity-api": "workspace:*",
     "@harness/pack-api": "workspace:*",
     "@harness/pack-healthcare": "workspace:*",
     "@harness/shared": "workspace:*",

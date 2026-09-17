@@ -1,5 +1,6 @@
 import path from 'node:path';
 import { createDb, loadKey } from '@harness/db';
+import type { Principal } from '@harness/identity-api';
 import { booleanFromEnv, envOrDefault, numberFromEnv, optionalEnv } from '@harness/shared';
 import { loadPolicy } from '../domain/tooling/policy.js';
 import { DEFAULT_CONFIDENCE_THRESHOLD, type ToolDeps } from '../domain/tooling/types.js';
@@ -36,13 +37,21 @@ function packNames(): string[] {
     .filter((name) => name !== '');
 }
 
+/**
+ * The caller name wrapped in a service principal. Transitional: Task 4 of Plan 7 replaces this
+ * with a principal resolved from `clients/<name>/identity.yaml` through `HARNESS_PRINCIPAL`.
+ */
+function callerPrincipal(id: string): Principal {
+  return { id, kind: 'service', level: 'service', displayName: id, surfaces: {}, attributes: {} };
+}
+
 export async function buildDepsFromEnv(): Promise<{ deps: ToolDeps; close: () => Promise<void> }> {
   const { db, close } = createDb();
   const packs = await loadPacks(packNames());
   const deps: ToolDeps = {
     db,
     client: envOrDefault('HARNESS_CLIENT', 'default'),
-    caller: envOrDefault('CORE_TOOLS_CALLER', 'hermes'),
+    principal: callerPrincipal(envOrDefault('CORE_TOOLS_CALLER', 'hermes')),
     policy: await loadPolicy(),
     encryptionKey: loadKey(),
     now: () => new Date(),
