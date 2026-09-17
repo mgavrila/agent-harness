@@ -1,11 +1,51 @@
+import { createRequire } from 'node:module';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { ConfigError } from '@harness/shared';
-import { targetFor } from './extraction.js';
+import { parseExtractionManifest, targetFor, type ExtractionManifest } from './extraction.js';
+import type { RawAttachmentKind, RawRecordKind } from './records.js';
 import type { Pack } from './types.js';
 
 export type { Pack } from './types.js';
 
 const NAME = /^[a-z][a-z0-9-]*$/;
+
+/** What a pack's `schema/<kind>.json` holds, and what `loadPackSchema` reads out of it. */
+export interface PackSchema {
+  /** The pack root: one level up from `src/`. Every path a pack declares is resolved from it. */
+  root: string;
+  /** The pack's own `package.json` version, so the two cannot drift. */
+  version: string;
+  records: RawRecordKind[];
+  attachments: RawAttachmentKind[];
+  extraction: ExtractionManifest;
+}
+
+/**
+ * Read the declaration files every pack ships, given the pack's own `import.meta.url`.
+ *
+ * `definePack` refuses a relative `formsDir` or `skillsDir`, because it would resolve against
+ * whatever directory the harness process happened to start in — so a pack has to resolve its own
+ * root, and doing it here means no pack gets that wrong. `schemaFile` is relative to the module
+ * that passes its `import.meta.url`, the way a `require` specifier in that file would be.
+ *
+ * A `require` rather than a JSON import: an import would need an import attribute and a resolver
+ * flag, and this keeps both files loadable from tsx, vitest and a built bundle alike.
+ */
+export function loadPackSchema(moduleUrl: string, schemaFile: string): PackSchema {
+  const requireJson = createRequire(moduleUrl);
+  const raw = requireJson(schemaFile) as Pick<PackSchema, 'records' | 'attachments'> & {
+    extraction: ExtractionManifest;
+  };
+  const { version } = requireJson('../package.json') as { version: string };
+  return {
+    root: path.resolve(path.dirname(fileURLToPath(moduleUrl)), '..'),
+    version,
+    records: raw.records,
+    attachments: raw.attachments,
+    extraction: parseExtractionManifest(raw.extraction),
+  };
+}
 
 /**
  * Every tool name and every result key in the harness is lowercase snake case — `documents_get`,

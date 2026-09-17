@@ -69,4 +69,4 @@ export {
   type WrittenFile,
 } from './kernel.js';
 export { type EvalReadback, type PackEvals } from './evals.js';
-export { definePack, type Pack } from './pack.js';
+export { definePack, loadPackSchema, type Pack } from './pack.js';

@@ -1,35 +1,11 @@
 import { readFileSync } from 'node:fs';
-import { createRequire } from 'node:module';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { parse as parseYaml } from 'yaml';
-import {
-  definePack,
-  parseExtractionManifest,
-  type ExtractionManifest,
-  type Policy,
-  type RawAttachmentKind,
-  type RawRecordKind,
-} from '@harness/pack-api';
+import { definePack, loadPackSchema, type Policy } from '@harness/pack-api';
 import { PACK_NAME } from './pack-name.js';
 import { HEALTHCARE_REPLACES, healthcareTools } from './tools/index.js';
 
-/** The pack root: one level up from `src/`. Every path below is absolute, as the contract requires. */
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-
-// A JSON import would need an import attribute and a resolver flag; a require keeps both files
-// loadable from tsx, vitest and a built bundle alike.
-const requireJson = createRequire(import.meta.url);
-
-interface RawManifest {
-  records: RawRecordKind[];
-  attachments: RawAttachmentKind[];
-  extraction: ExtractionManifest;
-}
-const raw = requireJson('../schema/provider.json') as RawManifest;
-const { version } = requireJson('../package.json') as { version: string };
-
-const extraction = parseExtractionManifest(raw.extraction);
+const { root, version, records, attachments, extraction } = loadPackSchema(import.meta.url, '../schema/provider.json');
 
 /**
  * The action-class defaults this pack ships, read from the file a human edits. The `Pack`
@@ -51,8 +27,8 @@ const { classes = {} } = parseYaml(readFileSync(path.join(root, 'policy.yaml'), 
 export const pack = definePack({
   name: PACK_NAME,
   version,
-  records: raw.records,
-  attachments: raw.attachments,
+  records,
+  attachments,
   documentKinds: extraction.document_kinds,
   extraction,
   formsDir: path.join(root, 'forms'),

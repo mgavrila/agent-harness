@@ -1,30 +1,7 @@
-import { createRequire } from 'node:module';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import {
-  definePack,
-  parseExtractionManifest,
-  type ExtractionManifest,
-  type RawAttachmentKind,
-  type RawRecordKind,
-} from '@harness/pack-api';
+import { definePack, loadPackSchema } from '@harness/pack-api';
 
-/** The pack root: one level up from `src/`. Every path below is absolute, as the contract requires. */
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-
-// A JSON import would need an import attribute and a resolver flag; a require keeps both files
-// loadable from tsx, vitest and a built bundle alike.
-const requireJson = createRequire(import.meta.url);
-
-interface RawManifest {
-  records: RawRecordKind[];
-  attachments: RawAttachmentKind[];
-  extraction: ExtractionManifest;
-}
-const raw = requireJson('../schema/epic.json') as RawManifest;
-const { version } = requireJson('../package.json') as { version: string };
-
-const extraction = parseExtractionManifest(raw.extraction);
+const { root, version, records, attachments, extraction } = loadPackSchema(import.meta.url, '../schema/epic.json');
 
 /**
  * Document scanning that produces epics.
@@ -40,8 +17,8 @@ const extraction = parseExtractionManifest(raw.extraction);
 export const pack = definePack({
   name: 'stories',
   version,
-  records: raw.records,
-  attachments: raw.attachments,
+  records,
+  attachments,
   documentKinds: extraction.document_kinds,
   extraction,
   skillsDir: path.join(root, 'skills'),
