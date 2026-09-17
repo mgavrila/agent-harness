@@ -15,7 +15,7 @@ import { registerApprovalHandlers } from '../handlers.js';
 import { postPendingApprovals } from '../poller.js';
 import { surfaceSinks } from '../sinks.js';
 import { surfacesOf } from './registry.js';
-import { STUB_SECRET, stubSurface } from './stub-surface.test-helpers.js';
+import { STUB_SECRET, stubSession, stubSurface } from './stub-surface.test-helpers.js';
 
 const db = useTestDb();
 const key = randomBytes(32);
@@ -33,7 +33,7 @@ const now = () => new Date('2026-09-15T12:00:00Z');
 function wire() {
   const slack = fakeSlackSession({ allowedUsers: parseAllowedUsers('U012') });
   const memory = new MemorySurface({ allowedUsers: parseAllowedUsers('U012') });
-  const stub = new MemorySurface({ name: 'stub', conversation: 'stub' });
+  const stub = stubSession();
   // The secrets come off the three adapters' own `Surface.secrets`, the way `loadSurfaces` builds
   // them, rather than out of an array written here. Otherwise the last case below proves only
   // that the host collected what this file remembered.
