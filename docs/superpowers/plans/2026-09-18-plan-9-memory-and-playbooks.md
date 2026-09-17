@@ -99,13 +99,13 @@ Read out of the worktree at `.claude/worktrees/plan-9-memory-playbooks` (branch 
 
 ## Decisions where the spec leaves a detail open
 
-1. **A tool's action class may depend on its arguments: `ToolDef.actionClassFor`.** Spec 5.5 wants one `memory_add` that is `write.self` in the caller's own scope and `write.internal` in the client's, and one `memory_remove` that follows the entry it removes. A tool declares one `actionClass` today, so `@harness/pack-api`'s `ToolDef` gains an optional `actionClassFor?: (args, deps) => ActionClass | Promise<ActionClass>`; `registerTools` resolves it before `decide`, `auditBaseFor` records the resolved class on the audit row, `createOrReuseApproval` prints it in the summary, and `executeApproval` resolves it again at replay so a parked client-scope write is re-checked as `write.internal`. `actionClass` stays required and is the class of every call when the resolver is absent, and the only two tools that use the resolver are `memory_add` and `memory_remove`.
+1. **A tool's action class may depend on its arguments: `ToolDef.actionClassFor`.** Spec 5.5 wants one `memory_add` that is `write.self` in the caller's own scope and `write.internal` in the client's, and one `memory_remove` that follows the entry it removes. A tool declares one `actionClass` today, so `@harness/pack-api`'s `ToolDef` gains an optional `actionClassFor?: (args, deps) => ActionClass | Promise<ActionClass>`. The resolved class has to reach **five** places, and missing any one of them is a kernel that says one thing and does another: `registerTools` resolves it before `decide`, `auditBaseFor` records it on the audit row, `createOrReuseApproval` prints it in the parked summary, `runBlocked` prints it in the refusal the model reads, and `executeApproval` resolves it again at replay so a parked client-scope write is re-checked as `write.internal`. A resolver may read the database, so `registerTools` runs it inside the same last-resort funnel every handler failure goes through. `actionClass` stays required and is the class of every call when the resolver is absent, and the only two tools that use the resolver are `memory_add` and `memory_remove`.
 
 2. **Caps are characters *and* entries; one entry is at most 500 characters.** `MEMORY_CAPS = { principal: { chars: 2_500, entries: 50 }, client: { chars: 4_000, entries: 50 } }` and `MEMORY_ENTRY_MAX_CHARS = 500`, all constants in `domain/memory/types.ts`. The entry cap is what bounds the rendered snapshot (decision 4): with only a character cap, a hundred one-character entries would carry a hundred ids.
 
 3. **The refusal over the cap is a `ToolError` that lists the scope's entries and the space left.** `memory scope "principal" is full: 2,480 of 2,500 characters used, 120 needed for this entry; remove or consolidate one with memory_remove, then add again. Current entries:` followed by one `- (id <uuid>) <text>` line per entry. The entries are the caller's own (or the client's, which the caller can read anyway), so echoing them is safe; the text being added is never echoed.
 
-4. **The snapshot is a fixed markdown document, principal entries first.** `renderMemorySnapshot` produces `# Memory`, then `## Your notes (principal scope)` with one `- <text> (id: <uuid>)` line per entry oldest first, then `## Shared notes (client scope)` in the same shape; a scope with no entries renders `- (none)`; no entries at all render the empty string, which the runtime turns into `(no memories yet)`. The full id is printed because `memory_remove` takes it. Bound: 2,500 + 4,000 characters of text, at most 100 entries × 45 characters of ids and punctuation, and two headings — under 11,000 characters.
+4. **The snapshot is a fixed markdown document, principal entries first.** `renderMemorySnapshot` produces `# Memory`, then `## Your notes (principal scope)` with one `- <text> (id: <uuid>)` line per entry oldest first, then `## Shared notes (client scope)` in the same shape; a scope with no entries renders `- (none)`; no entries at all render the empty string, which the runtime turns into `(no memories yet)`. The full id is printed because `memory_remove` takes it. Bound: 2,500 + 4,000 characters of text, at most 100 entries × 45 characters of list punctuation and id (`- ` + ` (id: ` + 36 + `)`), 99 newlines between the entry lines, the two headings (31 and 30) and the document's own `# Memory` block and separators (13) — **11,174 characters at both caps, so the assertion is 12,000**, not the 11,000 the text of this plan carried before the pre-flight scan.
 
 5. **The host renders the snapshot once, before the runtime starts, and never mutates it.** `runTurn` awaits `memorySnapshot(host.db, host.client, turn.principal.id)` (exported by core-tools) right after appending the inbound message and passes the string as `RunRequest.memory`. An entry the model adds during the turn is visible from the next turn on, which is what "frozen for this run" means. The stdio server (`app/main.ts` of core-tools) does not render one: it has no runtime.
 
@@ -175,7 +175,7 @@ Paths are relative to the repository root. No new package; no new directory outs
 | `harness/core-tools/src/domain/memory/render.ts` + test | `renderMemorySnapshot`, `memorySnapshot` |
 | `harness/core-tools/src/domain/memory/search.ts` + test | `searchSessions` |
 | `harness/core-tools/src/tools/memory.ts` + test | the four tools |
-| `harness/pack-api/src/types.ts`; `harness/core-tools/src/domain/tooling/registry.ts`, `context.ts`, `domain/approvals/execute.ts`, `repository.ts` (+ `registry.test.ts`) | `actionClassFor` |
+| `harness/pack-api/src/types.ts`; `harness/core-tools/src/domain/tooling/registry.ts`, `context.ts`, `execution.ts`, `domain/approvals/execute.ts`, `repository.ts` (+ `registry.test.ts`) | `actionClassFor`, and the five places the resolved class has to reach |
 | `harness/core-tools/src/tools/catalog.ts`, `src/index.ts`, `app/surface.test.ts`, `app/dual-pack.test.ts`, `docs/architecture/tool-surface.json` | publication and the snapshot |
 | `harness/host/src/domain/conversation.ts` + test | the snapshot on the request; the history budget; abort reasons |
 | `harness/runtime-api/src/types.ts`; `runtimes/deepagents/src/domain/prompt.ts` + test | the doc comment; the rules line naming the memory tools |
@@ -811,7 +811,7 @@ export function assertNoInjection(text: string, what: string): void {
 - [ ] **Step 4: Run the test to verify it passes**
 
 Run: `pnpm --filter @harness/core-tools exec vitest run src/domain/memory/injection.test.ts`
-Expected: PASS, six tests. If a `FACTS` sentence trips a pattern, tighten the pattern, not the sentence: the facts list is the contract.
+Expected: PASS, five tests. If a `FACTS` sentence trips a pattern, tighten the pattern, not the sentence: the facts list is the contract.
 
 - [ ] **Step 5: Export it**
 
@@ -850,7 +850,7 @@ git commit -m "feat(core-tools): refuse memory text that carries an instruction 
 **Interfaces:**
 - Consumes: `memoryEntries`, `messages`, `threads` (Task 1); `assertNoInjection` (Task 2); `assertNoRestrictedPattern`, `containsRestrictedPattern` from `src/shared/redaction/patterns.ts`; `levelAtLeast` from `@harness/identity-api`; `ToolDeps`, `defineTool`, `decide`, `auditBaseFor`.
 - Produces:
-  - `ToolDef.actionClassFor?: (args: z.infer<I>, deps: TDeps) => ActionClass | Promise<ActionClass>`; `auditBaseFor(deps, tool, argsHash, derivedFrom?, actionClass?)`; `createOrReuseApproval(db, deps, tool, args, argsHash, actionClass?)`.
+  - `ToolDef.actionClassFor?: (args: z.infer<I>, deps: TDeps) => ActionClass | Promise<ActionClass>`; `auditBaseFor(deps, tool, argsHash, derivedFrom?, actionClass?)`; `createOrReuseApproval(db, deps, tool, args, argsHash, actionClass?)`; `handleUnexpectedError` exported from `execution.ts`, and `runBlocked` printing `base.actionClass`.
   - `MEMORY_SCOPES`, `type MemoryScope`, `MEMORY_CAPS`, `MEMORY_ENTRY_MAX_CHARS`, `SESSION_SEARCH_LIMIT`, `MemoryEntry { id, scope, text, created_by, created_at }`, `MemoryUsage`, `SessionHit { thread_id, created_at, role, snippet }`.
   - `listMemory(db, client, principalId, scope?)`, `findMemoryEntry(db, client, principalId, id)`, `memoryUsage(entries)`, `addMemory(deps, { text, scope })`, `removeMemory(deps, id)`.
   - `renderMemorySnapshot(entries): string`; `memorySnapshot(db, client, principalId): Promise<string>` — **Task 4 imports this from `@harness/core-tools`**.
@@ -870,6 +870,19 @@ const scoped = defineTool({
   input: z.object({ scope: z.enum(['principal', 'client']) }),
   output: z.object({ scope: z.string() }),
   handler: async ({ scope }) => ({ scope }),
+});
+
+/** A resolver that reads something and cannot: `memory_remove`'s looks its entry up in the database. */
+const brokenClass = defineTool({
+  name: 'broken_class',
+  description: 'A write whose class resolver fails',
+  actionClass: 'write.self',
+  actionClassFor: () => {
+    throw new Error('the entry could not be read');
+  },
+  input: z.object({}),
+  output: z.object({ ok: z.boolean() }),
+  handler: async () => ({ ok: true }),
 });
 ```
 
@@ -894,13 +907,27 @@ describe('a tool whose action class follows its arguments', () => {
     const [parked] = await db.select().from(approvals);
     expect(parked.summary).toBe('scoped_write (write.internal) requested by u-test');
   });
+
+  it('reports a resolver that fails as an internal error and audits it, rather than rejecting the call', async () => {
+    // The resolver runs before policy decides and may touch the database, so its failure has to
+    // reach the caller the way every other failure does — an envelope and an audit row — not as
+    // a rejected MCP callback with nothing written down. The row carries the *declared* class,
+    // because the resolved one is exactly what could not be worked out.
+    const client = await connectTools('broken', [brokenClass], makeTestDeps(db));
+    const res = await client.callTool({ name: 'broken_class', arguments: {} });
+    expect(res.isError).toBe(true);
+    expect(textOf(res)).toBe('Tool broken_class could not be processed (internal error; see audit log).');
+    const [row] = await db.select().from(auditLog).where(eq(auditLog.tool, 'broken_class'));
+    expect(row).toMatchObject({ actionClass: 'write.self', decision: 'error' });
+    expect(row.error).toContain('the entry could not be read');
+  });
 });
 ```
 
 - [ ] **Step 2: Run it to verify it fails**
 
 Run: `pnpm --filter @harness/core-tools exec vitest run src/domain/tooling/registry.test.ts`
-Expected: FAIL — `actionClassFor` is not a known property of `ToolDef` (typecheck), and at runtime both calls run as `write.self`.
+Expected: FAIL — `actionClassFor` is not a known property of `ToolDef` (typecheck); at runtime both `scoped_write` calls would run as `write.self`, and `broken_class` would never reach its resolver at all.
 
 - [ ] **Step 3: Add `actionClassFor` to the contract and thread it through the kernel**
 
@@ -941,13 +968,31 @@ export function auditBaseFor(
 }
 ```
 
-In `harness/core-tools/src/domain/tooling/registry.ts`, inside the registered callback, replace the lines from `const { derived_from, ...handlerArgs } = …` through `switch (decide(tool.actionClass, deps.principal.level, deps.policy)) {` with:
+In `harness/core-tools/src/domain/tooling/execution.ts`, export `handleUnexpectedError` (`export async function handleUnexpectedError(`) — the registry now needs the same last-resort funnel — and change `runBlocked`'s last line to read the class off the audit base rather than off the definition:
+
+```ts
+  return textResult(`Tool ${tool.name} is blocked by policy (action class ${base.actionClass}).`, true);
+```
+
+`runBlocked` already receives `base`, so nothing about its signature moves. This is the fifth and last place the resolved class has to reach: a call decided as `write.internal` and blocked by a client's `policy.yaml` must not tell the model it was `write.self`.
+
+In `harness/core-tools/src/domain/tooling/registry.ts`, add `import type { ActionClass } from '@harness/pack-api';`, add `handleUnexpectedError` to the existing `./execution.js` import, and inside the registered callback replace the lines from `const { derived_from, ...handlerArgs } = …` through `switch (decide(tool.actionClass, deps.principal.level, deps.policy)) {` with:
 
 ```ts
         const { derived_from, ...handlerArgs } = args as Record<string, unknown> & { derived_from?: string[] };
-        // The class of *this* call: the declared one, unless the tool says it follows the arguments.
-        const actionClass = tool.actionClassFor ? await tool.actionClassFor(handlerArgs, deps) : tool.actionClass;
-        const base = auditBaseFor(deps, tool, hashArgs(handlerArgs), derived_from ?? [], actionClass);
+        const argsHash = hashArgs(handlerArgs);
+        // The class of *this* call: the declared one, unless the tool says it follows the
+        // arguments. A resolver may read the database — `memory_remove`'s looks up the entry it
+        // is asked to forget — so a failure here is a failure like any other handler's and goes
+        // through the same funnel, rather than rejecting the MCP callback with nothing recorded.
+        // The audit row for that failure carries the declared class, which is all that is known.
+        let actionClass: ActionClass;
+        try {
+          actionClass = tool.actionClassFor ? await tool.actionClassFor(handlerArgs, deps) : tool.actionClass;
+        } catch (err) {
+          return await handleUnexpectedError(deps.db, tool, auditBaseFor(deps, tool, argsHash, derived_from ?? []), err);
+        }
+        const base = auditBaseFor(deps, tool, argsHash, derived_from ?? [], actionClass);
 
         switch (decide(actionClass, deps.principal.level, deps.policy)) {
 ```
@@ -1162,11 +1207,14 @@ describe('renderMemorySnapshot', () => {
     expect(text).toContain('## Shared notes (client scope)\n- (none)\n');
   });
 
-  it('stays under eleven thousand characters at both caps', () => {
+  it('stays under twelve thousand characters at both caps', () => {
     const entries: MemoryEntry[] = [];
     for (let i = 0; i < 50; i += 1) entries.push(entry(`00000000-0000-4000-8000-${String(i).padStart(12, '0')}`, 'principal', 'p'.repeat(50)));
     for (let i = 0; i < 50; i += 1) entries.push(entry(`11111111-0000-4000-8000-${String(i).padStart(12, '0')}`, 'client', 'c'.repeat(80)));
-    expect(renderMemorySnapshot(entries).length).toBeLessThan(11_000);
+    // 50 × 95 + 49 for the principal section, 50 × 125 + 49 for the client one, two headings and
+    // the document's own frame: 11,174. The bound is 12,000, which is the next round number above
+    // a snapshot that is already at both caps — a render over it means the shape changed.
+    expect(renderMemorySnapshot(entries).length).toBeLessThan(12_000);
   });
 });
 
@@ -1335,8 +1383,14 @@ const SECTIONS: readonly { title: string; scope: MemoryScope }[] = [
  * A fixed document: one heading, one section per scope in a fixed order, one list item per entry
  * with its id (what `memory_remove` takes), and `(none)` for an empty scope so the model sees
  * both scopes exist. Empty when there is nothing at all — the runtime renders its own
- * "(no memories yet)" for that. Bounded by the two caps: at most 6,500 characters of text and
- * 100 ids, under 11,000 characters in all.
+ * "(no memories yet)" for that.
+ *
+ * Bounded by the two caps, and worth the arithmetic because a runtime budgets on it: 6,500
+ * characters of text (2,500 + 4,000), 100 entries each carrying 45 characters of list
+ * punctuation and id (`- ` + ` (id: ` + a 36-character uuid + `)`), 99 newlines between those
+ * lines, two headings of 31 and 30, and 13 more for `# Memory`, the blank line under it, the
+ * separator between the sections and the trailing newline. That is 11,174 at both caps, which
+ * is why the test asserts 12,000 rather than the 11,000 an earlier draft claimed.
  */
 export function renderMemorySnapshot(entries: readonly MemoryEntry[]): string {
   if (entries.length === 0) return '';
@@ -2367,7 +2421,7 @@ In `runtimes/deepagents/src/domain/prompt.ts`, replace the memory line of `KERNE
 - [ ] **Step 6: Run the tests to verify they pass**
 
 Run: `pnpm --filter @harness/host test && pnpm --filter @harness/runtime-deepagents exec vitest run src/domain/prompt.test.ts`
-Expected: PASS — every existing host test (the cancel, drain, timeout and resume tests included: a cancel still ends `cancelled`, the backstop still ends `error` with "cancelled" in the text) and the eleven new ones.
+Expected: PASS — every existing host test (the cancel, drain, timeout and resume tests included: a cancel still ends `cancelled`, the backstop still ends `error` with "cancelled" in the text) and the ten new ones.
 
 - [ ] **Step 7: Run the four gates**
 
@@ -2601,7 +2655,7 @@ export function nextRunAfter(schedule: string, timezone: string, from: Date): Da
 - [ ] **Step 5: Run the schema test to verify it passes**
 
 Run: `pnpm --filter @harness/host exec vitest run src/domain/playbooks/schema.test.ts`
-Expected: PASS, seven tests.
+Expected: PASS, six tests.
 
 - [ ] **Step 6: Write the failing core-tools repository test**
 
@@ -3062,6 +3116,10 @@ export async function finishPlaybookRun(
       })
       .where(eq(playbookRuns.id, id))
       .returning({ playbookId: playbookRuns.playbookId });
+    // No such firing: an operator closed it by hand between the claim and here, which the
+    // runbook tells them to do for a row stranded `running`. Nothing to stamp, and a throw
+    // inside this transaction would only turn their cleanup into a scheduler error.
+    if (!row) return;
     await tx.update(playbooks).set({ lastStatus: outcome.status, updatedAt: outcome.endedAt }).where(eq(playbooks.id, row.playbookId));
   });
 }
@@ -3630,7 +3688,11 @@ export const MAX_ATTEMPTS = 2;
  */
 const RETRYABLE = new Set<string>(['the run failed; see the host log', RUNTIME_FAILED]);
 
-/** The host's own message for a turn that threw before the runtime answered. */
+/**
+ * The host's own message for a turn that never produced a result: it threw before the runtime
+ * answered, or the host had begun draining and `serialize` refused to start it. Both mean no
+ * model ran, so both read the same way in `playbook_runs.error` and in the notice.
+ */
 const TURN_THREW = 'the turn failed before the runtime answered; see the host log';
 
 export interface TickResult {
@@ -3668,8 +3730,9 @@ export function playbookConversation(name: string): string {
  * Then the run: one thread per playbook, `kind: 'playbook'`, as the playbook's own service
  * principal, with the playbook's prompt as a host message, its one skill, its timeout and its
  * cost cap, delivered as the file says. A transport failure is retried once; anything else is
- * the run's own verdict. The last run id and the attempt count go on the row, and a firing that
- * ends `failed` stages the one notice.
+ * the run's own verdict, and a shutdown that refused the turn is not retried at all. The last
+ * run id and the attempt count go on the row, and a firing that ends `failed` stages the one
+ * notice.
  */
 export async function executePlaybook(host: Host, claimed: ClaimedRun): Promise<'done' | 'failed' | 'preflight_failed'> {
   const { playbook, run } = claimed;
@@ -3702,9 +3765,9 @@ export async function executePlaybook(host: Host, claimed: ClaimedRun): Promise<
   let lastError: string | null = null;
   while (attempts < MAX_ATTEMPTS) {
     attempts += 1;
-    let result: TurnResult;
+    let outcome: TurnResult | undefined;
     try {
-      result = await serialize(host, thread.id, () =>
+      outcome = await serialize(host, thread.id, () =>
         runTurn(host, {
           thread,
           principal: flight.principal,
@@ -3723,6 +3786,16 @@ export async function executePlaybook(host: Host, claimed: ClaimedRun): Promise<
       lastError = TURN_THREW;
       continue;
     }
+    // `serialize` answers `undefined` for a turn whose turn came once the host had begun
+    // draining: the process is on its way out, nothing ran, and a second attempt would be
+    // refused the same way. Recorded as a failed firing — the schedule fires it again — and
+    // never retried, which is the one difference between a shutdown and a transport failure.
+    if (outcome === undefined) {
+      host.log.info(`playbook "${playbook.name}": the host was draining; the firing was not started`);
+      lastError = TURN_THREW;
+      break;
+    }
+    const result = outcome;
     lastRunId = result.runId;
     if (result.status === 'done') {
       lastError = null;
@@ -4232,6 +4305,15 @@ and step 7 with:
    message the practice sees is the one you staged.
 ```
 
+and the body of "## Verification" — the last section of the file, which still names the retired
+gate — with:
+
+```markdown
+Before finishing: `harness_notify` returned `staged: true` (a `false` means
+this exact digest already went out and you should stay silent), or your whole
+reply was the line `Nothing to report.`. One of those two is always true.
+```
+
 In the root `.env.example`, replace the `HARNESS_HOST_PRINCIPAL` comment with:
 
 ```
@@ -4402,7 +4484,7 @@ In `docs/runbook.md`:
    ```
    ````
 
-8. Under "Upgrading from Plan 7", item 7, change `No nightly credentialing-expirations digest and no watchdogs until Plan 9.` to `No watchdogs.`, and add a new section after it:
+8. Under "Upgrading from Plan 7", item 7, change ``No nightly `credentialing-expirations` digest and no watchdogs until Plan 9.`` — it is wrapped across two lines in the file — to `No watchdogs.`, and add a new section after it:
 
    ```markdown
    ## Upgrading from Plan 8
@@ -4535,6 +4617,7 @@ git commit -m "docs: memory, playbooks and the scheduler; the Plan 8 upgrade ste
 
 - `memorySnapshot(db, client, principalId)` — defined Task 3 `render.ts`, exported from core-tools `index.ts` Task 3, imported by `conversation.ts` Task 4. ✔
 - `TurnDelivery`, `TurnInput.deliver/skills/timeoutMs/costCapUsd`, `TurnResult.error`, `RUNTIME_FAILED` — defined Task 4, used by `scheduler.ts` Task 6 with those exact names. ✔
+- `serialize<T>(host, threadId, fn): Promise<T | undefined>` — **unchanged** by Task 4, so Task 6 takes its result as `TurnResult | undefined` and treats `undefined` (the host began draining) as a firing that never started. `resume.ts`, the only other caller, discards the value, which is why the optional half of that signature had never been exercised. ✔
 - `claimDuePlaybooks(db, { client, now, limit? }): Promise<ClaimedRun[]>`, `ClaimedRun { playbook, run }`, `finishPlaybookRun(db, id, { status, runId, attempts, error, endedAt })`, `syncPlaybooks(db, { client, now }, definitions)` — defined Task 5, used Task 6 and the tests of Tasks 6–7. ✔
 - `requestPlaybookRun(db, { playbookId, now, requestedBy })` — defined Task 5 in core-tools, used by `playbooks.ts` Task 7 and the host tests of Tasks 5 and 7. ✔
 - `PlaybookRow` — core-tools `domain/playbooks/types.ts` Task 5; used by `preflight.ts`, `notice.ts` Task 6 through `@harness/core-tools`. ✔
@@ -4545,3 +4628,14 @@ git commit -m "docs: memory, playbooks and the scheduler; the Plan 8 upgrade ste
 - `resetDatabase` truncates the three new tables (Task 1) before any Task 3+ test writes them. ✔
 - `messages.seq` — Task 1 schema; `recentHistory` (Task 1) and `searchSessions` (Task 3) order by it. ✔
 - The runtime's fixed messages the scheduler retries on: `'the run failed; see the host log'` (verified in `run.ts`) and `RUNTIME_FAILED` (Task 4). ✔
+
+**Corrected by the pre-flight scan** (`.superpowers/sdd/2026-09-18-plan-9-memory-and-playbooks/preflight.md`, 119 rows):
+
+1. Task 6 took `serialize`'s result as `TurnResult`, which is `TurnResult | undefined`: a typecheck failure, now an explicit "the host was draining" branch that does not retry.
+2. The snapshot-bound test asserted under 11,000 characters; the render at both caps is 11,174. The assertion, decision 4 and the `render.ts` comment now say 12,000 and carry the arithmetic.
+3. `registerTools` resolved `actionClassFor` outside any `try`, so a resolver that reads the database could reject the MCP callback with nothing audited. Now funnelled through `handleUnexpectedError`, with a test.
+4. `runBlocked` still printed the declared class. Now prints `base.actionClass` — the fifth and last place the resolved class had to reach.
+5. `finishPlaybookRun` dereferenced an unguarded destructured row.
+6. Three test counts were wrong (Task 2 step 4, Task 4 step 6, Task 5 step 5).
+7. The skill's "Verification" section still named the retired `{"wakeAgent": false}` gate after Task 8 replaced it everywhere else.
+8. Task 9's quoted runbook string dropped the backticks the file uses.
