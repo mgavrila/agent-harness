@@ -57,7 +57,14 @@ export {
   digestKeyFor,
   type UrgencyBucket,
 } from './domain/deadlines/compute.js';
-export { type ExtractedText, type PageText, type ParsedExtraction } from './domain/documents/types.js';
+export {
+  type DocumentParser,
+  type ExtractedText,
+  type PageText,
+  type ParsedDocument,
+  type ParsedExtraction,
+} from './domain/documents/types.js';
+export { joinPages, localParser } from './domain/documents/parser.js';
 export {
   parseAttachmentKindSpec,
   parseExtractionManifest,

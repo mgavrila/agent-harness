@@ -3,6 +3,7 @@ import type { Db } from '@harness/db';
 import type { Principal } from '@harness/identity-api';
 import type { AnyToolDef as PackAnyToolDef, PackKernel, ToolDef as PackToolDef } from '@harness/pack-api';
 import type { EnvSource } from '@harness/shared';
+import type { DocumentParser } from '../documents/types.js';
 import type { SinkRegistry } from '../effects/types.js';
 import type { GatewayConfig } from '../models/types.js';
 import type { PackRegistry } from '../packs/types.js';
@@ -93,6 +94,14 @@ export interface ToolDeps {
    * path and the symlink-resolved path against it.
    */
   storageDir: string;
+  /**
+   * What turns a document under `storageDir` into text. `localParser(storageDir)` in tests and on
+   * bare metal; `remoteParser(HARNESS_FILES_URL, storageDir)` in Compose, where the parsing
+   * happens in a process that holds no key. Constructed, not configuration — the one member
+   * of this bag that is, because the choice between the two is the deployment's and the domain
+   * cannot make it from a URL alone.
+   */
+  parser: DocumentParser;
   /** Directory holding the active pack's `templates.json` and its PDFs. */
   formsDir: string;
   /**

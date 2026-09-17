@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { describeError } from '@harness/shared';
+import { localParser } from '../domain/documents/parser.js';
 import { connectInProcess } from '../domain/tooling/in-process.js';
 import { DEFAULT_POLICY } from '../domain/tooling/policy.js';
 import { DEFAULT_CONFIDENCE_THRESHOLD, type ToolDeps } from '../domain/tooling/types.js';
@@ -50,6 +51,7 @@ export async function surfaceDeps(): Promise<ToolDeps> {
     confidenceThreshold: DEFAULT_CONFIDENCE_THRESHOLD,
     gateway: { baseUrl: 'http://127.0.0.1:1', apiKey: 'unused', timeoutMs: 1_000, maxCallsPerRun: 1 },
     storageDir: '/nonexistent/surface',
+    parser: localParser('/nonexistent/surface'),
     formsDir: '/nonexistent/surface',
     restrictedToModel: false,
     sinks: {},

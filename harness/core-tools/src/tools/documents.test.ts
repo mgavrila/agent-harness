@@ -5,7 +5,15 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { documents, records, fields as fieldsTable, decrypt } from '@harness/db';
 import type { ToolDeps } from '../domain/tooling/types.js';
-import { connectTools, makeTestDeps, resultOf, useTestDb, startFakeGateway, type FakeGateway } from '../testing.js';
+import {
+  connectTools,
+  makeTestDeps,
+  resultOf,
+  useTestDb,
+  startFakeGateway,
+  type FakeGateway,
+  type TestDepsOverrides,
+} from '../testing.js';
 import { documentTextPath } from '../domain/storage/layout.js';
 import { writePdf } from '../domain/documents/pdf.test-helpers.js';
 import { recordTools } from './records.js';
@@ -187,7 +195,7 @@ describe('documents_classify and documents_extract', () => {
     await gateway.close();
   });
 
-  function connectWithGateway(overrides: Partial<ToolDeps> = {}) {
+  function connectWithGateway(overrides: TestDepsOverrides = {}) {
     const d = makeTestDeps(db, {
       storageDir,
       gateway: { baseUrl: gateway.url, apiKey: 'sk-test', timeoutMs: 10_000, maxCallsPerRun: 100 },
@@ -339,5 +347,28 @@ describe('documents_classify and documents_extract', () => {
     expect(doc.textPath).toBeNull();
     const textAbs = documentTextPath(path.join(storageDir, doc.storagePath));
     await expect(access(textAbs)).rejects.toThrow();
+  });
+
+  it('reads the document through the parser seam, so a parser in another process is what the pipeline sees', async () => {
+    const seen: string[] = [];
+    gateway.setResponder(() => ({ content: EXTRACTION_REPLY }));
+    const client = await connectWithGateway({
+      parser: {
+        extract: async (relPath) => {
+          seen.push(relPath);
+          return { pages: [{ num: 1, text: 'Name: Ada Lovelace MD' }], text: 'Name: Ada Lovelace MD', ocrUsed: true };
+        },
+      },
+    });
+    const ing = resultOf<IngestOut>(
+      await client.callTool({ name: 'documents_ingest', arguments: { path: 'incoming/license.pdf' } }),
+    );
+    const out = resultOf<{ ocr_used: boolean; pages: number }>(
+      await client.callTool({ name: 'documents_extract', arguments: { document_id: ing.document_id } }),
+    );
+    expect(seen).toEqual(['incoming/license.pdf']);
+    expect(out).toMatchObject({ ocr_used: true, pages: 1 });
+    const onDisk = await readFile(path.join(storageDir, 'incoming/license.pdf.redacted.txt'), 'utf8');
+    expect(onDisk).toContain('Ada Lovelace MD');
   });
 });

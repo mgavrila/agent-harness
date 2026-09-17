@@ -46,3 +46,26 @@ export interface ParsedExtraction {
   fields: ExtractedField[];
   attachments: ExtractedAttachment[];
 }
+
+/**
+ * What a parser answers with, whichever process did the parsing: the pages, the same pages
+ * joined by a blank line for a caller that wants one string, and whether OCR was needed. The
+ * same three fields the files worker sends over HTTP, declared here again rather than imported
+ * because core-tools does not depend on the worker.
+ */
+export interface ParsedDocument extends ExtractedText {
+  text: string;
+}
+
+/**
+ * The seam between the pipeline and whatever turns document bytes into text.
+ *
+ * Two implementations: `localParser` runs the subprocesses in this process, for tests and a
+ * bare-metal run; `remoteParser` sends the path to the files worker, a process with no key, no
+ * database and no outbound network, which is where an untrusted PDF belongs (spec decision 11).
+ * `relPath` is relative to the storage root and is refused, with a `ToolError`, when it resolves
+ * outside it — by both implementations, before anything is read or sent.
+ */
+export interface DocumentParser {
+  extract(relPath: string): Promise<ParsedDocument>;
+}

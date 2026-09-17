@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { createDb, loadKey } from '@harness/db';
 import type { Principal } from '@harness/identity-api';
 import { ConfigError, booleanFromEnv, createLogger, envOrDefault, numberFromEnv, optionalEnv } from '@harness/shared';
+import { localParser } from '../domain/documents/parser.js';
 import { loadIdentity } from '../domain/identity/registry.js';
 import { depsForRun, type KernelConfig } from '../domain/tooling/deps.js';
 import { loadPolicy } from '../domain/tooling/policy.js';
@@ -56,6 +57,8 @@ export function clientDirFor(client: string, repoRoot: string = REPO_ROOT): stri
  */
 export async function buildKernelConfig(): Promise<KernelConfig> {
   const packs = await loadPacks(packNames());
+  // One root for the whole file store, required and with no default (see storageRoot).
+  const storageDir = storageRoot();
   return {
     client: envOrDefault('HARNESS_CLIENT', 'default'),
     policy: await loadPolicy(),
@@ -64,8 +67,8 @@ export async function buildKernelConfig(): Promise<KernelConfig> {
     approvalTtlHours: numberFromEnv('APPROVAL_TTL_HOURS', 24, { min: 1, max: 720 }),
     confidenceThreshold: numberFromEnv('CONFIDENCE_THRESHOLD', DEFAULT_CONFIDENCE_THRESHOLD, { min: 0, max: 1 }),
     gateway: gatewayFromEnv(),
-    // One root for the whole file store, required and with no default (see storageRoot).
-    storageDir: storageRoot(),
+    storageDir,
+    parser: localParser(storageDir),
     formsDir: formsDirFrom(packs),
     restrictedToModel: booleanFromEnv('HARNESS_RESTRICTED_TO_MODEL'),
     packs,

@@ -8,6 +8,7 @@ import { McpServer } from '@modelcontextprotocol/server';
 import type { Db } from '@harness/db';
 import type { Principal } from '@harness/identity-api';
 import { pack as healthcarePack } from '@harness/pack-healthcare';
+import { localParser } from './domain/documents/parser.js';
 import { connectInProcess } from './domain/tooling/in-process.js';
 import { registerTools } from './domain/tooling/registry.js';
 import { DEFAULT_POLICY, mergePolicy } from './domain/tooling/policy.js';
@@ -71,6 +72,9 @@ export type TestDepsOverrides = Partial<Omit<ToolDeps, 'context'>> & { context?:
 export function makeTestDeps(db: Db, overrides: TestDepsOverrides = {}): ToolDeps {
   const { context, ...rest } = overrides;
   const packs = overrides.packs ?? TEST_PACKS;
+  // A throwaway directory per call, so a test that forgets to override it
+  // still cannot write into the repository.
+  const storageDir = rest.storageDir ?? mkdtempSync(path.join(tmpdir(), 'harness-test-storage-'));
   const deps: ToolDeps = {
     db,
     client: 'test',
@@ -81,9 +85,8 @@ export function makeTestDeps(db: Db, overrides: TestDepsOverrides = {}): ToolDep
     approvalTtlHours: 24,
     confidenceThreshold: DEFAULT_CONFIDENCE_THRESHOLD,
     gateway: { baseUrl: 'http://127.0.0.1:1', apiKey: 'sk-test', timeoutMs: 5_000, maxCallsPerRun: 100 },
-    // A throwaway directory per call, so a test that forgets to override it
-    // still cannot write into the repository.
-    storageDir: mkdtempSync(path.join(tmpdir(), 'harness-test-storage-')),
+    storageDir,
+    parser: localParser(storageDir),
     formsDir: TEST_PACKS.formsDir(),
     restrictedToModel: false,
     sinks: {},

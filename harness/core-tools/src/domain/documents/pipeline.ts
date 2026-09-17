@@ -18,7 +18,7 @@ import { callModelJson } from '../models/gateway.js';
 import type { ModelMessage } from '../models/types.js';
 import { requireRecord, upsertRecord } from '../records/repository.js';
 import type { AttachmentInput, FieldInput } from '../records/types.js';
-import { extractDocumentText, pdfPageCount } from './text.js';
+import { pdfPageCount } from './text.js';
 import { buildClassificationSchema, buildExtractionSchema } from './schema.js';
 import { buildClassificationMessages, buildExtractionMessages } from './prompts.js';
 import { parseExtraction } from './parse.js';
@@ -117,8 +117,10 @@ function externalIdFrom(kind: RecordKindSpec, byName: Map<string, ExtractedField
  * that is about to build a prompt goes through here.
  */
 async function readForModel(deps: ToolDeps, row: typeof documents.$inferSelect) {
+  // Resolved here as well as inside the parser: the sidecar path below is derived from it, and
+  // the containment check runs in this process before a path is handed to any parser (invariant 5).
   const abs = await resolveStoragePath(deps.storageDir, row.storagePath);
-  const { pages, ocrUsed } = await extractDocumentText(abs);
+  const { pages, ocrUsed } = await deps.parser.extract(row.storagePath);
   const { pages: redacted, hits } = redactPages(pages);
   // The flag exists so a client with a BAA can opt in; it is off by default and
   // turning it on is a documented decision (spec 4.4).

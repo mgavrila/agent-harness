@@ -6,6 +6,7 @@ import {
   PACK_KERNEL,
   createCoreToolsServer,
   loadPacks,
+  localParser,
   openRun,
   type GatewayConfig,
   type PackRegistry,
@@ -214,6 +215,7 @@ export async function openPipeline(opts: OpenPipelineOptions): Promise<PipelineH
     confidenceThreshold,
     gateway: opts.gateway,
     storageDir: opts.storageDir,
+    parser: localParser(opts.storageDir),
     // The pipeline under test reads documents; it fills no forms. The measured pack's shipped
     // templates directory is still the honest value: a tool that did reach for one would find
     // what a deployment finds, not a stub. The measured pack's, not the first loaded one's —
