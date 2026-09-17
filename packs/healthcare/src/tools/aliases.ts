@@ -123,6 +123,55 @@ const asDocumentView = (d: DocumentRecordView) => ({
   ingested_at: d.ingested_at,
 });
 
+/** This pack's own name, as `definePack` declares it and as `deps.packs.byName` answers to. */
+const PACK_NAME = 'healthcare';
+
+/**
+ * The document kinds some other loaded pack declares.
+ *
+ * Empty for the deployment this pack was written for, and that is what keeps the three schemas
+ * below byte-identical to the ones `docs/architecture/tool-surface.json` records: every widening
+ * in this file is conditional on this set being non-empty, and the surface is recorded for
+ * `HARNESS_PACKS=@harness/pack-healthcare` alone.
+ *
+ * Non-empty, it is the set of documents that reach these wrappers on their way to another pack's
+ * extraction target. `replaces` is process-wide, so once this pack takes over `documents_extract`
+ * it takes it over for every document in the process, including a meeting note. Renaming that
+ * note's record id to `provider_id` and its attachment count to `credentials` would be this pack
+ * answering for records it does not own, so a foreign document's result is returned exactly as
+ * the kernel produced it and the schema says both shapes are possible.
+ */
+function foreignDocumentKinds(deps: PackToolDeps): ReadonlySet<string> {
+  const own = new Set(deps.packs.byName(PACK_NAME).documentKinds);
+  return new Set(deps.packs.documentKinds().filter((kind) => !own.has(kind)));
+}
+
+/** One document as the kernel reports it: the same nine members, with `record_id` for the owner. */
+const KernelDocumentView = z.object({
+  id: z.string(),
+  record_id: z.string().nullable(),
+  kind: z.string().nullable(),
+  storage_path: z.string(),
+  sha256: z.string(),
+  pages: z.number().nullable(),
+  ocr_used: z.boolean(),
+  has_text: z.boolean(),
+  ingested_at: z.string(),
+});
+
+/**
+ * The view a `documents_*` wrapper publishes: this pack's alone, or either shape once another
+ * pack's documents can reach the tool.
+ */
+function documentViewFor(foreign: ReadonlySet<string>) {
+  return foreign.size === 0 ? DocumentView : z.union([DocumentView, KernelDocumentView]);
+}
+
+/** A document this pack owns is renamed; another pack's is returned untouched. */
+function viewDocument(foreign: ReadonlySet<string>, d: DocumentRecordView) {
+  return d.kind !== null && foreign.has(d.kind) ? d : asDocumentView(d);
+}
+
 function documentsIngestFor(deps: PackToolDeps) {
   return definePackTool({
     name: 'documents_ingest',
@@ -156,6 +205,102 @@ function documentsIngestFor(deps: PackToolDeps) {
   });
 }
 
+/** The prose these two definitions share, so the widened one cannot drift from the published one. */
+const EXTRACT_DESCRIPTION =
+  'Read a document end to end: text layer or OCR, redact SSN/EIN/DEA, ask the extract route for the provider fields and credentials, ' +
+  'then write them to the provider record. Fields below the confidence threshold are stored as pending for a human to confirm. ' +
+  'Restricted identifiers are stored encrypted straight from the redaction pass and are never sent to a model.';
+
+const EXTRACT_INPUT = z.object({
+  document_id: z.string().uuid(),
+  provider_id: z
+    .string()
+    .uuid()
+    .optional()
+    .describe('Attach to this provider instead of matching on the extracted name'),
+});
+
+const extractArgs = (args: { document_id: string; provider_id?: string }) => ({
+  document_id: args.document_id,
+  record_id: args.provider_id,
+});
+
+const asProviderExtract = (r: DocumentsExtractResult) => ({
+  document_id: r.document_id,
+  provider_id: r.record_id,
+  document_kind: r.document_kind,
+  ocr_used: r.ocr_used,
+  pages: r.pages,
+  fields_pending: r.fields_pending,
+  fields_extracted: r.fields_extracted,
+  credentials: r.attachments,
+  restricted_fields: r.restricted_fields,
+});
+
+/**
+ * `documents_extract`, in the only two shapes a deployment can ask for.
+ *
+ * Two whole definitions rather than one schema built from a condition, because the difference is
+ * at the top level and a tool's output must be a single object schema: the published one names
+ * `provider_id` and `credentials` and nothing else, and the widened one has to admit the kernel's
+ * `record_id` and `attachments` as well. Writing both out is what lets the first stay the exact
+ * object `docs/architecture/tool-surface.json` records while the second exists at all.
+ */
+function documentsExtractFor(foreign: ReadonlySet<string>): AnyToolDef {
+  if (foreign.size === 0) {
+    return definePackTool({
+      name: 'documents_extract',
+      description: EXTRACT_DESCRIPTION,
+      actionClass: 'write.internal',
+      input: EXTRACT_INPUT,
+      output: z.object({
+        document_id: z.string(),
+        provider_id: z.string(),
+        document_kind: z.string(),
+        ocr_used: z.boolean(),
+        pages: z.number(),
+        fields_pending: z.number(),
+        fields_extracted: z.number(),
+        credentials: z.number(),
+        restricted_fields: z.array(z.string()).describe('Names only. The values are encrypted on the provider record.'),
+      }),
+      handler: async (args, deps) =>
+        asProviderExtract(await callKernel<DocumentsExtractResult>(deps, 'documents_extract', extractArgs(args))),
+      recordIds: (args, result) => [args.document_id, result.provider_id],
+    });
+  }
+  return definePackTool({
+    name: 'documents_extract',
+    description:
+      `${EXTRACT_DESCRIPTION} ` +
+      'A document whose kind belongs to another loaded pack is extracted into that pack’s record kind and reported ' +
+      'under record_id and attachments instead of provider_id and credentials.',
+    actionClass: 'write.internal',
+    input: EXTRACT_INPUT,
+    output: z.object({
+      document_id: z.string(),
+      provider_id: z.string().optional().describe('The provider written, when this document is a credentialing one'),
+      record_id: z.string().optional().describe('The record written, when this document belongs to another pack'),
+      document_kind: z.string(),
+      ocr_used: z.boolean(),
+      pages: z.number(),
+      fields_pending: z.number(),
+      fields_extracted: z.number(),
+      credentials: z.number().optional(),
+      attachments: z.number().optional(),
+      restricted_fields: z.array(z.string()).describe('Names only. The values are encrypted on the record.'),
+    }),
+    handler: async (args, deps) => {
+      const r = await callKernel<DocumentsExtractResult>(deps, 'documents_extract', extractArgs(args));
+      // Another pack's document was routed to another pack's target and wrote another pack's
+      // record kind. Renaming any of that into this pack's vocabulary would be a lie.
+      return foreign.has(r.document_kind) ? r : asProviderExtract(r);
+    },
+    recordIds: (args, result) =>
+      [args.document_id, result.provider_id ?? result.record_id].filter((id) => id !== undefined),
+  });
+}
+
 /**
  * The twelve wrappers, built once per server from the live dependency bag.
  *
@@ -165,6 +310,7 @@ function documentsIngestFor(deps: PackToolDeps) {
  */
 export function aliasTools(deps: PackToolDeps): AnyToolDef[] {
   const { MASKED, isRestrictedName } = deps.kernel;
+  const foreign = foreignDocumentKinds(deps);
 
   const providersUpsert = definePackTool({
     name: 'providers_upsert',
@@ -240,7 +386,14 @@ export function aliasTools(deps: PackToolDeps): AnyToolDef[] {
       ),
     }),
     handler: async ({ provider_id }, deps) => {
-      const r = await callKernel<RecordsGetResult>(deps, 'records_get', { record_id: provider_id });
+      // `kind` pins the read to this pack's records. One store serves every loaded pack, so
+      // without it a deployment that also loads another pack would hand that pack's record
+      // back through the provider schema, its title landing under `name` and its own fields
+      // under a provider's. A mismatch is a ToolError naming both kinds.
+      const r = await callKernel<RecordsGetResult>(deps, 'records_get', {
+        record_id: provider_id,
+        kind: 'provider',
+      });
       return {
         provider: { id: r.record.id, name: r.record.name, npi: r.record.external_id, status: r.record.status },
         fields: r.fields,
@@ -296,6 +449,7 @@ export function aliasTools(deps: PackToolDeps): AnyToolDef[] {
         field: args.field,
         value: args.value,
         confirmed_by: args.confirmed_by,
+        kind: 'provider',
       });
       return { provider_id: args.provider_id, field: args.field, status: 'verified' as const };
     },
@@ -314,7 +468,10 @@ export function aliasTools(deps: PackToolDeps): AnyToolDef[] {
       ),
     }),
     handler: async ({ provider_id }, deps) =>
-      callKernel<RecordsListPendingResult>(deps, 'records_list_pending', { record_id: provider_id }),
+      callKernel<RecordsListPendingResult>(deps, 'records_list_pending', {
+        record_id: provider_id,
+        kind: 'provider',
+      }),
   });
 
   const deadlinesCompute = definePackTool({
@@ -403,10 +560,10 @@ export function aliasTools(deps: PackToolDeps): AnyToolDef[] {
     description: 'Return one document record. Never returns the document text or any restricted value.',
     actionClass: 'read',
     input: z.object({ document_id: z.string().uuid() }),
-    output: z.object({ document: DocumentView }),
+    output: z.object({ document: documentViewFor(foreign) }),
     handler: async ({ document_id }, deps) => {
       const r = await callKernel<{ document: DocumentRecordView }>(deps, 'documents_get', { document_id });
-      return { document: asDocumentView(r.document) };
+      return { document: viewDocument(foreign, r.document) };
     },
     recordIds: ({ document_id }) => [document_id],
   });
@@ -418,12 +575,13 @@ export function aliasTools(deps: PackToolDeps): AnyToolDef[] {
       'omit it to list every document ingested by this client, including ones not yet attached to a provider.',
     actionClass: 'read',
     input: z.object({ provider_id: z.string().uuid().optional() }),
-    output: z.object({ documents: z.array(DocumentView) }),
+    output: z.object({ documents: z.array(documentViewFor(foreign)) }),
     handler: async ({ provider_id }, deps) => {
       const r = await callKernel<{ documents: DocumentRecordView[] }>(deps, 'documents_list', {
         record_id: provider_id,
       });
-      return { documents: r.documents.map(asDocumentView) };
+      // Per document, not per call: one list can hold this pack's documents and another pack's.
+      return { documents: r.documents.map((d) => viewDocument(foreign, d)) };
     },
     recordIds: ({ provider_id }) => (provider_id ? [provider_id] : []),
   });
@@ -450,51 +608,7 @@ export function aliasTools(deps: PackToolDeps): AnyToolDef[] {
     recordIds: ({ document_id }) => [document_id],
   });
 
-  const documentsExtract = definePackTool({
-    name: 'documents_extract',
-    description:
-      'Read a document end to end: text layer or OCR, redact SSN/EIN/DEA, ask the extract route for the provider fields and credentials, ' +
-      'then write them to the provider record. Fields below the confidence threshold are stored as pending for a human to confirm. ' +
-      'Restricted identifiers are stored encrypted straight from the redaction pass and are never sent to a model.',
-    actionClass: 'write.internal',
-    input: z.object({
-      document_id: z.string().uuid(),
-      provider_id: z
-        .string()
-        .uuid()
-        .optional()
-        .describe('Attach to this provider instead of matching on the extracted name'),
-    }),
-    output: z.object({
-      document_id: z.string(),
-      provider_id: z.string(),
-      document_kind: z.string(),
-      ocr_used: z.boolean(),
-      pages: z.number(),
-      fields_pending: z.number(),
-      fields_extracted: z.number(),
-      credentials: z.number(),
-      restricted_fields: z.array(z.string()).describe('Names only. The values are encrypted on the provider record.'),
-    }),
-    handler: async (args, deps) => {
-      const r = await callKernel<DocumentsExtractResult>(deps, 'documents_extract', {
-        document_id: args.document_id,
-        record_id: args.provider_id,
-      });
-      return {
-        document_id: r.document_id,
-        provider_id: r.record_id,
-        document_kind: r.document_kind,
-        ocr_used: r.ocr_used,
-        pages: r.pages,
-        fields_pending: r.fields_pending,
-        fields_extracted: r.fields_extracted,
-        credentials: r.attachments,
-        restricted_fields: r.restricted_fields,
-      };
-    },
-    recordIds: (args, result) => [args.document_id, result.provider_id],
-  });
+  const documentsExtract = documentsExtractFor(foreign);
 
   return [
     providersUpsert,

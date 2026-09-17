@@ -12,6 +12,7 @@ import { registerTools } from './domain/tooling/registry.js';
 import { DEFAULT_POLICY } from './domain/tooling/policy.js';
 import { DEFAULT_CONFIDENCE_THRESHOLD, type AnyToolDef, type ToolDeps } from './domain/tooling/types.js';
 import { registryOf } from './domain/packs/registry.js';
+import type { PackRegistry } from './domain/packs/types.js';
 import { PACK_KERNEL } from './domain/packs/kernel.js';
 import { kernelTools } from './tools/catalog.js';
 
@@ -19,23 +20,29 @@ import { kernelTools } from './tools/catalog.js';
 const TEST_PACKS = registryOf([healthcarePack]);
 
 /**
- * The environment a pack sees under test: a fixed map, never the ambient one.
+ * The environment every pack sees under test, before the packs add their own.
  *
- * This is where the pin that used to live on `ToolDeps.verify` went. The shipped `.env` carries
- * `VERIFY_NPPES_ENABLED=true` and the live CMS endpoint, so a pack that read the ambient
- * environment would make real outbound lookups from the suite on any developer machine that has
- * one. Both halves matter and neither is redundant: the flag is off, and the endpoint is a port
- * nothing listens on, so a pack that somehow got past the flag still could not reach the real
- * registry. A test that wants a lookup starts its own stub and overrides `env` with its URL.
+ * Empty, and that is the point. A pack reads its configuration from `deps.env` and never from the
+ * ambient one, so a test has to hand over a fixed map — but *which* variables need pinning is the
+ * pack's knowledge, not this module's. Each pack declares them as `evals.testEnv`, and
+ * `testPackEnv` below merges every loaded pack's over this base. Anything a future kernel
+ * variable needs under test goes here; a pack's variable never does.
  */
-export const TEST_PACK_ENV: Readonly<Record<string, string>> = {
-  VERIFY_NPPES_ENABLED: 'false',
-  NPPES_BASE_URL: 'http://127.0.0.1:1/api/',
-  VERIFY_STATE_LICENSE_ENABLED: 'false',
-  VERIFY_TIMEOUT_MS: '5000',
-};
+export const TEST_PACK_ENV: Readonly<Record<string, string>> = {};
+
+/**
+ * The base map plus every loaded pack's `evals.testEnv`, in load order.
+ *
+ * A pack later in `HARNESS_PACKS` wins a collision, which matches how a registry answers
+ * singular questions in load order elsewhere. Two packs pinning the same variable to different
+ * values is a configuration nobody should ship, and the merge is not the place to discover it.
+ */
+export function testPackEnv(packs: PackRegistry): Readonly<Record<string, string>> {
+  return Object.assign({}, TEST_PACK_ENV, ...packs.all.map((p) => p.evals?.testEnv ?? {})) as Record<string, string>;
+}
 
 export function makeTestDeps(db: Db, overrides: Partial<ToolDeps> = {}): ToolDeps {
+  const packs = overrides.packs ?? TEST_PACKS;
   const deps: ToolDeps = {
     db,
     client: 'test',
@@ -56,8 +63,10 @@ export function makeTestDeps(db: Db, overrides: Partial<ToolDeps> = {}): ToolDep
     tools: new Map(),
     kernelTools: new Map(),
     kernel: PACK_KERNEL,
-    packs: TEST_PACKS,
-    env: TEST_PACK_ENV,
+    packs,
+    // Resolved from `packs` above, not from `TEST_PACKS`, so a test that loads a second pack
+    // gets that pack's pins too rather than only the shipped one's.
+    env: testPackEnv(packs),
     ...overrides,
   };
   // After the spread: a test that passes its own `packs` gets that registry's kernel tools, and

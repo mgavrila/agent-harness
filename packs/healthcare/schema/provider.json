@@ -110,7 +110,8 @@
     "role": "You read credentialing documents for a medical practice and return structured data.",
     "targets": [
       {
-        "document_kinds": ["*"],
+        "$comment": "Every kind this pack declares, named. Not the \"*\" catch-all it used to be: a catch-all claims every document kind in the process, including kinds another loaded pack declared, so a meeting note would be extracted against the provider schema and fail on the missing name. A pack claims what it can read.",
+        "document_kinds": ["state_license", "dea_certificate", "malpractice_certificate", "w9", "other"],
         "record_kind": "provider",
         "schema_name": "provider_extraction",
         "attachments_key": "credentials",

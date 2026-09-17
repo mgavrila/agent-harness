@@ -19,18 +19,23 @@ import type { ExtractionCase } from './cases.js';
 import type { CaseOutcome, StoredAttachment, StoredField } from './score.js';
 
 /**
- * The environment every eval hands a pack, in place of the process's own.
+ * The environment every eval hands a pack, before the packs add their own.
  *
- * Exported so `judge-deps.test-helpers.ts` pins the same thing: the judge is a second caller of
- * the same tools, and giving it a looser environment than the pipeline would measure a
+ * Empty, and that is the point. The runner has no opinion about which variables a pack's tools
+ * read: it used to name one pack's four by hand, which is a measuring instrument knowing an area
+ * of the product. A pack declares its own pins as `evals.testEnv` and `evalPackEnv` merges every
+ * loaded pack's over this base.
+ *
+ * Exported so `judge-deps.test-helpers.ts` starts from the same base: the judge is a second
+ * caller of the same tools, and giving it a looser environment than the pipeline would measure a
  * configuration nothing ships.
  */
-export const EVAL_PACK_ENV: Readonly<Record<string, string>> = {
-  VERIFY_NPPES_ENABLED: 'false',
-  NPPES_BASE_URL: 'http://127.0.0.1:1/api/',
-  VERIFY_STATE_LICENSE_ENABLED: 'false',
-  VERIFY_TIMEOUT_MS: '5000',
-};
+export const EVAL_PACK_ENV: Readonly<Record<string, string>> = {};
+
+/** The base map plus every loaded pack's `evals.testEnv`, in load order. */
+export function evalPackEnv(packs: PackRegistry): Readonly<Record<string, string>> {
+  return Object.assign({}, EVAL_PACK_ENV, ...packs.all.map((p) => p.evals?.testEnv ?? {})) as Record<string, string>;
+}
 
 export interface PipelineHandle {
   /** Calls a tool and records its name. Throws on an error envelope. */
@@ -190,11 +195,10 @@ export async function openPipeline(opts: OpenPipelineOptions): Promise<PipelineH
     kernel: PACK_KERNEL,
     packs,
     // A fixed map, never the ambient environment. The eval runs on whatever machine happens to
-    // have a database, and the shipped `.env` carries `VERIFY_NPPES_ENABLED=true` and the live
-    // CMS endpoint — so a pack reading the ambient environment would have this suite making
-    // real outbound registry lookups. The flag is off and the endpoint is a port nothing
-    // listens on, which is the pin `ToolDeps.verify` used to carry before the pack owned it.
-    env: EVAL_PACK_ENV,
+    // have a database, and a shipped `.env` there may well switch an outbound lookup on and
+    // point it at a live endpoint — so a pack reading the ambient environment would have this
+    // suite making real outbound calls. What to pin is each pack's own declaration.
+    env: evalPackEnv(packs),
   };
 
   const { client, close } = await connectInProcess(() => createCoreToolsServer(deps));

@@ -227,9 +227,25 @@ export async function extractDocument(
   // external-id re-matching, so the extraction cannot silently attach to, rename, or duplicate a
   // different record of this client.
   const named = record_id ? await requireRecord(deps, record_id) : undefined;
-  // The kind already on file decides which target this document feeds; an unclassified document
-  // falls back to the catch-all target, which is what every single-target pack declares.
-  const target = deps.packs.targetFor(row.kind ?? named?.kind ?? undefined);
+  // The kind already on file decides which target this document feeds. A record kind is never
+  // offered to `targetFor`: the two namespaces are unrelated, and passing `provider` to a
+  // function that answers about document kinds only ever worked because one pack declared a
+  // catch-all. When the document is unclassified but its destination record is named, the record
+  // kind resolves the target through the accessor that takes one.
+  const target =
+    row.kind !== null
+      ? deps.packs.targetFor(row.kind)
+      : named
+        ? deps.packs.targetForRecordKind(named.kind)
+        : deps.packs.targetFor(undefined);
+  // A document of one pack's kind may not be written into another pack's record. Without this the
+  // extraction would run against the target's field list and then upsert under the target's kind,
+  // quietly creating a second record rather than filling the one the caller named.
+  if (named && named.kind !== target.recordKind.kind) {
+    throw new ToolError(
+      `document ${document_id} extracts into a "${target.recordKind.kind}" record, but ${record_id} is a "${named.kind}" record`,
+    );
+  }
   const { abs, promptPages, redacted, hits, ocrUsed } = await readForModel(deps, row);
 
   const modelFields = target.recordKind.fields;

@@ -45,8 +45,19 @@ export interface PackRegistry {
   recordKind(kind: string): RecordKindSpec;
   /** `undefined` when no loaded pack declares it; the caller decides whether that is an error. */
   attachmentKind(kind: string): AttachmentKindSpec | undefined;
-  /** Throws `ToolError` when nothing claims the kind and no pack declares a catch-all. */
+  /**
+   * The target a document of this kind feeds: an exact claim first, then any catch-all, and for
+   * an unclassified document the first loaded pack's first target. Throws `ToolError` when a kind
+   * was given and no loaded pack claims it.
+   */
   targetFor(documentKind: string | undefined): ResolvedTarget;
+  /**
+   * The target that writes records of this kind, for a document whose own kind is unknown but
+   * whose destination record is named. Separate from `targetFor` on purpose: a record kind is not
+   * a document kind, and feeding one to the other is how an epic used to reach the provider
+   * target. Throws `ToolError` when no loaded pack extracts into that record kind.
+   */
+  targetForRecordKind(kind: string): ResolvedTarget;
   /** The first pack's extraction manifest, for the classification role and version. */
   manifest(): ExtractionManifest;
   /** The first pack's forms directory. `HARNESS_FORMS_DIR` overrides it in `app/server.ts`. */

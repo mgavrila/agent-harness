@@ -12,11 +12,23 @@ import { isRestrictedName } from '../../shared/redaction/names.js';
 import { fieldValueColumns, maskAttachment, maskField } from './mask.js';
 import type { AttachmentInput, FieldInput, UpsertRecordInput } from './types.js';
 
-export async function requireRecord(deps: ToolDeps, recordId: string) {
+/**
+ * One of this client's records, optionally pinned to a kind.
+ *
+ * `kind` is what a pack's renamed read passes so that its tool answers only for its own records:
+ * a deployment loading two packs shares one store, so an id alone no longer says which area of
+ * the product a row belongs to, and a read that ignored the kind would hand one pack's row back
+ * through the other pack's schema. A mismatch is a `ToolError`, not a not-found: the row exists
+ * and the caller is entitled to know it asked the wrong tool.
+ */
+export async function requireRecord(deps: ToolDeps, recordId: string, kind?: string) {
   const row = await deps.db.query.records.findFirst({
     where: and(eq(records.id, recordId), eq(records.client, deps.client)),
   });
   if (!row) throw new ToolError(`record ${recordId} not found`);
+  if (kind !== undefined && row.kind !== kind) {
+    throw new ToolError(`record ${recordId} is a "${row.kind}" record, not a "${kind}" record`);
+  }
   return row;
 }
 
@@ -148,8 +160,8 @@ export async function upsertRecord(deps: ToolDeps, args: UpsertRecordInput): Pro
 }
 
 /** `records_get`: the record with its fields and attachments, restricted values masked. */
-export async function readRecord(deps: ToolDeps, recordId: string): Promise<RecordsGetResult> {
-  const r = await requireRecord(deps, recordId);
+export async function readRecord(deps: ToolDeps, recordId: string, kind?: string): Promise<RecordsGetResult> {
+  const r = await requireRecord(deps, recordId, kind);
   const fieldRows = await deps.db.select().from(fields).where(eq(fields.recordId, recordId));
   const attachmentRows = await deps.db.select().from(attachments).where(eq(attachments.recordId, recordId));
   return {
@@ -189,10 +201,10 @@ export async function searchRecords(
 /** `records_confirm_field`: a human's value wins and the field becomes verified. */
 export async function confirmField(
   deps: ToolDeps,
-  args: { record_id: string; field: string; value: string; confirmed_by?: string },
+  args: { record_id: string; field: string; value: string; confirmed_by?: string; kind?: string },
 ): Promise<void> {
-  const { record_id, field, value, confirmed_by } = args;
-  await requireRecord(deps, record_id);
+  const { record_id, field, value, confirmed_by, kind } = args;
+  await requireRecord(deps, record_id, kind);
   const existing = await deps.db.query.fields.findFirst({
     where: and(eq(fields.recordId, record_id), eq(fields.name, field)),
   });
@@ -214,8 +226,12 @@ export async function confirmField(
 }
 
 /** `records_list_pending`: the fields still waiting on a human. */
-export async function listPendingFields(deps: ToolDeps, recordId: string): Promise<RecordsListPendingResult> {
-  await requireRecord(deps, recordId);
+export async function listPendingFields(
+  deps: ToolDeps,
+  recordId: string,
+  kind?: string,
+): Promise<RecordsListPendingResult> {
+  await requireRecord(deps, recordId, kind);
   const rows = await deps.db
     .select()
     .from(fields)

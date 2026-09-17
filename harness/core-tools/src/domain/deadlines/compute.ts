@@ -71,7 +71,15 @@ export function bucketFor(daysLeft: number): UrgencyBucket {
 interface DigestKeyItem {
   attachmentId: string;
   kind: string;
-  bucket: UrgencyBucket;
+  /**
+   * The urgency bucket, as a plain string rather than `UrgencyBucket`.
+   *
+   * Every producer today goes through `bucketFor`, but the only thing this function does with
+   * the value is interpolate it into the hashed line, so nothing here depends on the union — and
+   * the caller reading a bucket back off a result type that declares it `string` was casting it
+   * to `never` to get past the narrower declaration. A `string` here is what is actually true.
+   */
+  bucket: string;
 }
 
 /**

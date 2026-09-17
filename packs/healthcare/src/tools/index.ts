@@ -16,5 +16,5 @@ export { HEALTHCARE_REPLACES };
  * by building a bag that says so, and an eval gets the pinned-off map its pipeline hands over.
  */
 export function healthcareTools(deps: PackToolDeps): AnyToolDef[] {
-  return [...aliasTools(deps), ...formTools(deps), ...verifyTools(deps, verifyConfigFromEnv(deps.env))];
+  return [...aliasTools(deps), ...formTools(), ...verifyTools(deps, verifyConfigFromEnv(deps.env))];
 }

@@ -71,6 +71,18 @@ export const pack = definePack({
       'malpractice_coverage',
     ],
     generate: '@harness/pack-healthcare/generate',
+    // The pin that used to be hard-coded in core-tools' `makeTestDeps` and in the eval runner's
+    // `openPipeline`, both of which had no business naming this pack's variables. The shipped
+    // `.env` turns the registry lookup on and points it at the live CMS endpoint, so a suite
+    // running on a developer machine would make real outbound calls. Both halves matter: the
+    // flag is off, and the endpoint is a port nothing listens on, so a lookup that somehow got
+    // past the flag still could not reach the registry. A test that wants one overrides `env`.
+    testEnv: {
+      VERIFY_NPPES_ENABLED: 'false',
+      NPPES_BASE_URL: 'http://127.0.0.1:1/api/',
+      VERIFY_STATE_LICENSE_ENABLED: 'false',
+      VERIFY_TIMEOUT_MS: '5000',
+    },
     // Every one of the five, including the three that happen to equal the kernel's names: they
     // are this pack's own same-named replacements (see `HEALTHCARE_REPLACES`), so an eval
     // measuring this pack is driving healthcare's tools and reading healthcare's keys, not the

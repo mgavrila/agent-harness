@@ -41,7 +41,7 @@ export const allTools = kernelTools;
  * generic `records_*` tools when no loaded record kind wants them, plus every source's own.
  * `publishedCatalogue` is where those rules live and where each of them fails loudly.
  */
-export function publishedTools(deps: ToolDeps): AnyToolDef[] {
+export function publishedTools(deps: ToolDeps, kernel: AnyToolDef[] = kernelTools(deps.packs)): AnyToolDef[] {
   const sources: ToolSource[] = deps.packs.all.map((pack) => ({
     label: `pack "${pack.name}"`,
     replaces: pack.replaces ?? [],
@@ -51,7 +51,7 @@ export function publishedTools(deps: ToolDeps): AnyToolDef[] {
   // and its catalogue is exactly what the packs named.
   const anyGenericKind = deps.packs.recordKinds().some((r) => r.genericTools !== false);
   const hidden = anyGenericKind ? new Set<string>() : new Set<string>(GENERIC_RECORD_TOOLS);
-  return publishedCatalogue(kernelTools(deps.packs), sources, hidden);
+  return publishedCatalogue(kernel, sources, hidden);
 }
 
 /**
@@ -66,7 +66,11 @@ export function publishedTools(deps: ToolDeps): AnyToolDef[] {
  */
 export function createCoreToolsServer(deps: ToolDeps): McpServer {
   const server = new McpServer({ name: 'core-tools', version: '0.1.0' });
-  for (const tool of kernelTools(deps.packs)) deps.kernelTools.set(tool.name, tool);
-  registerTools(server, publishedTools(deps), deps);
+  // Built once and handed to both: every call to `kernelTools` mints fresh definitions, so
+  // building it twice would publish one set and leave a pack's wrapper reaching a second,
+  // identical-but-separate set through `deps.kernelTools`.
+  const kernel = kernelTools(deps.packs);
+  for (const tool of kernel) deps.kernelTools.set(tool.name, tool);
+  registerTools(server, publishedTools(deps, kernel), deps);
   return server;
 }

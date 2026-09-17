@@ -100,7 +100,7 @@ export async function upcomingDeadlines(
     };
   });
   const digest_key = digestKeyFor(
-    items.map((i) => ({ attachmentId: i.attachment_id, kind: i.kind, bucket: i.bucket as never })),
+    items.map((i) => ({ attachmentId: i.attachment_id, kind: i.kind, bucket: i.bucket })),
   );
   return { items, digest_key };
 }

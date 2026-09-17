@@ -19,7 +19,10 @@ const deps = () => makeTestDeps(null as unknown as Db);
 describe('makeTestDeps', () => {
   it('hands a pack a fixed environment with the registry lookup off and the endpoint unroutable', () => {
     const { env } = deps();
-    expect(env).toEqual(TEST_PACK_ENV);
+    // The base map is empty and the pins come from the loaded pack's own `evals.testEnv`, which
+    // is what keeps these four variable names out of the kernel.
+    expect(TEST_PACK_ENV).toEqual({});
+    expect(env).toEqual(healthcarePack.evals!.testEnv);
     expect(env.VERIFY_NPPES_ENABLED).toBe('false');
     expect(env.VERIFY_STATE_LICENSE_ENABLED).toBe('false');
     // Port 1 on the loopback interface: nothing listens there, so even a lookup that got past

@@ -78,12 +78,22 @@ describe('record kinds, attachment kinds and extraction targets', () => {
     expect(packs.attachmentKind('epic_link')).toBeUndefined();
   });
 
-  it('resolves every declared document kind to the provider target, and an unknown one to the catch-all', async () => {
+  it('resolves every declared document kind to the provider target, and an unclassified one to the first pack', async () => {
     const packs = await loadPacks(['@harness/pack-healthcare']);
     for (const kind of packs.documentKinds()) {
       expect(packs.targetFor(kind).recordKind.kind).toBe('provider');
     }
+    // No kind on file is not the same question as an unclaimed kind: nobody has said what the
+    // document is, so the answer is the deployment's own default — the first loaded pack's first
+    // target. That is what an unclassified document reached through a '*' target before packs
+    // began claiming their kinds by name.
     expect(packs.targetFor(undefined).target.schema_name).toBe('provider_extraction');
+  });
+
+  it('resolves a record kind to the target that writes it, which is a different question', async () => {
+    const packs = await loadPacks(['@harness/pack-healthcare']);
+    expect(packs.targetForRecordKind('provider').target.schema_name).toBe('provider_extraction');
+    expect(() => packs.targetForRecordKind('epic')).toThrow('no loaded pack extracts documents into a "epic" record');
   });
 
   it('throws a ToolError naming the kind when nothing declares it', () => {
@@ -100,16 +110,21 @@ describe('record kinds, attachment kinds and extraction targets', () => {
   });
 
   it('refuses two packs that claim the same document kind, so routing never depends on load order', () => {
-    const second = twin('twin');
-    // Both declare the '*' catch-all, which is the collision the stories pack was shaped to avoid.
-    expect(() => registryOf([healthcarePack, second])).toThrow(ConfigError);
-    expect(() => registryOf([healthcarePack, second])).toThrow(
-      'packs "healthcare" and "twin" both claim document kind "*"',
+    // Healthcare claims its five kinds by name, so a straight copy of it collides on the first.
+    expect(() => registryOf([healthcarePack, twin('twin')])).toThrow(ConfigError);
+    expect(() => registryOf([healthcarePack, twin('twin')])).toThrow(
+      'packs "healthcare" and "twin" both claim document kind "state_license"',
+    );
+
+    // Two catch-alls are the collision the stories pack was shaped to avoid, and '*' is a kind
+    // for this purpose: whichever pack loaded first would take every document.
+    expect(() => registryOf([twin('twin', ['*']), twin('triplet', ['*'])])).toThrow(
+      'packs "twin" and "triplet" both claim document kind "*"',
     );
 
     // An exact claim beside a catch-all is not a collision: the catch-all claims only the kinds
     // no one named, which is exactly the arrangement a second pack uses.
-    expect(() => registryOf([healthcarePack, twin('twin', ['w9'])])).not.toThrow();
+    expect(() => registryOf([twin('twin', ['*']), twin('triplet', ['w9'])])).not.toThrow();
 
     // Two exact claims on one kind collide the same way.
     expect(() => registryOf([twin('twin', ['w9']), twin('triplet', ['w9'])])).toThrow('both claim document kind "w9"');
@@ -122,7 +137,7 @@ describe('record kinds, attachment kinds and extraction targets', () => {
       name: 'twin',
       extraction: {
         ...healthcarePack.extraction,
-        targets: [{ ...healthcarePack.extraction.targets[0], document_kinds: ['w9'] }],
+        targets: [{ ...healthcarePack.extraction.targets[0], document_kinds: ['twin_notes'] }],
       },
     };
     expect(() => registryOf([healthcarePack, sharesProvider])).toThrow(ConfigError);

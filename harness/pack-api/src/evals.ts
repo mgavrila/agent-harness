@@ -24,6 +24,20 @@ export interface PackEvals {
   /** Module specifier exporting `generate(options)` for the synthetic corpus, e.g. `@harness/pack-stories/generate`. */
   generate?: string;
   /**
+   * The environment this pack's tools must see under test, in place of the process's own.
+   *
+   * A pack reads its configuration from `deps.env`, so whoever builds the dependency bag decides
+   * what it finds — and under test that has to be a fixed map, because the shipped `.env` on a
+   * developer's machine turns outbound lookups on and points them at a live endpoint. Before this
+   * member existed, the two builders of that map (`makeTestDeps` and `openPipeline`) hard-coded
+   * one pack's variable names, which is a kernel and a runner knowing an area of the product.
+   * Each pack names its own pins here instead, and both builders merge every loaded pack's.
+   *
+   * Only pins belong here: a switch turned off, an endpoint pointed at a port nothing listens on.
+   * A test that wants the behaviour switched on overrides `env` with its own stub's URL.
+   */
+  testEnv?: Readonly<Record<string, string>>;
+  /**
    * Which tools one eval case drives, and which keys their results carry. Every member defaults
    * to the kernel's own name, so a pack that ships no tools of its own may omit the block.
    */

@@ -57,6 +57,19 @@ function kindEnum(packs: PackRegistry) {
   return z.enum(packs.recordKinds().map((r) => r.kind) as [string, ...string[]]);
 }
 
+/**
+ * The optional kind a read may pin itself to.
+ *
+ * One store, two front doors: a deployment loading two packs keeps every record in one table, so
+ * a record id on its own no longer says whose record it is. A caller that knows — a pack's own
+ * renamed read, which answers under that pack's schema — says so here, and a row of another kind
+ * is a `ToolError` rather than a row returned through the wrong vocabulary. Omitting it keeps the
+ * generic behaviour: any record of this client, whatever declared it.
+ */
+function pinnedKind(kind: z.ZodEnum<Record<string, string>>) {
+  return kind.optional().describe('Refuse the read when the record is not of this kind');
+}
+
 export function recordTools(packs: PackRegistry): AnyToolDef[] {
   const kind = kindEnum(packs);
 
@@ -96,7 +109,7 @@ export function recordTools(packs: PackRegistry): AnyToolDef[] {
     name: 'records_get',
     description: 'Return a record with its fields and attachments. Restricted values are masked.',
     actionClass: 'read',
-    input: z.object({ record_id: z.string().uuid() }),
+    input: z.object({ record_id: z.string().uuid(), kind: pinnedKind(kind) }),
     output: z.object({
       record: z.object({
         id: z.string(),
@@ -108,7 +121,7 @@ export function recordTools(packs: PackRegistry): AnyToolDef[] {
       fields: z.array(RecordFieldView),
       attachments: z.array(RecordAttachmentView),
     }),
-    handler: async ({ record_id }, deps) => readRecord(deps, record_id),
+    handler: async (args, deps) => readRecord(deps, args.record_id, args.kind),
     recordIds: ({ record_id }) => [record_id],
   });
 
@@ -144,6 +157,7 @@ export function recordTools(packs: PackRegistry): AnyToolDef[] {
       field: z.string().min(1),
       value: z.string(),
       confirmed_by: z.string().optional(),
+      kind: pinnedKind(kind),
     }),
     output: z.object({ record_id: z.string(), field: z.string(), status: z.literal('verified') }),
     handler: async (args, deps) => {
@@ -158,13 +172,13 @@ export function recordTools(packs: PackRegistry): AnyToolDef[] {
     name: 'records_list_pending',
     description: 'List fields that still need human confirmation for a record.',
     actionClass: 'read',
-    input: z.object({ record_id: z.string().uuid() }),
+    input: z.object({ record_id: z.string().uuid(), kind: pinnedKind(kind) }),
     output: z.object({
       fields: z.array(
         z.object({ name: z.string(), confidence: z.number().nullable(), source_page: z.number().nullable() }),
       ),
     }),
-    handler: async ({ record_id }, deps) => listPendingFields(deps, record_id),
+    handler: async (args, deps) => listPendingFields(deps, args.record_id, args.kind),
   });
 
   return [recordsUpsert, recordsGet, recordsSearch, recordsConfirmField, recordsListPending];

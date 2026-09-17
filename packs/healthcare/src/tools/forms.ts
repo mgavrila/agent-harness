@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import * as z from 'zod/v4';
 import { ToolError } from '@harness/shared';
-import { definePackTool, type AnyToolDef, type PackToolDeps } from '@harness/pack-api';
+import { definePackTool, type AnyToolDef } from '@harness/pack-api';
 import { getTemplate, loadManifest, mappingLabel } from '../domain/forms/templates.js';
 import { fillTemplatePdf, resolveMappings } from '../domain/forms/fill.js';
 import { buildRoster, loadProviderData } from '../domain/forms/provider-data.js';
@@ -12,12 +12,12 @@ import { ROSTER_COLUMNS } from '../domain/forms/types.js';
 /**
  * The four form tools.
  *
- * A factory for symmetry with the other two groups, and because `formsRelease` needs the
- * kernel's `stageRelease` off `deps.kernel`. The three writes that used to call core-tools'
- * free functions — `writeOutFile`, `stageRelease` — go through `d.kernel` now: a pack has no
- * file-store handle of its own, and the kernel is what keeps the out tree client-scoped.
+ * A factory for symmetry with the other two groups, though unlike them it closes over nothing:
+ * each handler is given the live bag as `d`, and the writes that used to call core-tools' free
+ * functions — `writeOutFile`, `stageRelease` — reach them through `d.kernel`, because a pack has
+ * no file-store handle of its own and the kernel is what keeps the out tree client-scoped.
  */
-export function formTools(_deps: PackToolDeps): AnyToolDef[] {
+export function formTools(): AnyToolDef[] {
   const formsListTemplates = definePackTool({
     name: 'forms_list_templates',
     description: 'List the form templates installed for this client, with the record fields each one requires.',

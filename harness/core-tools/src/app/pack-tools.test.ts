@@ -4,7 +4,7 @@ import { pack as healthcarePack } from '@harness/pack-healthcare';
 import { definePack, type Pack } from '@harness/pack-api';
 import { registryOf } from '../domain/packs/registry.js';
 import { connectTestClient, makeTestDeps, useTestDb } from '../testing.js';
-import { createCoreToolsServer } from '../tools/catalog.js';
+import { createCoreToolsServer, publishedTools } from '../tools/catalog.js';
 
 const db = useTestDb();
 
@@ -50,5 +50,51 @@ describe('createCoreToolsServer and pack-contributed tools', () => {
 
     expect(received).toBe(deps);
     expect(tools.map((t) => t.name)).toContain('pack_test_marker');
+  });
+});
+
+/** The shipped pack with one record kind renamed, so two of them can be loaded side by side. */
+function renamedKind(name: string, kind: string, genericTools: boolean): Pack {
+  return definePack({
+    ...healthcarePack,
+    name,
+    records: healthcarePack.records.map((r) => ({ ...r, kind, genericTools })),
+    extraction: {
+      ...healthcarePack.extraction,
+      document_kinds: [`${name}_notes`],
+      targets: healthcarePack.extraction.targets.map((t) => ({
+        ...t,
+        record_kind: kind,
+        document_kinds: [`${name}_notes`],
+      })),
+    },
+    documentKinds: [`${name}_notes`],
+    replaces: undefined,
+    tools: undefined,
+  });
+}
+
+describe('the genericTools gate', () => {
+  const generic = ['records_upsert', 'records_get', 'records_search', 'records_confirm_field', 'records_list_pending'];
+
+  it('publishes none of the five when every loaded record kind is served by a pack’s own tools', () => {
+    // The shipped pack: `provider` declares `genericTools: false` and its own `providers_*`
+    // renames take their place, which is what keeps the healthcare catalogue at 23 names.
+    const names = publishedTools(makeTestDeps(db, { packs: registryOf([healthcarePack]) })).map((t) => t.name);
+    for (const tool of generic) expect(names).not.toContain(tool);
+  });
+
+  it('publishes all five for a pack that ships no tools of its own', () => {
+    const packs = registryOf([renamedKind('plain', 'plain_record', true)]);
+    const names = publishedTools(makeTestDeps(db, { packs })).map((t) => t.name);
+    for (const tool of generic) expect(names).toContain(tool);
+  });
+
+  it('publishes all five as soon as one loaded kind wants them, even beside a gated one', () => {
+    // The dual-pack case, in miniature: the gate is "does any loaded kind want them", not "do
+    // all of them". A pack loaded beside one that ships its own tools must still reach a record.
+    const packs = registryOf([renamedKind('gated', 'gated_record', false), renamedKind('open', 'open_record', true)]);
+    const names = publishedTools(makeTestDeps(db, { packs })).map((t) => t.name);
+    for (const tool of generic) expect(names).toContain(tool);
   });
 });
