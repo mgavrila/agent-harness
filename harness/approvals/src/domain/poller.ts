@@ -1,7 +1,7 @@
 import { and, asc, eq, gt, isNotNull, isNull, lte } from 'drizzle-orm';
 import { approvals, type Db } from '@harness/db';
 import { createLogger, SurfaceAcceptedError } from '@harness/shared';
-import type { SurfaceSession } from '@harness/surface-api';
+import type { MessageRef, SurfaceSession } from '@harness/surface-api';
 import { approvalCard } from './cards.js';
 
 const log = createLogger('approvals');
@@ -28,6 +28,9 @@ export interface PollResult {
  */
 const STALE_CLAIM_MS = 2 * 60 * 1000;
 
+/** A row back in the pending select: what both the stale sweep and a failed post write. */
+const UNCLAIMED = { surface: null, conversationId: null, claimedAt: null } as const;
+
 /**
  * Turn every pending approval that has no card yet into one.
  *
@@ -51,7 +54,7 @@ export async function postPendingApprovals(deps: PollDeps, limit = 20): Promise<
 
   await deps.db
     .update(approvals)
-    .set({ surface: null, conversationId: null, claimedAt: null })
+    .set(UNCLAIMED)
     .where(
       and(
         eq(approvals.client, deps.client),
@@ -95,7 +98,7 @@ export async function postPendingApprovals(deps: PollDeps, limit = 20): Promise<
     // Before it, nothing was sent, so the claim is released and the next tick retries
     // immediately. After it, a card is live: releasing the claim there would put a second card
     // with a second set of working buttons next to it on the next tick.
-    let ref: Awaited<ReturnType<typeof deps.surface.postCard>>;
+    let ref: MessageRef;
     try {
       ref = await deps.surface.postCard(conversation, approvalCard(row, deps.surface.capabilities));
     } catch (err) {
@@ -113,7 +116,7 @@ export async function postPendingApprovals(deps: PollDeps, limit = 20): Promise<
       log.error(`could not post the card for ${row.id}`, err);
       await deps.db
         .update(approvals)
-        .set({ surface: null, conversationId: null, claimedAt: null })
+        .set(UNCLAIMED)
         .where(and(eq(approvals.id, row.id), isNull(approvals.messageRef)));
       continue;
     }
