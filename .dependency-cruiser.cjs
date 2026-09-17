@@ -34,6 +34,7 @@ const PACKAGES = [
   { name: 'shared', src: 'harness/shared/src', severity: 'error' },
   { name: 'pack-api', src: 'harness/pack-api/src', severity: 'error' },
   { name: 'surface-api', src: 'harness/surface-api/src', severity: 'error' },
+  { name: 'identity-api', src: 'harness/identity-api/src', severity: 'error' },
   { name: 'db', src: 'harness/db/src', severity: 'error' },
   { name: 'gateway', src: 'harness/gateway/src', severity: 'error' },
   { name: 'core-tools', src: 'harness/core-tools/src', severity: 'error' },
@@ -96,6 +97,7 @@ const WORKSPACE_DIRS = [
   'harness/shared',
   'harness/pack-api',
   'harness/surface-api',
+  'harness/identity-api',
   'harness/db',
   'harness/gateway',
   'harness/core-tools',
@@ -233,6 +235,17 @@ const GLOBAL_RULES = [
     },
   },
   {
+    name: 'identity-api-imports-only-shared',
+    comment:
+      '@harness/identity-api is the contract an identity plug-in implements. It may import @harness/shared and zod, and no other workspace package: a contract that pulled in core-tools would defeat the point of having one, and one that pulled in @harness/pack-api would tie identity to the pack contract. The five levels both contracts need live in @harness/shared for exactly that reason.',
+    severity: 'error',
+    from: { path: '^harness/identity-api/src/' },
+    to: {
+      path: '^(harness|packs|surfaces|identities|evals|scripts)/',
+      pathNot: ['^harness/identity-api/src/', '^harness/shared/src/'],
+    },
+  },
+  {
     name: 'a-pack-never-imports-core-tools',
     comment:
       'A pack depends on @harness/pack-api and @harness/shared only. An edge back into core-tools or @harness/db would be a cycle and would make the pack unloadable by anything else. Its *tests* may reach @harness/core-tools/testing: a test that boots the real kernel against Postgres is not shipped and is not part of the cycle. No pack declares such a dependency today — the five kernel-side healthcare tests live in harness/core-tools/src/app/pack-healthcare — and this exemption is here so the next pack author is not blocked by a false error.',
@@ -285,12 +298,12 @@ module.exports = {
         // One node per package layer, not per file: the graph answers "may this package import
         // that one", which is the same question the rules above answer. `index.ts` is left
         // uncollapsed everywhere, because it is the node every cross-package arrow should land
-        // on. `@harness/shared`, `@harness/pack-api` and `@harness/surface-api` are flat — they
-        // are one layer each — so they get a pattern of their own, as do the pack's two
-        // generator directories.
+        // on. `@harness/shared`, `@harness/pack-api`, `@harness/surface-api` and
+        // `@harness/identity-api` are flat — they are one layer each — so they get a pattern of
+        // their own, as do the pack's two generator directories.
         collapsePattern: [
           '^(harness|packs|evals|scripts)/[^/]+/(src/)?(shared|domain|tools|app)',
-          '^harness/(shared|pack-api|surface-api)/src/(?!index[.]ts)',
+          '^harness/(shared|pack-api|surface-api|identity-api)/src/(?!index[.]ts)',
           '^packs/[^/]+/(synthetic|forms)/',
           '^surfaces/[^/]+/src/(?!index[.]ts)',
         ],

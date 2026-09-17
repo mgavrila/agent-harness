@@ -1,7 +1,7 @@
 /**
  * The public API of @harness/shared.
  *
- * Eight modules of pure helpers with no domain knowledge and no workspace dependency, so the
+ * Nine modules of pure helpers with no domain knowledge and no workspace dependency, so the
  * packages at the bottom of the graph — @harness/db and every pack — can import them. Nothing
  * that knows what a provider, a document or an approval is belongs here; that lives in a
  * domain folder in the package that owns the concept. Redaction is the named exception and
@@ -17,6 +17,7 @@ export {
   describeError,
 } from './errors.js';
 export { CONVERSATION_ID_PATTERN, SURFACE_NAME_PATTERN } from './ids.js';
+export { LEVELS, USER_LEVELS, type Level } from './levels.js';
 export {
   booleanFromEnv,
   envOrDefault,
