@@ -334,12 +334,16 @@ export async function extractDocument(
     attachments: attachmentInputs,
   });
 
+  // The kind already on file wins, the same rule `documents_classify` applies: the model's answer
+  // fills the gap and never overwrites one somebody already declared.
+  const documentKind = row.kind ?? parsed.documentKind;
+
   const textAbs = documentTextPath(abs);
   await deps.db
     .update(documents)
     .set({
       recordId: upserted.record_id,
-      kind: row.kind ?? parsed.documentKind,
+      kind: documentKind,
       ocrUsed,
       textPath: toStorageRelative(deps.storageDir, textAbs),
     })
@@ -367,7 +371,7 @@ export async function extractDocument(
   return {
     document_id,
     record_id: upserted.record_id,
-    document_kind: row.kind ?? parsed.documentKind,
+    document_kind: documentKind,
     ocr_used: ocrUsed,
     pages: promptPages.length,
     fields_pending: upserted.fields_pending,
