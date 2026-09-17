@@ -41,9 +41,15 @@ with a `bot_id`, and any subtype but `file_share` (edits, deletions, joins), are
 
 A file attached to a message is downloaded by `transport/files.ts` with the bot token into
 `<storageDir>/incoming/<message ts, dot replaced by a dash>-<file name, sanitised to
-[A-Za-z0-9._-]>`, checked against the storage root before anything is written. A download that
-fails drops that one attachment (logged by name, never by its signed URL) and the message is
-still delivered. `MessageEvent.attachments[].path` is that name, relative to `incoming/`.
+[A-Za-z0-9._-]>`, checked against the storage root before anything is written; two attachments
+sharing a name in one message get `-2`, `-3`, ... before the extension. A download over
+`MAX_ATTACHMENT_BYTES` (64 MiB — Slack itself allows up to 1 GiB, which is not a size this host
+buffers or stores unbounded) is refused: a declared `content-length` over the limit is refused
+before a byte is read, and the body is otherwise streamed to disk and cut off — deleting whatever
+was written so far — the moment it passes the limit regardless of what `content-length` claimed.
+Any failed or refused download drops that one attachment (logged by name and reason, never by a
+path or the signed URL) and the message is still delivered. `MessageEvent.attachments[].path` is
+that name, relative to `incoming/`.
 
 ## Capabilities
 

@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { attachmentPath, downloadAttachments } from './files.js';
+import { attachmentPath, downloadAttachments, MAX_ATTACHMENT_BYTES } from './files.js';
 
 let storageDir: string;
 const log = { info() {}, warn() {}, error() {} };
@@ -28,6 +28,12 @@ describe('attachmentPath', () => {
       '1789000000-000001-Dr_Reyes_licence__2026_.pdf',
     );
     expect(attachmentPath('1.2', '../../etc/passwd')).toBe('1-2-.._.._etc_passwd');
+  });
+
+  it('neutralises the timestamp too, defensively', () => {
+    // Slack never sends a `ts` shaped like this; the guard exists so the same rule that protects
+    // the name protects the prefix, regardless of where the string came from.
+    expect(attachmentPath('1.1/../evil', 'x.pdf')).toBe('1-1_.._evil-x.pdf');
   });
 });
 
@@ -80,5 +86,87 @@ describe('downloadAttachments', () => {
     expect(out).toEqual([{ name: 'ok.pdf', path: '1-1-ok.pdf' }]);
     expect(warned[0]).toContain('bad.pdf');
     expect(warned[0]).not.toContain('files.slack.com');
+    // The warn line is built from the error's class, never its message, because a filesystem
+    // error's message carries the absolute path it failed on.
+    expect(warned[0]).not.toContain(storageDir);
+  });
+
+  it('suffixes a repeated file name so two attachments in one message never collide', async () => {
+    const fetch = fakeFetch({ 'https://files.slack.com/a': 'first', 'https://files.slack.com/b': 'second' });
+    const out = await downloadAttachments(
+      '1.1',
+      [
+        { name: 'w9.pdf', url: 'https://files.slack.com/a' },
+        { name: 'w9.pdf', url: 'https://files.slack.com/b' },
+      ],
+      { token: 't', storageDir, fetch, log },
+    );
+    expect(out).toEqual([
+      { name: 'w9.pdf', path: '1-1-w9.pdf' },
+      { name: 'w9.pdf', path: '1-1-w9-2.pdf' },
+    ]);
+    expect(await readFile(path.join(storageDir, 'incoming', '1-1-w9.pdf'), 'utf8')).toBe('first');
+    expect(await readFile(path.join(storageDir, 'incoming', '1-1-w9-2.pdf'), 'utf8')).toBe('second');
+  });
+});
+
+describe('downloadAttachments size cap', () => {
+  it('exports a 64 MiB default', () => {
+    expect(MAX_ATTACHMENT_BYTES).toBe(64 * 1024 * 1024);
+  });
+
+  it('rejects a declared content-length over the limit before reading the body, and writes nothing', async () => {
+    const warned: string[] = [];
+    const fetchStub = (async () =>
+      new Response('short', { status: 200, headers: { 'content-length': '999999' } })) as typeof fetch;
+    const out = await downloadAttachments('1.1', [{ name: 'huge.pdf', url: 'https://files.slack.com/huge' }], {
+      token: 't',
+      storageDir,
+      fetch: fetchStub,
+      maxBytes: 20,
+      log: { ...log, warn: (m: string) => warned.push(m) },
+    });
+    expect(out).toEqual([]);
+    await expect(readFile(path.join(storageDir, 'incoming', '1-1-huge.pdf'))).rejects.toThrow();
+    expect(warned[0]).toContain('huge.pdf');
+    expect(warned[0]).toContain('20');
+    expect(warned[0]).not.toContain(storageDir);
+  });
+
+  it('aborts a chunked body once it passes the limit, and removes the partial file', async () => {
+    const warned: string[] = [];
+    const fetchStub = (async () => {
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new Uint8Array(15));
+          controller.enqueue(new Uint8Array(15));
+          controller.close();
+        },
+      });
+      return new Response(stream, { status: 200 });
+    }) as typeof fetch;
+    const out = await downloadAttachments('1.1', [{ name: 'stream.pdf', url: 'https://files.slack.com/stream' }], {
+      token: 't',
+      storageDir,
+      fetch: fetchStub,
+      maxBytes: 20,
+      log: { ...log, warn: (m: string) => warned.push(m) },
+    });
+    expect(out).toEqual([]);
+    await expect(readFile(path.join(storageDir, 'incoming', '1-1-stream.pdf'))).rejects.toThrow();
+    expect(warned[0]).toContain('stream.pdf');
+  });
+
+  it('writes a body under the limit as before', async () => {
+    const fetchStub = (async () => new Response('ok', { status: 200 })) as typeof fetch;
+    const out = await downloadAttachments('1.1', [{ name: 'small.pdf', url: 'https://files.slack.com/small' }], {
+      token: 't',
+      storageDir,
+      fetch: fetchStub,
+      maxBytes: 20,
+      log,
+    });
+    expect(out).toEqual([{ name: 'small.pdf', path: '1-1-small.pdf' }]);
+    expect(await readFile(path.join(storageDir, 'incoming', '1-1-small.pdf'), 'utf8')).toBe('ok');
   });
 });
