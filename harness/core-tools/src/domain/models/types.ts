@@ -5,7 +5,7 @@ export { ROUTES, type Route };
 export interface GatewayConfig {
   /** Origin of the LiteLLM proxy, no trailing slash. */
   baseUrl: string;
-  /** The proxy master key. Provider keys never leave the proxy. */
+  /** The proxy master key. A model vendor's own keys never leave the proxy. */
   apiKey: string;
   timeoutMs: number;
   /**
@@ -23,7 +23,7 @@ export interface ModelMessage {
 }
 
 export interface JsonSchemaSpec {
-  /** A schema name the provider echoes back. Lowercase, underscores. */
+  /** A schema name the model vendor echoes back. Lowercase, underscores. */
   name: string;
   schema: Record<string, unknown>;
 }

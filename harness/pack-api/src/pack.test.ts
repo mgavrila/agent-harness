@@ -17,6 +17,7 @@ const base: Pack = {
     version: '1.0.0',
     document_kinds: ['other'],
     role: 'You read documents.',
+    injection_examples: [],
     targets: [
       {
         document_kinds: ['*'],

@@ -4,7 +4,9 @@ import { describe, it, expect } from 'vitest';
 import { parse } from 'yaml';
 import type { Db } from '@harness/db';
 import { pack as healthcarePack } from '@harness/pack-healthcare';
+import { pack as storiesPack } from '@harness/pack-stories';
 import { registryOf } from '../domain/packs/registry.js';
+import type { PackRegistry } from '../domain/packs/types.js';
 import { makeTestDeps } from '../testing.js';
 import { publishedTools } from './catalog.js';
 
@@ -24,7 +26,7 @@ const packs = registryOf([healthcarePack]);
  * never calls a handler, so this test needs no Postgres — the same trick `app/record-surface.ts`
  * uses to record the surface offline.
  */
-function publishedNames(registry: typeof packs): Set<string> {
+function publishedNames(registry: PackRegistry): Set<string> {
   const deps = makeTestDeps(null as unknown as Db, { packs: registry });
   return new Set(publishedTools(deps).map((t) => t.name));
 }
@@ -82,6 +84,40 @@ describe('loaded pack skill frontmatter', () => {
 
     for (const tool of tools) {
       expect(KNOWN_TOOL_NAMES.has(tool), `${name}: unknown tool "${tool}"`).toBe(true);
+    }
+  });
+});
+
+/**
+ * The same checks with a second pack loaded, which is what gives the stories skill's eight names
+ * their meaning.
+ *
+ * `records_search`, `records_get`, `records_list_pending` and `records_confirm_field` are
+ * published here **only** because the healthcare pack's `replaces` is the seven same-named tools
+ * and not the twelve: the five `providers_*` wrappers are renames, and the kernel's five are held
+ * back from a healthcare-only catalogue by `genericTools: false` instead. Widen `replaces` back to
+ * twelve and those names vanish process-wide, and this block names the missing tool.
+ */
+describe('two packs loaded at once', () => {
+  const both = registryOf([healthcarePack, storiesPack]);
+  const known = publishedNames(both);
+  const skills = skillsOf(both.skillsDirs());
+
+  it('walks both skills directories, not just the first', () => {
+    expect(both.skillsDirs()).toHaveLength(2);
+    expect(skills.map(([, name]) => name).sort()).toEqual([
+      'credentialing-expirations',
+      'credentialing-fill-form',
+      'credentialing-intake',
+      'credentialing-roster',
+      'stories-intake',
+    ]);
+  });
+
+  it.each(skills)('%s/%s names only tools the union catalogue publishes', (dir, name) => {
+    const harness = (readFrontmatter(dir, name).metadata as Record<string, unknown>).harness as Record<string, unknown>;
+    for (const tool of harness.tools as string[]) {
+      expect(known.has(tool), `${name}: unknown tool "${tool}"`).toBe(true);
     }
   });
 });

@@ -124,9 +124,9 @@ export const KERNEL_PIPELINE_TOOLS: PipelineTools = {
  * The measured pack's `evals.readback` names every tool and both keys, each falling back to the
  * kernel's. The one thing it cannot answer for is the key the *extract result* carries: a pack
  * loaded beside it may have replaced `documents_extract` under the same name and may answer in
- * its own vocabulary. Healthcare does exactly that — its replacement returns `provider_id` —
- * and a second measured pack declaring the kernel's `record_id` used to read `undefined` off it
- * and fail every case. So that one key is read off whichever loaded pack `replaces` the extract
+ * its own vocabulary — a shipped pack does exactly that, renaming the new record's id — and a
+ * second measured pack declaring the kernel's `record_id` used to read `undefined` off it and
+ * failed every case. So that one key is read off whichever loaded pack `replaces` the extract
  * tool, and only then off the measured pack's own declaration.
  *
  * A pack that replaces the extract tool and declares no `evals.readback` of its own is taken at
@@ -251,9 +251,9 @@ export function normalizeMasking(fields: StoredField[]): StoredField[] {
  * masking and attachment dedupe are all in scope.
  *
  * Not one tool name here is a literal. All three come off `handle.tools`, which `openPipeline`
- * resolved from the measured pack's `evals.readback` against the packs it loaded: healthcare
- * renames the read to `providers_get` and carries the record id as `provider_id`, a pack that
- * ships no tools of its own gets the kernel's `records_get` and `record_id`.
+ * resolved from the measured pack's `evals.readback` against the packs it loaded: a pack that
+ * renames the read gets its own name and its own id key, and a pack that ships no tools of its
+ * own gets the kernel's `records_get` and `record_id`.
  */
 export async function runCase(handle: PipelineHandle, c: ExtractionCase): Promise<CaseOutcome> {
   handle.toolsCalled.length = 0;

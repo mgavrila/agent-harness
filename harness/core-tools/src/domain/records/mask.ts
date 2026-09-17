@@ -28,7 +28,7 @@ export function maskField(f: typeof fields.$inferSelect): RecordFieldView {
 /**
  * An attachment as a caller sees it. The number is never returned, only whether one is on file.
  *
- * `issued_at` and `properties` are here and were not on the credential view this replaces: a
+ * `issued_at` and `properties` are here and were not on the narrower view this replaces: a
  * pack's form templates read the issue date, and a pack that can no longer run its own SQL has
  * no other way to reach either.
  */

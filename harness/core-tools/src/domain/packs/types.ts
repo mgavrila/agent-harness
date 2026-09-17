@@ -4,8 +4,8 @@ import type { AttachmentKindSpec, ExtractionManifest, ExtractionTarget, Pack, Re
  * The pack, target and record kind one document's extraction resolves to.
  *
  * With one pack loaded this is always that pack's only target. With two, an exact claim on the
- * document's kind wins over either pack's catch-all, which is what lets a meeting note reach the
- * stories pack while a state licence reaches the healthcare pack in the same process.
+ * document's kind wins over either pack's catch-all, which is what lets each pack's documents
+ * reach its own target in one process.
  */
 export interface ResolvedTarget {
   pack: Pack;
@@ -15,6 +15,8 @@ export interface ResolvedTarget {
   attachmentKinds: AttachmentKindSpec[];
   /** The owning pack's `extraction.role`, the first line of the prompt. */
   role: string;
+  /** The owning pack's example imperatives, quoted inside the kernel's injection-defence block. */
+  injectionExamples: readonly string[];
 }
 
 /**
@@ -54,8 +56,9 @@ export interface PackRegistry {
   /**
    * The target that writes records of this kind, for a document whose own kind is unknown but
    * whose destination record is named. Separate from `targetFor` on purpose: a record kind is not
-   * a document kind, and feeding one to the other is how an epic used to reach the provider
-   * target. Throws `ToolError` when no loaded pack extracts into that record kind.
+   * a document kind, and feeding one to the other is how a document of one pack's kind used to
+   * reach another pack's target. Throws `ToolError` when no loaded pack extracts into that
+   * record kind.
    */
   targetForRecordKind(kind: string): ResolvedTarget;
   /** The first pack's extraction manifest, for the classification role and version. */

@@ -4,7 +4,7 @@ import { ConfigError, optionalEnv } from '@harness/shared';
 
 /**
  * Root of the harness file store. There is no default: a deployment that has
- * not said where files live must fail at startup rather than scatter provider
+ * not said where files live must fail at startup rather than scatter ingested
  * documents into whatever directory happened to be the working directory.
  */
 export function storageRoot(dir: string | undefined = optionalEnv('HARNESS_STORAGE_DIR')): string {

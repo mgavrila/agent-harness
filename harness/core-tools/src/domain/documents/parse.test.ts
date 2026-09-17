@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { pack as healthcarePack } from '@harness/pack-healthcare';
+import { pack as storiesPack } from '@harness/pack-stories';
 import { registryOf } from '../packs/registry.js';
 import { parseExtraction } from './parse.js';
 
@@ -74,5 +75,44 @@ describe('parseExtraction', () => {
   it('falls back to "other" for an unknown document kind', () => {
     const out = parseExtraction({ ...raw, document_kind: 'passport' }, target);
     expect(out.documentKind).toBe('other');
+  });
+});
+
+/**
+ * Whether an attachment needs an expiry date is the attachment kind's own declaration, not a
+ * rule the kernel applies to everything hung off a record.
+ */
+describe('parseExtraction and an attachment kind that never expires', () => {
+  const storiesTarget = registryOf([storiesPack]).targetFor('meeting_notes');
+  const link = { kind: 'source_link', issuer: 'JIRA', state: '', issued_at: '', confidence: 0.9, source_page: 1 };
+
+  it('keeps a link with no expiry, because source_link declares no expires_at property', () => {
+    const out = parseExtraction(
+      { document_kind: 'meeting_notes', fields: {}, links: [{ ...link, expires_at: '' }] },
+      storiesTarget,
+    );
+    expect(out.attachments).toEqual([
+      {
+        kind: 'source_link',
+        issuer: 'JIRA',
+        state: undefined,
+        issued_at: undefined,
+        expires_at: undefined,
+        confidence: 0.9,
+        source_page: 1,
+      },
+    ]);
+  });
+
+  it('still drops a healthcare credential with no usable expiry, because its kind declares one', () => {
+    const out = parseExtraction(
+      {
+        document_kind: 'state_license',
+        fields: {},
+        credentials: [{ kind: 'license', state: 'CA', issuer: 'Board', issued_at: '', expires_at: '' }],
+      },
+      target,
+    );
+    expect(out.attachments).toEqual([]);
   });
 });

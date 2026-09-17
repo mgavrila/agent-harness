@@ -14,9 +14,8 @@ const NO_PACKS_MESSAGE = 'HARNESS_PACKS names no pack; at least one is required'
  *
  * `recordKinds()` and `attachmentKinds()` answer with each pack's declarations **parsed**, not
  * the raw values off `Pack.records` and `Pack.attachments`. Those two members are typed
- * `RawRecordKind` and `RawAttachmentKind`, which say so: a pack hands over the JSON a human
- * edits — `packs/healthcare/src/index.ts` hands over `provider.json` — and the raw value is
- * missing the zod defaults `buildExtractionSchema` depends on (`restricted: false`,
+ * `RawRecordKind` and `RawAttachmentKind`, which say so: a pack is free to hand in the raw JSON
+ * a human edits rather than validating it itself, and the raw value is missing the zod defaults `buildExtractionSchema` depends on (`restricted: false`,
  * `source: 'model'`). Parsing here, once, at construction, is what makes those defaults exist
  * no matter which pack, or which test, built this registry; validating against *this build's*
  * restricted-name rules rather than the pack's matters too, because those rules decide what
@@ -93,6 +92,7 @@ export function registryOf(all: Pack[]): PackRegistry {
       recordKind,
       attachmentKinds: attachmentsOf.get(pack.name) ?? [],
       role: pack.extraction.role,
+      injectionExamples: pack.extraction.injection_examples,
     };
   }
 

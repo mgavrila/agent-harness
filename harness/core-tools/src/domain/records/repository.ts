@@ -107,7 +107,7 @@ async function upsertField(deps: ToolDeps, recordId: string, f: FieldInput) {
 
 async function upsertAttachment(deps: ToolDeps, recordId: string, a: AttachmentInput) {
   assertAttachmentKind(deps, a.kind);
-  // A record can hold one attachment of a kind per state (two licences in two states), so the
+  // A record can hold one attachment of a kind per state (two permits in two states), so the
   // state — null included — is part of the match.
   const existing = await deps.db.query.attachments.findFirst({
     where: and(
@@ -174,8 +174,8 @@ export async function readRecord(deps: ToolDeps, recordId: string, kind?: string
 /**
  * `records_search`: name fragment, exact external id, or both, at most 20, scoped to the client.
  *
- * Both given means "either", not "both": that is what reproduces the single-box search the
- * `providers_search` alias offers, where one string is tried as a name and as an NPI at once.
+ * Both given means "either", not "both": that is what reproduces the single-box search a pack's
+ * renamed alias offers, where one string is tried as a name and as an outside identifier at once.
  */
 export async function searchRecords(
   deps: ToolDeps,

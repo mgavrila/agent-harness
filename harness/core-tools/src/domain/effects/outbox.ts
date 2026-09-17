@@ -24,7 +24,7 @@ export async function stageEffect(
   input: StageEffectInput,
 ): Promise<{ effect_id: string; staged: boolean }> {
   // Idempotency keys are caller-supplied and only meaningful within a client;
-  // two clients computing the same key (e.g. `roster:aetna`) must not collide.
+  // two clients computing the same key (e.g. `export:acme`) must not collide.
   const scopedKey = `${deps.client}:${input.idempotencyKey}`;
   const inserted = await deps.db
     .insert(toolEffects)

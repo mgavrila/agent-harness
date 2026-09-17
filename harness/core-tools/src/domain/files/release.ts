@@ -5,7 +5,7 @@ import type { ToolDeps } from '../tooling/types.js';
 import { resolveOutFile } from '../storage/file-store.js';
 import { stageEffect } from '../effects/outbox.js';
 
-/** Slack rejects very large uploads and a 25 MB roster is a bug, not a roster. */
+/** Slack rejects very large uploads, and a 25 MB generated file is a bug rather than a delivery. */
 const MAX_RELEASE_BYTES = 25 * 1024 * 1024;
 
 /**

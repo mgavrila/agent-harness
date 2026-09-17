@@ -77,7 +77,7 @@ export function recordTools(packs: PackRegistry): AnyToolDef[] {
     name: 'records_upsert',
     description:
       'Create or update a record of a declared kind with extracted fields and attachments. Matches an existing record by external_id (or by name when there is none). ' +
-      'Fields named for a restricted identifier (ssn, social security number, ein, tax id, dea number) are always encrypted and never returned in plaintext, ' +
+      'A field whose name the harness recognises as a restricted identifier is always encrypted and never returned in plaintext, ' +
       'whatever `restricted` says; set `restricted: true` to protect any other field.',
     actionClass: 'write.internal',
     input: z.object({

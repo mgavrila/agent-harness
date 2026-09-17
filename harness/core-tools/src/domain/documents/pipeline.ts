@@ -98,8 +98,8 @@ function extractionReplyFor(attachmentsKey: string) {
 
 /**
  * The record's stable outside identifier, read out of the extraction the way its kind says: an
- * NPI is ten digits however the page printed it, and a value that does not normalise to the
- * declared length is dropped rather than stored as a near miss.
+ * identifier declared as ten digits is ten digits however the page printed it, and a value that
+ * does not normalise to the declared length is dropped rather than stored as a near miss.
  */
 function externalIdFrom(kind: RecordKindSpec, byName: Map<string, ExtractedField>): string | undefined {
   if (!kind.externalId) return undefined;
@@ -194,7 +194,8 @@ export async function classifyDocument(deps: ToolDeps, documentId: string): Prom
   const row = await requireDocument(deps, documentId);
   const kinds = deps.packs.documentKinds();
   const { promptPages } = await readForModel(deps, row);
-  const messages = buildClassificationMessages(promptPages, deps.packs.manifest().role);
+  const manifest = deps.packs.manifest();
+  const messages = buildClassificationMessages(promptPages, manifest.role, manifest.injection_examples);
   assertPromptRedacted(deps, messages);
   const { json } = await callModelJson(deps, {
     route: 'extract',
@@ -228,7 +229,7 @@ export async function extractDocument(
   // different record of this client.
   const named = record_id ? await requireRecord(deps, record_id) : undefined;
   // The kind already on file decides which target this document feeds. A record kind is never
-  // offered to `targetFor`: the two namespaces are unrelated, and passing `provider` to a
+  // offered to `targetFor`: the two namespaces are unrelated, and passing a record kind to a
   // function that answers about document kinds only ever worked because one pack declared a
   // catch-all. When the document is unclassified but its destination record is named, the record
   // kind resolves the target through the accessor that takes one.
@@ -253,6 +254,7 @@ export async function extractDocument(
     role: target.role,
     instruction: target.target.instruction,
     attachmentInstruction: target.target.attachment_instruction,
+    injectionExamples: target.injectionExamples,
   });
   assertPromptRedacted(deps, messages);
   const { json } = await callModelJson(deps, {
@@ -276,7 +278,7 @@ export async function extractDocument(
 
   const byName = new Map(parsed.fields.map((f) => [f.name, f]));
   // The record's display name is its kind's nameFields, joined and with the empties dropped —
-  // `first_name middle_name last_name` for a provider, `title` for an epic.
+  // `first_name middle_name last_name` for a person, `title` for an epic.
   const name =
     named?.name ??
     target.recordKind.nameFields

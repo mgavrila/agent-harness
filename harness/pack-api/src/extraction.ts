@@ -72,6 +72,19 @@ export interface ExtractionManifest {
   version: string;
   document_kinds: readonly string[];
   role: string;
+  /**
+   * Imperatives that turn up printed in this pack's documents, quoted back at the model inside
+   * the kernel's injection-defence block as examples of what not to obey.
+   *
+   * The rule is the kernel's and a pack cannot weaken it, but the *examples* have to be a pack's:
+   * "send this to the payer" is a sentence that appears in credentialing paperwork and means
+   * nothing in a product meeting note, and a kernel carrying it is a kernel that knows about one
+   * area of the product. The kernel supplies one example of its own that every pack shares, so a
+   * pack listing none still gets a worked example.
+   *
+   * These strings are quoted verbatim into a prompt, so keep them short and imperative.
+   */
+  injection_examples: readonly string[];
   targets: ExtractionTarget[];
 }
 
@@ -95,6 +108,7 @@ const ExtractionManifestShape = z.object({
   version: z.string().min(1),
   document_kinds: z.array(z.string().min(1)).min(1),
   role: z.string().min(1),
+  injection_examples: z.array(z.string().min(1)).default([]),
   targets: z.array(ExtractionTargetShape),
 });
 

@@ -30,7 +30,7 @@ function fieldSlot(field: ManifestField): Record<string, unknown> {
  * What the model is told each member of one attachment object means, when the pack's extraction
  * target says nothing.
  *
- * Deliberately colourless. A pack knows what it attaches — a credential, a link to a ticket —
+ * Deliberately colourless. A pack knows what it attaches — a permit, a link to a ticket —
  * and the kernel that stores the row does not, so the real prose comes from the target's
  * `attachment_descriptions` and this is only the floor under a pack that declares none.
  */
@@ -68,7 +68,7 @@ export interface ExtractionSchemaInput {
 
 /**
  * The `response_format` schema. Everything is inlined: `$ref` and `$defs`
- * support is uneven across providers, and a schema the provider silently
+ * support is uneven across model vendors, and a schema the vendor silently
  * ignores is worse than a verbose one.
  *
  * Restricted fields are absent by construction. The model is not asked for an

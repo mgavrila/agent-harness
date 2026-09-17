@@ -66,7 +66,7 @@ export interface ToolDeps {
   /**
    * Absolute root of the file store, from `storageRoot()`: required, with no
    * default, so a deployment that has not said where files live fails at
-   * startup instead of scattering provider documents into the working
+   * startup instead of scattering ingested documents into the working
    * directory. One root serves both halves and they do not collide: ingested
    * documents sit where the caller puts them under it (`incoming/`, and their
    * `.redacted.txt` sidecars beside them), and everything a tool generates for
@@ -80,7 +80,7 @@ export interface ToolDeps {
   /**
    * Whether restricted identifiers (SSN, EIN, DEA) may be sent to a model.
    * False for every client by default. Turning it on is a documented decision
-   * that requires a BAA with the model provider (spec section 4.4).
+   * that requires a BAA with the model vendor (spec section 4.4).
    */
   restrictedToModel: boolean;
   /** External-effect senders keyed by sink name (e.g. 'slack'). Empty in Plan 1.1; Plan 3 registers real ones. */
@@ -101,7 +101,7 @@ export interface ToolDeps {
   /**
    * The packs this process loaded, from `HARNESS_PACKS`. Document kinds, the extraction
    * manifest and the forms directory all come from here rather than from an import, which is
-   * what lets one build serve credentialing today and a different area tomorrow.
+   * what lets one build serve one area of the product today and a different one tomorrow.
    */
   packs: PackRegistry;
   /**

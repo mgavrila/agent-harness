@@ -36,10 +36,10 @@ export interface ComputedDeadline {
  * The expiration and renewal-start dates for a record's attachments.
  *
  * `leadDaysFor` comes from the loaded pack's `AttachmentKindSpec`: the kernel has no table of
- * lead times any more, because how long before a licence lapses someone should start renewing
- * it is the pack's knowledge, not the calculator's. **Zero lead days means no renewal-start
- * deadline at all**, which is the honest answer for an attachment kind that does not expire;
- * before this, an unknown kind silently got 90 days.
+ * lead times any more, because how long before an attachment lapses someone should start
+ * renewing it is the pack's knowledge, not the calculator's. **Zero lead days means no
+ * renewal-start deadline at all**, which is the honest answer for an attachment kind that does
+ * not expire; before this, an unknown kind silently got 90 days.
  */
 export function computeDeadlines(items: AttachmentLike[], leadDaysFor: (kind: string) => number): ComputedDeadline[] {
   const out: ComputedDeadline[] = [];
@@ -89,9 +89,10 @@ interface DigestKeyItem {
  * bucket changes at least one triple and so changes the key, which is exactly the signal a
  * playbook needs to speak again.
  *
- * **The hashed string and the `expirations:` prefix are unchanged from the credential-keyed
- * version, and migration 0008 preserved every credential id as its attachment id.** That is what
- * stops every playbook speaking again on the first run after the migration.
+ * **The hashed string and the `expirations:` prefix are unchanged from the version that keyed
+ * these triples off the old table's rows, and migration 0008 preserved every one of those ids
+ * as its attachment id.** That is what stops every playbook speaking again on the first run
+ * after the migration.
  */
 export function digestKeyFor(items: DigestKeyItem[]): string {
   if (items.length === 0) return 'expirations:none';
