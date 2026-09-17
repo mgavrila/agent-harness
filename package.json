@@ -33,8 +33,7 @@
     "new-client": "pnpm --filter @harness/scripts exec tsx src/app/cli.ts",
     "demo:up": "docker compose --env-file .env -f harness/compose/docker-compose.yml --profile demo up -d --build",
     "demo:down": "docker compose --env-file .env -f harness/compose/docker-compose.yml --profile demo down",
-    "demo:logs": "docker compose --env-file .env -f harness/compose/docker-compose.yml --profile demo logs -f hermes host",
-    "demo:playbooks": "docker compose --env-file .env -f harness/compose/docker-compose.yml exec hermes bash /opt/data/cron/playbooks.sh"
+    "demo:logs": "docker compose --env-file .env -f harness/compose/docker-compose.yml --profile demo logs -f host"
   },
   "devDependencies": {
     "@eslint/js": "9.39.5",

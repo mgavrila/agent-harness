@@ -23,12 +23,11 @@ console.log(
   `  1. cp ${path.relative(process.cwd(), path.join(result.dir, '.env.example'))} .env   # then fill in the blanks`,
 );
 console.log(`     Set HARNESS_CLIENT=${values.name} and a storage directory this client does not share.`);
-console.log('  2. Create the two Slack apps — one for the Hermes gateway, one for the approvals');
-console.log('     app — with Socket Mode on both and Interactivity on the approver, then paste');
-console.log('     both pairs of tokens.');
+console.log('  2. Create one Slack app (Socket Mode and Interactivity on; see docs/runbook.md),');
+console.log("     paste its two tokens and the approvals channel id, and put the two humans'");
+console.log('     Slack member ids in identity.yaml.');
 console.log(`  3. Review clients/${values.name}/SOUL.md and policy.yaml before the first run.`);
-// Deliberately not `pnpm demo:up`: the Compose file hardcodes the
-// demo-practice client folder and policy path, so that command starts
-// demo-practice no matter what HARNESS_CLIENT says.
-console.log('  4. Point Compose at this client and start it: see "Onboarding a client" in');
-console.log('     docs/runbook.md. `pnpm demo:up` starts demo-practice, not this client.');
+console.log(
+  `  4. COMPOSE_PROJECT_NAME=${values.name} docker compose --env-file .env -f harness/compose/docker-compose.yml --profile demo up -d --build,`,
+);
+console.log('     or `pnpm demo:up` with HARNESS_CLIENT set in .env.');

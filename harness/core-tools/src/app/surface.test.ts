@@ -155,9 +155,9 @@ describe('the files worker boundary', () => {
     expect(services.files.ports).toBeUndefined();
   });
 
-  it('is reached by the two services that run core-tools, which tell it where the worker is', async () => {
+  it('is reached by the host, which tells core-tools where the worker is', async () => {
     const { services } = await rendered();
-    for (const name of ['hermes', 'host']) {
+    for (const name of ['host']) {
       expect(Object.keys(services[name].networks ?? {}).sort(), name).toEqual(['default', 'files']);
       expect(services[name].environment?.HARNESS_FILES_URL, name).toBe('http://files:8790');
     }
@@ -196,5 +196,20 @@ describe('the Compose stack names no client and mounts no socket', () => {
       expect(services.host.environment?.[name], name).toBeDefined();
     }
     expect(services.host.environment?.SLACK_ALLOWED_USERS).toBeUndefined();
+  });
+
+  it('runs exactly the five services of the kernel design, and no Hermes', async () => {
+    const { services } = parseYaml(await rendered()) as { services: Record<string, unknown> };
+    expect(Object.keys(services).sort()).toEqual(['core-tools', 'files', 'host', 'litellm', 'postgres']);
+    expect(await rendered()).not.toMatch(/hermes/i);
+  });
+
+  it('gives the host the one Slack app and no second one', async () => {
+    const { services } = parseYaml(await rendered()) as {
+      services: Record<string, { environment?: Record<string, string> }>;
+    };
+    expect(services.host.environment?.SLACK_BOT_TOKEN).toBeDefined();
+    expect(services.host.environment?.SLACK_APP_TOKEN).toBeDefined();
+    expect(Object.keys(services.host.environment ?? {}).filter((k) => k.startsWith('APPROVALS_SLACK'))).toEqual([]);
   });
 });

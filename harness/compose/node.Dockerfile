@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 #
-# The host and its messaging adapters. core-tools is hosted in-process, so the
-# whole workspace is installed rather than one package.
+# The host: the runtime, the surfaces and the identity plug-in it loads, with core-tools hosted
+# in-process. The whole workspace is installed because the plug-ins are workspace packages.
 #
 # Build context is the repository root.
 FROM node:26-bookworm-slim
@@ -24,6 +24,11 @@ COPY runtimes ./runtimes
 COPY clients ./clients
 COPY scripts ./scripts
 RUN pnpm install --frozen-lockfile && chmod -R a+rX /srv/agent-harness
+
+# The storage volume's layout. Docker seeds a fresh named volume from the image's directory at the
+# mount path, ownership included, so the first container to mount `storage` leaves `incoming/` and
+# `out/` owned by the uid the host runs as. hermes-init used to chown the volume; nothing needs to.
+RUN mkdir -p /srv/harness-storage/incoming /srv/harness-storage/out && chown -R node:node /srv/harness-storage
 
 # Runs as the base image's uid-1000 "node" user rather than root.
 USER node

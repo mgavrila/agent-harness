@@ -21,6 +21,11 @@ COPY harness/shared ./harness/shared
 COPY harness/files ./harness/files
 RUN pnpm install --frozen-lockfile && chmod -R a+rX /srv/agent-harness
 
-# The base image's uid-1000 "node" user, which is the storage volume's owner (HERMES_UID=1000).
+# The storage volume's layout. Docker seeds a fresh named volume from the image's directory at the
+# mount path, ownership included, so whichever of this image and node.Dockerfile's mounts the
+# volume first leaves `incoming/` and `out/` owned by the uid the container runs as.
+RUN mkdir -p /srv/harness-storage/incoming /srv/harness-storage/out && chown -R node:node /srv/harness-storage
+
+# The base image's uid-1000 "node" user, which is the storage volume's owner.
 USER node
 CMD ["pnpm", "--filter", "@harness/files", "start"]

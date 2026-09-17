@@ -1,3 +1,4 @@
+import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { config as loadEnv } from 'dotenv';
@@ -40,6 +41,10 @@ const names = (raw: string): string[] =>
 
 const { db, close: closeDb } = createDb();
 const config = await buildKernelConfig(process.env);
+// Belt to the image's braces (decision 4): the storage volume's layout comes from
+// node.Dockerfile, but an operator who mounts a bare directory instead still gets both.
+await mkdir(path.join(config.storageDir, 'incoming'), { recursive: true });
+await mkdir(outRoot(config.storageDir), { recursive: true });
 const clientDir = path.join(repoRoot, 'clients', config.client);
 
 // The three plug-ins, by name. Identity first: the host's own principal has to be declared.

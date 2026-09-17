@@ -66,7 +66,7 @@ describe('@harness/identity-static', () => {
     await expect(identity.connect({ env: {}, log, clientDir: bad })).rejects.toThrow(/identity file is invalid/);
   });
 
-  it('parses the demo client file, which names the five principals Compose and the configs use', async () => {
+  it('parses the demo client file, which names the four principals Compose and the configs use', async () => {
     const session = await identity.connect({
       env: {},
       log,
@@ -75,7 +75,6 @@ describe('@harness/identity-static', () => {
     expect((await session.list()).map((p) => `${p.id}:${p.level}`)).toEqual([
       'u-practice-manager:admin',
       'u-coordinator:lead',
-      'svc-hermes:service',
       'svc-host:service',
       'svc-local:service',
     ]);

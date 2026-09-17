@@ -6,8 +6,8 @@
 #   level  member < practitioner < lead < admin for a person; service for a scheduled job's
 #          or a process's own identity. A service is never "at least" a user level.
 #
-# The Slack member ids below are placeholders until Plan 8b's Slack inbound; replace them with
-# the two humans' real ids then.
+# Replace the two Slack member ids with the real ones before the first run; see the runbook's
+# onboarding section for how to read a member id.
 principals:
   - id: u-practice-manager
     kind: user
@@ -21,11 +21,6 @@ principals:
     displayName: Credentialing coordinator
     surfaces:
       slack: U0456EFGH
-  # The core-tools child the chat runtime launches (HARNESS_PRINCIPAL in hermes.config.yaml).
-  - id: svc-hermes
-    kind: service
-    level: service
-    displayName: Chat runtime
   # The host's own identity (HARNESS_HOST_PRINCIPAL): reconciliation, and playbooks from Plan 9.
   - id: svc-host
     kind: service

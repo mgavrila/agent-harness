@@ -2,11 +2,13 @@
 #
 # `postgres` and `litellm` have no profile, so they start with a bare
 # `docker compose up`: the database and the model gateway are what everything
-# else needs. `core-tools` is build-only (Hermes launches it over stdio, not as
-# a service). Every client path is derived from `HARNESS_CLIENT`; onboarding a
-# client is a folder and a `.env`, never an edit here. No service mounts the
-# Docker socket. The rest is in the `demo` profile (`files`, `hermes-init`,
-# `hermes`, `host`), and `pnpm demo:up` brings up the whole client instance.
+# else needs. `files` and `host` are the `demo` profile, and `pnpm demo:up`
+# brings up the whole client instance. `core-tools` is build-only: nothing
+# starts it as a service — it is hosted in-process inside `host`, and this
+# entry only proves the image still builds, for the MCP inspector and the eval
+# runner on an operator's machine. Every client path is derived from
+# `HARNESS_CLIENT`; onboarding a client is a folder and a `.env`, never an edit
+# here. No service mounts the Docker socket.
 #
 # Every variable below is interpolated from the repository-root `.env`, so run
 # these through the `pnpm` scripts, which pass `--env-file .env`. Compose's own
@@ -95,8 +97,9 @@ services:
       timeout: 5s
       retries: 6
 
-  # Built, not started: Hermes launches core-tools over stdio in Plan 3.
-  # `docker compose build core-tools` proves the image still builds.
+  # Built, not started: core-tools is hosted in-process inside `host` (see node.Dockerfile).
+  # `docker compose build core-tools` proves the image still builds, for the MCP inspector and
+  # the eval runner on an operator's machine.
   core-tools:
     build:
       context: ../..
@@ -117,150 +120,9 @@ services:
       litellm:
         condition: service_healthy
 
-  # Seeds the Hermes data volume from the client folder. SOUL.md and config.yaml
-  # are ours and are rewritten on every start; the cron directory is Hermes's
-  # own and is only ever added to, so its job records survive a redeploy.
-  hermes-init:
-    image: busybox:1.37
-    profiles: ['demo']
-    user: '0:0'
-    volumes:
-      - hermesdata:/data
-      # The shared file store, mounted here only to create and chown it.
-      # Docker creates a named volume root-owned and 0755, and neither image
-      # has content at this path to seed ownership from, so without this the
-      # first forms_fill fails with EACCES: the writer is the core-tools child
-      # inside the hermes container, which runs as HERMES_UID, not root.
-      - storage:/srv/harness-storage
-      # Long syntax: the short form's unexpanded ${HARNESS_CLIENT:?...} has a
-      # colon inside the default/error clause, and some Compose versions split
-      # a short-syntax bind on every colon when interpolation is disabled
-      # (as `docker compose config --no-interpolate` does), so it must never
-      # be written as a single `source:target:mode` string.
-      - type: bind
-        source: ../../clients/${HARNESS_CLIENT:?set HARNESS_CLIENT in .env}
-        target: /srv/client
-        read_only: true
-      - ../../.env:/srv/env/.env:ro
-    environment:
-      HERMES_UID: '${HERMES_UID:-1000}'
-      HERMES_GID: '${HERMES_GID:-1000}'
-    command:
-      - sh
-      - -c
-      - |
-        set -eu
-        mkdir -p /data/cron /data/scripts
-        cp /srv/client/SOUL.md /data/SOUL.md
-        cp /srv/client/hermes.config.yaml /data/config.yaml
-        cp /srv/client/cron/playbooks.sh /data/cron/playbooks.sh
-        cp /srv/client/scripts/*.sh /data/scripts/
-        chmod +x /data/cron/playbooks.sh /data/scripts/*.sh
-        # Hermes reads secrets from $$HERMES_HOME/.env; the process environment
-        # carries them too, and whichever it prefers, both agree. The
-        # approver's Slack app tokens are filtered out here for the same
-        # reason the hermes service blanks them: they belong to a different
-        # Slack app, and only the approvals container should hold them.
-        # sed, not `grep -v`: grep exits 1 when it prints nothing, which
-        # would abort this script under `set -e`.
-        sed '/^APPROVALS_SLACK_/d' /srv/env/.env > /data/.env
-        # Hermes interpolates the core-tools child's env block from this file,
-        # not from the process environment, so the three host-side addresses
-        # in the operator's .env must be rewritten to their compose-network
-        # forms here or the child cannot reach the database or the gateway.
-        sed -i \
-          -e 's#^DATABASE_URL=.*#DATABASE_URL=postgres://harness:harness@postgres:5432/harness#' \
-          -e 's#^HARNESS_GATEWAY_URL=.*#HARNESS_GATEWAY_URL=http://litellm:4000#' \
-          -e 's#^HARNESS_FILES_URL=.*#HARNESS_FILES_URL=http://files:8790#' \
-          /data/.env
-        # An operator's .env may lack a trailing newline; append on a fresh line.
-        [ -z "$$(tail -c1 /data/.env)" ] || echo >> /data/.env
-        grep -q '^HARNESS_GATEWAY_URL=' /data/.env || echo 'HARNESS_GATEWAY_URL=http://litellm:4000' >> /data/.env
-        grep -q '^HARNESS_FILES_URL=' /data/.env || echo 'HARNESS_FILES_URL=http://files:8790' >> /data/.env
-        chmod 600 /data/.env
-        # jobs.json is deliberately NOT seeded: its record shape is not
-        # documented, and Hermes creates it on the first `hermes cron create`.
-        # $$-escaped: these must reach the container's own shell unexpanded,
-        # not be interpolated by Compose itself when it parses this file (that
-        # would use the host/.env value instead of this service's own
-        # environment: block below, and blank out to "chown -R \":\"" when
-        # HERMES_UID/HERMES_GID are not set on the host).
-        chown -R "$${HERMES_UID}:$${HERMES_GID}" /data
-        # The shared store, same $$-escaping rule. `out/` is created here
-        # rather than left to the first forms_fill, because that mkdir runs as
-        # HERMES_UID inside the hermes container and the fresh volume root is
-        # owned by root. The approvals container reads this tree as its own
-        # uid-1000 `node` user, which matches the default HERMES_UID.
-        # `incoming/` is where Hermes drops files a human attaches in chat (see
-        # the hermes service's mount of the same subpath), so `documents_ingest`
-        # can read them as `incoming/<file name>` under the storage root.
-        mkdir -p /srv/harness-storage/out /srv/harness-storage/incoming
-        chown -R "$${HERMES_UID}:$${HERMES_GID}" /srv/harness-storage
-        echo "hermes-init: seeded SOUL.md, config.yaml, cron/playbooks.sh, scripts/ and the storage root"
-
-  hermes:
-    build:
-      context: ../..
-      dockerfile: harness/compose/hermes.Dockerfile
-    image: harness-hermes
-    profiles: ['demo']
-    restart: unless-stopped
-    networks:
-      - default
-      - files
-    depends_on:
-      postgres:
-        condition: service_healthy
-      litellm:
-        condition: service_healthy
-      hermes-init:
-        condition: service_completed_successfully
-      files:
-        condition: service_healthy
-    env_file:
-      - ../../.env
-    environment:
-      # Hermes has its own Slack app (SLACK_BOT_TOKEN / SLACK_APP_TOKEN). The
-      # approver's app is a different one and its tokens have no business
-      # here, so they are blanked out of what env_file brought in.
-      APPROVALS_SLACK_BOT_TOKEN: ''
-      APPROVALS_SLACK_APP_TOKEN: ''
-      # These override the .env values, which point at the host from a shell.
-      HERMES_UID: '${HERMES_UID:-1000}'
-      HERMES_GID: '${HERMES_GID:-1000}'
-      DATABASE_URL: 'postgres://harness:harness@postgres:5432/harness'
-      HARNESS_STORAGE_DIR: '/srv/harness-storage'
-      HARNESS_PACKS: '${HARNESS_PACKS:-@harness/pack-healthcare}'
-      HARNESS_POLICY_FILE: '/srv/agent-harness/clients/${HARNESS_CLIENT:?set HARNESS_CLIENT in .env}/policy.yaml'
-      # The core-tools child Hermes launches reaches the proxy on the compose
-      # network, not on the host loopback the .env value names. The master key
-      # comes from .env: it is the only credential this container needs for
-      # models, because the provider keys never leave the proxy.
-      HARNESS_GATEWAY_URL: 'http://litellm:4000'
-      # The core-tools child parses documents in the files worker, on the internal network.
-      HARNESS_FILES_URL: 'http://files:8790'
-      LITELLM_MASTER_KEY: '${LITELLM_MASTER_KEY:?set LITELLM_MASTER_KEY in .env}'
-    volumes:
-      - hermesdata:/opt/data
-      - storage:/srv/harness-storage
-      # Hermes saves chat attachments under $HERMES_HOME/cache/documents. Mount
-      # the store's `incoming/` there, so a file a human drops in Slack is
-      # already inside the storage root the core-tools child may read from,
-      # as `incoming/<file name>`; nothing outside that root is ever readable.
-      - type: volume
-        source: storage
-        target: /opt/data/cache/documents
-        volume:
-          subpath: incoming
-      # Content is editable without a rebuild; code is not.
-      - ../../packs:/srv/agent-harness/packs:ro
-      - ../../clients:/srv/agent-harness/clients:ro
-    command: ['gateway', 'run']
-
   # The one long-running harness process per client: the runtime, the surfaces and the identity
-  # plug-in it loads by name, the approvals loops, and core-tools hosted in-process. Hermes still
-  # serves Slack chat beside it until Plan 8b; the host serves approvals on Slack and chat on
-  # whatever other surface HARNESS_SURFACES names.
+  # plug-in it loads by name, the approvals loops, and core-tools hosted in-process. The one
+  # Slack app serves both chat and approvals.
   host:
     build:
       context: ../..
@@ -278,8 +140,8 @@ services:
         condition: service_healthy
       files:
         condition: service_healthy
-    # No env_file here, deliberately: an explicit allowlist interpolated from ../../.env, so
-    # Hermes's Slack tokens never enter this container. Anything main.ts reads is listed here.
+    # No env_file here, deliberately: an explicit allowlist interpolated from ../../.env.
+    # Anything main.ts reads is listed here.
     environment:
       DATABASE_URL: 'postgres://harness:harness@postgres:5432/harness'
       HARNESS_ENCRYPTION_KEY: '${HARNESS_ENCRYPTION_KEY:-}'
@@ -291,8 +153,8 @@ services:
       HARNESS_RUNTIME: '${HARNESS_RUNTIME:-@harness/runtime-deepagents}'
       HARNESS_HOST_PRINCIPAL: '${HARNESS_HOST_PRINCIPAL:-svc-host}'
       HARNESS_POLICY_FILE: '/srv/agent-harness/clients/${HARNESS_CLIENT:?set HARNESS_CLIENT in .env}/policy.yaml'
-      # This process refuses to start without a gateway key. Same proxy as Hermes, reached on
-      # the compose network rather than the host loopback the .env value names.
+      # This process refuses to start without a gateway key, reached on the compose network
+      # rather than the host loopback the .env value names.
       HARNESS_GATEWAY_URL: 'http://litellm:4000'
       # Same worker, same network: documents are parsed there, not in this process.
       HARNESS_FILES_URL: 'http://files:8790'
@@ -301,12 +163,9 @@ services:
       HARNESS_RUN_MAX_TOOL_CALLS: '${HARNESS_RUN_MAX_TOOL_CALLS:-60}'
       HARNESS_RUN_TIMEOUT_S: '${HARNESS_RUN_TIMEOUT_S:-600}'
       HARNESS_HISTORY_MAX_MESSAGES: '${HARNESS_HISTORY_MAX_MESSAGES:-40}'
-      # This host's own Slack app — a second app, not Hermes's. One app token cannot serve two
-      # Socket Mode connections: Slack delivers each event to exactly one of them, so the
-      # approval buttons would work about half the time on a shared token. Two apps stay
-      # required until Plan 8b makes this host the one Slack connection.
-      APPROVALS_SLACK_BOT_TOKEN: '${APPROVALS_SLACK_BOT_TOKEN:-}'
-      APPROVALS_SLACK_APP_TOKEN: '${APPROVALS_SLACK_APP_TOKEN:-}'
+      # The one Slack app: chat and approvals.
+      SLACK_BOT_TOKEN: '${SLACK_BOT_TOKEN:-}'
+      SLACK_APP_TOKEN: '${SLACK_APP_TOKEN:-}'
       SLACK_APPROVALS_CHANNEL: '${SLACK_APPROVALS_CHANNEL:-}'
       APPROVALS_POLL_SECONDS: '${APPROVALS_POLL_SECONDS:-5}'
       EFFECTS_DISPATCH_SECONDS: '${EFFECTS_DISPATCH_SECONDS:-5}'
@@ -329,5 +188,4 @@ networks:
 
 volumes:
   pgdata: {}
-  hermesdata: {}
   storage: {}
