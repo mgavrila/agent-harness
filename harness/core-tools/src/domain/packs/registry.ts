@@ -127,12 +127,10 @@ export function registryOf(all: Pack[]): PackRegistry {
         if (any) return resolve(pack, any);
       }
       // An unclassified document is not the same failure as an unclaimed kind. Nobody has said
-      // what this document is, so the answer is the deployment's own default: the first pack
-      // `HARNESS_PACKS` named, and its first target. That is the same "the first pack answers"
-      // convention `manifest()` and `formsDir()` already follow, and it is what every pack used
-      // to get for free from a `'*'` target before packs began claiming their kinds by name.
-      // A caller that means a different pack's document says so with `documents_classify`, or by
-      // declaring the kind at ingest.
+      // what this document is, so the answer is the primary pack's first target — the first entry
+      // of `HARNESS_PACKS`, the same pack `manifest()` and `formsDir()` answer for. That one rule
+      // is written out on `PackRegistry` in `./types.ts`, and it is what every pack used to get
+      // for free from a `'*'` target before packs began claiming their kinds by name.
       if (documentKind === undefined) return resolve(all[0], all[0].extraction.targets[0]);
       // A kind that was declared and claimed by nobody is a real error, named: the pack that
       // declares the kind and the pack that extracts it have come apart, and silently routing the
