@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { SurfaceAcceptedError, SurfaceError } from '@harness/shared';
-import type { ActionEvent, Card, Form, FormEvent } from '@harness/surface-api';
+import type { ActionEvent, Card, Form, FormEvent, MessageEvent } from '@harness/surface-api';
 import { fakeSlackSession } from './testing.js';
 
 const card: Card = {
@@ -261,5 +261,35 @@ describe('the Slack session', () => {
     await session.stop();
     expect(events.started).toBe(true);
     expect(events.stopped).toBe(true);
+  });
+});
+
+describe('inbound messages', () => {
+  it('delivers a mention as a MessageEvent that names the surface and the message', async () => {
+    const { session, events } = fakeSlackSession();
+    const seen: MessageEvent[] = [];
+    session.onMessage(async (e) => {
+      seen.push(e);
+    });
+    await events.emitMessage({
+      userId: 'U012',
+      channel: 'C0DEMO',
+      text: 'file these',
+      ts: '1789000000.000001',
+      threadTs: null,
+      mentioned: true,
+      files: [{ name: 'w9.pdf', path: '1789000000-000001-w9.pdf' }],
+    });
+    expect(seen).toEqual([
+      {
+        surface: 'slack',
+        userId: 'U012',
+        conversation: 'C0DEMO',
+        text: 'file these',
+        attachments: [{ name: 'w9.pdf', path: '1789000000-000001-w9.pdf' }],
+        message: { surface: 'slack', conversation: 'C0DEMO', id: '1789000000.000001' },
+        mentioned: true,
+      },
+    ]);
   });
 });

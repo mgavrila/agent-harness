@@ -79,7 +79,7 @@ export interface SlackView {
   state: Record<string, Record<string, { value?: string | null }>>;
 }
 
-/** One inbound message, narrowed off Bolt's payload in Plan 8b. Declared now so the session can register for it. */
+/** One inbound message, narrowed off Bolt's payload. `files` is already downloaded. */
 export interface SlackInbound {
   userId: string;
   channel: string;
@@ -88,7 +88,22 @@ export interface SlackInbound {
   threadTs: string | null;
   /** True for a direct message or a message that mentions the bot. */
   mentioned: boolean;
-  files: { name: string; url: string }[];
+  /** `path` is relative to `<storageDir>/incoming`. */
+  files: { name: string; path: string }[];
+}
+
+/** The fields of a Bolt `message` or `app_mention` payload the classifier reads. */
+export interface RawMessage {
+  type: 'message' | 'app_mention';
+  subtype?: string;
+  channel: string;
+  channel_type?: string;
+  user?: string;
+  bot_id?: string;
+  text?: string;
+  ts: string;
+  thread_ts?: string;
+  files?: { name?: string; url_private_download?: string }[];
 }
 
 /**

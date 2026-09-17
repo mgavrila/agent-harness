@@ -4,32 +4,51 @@ Slack as one messaging surface. Block Kit, Bolt in Socket Mode, and the slice of
 host needs, all behind `@harness/surface-api`.
 
 ```text
-src/config.ts            the four variables this adapter reads, from deps.env only
+src/config.ts            the three variables this adapter reads, from deps.env only
 src/session.ts           SurfaceSession over the transport: post, update, reply, upload, open a form
 src/render/blocks.ts     a Card as Block Kit. Byte-pinned against what the app produced before Plan 6
 src/render/modal.ts      a Form as a Slack modal view, and reading a submission back
-src/transport/           the SlackApi slice, the WebClient adapter, the Bolt listener, the fakes
+src/transport/           the SlackApi slice, the WebClient adapter, the Bolt listener, the file
+                         downloader, the fakes
 src/testing.ts           ./testing: FakeSlack, FakeSlackEvents, fakeSlackSession
 ```
 
-## Two Slack apps, not one
+## One Slack app
 
-This adapter needs `APPROVALS_SLACK_BOT_TOKEN` and `APPROVALS_SLACK_APP_TOKEN`, which are a
-_different_ Slack app from Hermes's. Slack routes each Socket Mode event to exactly one of an
-app's open connections, so one shared app loses about half of every button click. There is
-deliberately no fallback to `SLACK_BOT_TOKEN`. It also reads `SLACK_APPROVALS_CHANNEL` (where
-cards go). All three names are unchanged from before the surface contract existed.
-`SLACK_ALLOWED_USERS` is gone: who may decide is the identity plug-in's answer now — a principal
-of `kind: 'user'` at level `lead` or above, resolved from the Slack user id on this surface — not
-a variable this adapter reads.
+This adapter reads `SLACK_BOT_TOKEN` and `SLACK_APP_TOKEN` (Socket Mode) and
+`SLACK_APPROVALS_CHANNEL` (where approval cards and released files go). One app carries chat and
+approvals, because one process — the host — holds both connections; two apps were needed only
+while Hermes and the approvals process were separate, and that reasoning is gone with the second
+process. The app needs Interactivity on (for the approval buttons and the note modal) and is
+subscribed to `message.channels`, `message.groups`, `message.im`, `message.mpim` and
+`app_mention`; its bot scopes are `chat:write`, `app_mentions:read`, `channels:history`,
+`groups:history`, `im:history`, `im:read`, `im:write`, `mpim:history`, `users:read`,
+`files:read`, `files:write`. `SLACK_ALLOWED_USERS` is gone: who may decide is the identity
+plug-in's answer now — a principal of `kind: 'user'` at level `lead` or above, resolved from the
+Slack user id on this surface — not a variable this adapter reads.
 
-`Surface.secrets` names Hermes's `SLACK_BOT_TOKEN` and `SLACK_APP_TOKEN` as well as this
-adapter's own two, so an operator wiring a container that should not hold the approver's
-credentials knows to leave all four out of it.
+`Surface.secrets` names this app's two tokens, so an operator wiring a container that should
+never hold a Slack credential knows to leave both out of it.
+
+## Inbound: messages, mentions and attachments
+
+Bolt's `message` and `app_mention` listeners narrow every payload to a `SlackInbound` and hand it
+to the one handler `SurfaceSession.onMessage` registered. `mentioned` is true for a direct
+message and for a mention; a plain channel message is `mentioned: false` and the host still
+receives it but does not answer. A `message` that carries the mention token is dropped, because
+`app_mention` already delivered it — Slack sends both when the bot is a channel member. Messages
+with a `bot_id`, and any subtype but `file_share` (edits, deletions, joins), are dropped.
+
+A file attached to a message is downloaded by `transport/files.ts` with the bot token into
+`<storageDir>/incoming/<message ts, dot replaced by a dash>-<file name, sanitised to
+[A-Za-z0-9._-]>`, checked against the storage root before anything is written. A download that
+fails drops that one attachment (logged by name, never by its signed URL) and the message is
+still delivered. `MessageEvent.attachments[].path` is that name, relative to `incoming/`.
 
 ## Capabilities
 
 Forms (a modal), private replies (ephemeral messages) and editing a posted card: all three.
+Streaming is not yet: `capabilities.streaming` is false until Plan 8b's next task.
 
 ## What is pinned
 

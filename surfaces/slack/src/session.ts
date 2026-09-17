@@ -175,8 +175,8 @@ export function createSlackSession(transport: SlackTransport, config: SlackConfi
           userId: message.userId,
           conversation: message.channel,
           text: message.text,
-          // Downloaded into <storageDir>/incoming by Plan 8b's transport; until then, none.
-          attachments: message.files.map((f) => ({ name: f.name, path: f.name })),
+          // Already downloaded into <storageDir>/incoming by the transport.
+          attachments: message.files.map((f) => ({ name: f.name, path: f.path })),
           message: ref(message.channel, message.ts),
           mentioned: message.mentioned,
         });

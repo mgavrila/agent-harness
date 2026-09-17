@@ -258,9 +258,8 @@ export interface Surface {
   name: string;
   version: string;
   /**
-   * The environment variable names this adapter reads that are credentials. The host strips the
-   * union of every loaded surface's list from the environment of the core-tools child it
-   * spawns, so the allowlist there names no surface.
+   * The environment variable names this adapter reads that are credentials: the host must never
+   * forward one to a runtime and must never log one.
    */
   secrets: readonly string[];
   connect(deps: SurfaceDeps): Promise<SurfaceSession>;
