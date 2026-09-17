@@ -3,7 +3,7 @@ import * as z from 'zod/v4';
 import { eq } from 'drizzle-orm';
 import { modelCalls, runs } from '@harness/db';
 import { ModelOutputError, ToolError } from '@harness/shared';
-import { makeTestDeps, useTestDb, startFakeGateway, type FakeGateway } from '../../testing.js';
+import { makeTestDeps, useTestDb, startFakeGateway, type FakeGateway, type TestDepsOverrides } from '../../testing.js';
 import type { ToolDeps } from '../tooling/types.js';
 import { callModel, callModelJson, gatewayFromEnv } from './gateway.js';
 
@@ -17,7 +17,7 @@ afterAll(async () => {
   await gateway.close();
 });
 
-function deps(overrides: Partial<ToolDeps> = {}): ToolDeps {
+function deps(overrides: TestDepsOverrides = {}): ToolDeps {
   return makeTestDeps(db, {
     gateway: { baseUrl: gateway.url, apiKey: 'sk-test-key', timeoutMs: 5_000, maxCallsPerRun: 100 },
     ...overrides,
@@ -39,7 +39,10 @@ describe('callModel', () => {
   });
 
   it('records one model_calls row per call, with the run id from the session context', async () => {
-    const [run] = await db.insert(runs).values({ client: 'test', caller: 'test-caller' }).returning();
+    const [run] = await db
+      .insert(runs)
+      .values({ client: 'test', caller: 'test-caller', principalId: 'test-caller' })
+      .returning();
     const d = deps({ context: { runId: run.id } });
     gateway.setResponder(() => ({
       content: 'x',
@@ -111,7 +114,10 @@ describe('callModel', () => {
   });
 
   it('trips the per-run breaker once a run has made its limit of calls', async () => {
-    const [run] = await db.insert(runs).values({ client: 'test', caller: 'test-caller' }).returning();
+    const [run] = await db
+      .insert(runs)
+      .values({ client: 'test', caller: 'test-caller', principalId: 'test-caller' })
+      .returning();
     const d = deps({
       context: { runId: run.id },
       gateway: { baseUrl: gateway.url, apiKey: 'sk-test-key', timeoutMs: 5_000, maxCallsPerRun: 2 },
@@ -129,7 +135,10 @@ describe('callModel', () => {
     // Every query carries the client. Run ids are uuids so a collision is not
     // the worry; the rule is that no client's counter can be moved by another
     // client's rows, and this was the one new query that omitted the column.
-    const [run] = await db.insert(runs).values({ client: 'test', caller: 'test-caller' }).returning();
+    const [run] = await db
+      .insert(runs)
+      .values({ client: 'test', caller: 'test-caller', principalId: 'test-caller' })
+      .returning();
     gateway.setResponder(() => ({ content: 'x' }));
 
     const other = deps({

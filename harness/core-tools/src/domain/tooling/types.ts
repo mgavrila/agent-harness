@@ -10,15 +10,27 @@ import type { Policy } from './policy.js';
 import type { AuditEntry } from './audit.js';
 
 /**
- * What a session has told us about itself, stamped onto every audit row it produces. One
- * object per process, mutated in place by `harness_set_context` and rewound by
- * `preservingContext` when a transaction rolls back.
+ * What one run knows about itself, stamped onto every audit row, effect and model call it
+ * produces. Built once per run — by `openRun` for the stdio server and the eval pipeline, by the
+ * host per turn from Plan 8 — and never shared between runs: one `ToolDeps` per run, never a
+ * process-wide mutable object.
  */
-export interface SessionContext {
-  runId?: string;
+export interface RunContext {
+  /**
+   * The `runs` row this run's rows point at. Null only where no run was opened: the surface
+   * recorder, which has no database, and a unit test that opened none. Every shipping entry
+   * point opens one.
+   */
+  runId: string | null;
+  /** The conversation thread (a `threads` row from Plan 8). Null until a host opens threads. */
+  threadId: string | null;
+  /** The surface and conversation the run was started from. Null for the stdio server. */
+  surface: string | null;
+  conversation: string | null;
+  /** The skill the runtime activated, when it said so. Nothing in this plan sets them. */
   skill?: string;
   skillVersion?: string;
-  /** Name of the tool currently executing; set by the registry before calling a handler. */
+  /** The tool currently executing; set by `withCurrentTool`, read by `stageEffect`. */
   tool?: string;
 }
 
@@ -91,8 +103,8 @@ export interface ToolDeps {
   restrictedToModel: boolean;
   /** External-effect senders keyed by sink name (e.g. 'surface_message'). Empty in Plan 1.1; Plan 3 registers real ones. */
   sinks: SinkRegistry;
-  /** Per-process session context (run, skill, tool) stamped on audit rows; see `context.ts`. */
-  context: SessionContext;
+  /** This run's context, stamped on audit rows; see `context.ts`. One per run. */
+  context: RunContext;
   /** Every registered tool, keyed by name, so a parked action can be replayed by name. Filled by `registerTools`. */
   tools: Map<string, AnyToolDef>;
   /**

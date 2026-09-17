@@ -189,10 +189,22 @@ export const approvals = pgTable(
   ],
 );
 
+/**
+ * One run: a conversation turn, a scheduled job, or a stdio server's lifetime. Every audit row,
+ * effect and model call points at one, and `principal_id` is who it acted as.
+ */
 export const runs = pgTable('runs', {
   id: uuid('id').primaryKey().defaultRandom(),
   client: text('client').notNull(),
+  /** The principal id, again. Kept beside `principal_id` until nothing reads it; Plan 8 drops it. */
   caller: text('caller').notNull(),
+  /** Who this run acts as: a `Principal.id` from the client's identity plug-in. */
+  principalId: text('principal_id').notNull(),
+  /** The conversation thread this run belongs to. A `threads` row once Plan 8 adds the table; no foreign key until then. */
+  threadId: uuid('thread_id'),
+  /** The surface the run was started from and the conversation on it. Null for the stdio server. */
+  surface: text('surface'),
+  conversation: text('conversation'),
   channel: text('channel'),
   startedAt: timestamp('started_at', { withTimezone: true }).notNull().defaultNow(),
   endedAt: timestamp('ended_at', { withTimezone: true }),

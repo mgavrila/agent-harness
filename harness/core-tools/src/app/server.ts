@@ -1,14 +1,22 @@
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { createDb, loadKey } from '@harness/db';
 import type { Principal } from '@harness/identity-api';
-import { booleanFromEnv, envOrDefault, numberFromEnv, optionalEnv } from '@harness/shared';
+import { ConfigError, booleanFromEnv, createLogger, envOrDefault, numberFromEnv, optionalEnv } from '@harness/shared';
+import { loadIdentity } from '../domain/identity/registry.js';
+import { depsForRun, type KernelConfig } from '../domain/tooling/deps.js';
 import { loadPolicy } from '../domain/tooling/policy.js';
 import { DEFAULT_CONFIDENCE_THRESHOLD, type ToolDeps } from '../domain/tooling/types.js';
 import { gatewayFromEnv } from '../domain/models/gateway.js';
 import { storageRoot } from '../domain/storage/layout.js';
-import { PACK_KERNEL } from '../domain/packs/kernel.js';
 import { loadPacks } from '../domain/packs/registry.js';
 import type { PackRegistry } from '../domain/packs/types.js';
+import { openRun } from '../domain/session/repository.js';
+
+const log = createLogger('core-tools');
+
+// src/app -> src -> core-tools -> harness -> <repo>. The same resolution main.ts uses for .env.
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../..');
 
 /**
  * Where the form templates live.
@@ -37,47 +45,69 @@ function packNames(): string[] {
     .filter((name) => name !== '');
 }
 
-/**
- * The caller name wrapped in a service principal. Transitional: Task 4 of Plan 7 replaces this
- * with a principal resolved from `clients/<name>/identity.yaml` through `HARNESS_PRINCIPAL`.
- */
-function callerPrincipal(id: string): Principal {
-  return { id, kind: 'service', level: 'service', displayName: id, surfaces: {}, attributes: {} };
+/** `clients/<name>/` under the repository root: `/srv/agent-harness/clients/<name>` in a container. */
+export function clientDirFor(client: string, repoRoot: string = REPO_ROOT): string {
+  return path.join(repoRoot, 'clients', client);
 }
 
-export async function buildDepsFromEnv(): Promise<{ deps: ToolDeps; close: () => Promise<void> }> {
-  const { db, close } = createDb();
+/**
+ * Everything every run shares, read and loaded once per process. Nothing here is per run:
+ * the database handle, the principal and the run context arrive through `depsForRun`.
+ */
+export async function buildKernelConfig(): Promise<KernelConfig> {
   const packs = await loadPacks(packNames());
-  const deps: ToolDeps = {
-    db,
+  return {
     client: envOrDefault('HARNESS_CLIENT', 'default'),
-    principal: callerPrincipal(envOrDefault('CORE_TOOLS_CALLER', 'hermes')),
     policy: await loadPolicy(),
     encryptionKey: loadKey(),
     now: () => new Date(),
     approvalTtlHours: numberFromEnv('APPROVAL_TTL_HOURS', 24, { min: 1, max: 720 }),
     confidenceThreshold: numberFromEnv('CONFIDENCE_THRESHOLD', DEFAULT_CONFIDENCE_THRESHOLD, { min: 0, max: 1 }),
     gateway: gatewayFromEnv(),
-    // One root for the whole file store, required and with no default (see
-    // storageRoot). Ingested documents live under it as domain/storage lays
-    // them out; generated output goes under `<root>/out`.
+    // One root for the whole file store, required and with no default (see storageRoot).
     storageDir: storageRoot(),
     formsDir: formsDirFrom(packs),
     restrictedToModel: booleanFromEnv('HARNESS_RESTRICTED_TO_MODEL'),
-    sinks: {},
-    // One context object per process, shared by every connection this process
-    // serves. That is correct for the stdio deployment, where Hermes starts one
-    // process per session. A multi-session transport (HTTP) must not reuse this
-    // deps object: it has to build one `deps` per session, or one session's run
-    // id and skill would be stamped on another session's audit rows.
-    context: {},
-    tools: new Map(),
-    kernelTools: new Map(),
-    kernel: PACK_KERNEL,
     packs,
     // The deployment's own environment, and the only bag that hands one over. A pack reads its
     // variables from here; see `ToolDeps.env`.
     env: process.env,
   };
-  return { deps, close };
+}
+
+/**
+ * The principal this process acts as: `HARNESS_PRINCIPAL`, an id the identity plug-in
+ * `HARNESS_IDENTITY` names must declare. The plug-in is connected for this one lookup and
+ * stopped again — a stdio server is one principal for its whole life, so it keeps no session.
+ * An undeclared id is a startup failure: a server that started anyway would audit every call
+ * as somebody nobody vouched for.
+ */
+export async function resolvePrincipal(config: Pick<KernelConfig, 'client' | 'env'>): Promise<Principal> {
+  const specifier = envOrDefault('HARNESS_IDENTITY', '@harness/identity-static');
+  const session = await loadIdentity(specifier, { env: config.env, log, clientDir: clientDirFor(config.client) });
+  try {
+    const id = envOrDefault('HARNESS_PRINCIPAL', 'svc-local');
+    const principal = await session.get(id);
+    if (!principal) {
+      throw new ConfigError(
+        `HARNESS_PRINCIPAL names "${id}", which the identity plug-in "${session.name}" does not declare`,
+      );
+    }
+    return principal;
+  } finally {
+    await session.stop();
+  }
+}
+
+/**
+ * The stdio server's dependencies: the shared configuration, this process's principal, and one
+ * run for the process's lifetime. A multi-run host builds its own `KernelConfig` once and calls
+ * `openRun` and `depsForRun` per run instead.
+ */
+export async function buildDepsFromEnv(): Promise<{ deps: ToolDeps; close: () => Promise<void> }> {
+  const { db, close } = createDb();
+  const config = await buildKernelConfig();
+  const principal = await resolvePrincipal(config);
+  const context = await openRun(db, { client: config.client, principal });
+  return { deps: depsForRun(config, { db, principal, context }), close };
 }

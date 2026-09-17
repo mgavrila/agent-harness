@@ -98,7 +98,9 @@ const mutateContextThenThrow = defineTool({
     const runId = randomUUID();
     d.context.runId = runId;
     d.context.skill = 'ghost-skill';
-    await d.db.insert(runs).values({ id: runId, client: d.client, caller: d.principal.id });
+    await d.db
+      .insert(runs)
+      .values({ id: runId, client: d.client, caller: d.principal.id, principalId: d.principal.id });
     throw new ToolError('rolled back after mutating context');
   },
 });
@@ -317,7 +319,7 @@ describe('registerTools', () => {
 
     const res = await client.callTool({ name: 'mutate_context_then_throw', arguments: {} });
     expect(res.isError).toBe(true);
-    expect(deps.context.runId).toBeUndefined();
+    expect(deps.context.runId).toBeNull();
     expect(deps.context.skill).toBeUndefined();
     expect(await db.select().from(runs)).toHaveLength(0);
 

@@ -17,6 +17,11 @@ describe('core-tools MCP client', () => {
   it('executes an approved forms_release and stages the effect, audited', async () => {
     const key = randomBytes(32);
     const storageDir = await mkdtemp(path.join(tmpdir(), 'harness-exec-'));
+    const identityFile = path.join(storageDir, 'identity.yaml');
+    await writeFile(
+      identityFile,
+      'principals:\n  - id: svc-approvals\n    kind: service\n    level: service\n    displayName: Approvals host\n',
+    );
     const fileId = 'roster/aetna-abc123def456.csv';
     const outFile = path.join(storageDir, 'out', fileId);
     await mkdir(path.dirname(outFile), { recursive: true });
@@ -45,7 +50,8 @@ describe('core-tools MCP client', () => {
         DATABASE_URL: TEST_DATABASE_URL,
         HARNESS_ENCRYPTION_KEY: key.toString('base64'),
         HARNESS_CLIENT: 'exec-test',
-        CORE_TOOLS_CALLER: 'approvals-app',
+        HARNESS_PRINCIPAL: 'svc-approvals',
+        HARNESS_IDENTITY_FILE: identityFile,
         HARNESS_STORAGE_DIR: storageDir,
       },
     });

@@ -51,6 +51,13 @@ const MESSAGING_FORBIDDEN = /slack|bolt|block ?kit|thread_ts|\bblocks\b/i;
 const FRAMEWORK_FORBIDDEN = /deepagents|langchain|langgraph|\bentra\b|\bteams\b/i;
 
 /**
+ * A client's name and the agent runtime's name (spec decision 20). The kernel serves whichever
+ * client `HARNESS_CLIENT` names and whichever runtime launches it; a kernel that spells either
+ * is a kernel that will need a special case for the second one.
+ */
+const DEPLOYMENT_FORBIDDEN = /demo-practice|hermes/i;
+
+/**
  * What is scanned for what, and what is left out of each.
  *
  * `*.test.ts` is excluded everywhere because a test names what it tests: the healthcare suites in
@@ -127,6 +134,34 @@ const SCANNED = [
     what: 'framework and vendor vocabulary',
     root: 'identities/static/src',
     forbidden: FRAMEWORK_FORBIDDEN,
+    minFiles: 1,
+    skip: [/\.test\.ts$/],
+  },
+  {
+    what: 'deployment vocabulary',
+    root: 'harness/core-tools/src',
+    forbidden: DEPLOYMENT_FORBIDDEN,
+    minFiles: 10,
+    skip: [/\.test\.ts$/],
+  },
+  {
+    what: 'deployment vocabulary',
+    root: 'evals/src',
+    forbidden: DEPLOYMENT_FORBIDDEN,
+    minFiles: 10,
+    skip: [/\.test\.ts$/, /\.test-helpers\.ts$/],
+  },
+  {
+    what: 'deployment vocabulary',
+    root: 'harness/identity-api/src',
+    forbidden: DEPLOYMENT_FORBIDDEN,
+    minFiles: 5,
+    skip: [/\.test\.ts$/],
+  },
+  {
+    what: 'deployment vocabulary',
+    root: 'identities/static/src',
+    forbidden: DEPLOYMENT_FORBIDDEN,
     minFiles: 1,
     skip: [/\.test\.ts$/],
   },
@@ -225,6 +260,9 @@ describe('the kernel, the packs, the identity contract and the evals name no are
     // and the evals' `agreementRate`, which contains the letters of "entra".
     for (const line of ['const teamsize = 3;', 'agreementRate: number;']) {
       expect(FRAMEWORK_FORBIDDEN.test(line), line).toBe(false);
+    }
+    for (const line of ['HARNESS_CLIENT: demo-practice', '// Hermes starts one process per session']) {
+      expect(DEPLOYMENT_FORBIDDEN.test(line), line).toBe(true);
     }
   });
 });

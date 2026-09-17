@@ -59,7 +59,7 @@ export function openJudgeDeps(opts: { gatewayUrl: string; storageDir: string }):
       formsDir: packs.all[0].formsDir ?? opts.storageDir,
       restrictedToModel: false,
       sinks: {},
-      context: {},
+      context: { runId: null, threadId: null, surface: null, conversation: null },
       tools: new Map(),
       kernelTools: new Map(),
       kernel: PACK_KERNEL,

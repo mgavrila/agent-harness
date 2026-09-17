@@ -43,11 +43,13 @@ describe('session context and lineage', () => {
   it('refuses to adopt a run that belongs to another client and leaves the context untouched', async () => {
     const client = await connectServer();
     const runId = '22222222-2222-4222-8222-222222222222';
-    await db.insert(runs).values({ id: runId, client: 'other-clinic', caller: 'their-caller' });
+    await db
+      .insert(runs)
+      .values({ id: runId, client: 'other-clinic', caller: 'their-caller', principalId: 'their-caller' });
 
     const res = await client.callTool({ name: 'harness_set_context', arguments: { run_id: runId } });
     expect(res.isError).toBe(true);
-    expect(deps.context.runId).toBeUndefined();
+    expect(deps.context.runId).toBeNull();
 
     await client.callTool({ name: 'providers_search', arguments: { query: 'nobody' } });
     const search = (await db.select().from(auditLog)).find((r) => r.tool === 'providers_search')!;

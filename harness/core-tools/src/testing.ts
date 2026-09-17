@@ -11,7 +11,12 @@ import { pack as healthcarePack } from '@harness/pack-healthcare';
 import { connectInProcess } from './domain/tooling/in-process.js';
 import { registerTools } from './domain/tooling/registry.js';
 import { DEFAULT_POLICY, mergePolicy } from './domain/tooling/policy.js';
-import { DEFAULT_CONFIDENCE_THRESHOLD, type AnyToolDef, type ToolDeps } from './domain/tooling/types.js';
+import {
+  DEFAULT_CONFIDENCE_THRESHOLD,
+  type AnyToolDef,
+  type RunContext,
+  type ToolDeps,
+} from './domain/tooling/types.js';
 import { registryOf } from './domain/packs/registry.js';
 import type { PackRegistry } from './domain/packs/types.js';
 import { PACK_KERNEL } from './domain/packs/kernel.js';
@@ -57,7 +62,14 @@ export function testPackEnv(packs: PackRegistry): Readonly<Record<string, string
   return Object.assign({}, TEST_PACK_ENV, ...packs.all.map((p) => p.evals?.testEnv ?? {})) as Record<string, string>;
 }
 
-export function makeTestDeps(db: Db, overrides: Partial<ToolDeps> = {}): ToolDeps {
+/** No run opened. A test that asserts on `run_id` opens one with `openRun` and passes it as `context`. */
+export const TEST_CONTEXT: RunContext = { runId: null, threadId: null, surface: null, conversation: null };
+
+/** `Partial<ToolDeps>`, except that a partial context is merged over `TEST_CONTEXT` rather than replacing it. */
+export type TestDepsOverrides = Partial<Omit<ToolDeps, 'context'>> & { context?: Partial<RunContext> };
+
+export function makeTestDeps(db: Db, overrides: TestDepsOverrides = {}): ToolDeps {
+  const { context, ...rest } = overrides;
   const packs = overrides.packs ?? TEST_PACKS;
   const deps: ToolDeps = {
     db,
@@ -75,7 +87,7 @@ export function makeTestDeps(db: Db, overrides: Partial<ToolDeps> = {}): ToolDep
     formsDir: TEST_PACKS.formsDir(),
     restrictedToModel: false,
     sinks: {},
-    context: {},
+    context: { ...TEST_CONTEXT, ...context },
     tools: new Map(),
     kernelTools: new Map(),
     kernel: PACK_KERNEL,
@@ -83,7 +95,7 @@ export function makeTestDeps(db: Db, overrides: Partial<ToolDeps> = {}): ToolDep
     // Resolved from `packs` above, not from `TEST_PACKS`, so a test that loads a second pack
     // gets that pack's pins too rather than only the shipped one's.
     env: testPackEnv(packs),
-    ...overrides,
+    ...rest,
   };
   // After the spread: a test that passes its own `packs` gets that registry's kernel tools, and
   // one that passes its own `kernelTools` keeps them. `createCoreToolsServer` fills the same map

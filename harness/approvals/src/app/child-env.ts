@@ -39,13 +39,17 @@ export function coreToolsChildEnv({ env, client, storageRoot, surfaceSecrets }: 
     DATABASE_URL: requiredEnv('DATABASE_URL', '', env),
     HARNESS_ENCRYPTION_KEY: requiredEnv('HARNESS_ENCRYPTION_KEY', '', env),
     HARNESS_CLIENT: client,
-    CORE_TOOLS_CALLER: 'approvals-app',
+    // The principal every approved action is executed and audited as. Declared in the client's
+    // identity.yaml; the child refuses to start if it is not.
+    HARNESS_PRINCIPAL: 'svc-approvals',
     HARNESS_STORAGE_DIR: storageRoot,
     // core-tools refuses to start without a gateway key: every model call goes through the
     // proxy, and an approved documents_extract replay makes one. The provider keys stay in the
     // proxy, so this is the only model credential the child ever holds.
     LITELLM_MASTER_KEY: requiredEnv('LITELLM_MASTER_KEY', '', env),
     ...(env.HARNESS_POLICY_FILE ? { HARNESS_POLICY_FILE: env.HARNESS_POLICY_FILE } : {}),
+    ...(env.HARNESS_IDENTITY ? { HARNESS_IDENTITY: env.HARNESS_IDENTITY } : {}),
+    ...(env.HARNESS_IDENTITY_FILE ? { HARNESS_IDENTITY_FILE: env.HARNESS_IDENTITY_FILE } : {}),
     ...(env.HARNESS_FORMS_DIR ? { HARNESS_FORMS_DIR: env.HARNESS_FORMS_DIR } : {}),
     ...(env.HARNESS_GATEWAY_URL ? { HARNESS_GATEWAY_URL: env.HARNESS_GATEWAY_URL } : {}),
     ...(env.HARNESS_PACKS ? { HARNESS_PACKS: env.HARNESS_PACKS } : {}),

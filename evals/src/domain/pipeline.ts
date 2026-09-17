@@ -6,6 +6,7 @@ import {
   PACK_KERNEL,
   createCoreToolsServer,
   loadPacks,
+  openRun,
   type GatewayConfig,
   type PackRegistry,
   type Policy,
@@ -186,6 +187,8 @@ export function extractIdKeyFor(packs: PackRegistry, extractTool: string, docume
 export async function openPipeline(opts: OpenPipelineOptions): Promise<PipelineHandle> {
   await runMigrations(opts.databaseUrl);
   const { db, close: closeDb } = createDb(opts.databaseUrl);
+  const client = opts.client ?? 'evals';
+  const context = await openRun(db, { client, principal: EVAL_PRINCIPAL });
   const policy: Policy = { ...DEFAULT_POLICY };
   const confidenceThreshold = opts.confidenceThreshold ?? DEFAULT_CONFIDENCE_THRESHOLD;
   const toolsCalled: string[] = [];
@@ -200,7 +203,7 @@ export async function openPipeline(opts: OpenPipelineOptions): Promise<PipelineH
 
   const deps: ToolDeps = {
     db,
-    client: opts.client ?? 'evals',
+    client,
     principal: EVAL_PRINCIPAL,
     policy,
     // Ephemeral: the eval database is truncated between cases and dropped
@@ -219,7 +222,7 @@ export async function openPipeline(opts: OpenPipelineOptions): Promise<PipelineH
     formsDir: measuredPack.formsDir ?? opts.storageDir,
     restrictedToModel: false,
     sinks: {},
-    context: {},
+    context,
     tools: new Map(),
     kernelTools: new Map(),
     kernel: PACK_KERNEL,
@@ -231,7 +234,7 @@ export async function openPipeline(opts: OpenPipelineOptions): Promise<PipelineH
     env: evalPackEnv(packs),
   };
 
-  const { client, close } = await connectInProcess(() => createCoreToolsServer(deps));
+  const { client: mcpClient, close } = await connectInProcess(() => createCoreToolsServer(deps));
 
   return {
     toolsCalled,
@@ -243,7 +246,7 @@ export async function openPipeline(opts: OpenPipelineOptions): Promise<PipelineH
     db,
     async callTool(name, args) {
       toolsCalled.push(name);
-      const res = await client.callTool({ name, arguments: args });
+      const res = await mcpClient.callTool({ name, arguments: args });
       if (res.isError) {
         const text = Array.isArray(res.content) ? JSON.stringify(res.content) : String(res.content);
         throw new Error(`${name} failed: ${text}`);
@@ -254,6 +257,7 @@ export async function openPipeline(opts: OpenPipelineOptions): Promise<PipelineH
     async reset() {
       toolsCalled.length = 0;
       await resetDatabase(db);
+      await openRun(db, { client, principal: EVAL_PRINCIPAL, id: context.runId });
     },
     async close() {
       await close();

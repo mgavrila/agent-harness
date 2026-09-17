@@ -104,7 +104,9 @@ mcp_servers:
       # would serve a different pack set from the one the approvals app's
       # core-tools child serves.
       HARNESS_PACKS: '${HARNESS_PACKS}'
-      CORE_TOOLS_CALLER: 'hermes'
+      # The principal this child acts as, declared in identity.yaml beside this file. Every
+      # audit row and every approval it parks carries this id; the runtime cannot change it.
+      HARNESS_PRINCIPAL: 'svc-hermes'
       APPROVAL_TTL_HOURS: '24'
       # CONFIDENCE_THRESHOLD is left unset: core-tools applies DEFAULT_CONFIDENCE_THRESHOLD (0.85).
       # Every model call goes through the proxy, and core-tools refuses to

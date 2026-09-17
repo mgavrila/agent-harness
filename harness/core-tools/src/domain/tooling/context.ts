@@ -1,4 +1,4 @@
-import type { AnyToolDef, AuditBase, SessionContext, ToolDeps } from './types.js';
+import type { AnyToolDef, AuditBase, RunContext, ToolDeps } from './types.js';
 
 /**
  * The identity every audit row carries: who called, which tool, under what
@@ -34,21 +34,28 @@ export function auditBaseFor(
  * row that was never persisted, or every later audit write would fail the
  * `audit_log.run_id` foreign key.
  */
-function restoreContext(target: SessionContext, snapshot: SessionContext): void {
-  for (const key of Object.keys(target) as (keyof SessionContext)[]) delete target[key];
+function restoreContext(target: RunContext, snapshot: RunContext): void {
+  // Cast to a plain index signature rather than `RunContext` itself: `RunContext` mixes
+  // required (`string | null`) and optional (`string | undefined`) members, and TypeScript
+  // cannot verify a computed `target[key] = value` copy across that mix key by key. The
+  // runtime behaviour — clear every key, then put back only the ones that held a value — is
+  // unchanged; only the type used to express the loop is looser.
+  const t = target as unknown as Record<string, unknown>;
+  const s = snapshot as unknown as Record<string, unknown>;
+  for (const key of Object.keys(target)) delete t[key];
   // Only the keys that actually held a value are put back. A snapshot taken
   // while a key held `undefined` must not reinstate it as an own property, or
   // `'tool' in context` would stay true for a tool that is no longer running:
   // absent and explicitly-undefined have to look the same.
-  for (const key of Object.keys(snapshot) as (keyof SessionContext)[]) {
-    const value = snapshot[key];
-    if (value !== undefined) target[key] = value;
+  for (const key of Object.keys(snapshot)) {
+    const value = s[key];
+    if (value !== undefined) t[key] = value;
   }
 }
 
 /** Run `fn`, rewinding the shared session context to its prior state if `fn` throws. */
-export async function preservingContext<T>(context: SessionContext, fn: () => Promise<T>): Promise<T> {
-  const snapshot: SessionContext = { ...context };
+export async function preservingContext<T>(context: RunContext, fn: () => Promise<T>): Promise<T> {
+  const snapshot: RunContext = { ...context };
   try {
     return await fn();
   } catch (err) {
@@ -63,7 +70,7 @@ export async function preservingContext<T>(context: SessionContext, fn: () => Pr
  * previous name afterwards. Nesting is why the old value is put back rather
  * than cleared: `approvals_execute` replays another tool inside its own call.
  */
-export async function withCurrentTool<T>(context: SessionContext, tool: string, fn: () => Promise<T>): Promise<T> {
+export async function withCurrentTool<T>(context: RunContext, tool: string, fn: () => Promise<T>): Promise<T> {
   const previous = context.tool;
   context.tool = tool;
   try {

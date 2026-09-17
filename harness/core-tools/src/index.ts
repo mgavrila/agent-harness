@@ -31,11 +31,12 @@ export {
 } from './domain/tooling/policy.js';
 export { expireApprovals, parkStuckDispatches, reconcile, type ReconcileResult } from './domain/tooling/reconcile.js';
 export { connectInProcess } from './domain/tooling/in-process.js';
+export { depsForRun, type KernelConfig, type RunDeps } from './domain/tooling/deps.js';
 export {
   DEFAULT_CONFIDENCE_THRESHOLD,
   type AnyToolDef,
   type AuditBase,
-  type SessionContext,
+  type RunContext,
   type ToolDef,
   type ToolDeps,
 } from './domain/tooling/types.js';
@@ -44,6 +45,7 @@ export {
 export { allTools, createCoreToolsServer, kernelTools, publishedTools } from './tools/catalog.js';
 
 // --- Domains ------------------------------------------------------------------------------
+export { openRun, type OpenRunInput } from './domain/session/repository.js';
 export { createOrReuseApproval } from './domain/approvals/repository.js';
 export { executeApproval, type ExecutedApproval } from './domain/approvals/execute.js';
 export {

@@ -31,7 +31,16 @@ describe('coreToolsChildEnv', () => {
     expect(env.DATABASE_URL).toBe(base.DATABASE_URL);
     expect(env.HARNESS_CLIENT).toBe('demo-practice');
     expect(env.HARNESS_STORAGE_DIR).toBe('/srv/harness-storage');
-    expect(env.CORE_TOOLS_CALLER).toBe('approvals-app');
+    expect(env.HARNESS_PRINCIPAL).toBe('svc-approvals');
+  });
+
+  it('forwards the identity plug-in and file only when the deployment sets them', () => {
+    expect(coreToolsChildEnv(input())).not.toHaveProperty('HARNESS_IDENTITY_FILE');
+    const env = coreToolsChildEnv(
+      input({ HARNESS_IDENTITY: '@harness/identity-static', HARNESS_IDENTITY_FILE: '/srv/x/identity.yaml' }),
+    );
+    expect(env.HARNESS_IDENTITY).toBe('@harness/identity-static');
+    expect(env.HARNESS_IDENTITY_FILE).toBe('/srv/x/identity.yaml');
   });
 
   it('carries the gateway key, without which the child refuses to start', () => {
