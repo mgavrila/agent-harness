@@ -22,8 +22,6 @@ export interface LoadedSurfaces {
   readonly secrets: readonly string[];
   /** `undefined` when no loaded surface has that name; the caller decides whether that is an error. */
   find(name: string): SurfaceSession | undefined;
-  /** Throws `ConfigError` when no loaded surface has that name. */
-  byName(name: string): SurfaceSession;
 }
 
 /** A set over sessions that are already in hand. Every test uses it; `loadSurfaces` builds one. */
@@ -34,11 +32,6 @@ export function surfacesOf(sessions: SurfaceSession[], secrets: readonly string[
     primary: sessions[0],
     secrets,
     find: (name) => sessions.find((s) => s.name === name),
-    byName(name) {
-      const found = sessions.find((s) => s.name === name);
-      if (!found) throw new ConfigError(`no surface named "${name}" is loaded`);
-      return found;
-    },
   };
 }
 

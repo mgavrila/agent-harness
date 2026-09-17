@@ -14,7 +14,7 @@ describe('loadSurfaces', () => {
     const surfaces = await loadSurfaces(['@harness/surface-memory'], deps);
     expect(surfaces.all).toHaveLength(1);
     expect(surfaces.primary.name).toBe('memory');
-    expect(surfaces.byName('memory')).toBe(surfaces.primary);
+    expect(surfaces.find('memory')).toBe(surfaces.primary);
     expect(surfaces.secrets).toEqual([]);
   });
 
@@ -40,14 +40,13 @@ describe('loadSurfaces', () => {
 });
 
 describe('surfacesOf', () => {
-  it('answers by name and reports an unknown one as undefined, or throws when asked to insist', () => {
+  it('answers by name and reports an unknown one as undefined', () => {
     const memory = new MemorySurface();
     const other = new MemorySurface({ name: 'other', conversation: 'other' });
     const surfaces = surfacesOf([memory, other], ['A_TOKEN']);
     expect(surfaces.primary).toBe(memory);
     expect(surfaces.find('other')).toBe(other);
     expect(surfaces.find('teams')).toBeUndefined();
-    expect(() => surfaces.byName('teams')).toThrow(/no surface named "teams" is loaded/);
     expect(surfaces.secrets).toEqual(['A_TOKEN']);
   });
 
