@@ -42,6 +42,16 @@ synthetic/cli.ts          the `pnpm synth:stories` entrypoint
   `records_get`, `records_list_pending` and `records_confirm_field` are published only because the
   healthcare pack replaces the seven same-named tools and not the twelve.
 
+## The suite that proves it
+
+`harness/core-tools/src/app/dual-pack.test.ts` loads this pack beside `@harness/pack-healthcare`
+and asserts that the union catalogue publishes twenty-eight names with no collision, that the
+five `records_*` tools survive and reach both kinds, that a meeting note routes to the epic
+target while a state licence routes to the provider target, that healthcare's read refuses an
+epic id rather than returning it through the provider schema, and that the stories intake
+produces an epic end to end against the fake gateway. A kernel that still assumes credentialing
+passes every other suite in the tree and fails that one.
+
 ## Public API
 
 `@harness/pack-stories` is `src/index.ts`, which exports `pack`. Two subpaths reach past it:
@@ -63,12 +73,29 @@ what `evals/injection.jsonl` scores against.
 ## Loading it
 
 It is a devDependency of `@harness/core-tools`, because it is a test fixture rather than something
-a deployment serves. A deployment that wants it names it in `HARNESS_PACKS` and adds it to the
-workspace root's dependencies.
+a deployment serves. A deployment that wants it moves it into that package's `dependencies`, so
+pnpm can resolve the dynamic import, and names it in `HARNESS_PACKS`.
+
+Order matters in one way only: the first entry is the deployment's primary pack, which answers
+`manifest()`, `formsDir()` and the target for a document nobody classified. This pack ships no
+forms, so it goes second.
 
 ```bash
 HARNESS_PACKS=@harness/pack-healthcare,@harness/pack-stories
 ```
+
+## Evaluating it
+
+```bash
+pnpm synth:stories                                                            # write the three PDFs
+HARNESS_PACKS=@harness/pack-healthcare,@harness/pack-stories \
+  pnpm evals -- --pack stories
+```
+
+`--pack` picks which loaded pack is measured, and everything follows it: this pack's three
+extraction cases, its one injection case, its corpus, its intake skill and the one judged field,
+`summary`. Loading healthcare beside it is the interesting run, because healthcare's
+`documents_*` replacements are then the tools the pipeline drives.
 
 **Everything here is fabricated.** The people, the trackers and the roadmap are invented, and the
 address the injected instruction names is under `.invalid`, which resolves nowhere.
