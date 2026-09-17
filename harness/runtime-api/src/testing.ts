@@ -1,4 +1,4 @@
-/** What a test of a runtime, or of the host, reaches for. `ScriptedRuntime` and the kit arrive in Task 2. */
+/** What a test of a runtime, or of the host, reaches for. */
 export {
   startFakeGateway,
   type FakeGateway,
@@ -8,3 +8,14 @@ export {
   type FakeToolCall,
   type Responder,
 } from './gateway.js';
+export {
+  ScriptedRuntime,
+  TrajectoryShape,
+  parseTrajectory,
+  readTrajectory,
+  scriptedRuntime,
+  type Trajectory,
+  type TrajectoryStep,
+} from './scripted.js';
+export { fixtureRequest, toolServerFixture, type FixtureTool, type ToolServerFixture } from './tool-server.js';
+export { runtimeConformance, type ConformanceHarness, type ConformanceScript } from './conformance.js';
