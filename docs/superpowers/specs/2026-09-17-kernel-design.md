@@ -308,9 +308,11 @@ export interface Policy {
 | destructive    | blocked  | approval     | approval | approval | blocked  |
 | admin          | blocked  | blocked      | blocked  | auto     | blocked  |
 
-A client's `policy.yaml` keeps its `classes:` block (applies to every level) and may add
-`levels:`. The demo's file is unchanged and keeps meaning what it meant, because its two
-coordinators are `lead` and above.
+`decide(actionClass, level, policy)` reads the level's cell first: a `classes:` entry in a
+client's `policy.yaml` replaces the kernel's `classes` default for that class, but a kernel or
+client `levels` cell always wins over `classes` for that level, so loosening or tightening one
+level's answer takes a `levels:` block of the client's own. The demo's file is unchanged and
+keeps meaning what it meant, because its two coordinators are `lead` and above.
 
 ## 5. Kernel modules
 

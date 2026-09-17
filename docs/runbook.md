@@ -91,6 +91,9 @@ order by created_at desc;
 logical call has the same hash across retries. Use it to group repeated
 failures. The raw arguments are not stored in the audit log.
 
+`caller` is the principal id since Plan 7 — `u-…` for a person, `svc-…` for a service — so a
+row's `caller` and its run's `principal_id` always agree.
+
 ## What is not audited
 
 The audit log covers calls that reach the policy wrapper. A call whose arguments
@@ -190,15 +193,32 @@ one practice can never retire another practice's approvals. The startup pass in
 it actually repairs something it writes one `audit_log` row with
 `caller = 'startup'` and `tool = 'harness_reconcile'`.
 
-## Session context
+## Runs and principals
 
-The MCP server keeps one session context (run id, skill, skill version) per
-**process**, shared by every connection that process serves. That is correct for
-the stdio deployment, where Hermes launches one `core-tools` process per session.
+Every core-tools process acts as exactly one principal — `HARNESS_PRINCIPAL`, an id declared in
+`clients/<name>/identity.yaml` — and opens exactly one `runs` row at startup. The row carries
+`principal_id`, and every `audit_log`, `tool_effects` and `model_calls` row the process writes
+points at it. A process whose principal the identity file does not declare does not start.
 
-Anyone moving the server to a multi-session transport (HTTP) must build one
-`deps` object per session. Reusing a single one would stamp one session's run id
-and skill onto another session's audit rows.
+Who is who in the demo: `svc-hermes` is the child the chat runtime launches (set in
+`hermes.config.yaml`), `svc-approvals` the child the approvals host launches (set in its
+`child-env.ts`), `svc-local` the stdio server on an operator's machine (the default), and the
+two humans are `u-practice-manager` (`admin`) and `u-coordinator` (`lead`). Nothing resolves a
+Slack user to one of the humans until Plan 8's host does; until then every call from chat is
+the runtime's service principal, at level `service`.
+
+A multi-run host builds one `KernelConfig` and calls `openRun` and `depsForRun` per run; it
+must never reuse one `ToolDeps` across runs, or one run's id would be stamped on another's rows.
+
+To see what a run did:
+
+```sql
+select r.id, r.principal_id, r.surface, r.conversation, r.started_at,
+       count(a.id) as calls, count(a.id) filter (where a.decision = 'blocked') as blocked
+from runs r left join audit_log a on a.run_id = r.id
+where r.started_at > now() - interval '1 day'
+group by r.id order by r.started_at desc;
+```
 
 ## Writing migrations
 
@@ -310,14 +330,25 @@ says. That flag governs the prompt, not the file.
 through `pdftoppm` and `tesseract`. Expect lower field accuracy; the eval suite
 scores that split separately for exactly this reason.
 
-A document that fails with `unsupported document type` is neither a PDF nor a
-recognised image. A document that fails with `tesseract is not installed` means
-the host is missing the OCR binaries:
+**Where the parsing happens.** Under Compose, in the `files` service: core-tools sends the
+document's path (relative to the storage root, checked against it on both sides) to
+`HARNESS_FILES_URL` and gets pages back; the worker holds no key, no database URL and no
+provider credential, and its network is `internal: true`, so it reaches nothing. Redaction
+runs in core-tools on what comes back. `docker compose --env-file .env -f
+harness/compose/docker-compose.yml --profile demo logs files` is where a parse failure is
+explained in full; the message core-tools puts in `audit_log.error` names a basename at most.
+A document reporting more than `MAX_PAGES` (500) pages is refused with `422` before `pdftotext`
+or `pdftoppm` ever runs on it, so one upload cannot buy an unbounded render-and-OCR run. On bare
+metal, with `HARNESS_FILES_URL` unset, core-tools runs the same binaries itself:
 
 ```bash
 brew install tesseract poppler                      # macOS
 apt-get install -y tesseract-ocr poppler-utils      # Debian
 ```
+
+A document that fails with `unsupported document type` is neither a PDF nor a recognised
+image, whichever side parsed it. `document parser is unreachable` means the `files` service is
+down or the calling container is not on the `files` network.
 
 ## Evals
 
@@ -513,29 +544,36 @@ wrote a restricted-looking value where it should not be; read the audit row.
 
 ## Onboarding a client
 
-`pnpm new-client --pack <pack> --name <slug>` scaffolds `clients/<slug>/`. It
-does not make that client runnable on its own — the Compose file still names
-`demo-practice` — so finish by hand:
+`pnpm new-client --pack <pack> --name <slug>` scaffolds `clients/<slug>/` — `SOUL.md`,
+`identity.yaml`, `policy.yaml`, `routing.yaml`, the runtime config, the cron and watchdog
+scripts and an `.env.example`. Compose derives every client path from `HARNESS_CLIENT`, so
+there is nothing to edit under `harness/compose/`:
 
-1. `cp clients/<slug>/.env.example .env` and fill it in, with
-   `HARNESS_CLIENT=<slug>` and a storage directory this client does not share.
-2. Create the two Slack apps described under **Slack credentials** above and
-   paste both pairs of tokens.
-3. Review `clients/<slug>/SOUL.md` and `policy.yaml` before the first run.
-4. Point Compose at the client: in `harness/compose/docker-compose.yml`, the
-   `hermes-init` bind mount `../../clients/demo-practice:/srv/client:ro`, and
-   the `HARNESS_POLICY_FILE` value on both the `hermes` and the `approvals`
-   service. Three occurrences of `demo-practice` in total.
-5. Start it under its own Compose project so it does not collide with another
-   client's containers and volumes:
+1. `cp clients/<slug>/.env.example .env` and fill it in, with `HARNESS_CLIENT=<slug>` and a
+   storage directory this client does not share.
+2. Declare the people and services in `clients/<slug>/identity.yaml`: the two service ids the
+   containers use (`svc-hermes`, `svc-approvals`), `svc-local` for the operator, and one
+   `u-…` principal per human with their level. A container whose principal is missing from the
+   file refuses to start.
+3. Create the two Slack apps described under **Slack credentials** above and paste both pairs
+   of tokens.
+4. Review `clients/<slug>/SOUL.md` and `policy.yaml` before the first run.
+5. Start it under its own Compose project so it does not collide with another client's
+   containers and volumes:
    `COMPOSE_PROJECT_NAME=<slug> docker compose --env-file .env -f harness/compose/docker-compose.yml --profile demo up -d --build`.
-   The compose file fixes the default project name to `agent-harness`; the
-   environment variable overrides it, so each client instance gets its own
-   containers, network and volumes.
 
-Do **not** use `pnpm demo:up` for a new client. It runs the default Compose
-project with the `demo-practice` paths above, so it starts demo-practice
-whatever `HARNESS_CLIENT` says.
+`pnpm demo:up` is the same command under the default project name; with `HARNESS_CLIENT` set
+in `.env` it starts that client.
+
+`policy.yaml`'s `classes:` block sets the default for every level, but a level cell — the
+kernel's own `DEFAULT_POLICY` or a `levels:` block in the client's file — always wins over
+`classes` for that level, so `classes:` alone cannot loosen or tighten a level the kernel
+already gives its own cell:
+
+```yaml
+levels:
+  member: { destructive: approval }
+```
 
 ## Playbooks
 

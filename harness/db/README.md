@@ -18,15 +18,15 @@ src/testing.ts          ./testing: TEST_DATABASE_URL, resetDatabase, useTestDb
 
 The tables `schema.ts` declares, in the order it declares them:
 
-| Table                               | What it holds                                                                        |
-| ----------------------------------- | ------------------------------------------------------------------------------------ |
-| `records`                           | one row per thing a pack stores, keyed by `pack` and `kind`. Client-scoped.          |
-| `documents`                         | an ingested file, its hash, its page count, and the record it belongs to             |
-| `attachments`                       | what hangs off a record: a kind, an issuer, dates, an encrypted number, `properties` |
-| `fields`                            | one name/value per record, plaintext or encrypted, with a confidence and a status    |
-| `deadlines`                         | one row per attachment and deadline kind, with its due date                          |
-| `approvals`, `runs`, `tool_effects` | the parked actions, the runs that produced them, and the outbox                      |
-| `model_calls`, `audit_log`          | what was asked of a model, and what every tool call did. `audit_log` is append-only. |
+| Table                               | What it holds                                                                                                                        |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `records`                           | one row per thing a pack stores, keyed by `pack` and `kind`. Client-scoped.                                                          |
+| `documents`                         | an ingested file, its hash, its page count, and the record it belongs to                                                             |
+| `attachments`                       | what hangs off a record: a kind, an issuer, dates, an encrypted number, `properties`                                                 |
+| `fields`                            | one name/value per record, plaintext or encrypted, with a confidence and a status                                                    |
+| `deadlines`                         | one row per attachment and deadline kind, with its due date                                                                          |
+| `approvals`, `runs`, `tool_effects` | the parked actions, the runs that produced them (each with the principal it acted as, and where it was started from), and the outbox |
+| `model_calls`, `audit_log`          | what was asked of a model, and what every tool call did. `audit_log` is append-only.                                                 |
 
 There is no `providers` table and no `credentials` table: migration `0008` replaced them with
 `records` and `attachments`, so one pair of tables serves every loaded pack and a pack ships no
@@ -65,3 +65,7 @@ absent from the snapshot and the next generate re-emits the same change forever.
 no down migration. `docs/runbook.md`, "Migration 0008 and the record model", says why and what
 to do if it has to be undone; `src/domain/migration-0008.test.ts` replays the shipped file over
 a fixture of the pre-0008 schema on every run.
+
+`0010_run_principal` adds `runs.principal_id` and backfills it from `caller` in a hand-written
+data section before setting it `NOT NULL`; `src/domain/migration-0010.test.ts` replays it over a
+fixture of the pre-0010 `runs` table.
