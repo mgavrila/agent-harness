@@ -10,8 +10,8 @@ has no default in this package — the demo's Compose service sets `@harness/sur
 the host says is a neutral `Card`, `Form` or line of text from `@harness/surface-api`.
 
 This package no longer hosts its own process. `src/app/main.ts` and `src/app/child-env.ts` are
-gone — Plan 8's host (a later task) is what opens a run and drives this domain, in the same
-process as the kernel rather than as a stdio child of it.
+gone — `@harness/host` is what opens a run and drives this domain, in the same process as the
+kernel rather than as a stdio child of it.
 
 ## Layout
 
@@ -42,6 +42,13 @@ a fresh `runs` row for the call, builds one `ToolDeps` for it with `depsForRun`,
 in-process MCP client to a server on that bag, calls `approvals_execute`, and closes the run — so
 the execution audits under the approver's own principal id, not a service account's. Housekeeping
 (`reconcile`) runs the same way but as the host's own service principal.
+
+`mayAct` (`src/domain/handlers.ts`) is what reads the identity plug-in: `DecisionDeps.identity`
+is the `IdentitySession` the host connected, and `mayAct` calls `identity.resolve({ surface,
+userId })` before anything else runs. `DecisionDeps.onDecided`, when the caller sets it, is
+called after a decision is recorded, executed and shown; `@harness/host`'s `resumeOnDecision` is
+the one implementation today — it looks the approval's `thread_id` up and runs one more turn on
+that thread, as the thread's own principal, reporting what already happened.
 
 ## Slack
 

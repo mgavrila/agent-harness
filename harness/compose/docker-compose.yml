@@ -291,14 +291,20 @@ services:
       HARNESS_RUNTIME: '${HARNESS_RUNTIME:-@harness/runtime-deepagents}'
       HARNESS_HOST_PRINCIPAL: '${HARNESS_HOST_PRINCIPAL:-svc-host}'
       HARNESS_POLICY_FILE: '/srv/agent-harness/clients/${HARNESS_CLIENT:?set HARNESS_CLIENT in .env}/policy.yaml'
+      # This process refuses to start without a gateway key. Same proxy as Hermes, reached on
+      # the compose network rather than the host loopback the .env value names.
       HARNESS_GATEWAY_URL: 'http://litellm:4000'
+      # Same worker, same network: documents are parsed there, not in this process.
       HARNESS_FILES_URL: 'http://files:8790'
       LITELLM_MASTER_KEY: '${LITELLM_MASTER_KEY:?set LITELLM_MASTER_KEY in .env}'
       HARNESS_RUN_MAX_MODEL_CALLS: '${HARNESS_RUN_MAX_MODEL_CALLS:-30}'
       HARNESS_RUN_MAX_TOOL_CALLS: '${HARNESS_RUN_MAX_TOOL_CALLS:-60}'
       HARNESS_RUN_TIMEOUT_S: '${HARNESS_RUN_TIMEOUT_S:-600}'
       HARNESS_HISTORY_MAX_MESSAGES: '${HARNESS_HISTORY_MAX_MESSAGES:-40}'
-      # The approver's Slack app, until Plan 8b makes it the one app.
+      # This host's own Slack app — a second app, not Hermes's. One app token cannot serve two
+      # Socket Mode connections: Slack delivers each event to exactly one of them, so the
+      # approval buttons would work about half the time on a shared token. Two apps stay
+      # required until Plan 8b makes this host the one Slack connection.
       APPROVALS_SLACK_BOT_TOKEN: '${APPROVALS_SLACK_BOT_TOKEN:-}'
       APPROVALS_SLACK_APP_TOKEN: '${APPROVALS_SLACK_APP_TOKEN:-}'
       SLACK_APPROVALS_CHANNEL: '${SLACK_APPROVALS_CHANNEL:-}'

@@ -27,20 +27,25 @@ src/testing.ts     ./testing: makeTestDeps, connectTools, resultOf, approvalIdOf
 
 `@harness/core-tools` exports the kernel, every domain's public functions and types, and the
 shared helpers — see `src/index.ts`, which is grouped and commented. The subpaths are
-`./testing`, `./effects`, `./fake-gateway`, `./in-process`, `./redaction` and `./storage`. A
-subpath exists so that a consumer needing one thing does not
-inherit the whole barrel: the approvals app takes `containsRestrictedPattern` from
-`./redaction` and `outRoot` from `./storage` rather than the package root. Nothing under
-`src/app/` is reachable: the composition root reads the environment and opens a pool, and a
-consumer that imported it would inherit both.
+`./testing`, `./effects`, `./in-process`, `./redaction` and `./storage`. A subpath exists so
+that a consumer needing one thing does not inherit the whole barrel: the approvals library
+takes `containsRestrictedPattern` from `./redaction` and `outRoot` from `./storage` rather than
+the package root. Nothing under `src/app/` is reachable: the composition root reads the
+environment and opens a pool, and a consumer that imported it would inherit both. There is no
+`./fake-gateway` subpath any more — the fake moved to `@harness/runtime-api/testing` (below).
 
 ## Configuration
 
-`src/app/server.ts` is the composition root and reads almost everything, through a helper in
-`@harness/shared` so no variable is validated more loosely than its neighbour. Two domains
-read their own variable the same way, as a default parameter a caller can override:
-`storageRoot` (`HARNESS_STORAGE_DIR`) and `loadPolicy` (`HARNESS_POLICY_FILE`). The third
-reader, `gatewayFromEnv`, takes no parameter and is the exception described next.
+`buildKernelConfig` (`domain/tooling/config.ts`) does the startup-only work once — pack loading,
+policy parsing, key loading — from an `EnvSource` a caller passes in; it used to live in
+`app/server.ts`, which no other package may import, and moved to the domain layer so
+`@harness/host` can call it too, once per process, and clone it into per-run deps with
+`depsForRun`. `src/app/server.ts` is still the stdio server's own composition root and reads
+almost everything through a helper in `@harness/shared` so no variable is validated more
+loosely than its neighbour. Two domains read their own variable the same way, as a default
+parameter a caller can override: `storageRoot` (`HARNESS_STORAGE_DIR`) and `loadPolicy`
+(`HARNESS_POLICY_FILE`). The third reader, `gatewayFromEnv`, takes no parameter and is the
+exception described next.
 
 **`gatewayFromEnv` in `src/domain/models/gateway.ts` is the documented exception**, and it is
 the only one in the workspace. Three more variables — `HARNESS_GATEWAY_URL`,
@@ -86,8 +91,11 @@ pnpm --filter @harness/core-tools test
 
 Tests use the real Postgres on `127.0.0.1:15432` (`harness_test`) through `useTestDb()`, an
 in-process MCP client through `connectTools`, and `startFakeGateway` — a real loopback HTTP
-server — for anything that calls a model. No test reaches the network, Slack or a model
-provider. Do not source `.env` first.
+server — for anything that calls a model. The fake itself lives in `@harness/runtime-api/testing`
+now, not here: both runtimes and the kernel's own model-gateway tests need it, and neither
+runtime may import this package. `./testing` re-exports it unchanged, so nothing in this
+package's own tests moved. No test reaches the network, Slack or a model provider. Do not
+source `.env` first.
 
 `src/app/surface.test.ts` compares the published tool schemas, the set of environment variable
 names and the rendered Compose config against `docs/architecture/`. Regenerate with
