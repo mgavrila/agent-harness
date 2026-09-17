@@ -41,6 +41,8 @@ const PACKAGES = [
   { name: 'evals', src: 'evals/src', severity: 'error' },
   { name: 'pack-healthcare', src: 'packs/healthcare/src', severity: 'error' },
   { name: 'pack-stories', src: 'packs/stories/src', severity: 'error' },
+  { name: 'surface-slack', src: 'surfaces/slack/src', severity: 'error' },
+  { name: 'surface-memory', src: 'surfaces/memory/src', severity: 'error' },
   { name: 'scripts', src: 'scripts/src', severity: 'error' },
 ];
 
@@ -101,6 +103,8 @@ const WORKSPACE_DIRS = [
   'evals',
   'packs/healthcare',
   'packs/stories',
+  'surfaces/slack',
+  'surfaces/memory',
   'scripts',
 ];
 
@@ -229,6 +233,20 @@ const GLOBAL_RULES = [
     },
   },
   {
+    name: 'a-surface-imports-only-api-and-shared',
+    comment:
+      'A messaging adapter depends on @harness/surface-api and @harness/shared only. An edge into @harness/approvals would be a cycle — the host loads the adapter — and an edge into @harness/core-tools, @harness/db or a pack would tie one transport to one area of the product. Its own tests are not exempt: an adapter that needed the kernel to test itself would be an adapter that knows too much.',
+    severity: 'error',
+    from: { path: '^surfaces/([^/]+)/' },
+    to: {
+      // `surfaces` is in the alternation so one adapter cannot import another: two transports
+      // sharing code is a third package, not an edge. `^surfaces/$1/` is the group captured
+      // above, so an adapter still reaches its own modules and only its own.
+      path: '^(harness|packs|surfaces|evals|scripts)/',
+      pathNot: ['^harness/surface-api/src/', '^harness/shared/src/', '^surfaces/$1/'],
+    },
+  },
+  {
     name: 'shared-has-no-workspace-dependencies',
     comment:
       '@harness/shared is the bottom of the graph. @harness/db and every pack import it, so a dependency on any other workspace package would be a cycle. Node built-ins only.',
@@ -263,6 +281,7 @@ module.exports = {
           '^(harness|packs|evals|scripts)/[^/]+/(src/)?(shared|domain|tools|app)',
           '^harness/(shared|pack-api|surface-api)/src/(?!index[.]ts)',
           '^packs/[^/]+/(synthetic|forms)/',
+          '^surfaces/[^/]+/src/(?!index[.]ts)',
         ],
       },
     },
