@@ -71,6 +71,21 @@ one approval to more than one surface at once.
 | 16 | Skills | `packs/healthcare/skills/*/SKILL.md` untouched (the intake skill's description says "from Slack", which is true of the demo deployment's Hermes chat surface). | Skills are prompts; editing them changes agent behaviour and is not this plan's job. |
 | 17 | Proof of preservation | The Slack adapter's rendered Block Kit for a fixed approval row is pinned byte-for-byte to today's output (the existing `blocks.test.ts` fixtures move with the code and keep their assertions); the poller/decision/runner tests run against the memory surface and, once, against `FakeSlack` through the adapter; `pnpm surface:record` changes only the four schema places listed in decision 10. | The demo must post the same card, thread the same reply, upload the same file. |
 
+### 2a. Amendments taken while writing the plan
+
+The plan (`docs/superpowers/plans/2026-09-17-plan-6-surface-agnostic-messaging.md`, section
+"Decisions where the spec and no-behaviour-change pull apart") records nineteen rulings,
+all accepted by the controller. The ones that change this document's wording: the card and
+form models are richer than decisions 5 and 6 (`NotePart`, `Card.id/subtitle/notice`,
+`Form.cancelLabel/intro`, `FormField.maxLength/placeholder`) because today's Block Kit bytes
+cannot be reproduced from the smaller model; `SurfaceSession.mention(userId)` exists for the
+thread reply; the migration renames sink names on sendable rows only and rewrites no payload
+(payloads are encrypted; a payload without `surface` resolves to the primary surface and the
+sinks accept the legacy `channel` key); the conversation-id pattern lives in `@harness/shared`
+and is re-exported by `@harness/pack-api`; `MEMORY_ALLOWED_USERS` is a second, optional env
+addition; the health endpoint does not expose posted cards (it never carries approval content),
+so the memory adapter's README points at the database rows and the log instead.
+
 ## 3. The contract (`@harness/surface-api`)
 
 ```ts
