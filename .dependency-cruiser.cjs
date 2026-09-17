@@ -33,6 +33,7 @@ const path = require('node:path');
 const PACKAGES = [
   { name: 'shared', src: 'harness/shared/src', severity: 'error' },
   { name: 'pack-api', src: 'harness/pack-api/src', severity: 'error' },
+  { name: 'surface-api', src: 'harness/surface-api/src', severity: 'error' },
   { name: 'db', src: 'harness/db/src', severity: 'error' },
   { name: 'gateway', src: 'harness/gateway/src', severity: 'error' },
   { name: 'core-tools', src: 'harness/core-tools/src', severity: 'error' },
@@ -40,6 +41,8 @@ const PACKAGES = [
   { name: 'evals', src: 'evals/src', severity: 'error' },
   { name: 'pack-healthcare', src: 'packs/healthcare/src', severity: 'error' },
   { name: 'pack-stories', src: 'packs/stories/src', severity: 'error' },
+  { name: 'surface-slack', src: 'surfaces/slack/src', severity: 'error' },
+  { name: 'surface-memory', src: 'surfaces/memory/src', severity: 'error' },
   { name: 'scripts', src: 'scripts/src', severity: 'error' },
 ];
 
@@ -92,6 +95,7 @@ function layerRules({ name, src, severity }) {
 const WORKSPACE_DIRS = [
   'harness/shared',
   'harness/pack-api',
+  'harness/surface-api',
   'harness/db',
   'harness/gateway',
   'harness/core-tools',
@@ -99,6 +103,8 @@ const WORKSPACE_DIRS = [
   'evals',
   'packs/healthcare',
   'packs/stories',
+  'surfaces/slack',
+  'surfaces/memory',
   'scripts',
 ];
 
@@ -169,6 +175,17 @@ const GLOBAL_RULES = [
     to: { path: '^packs/[^/]+/', dependencyTypesNot: ['dynamic-import'] },
   },
   {
+    name: 'the-host-never-statically-imports-a-surface',
+    comment:
+      'Adapters are loaded at runtime from HARNESS_SURFACES through a dynamic import in domain/surfaces/registry.ts. A static import would wire the approvals host to one messaging transport by name, which is the coupling the surface contract exists to remove. *.test.ts is exempt: a test drives a real adapter on a fake transport because that is the only way to prove the host against the thing that ships, and it is not shipped itself.',
+    severity: 'error',
+    from: {
+      path: '^harness/approvals/src/',
+      pathNot: ['\\.test\\.ts$'],
+    },
+    to: { path: '^surfaces/[^/]+/', dependencyTypesNot: ['dynamic-import'] },
+  },
+  {
     name: 'no-unresolvable-workspace-import',
     comment:
       'An import the resolver cannot follow matches no other rule in this file, so a deep cross-package import written as a bare specifier (@harness/core-tools/src/domain/x.js) would pass every layer rule in silence. This catches it. Scoped to specifiers starting with `@harness/` or a relative `./` or `../`, deliberately: six third-party specifiers are unresolvable here for reasons that have nothing to do with the architecture (zod/v4, vitest and the @modelcontextprotocol subpaths resolve through export maps depcruise does not follow), and a rule that failed on those would have to be switched off rather than fixed. tsc --noEmit catches these too; this is the gate that says so at the architecture layer.',
@@ -199,7 +216,21 @@ const GLOBAL_RULES = [
       '@harness/pack-api is the contract a pack implements. It may import @harness/shared and zod, and no other workspace package: a contract that pulled in core-tools would defeat the point of having one.',
     severity: 'error',
     from: { path: '^harness/pack-api/src/' },
-    to: { path: '^(harness|packs|evals|scripts)/', pathNot: ['^harness/pack-api/src/', '^harness/shared/src/'] },
+    to: {
+      path: '^(harness|packs|surfaces|evals|scripts)/',
+      pathNot: ['^harness/pack-api/src/', '^harness/shared/src/'],
+    },
+  },
+  {
+    name: 'surface-api-imports-only-shared',
+    comment:
+      '@harness/surface-api is the contract an adapter implements. It may import @harness/shared and zod, and no other workspace package: a contract that pulled in @harness/approvals would defeat the point of having one, and one that pulled in @harness/pack-api would tie a messaging adapter to the pack contract. The two id patterns both contracts need live in @harness/shared for exactly that reason.',
+    severity: 'error',
+    from: { path: '^harness/surface-api/src/' },
+    to: {
+      path: '^(harness|packs|surfaces|evals|scripts)/',
+      pathNot: ['^harness/surface-api/src/', '^harness/shared/src/'],
+    },
   },
   {
     name: 'a-pack-never-imports-core-tools',
@@ -207,7 +238,24 @@ const GLOBAL_RULES = [
       'A pack depends on @harness/pack-api and @harness/shared only. An edge back into core-tools or @harness/db would be a cycle and would make the pack unloadable by anything else. Its *tests* may reach @harness/core-tools/testing: a test that boots the real kernel against Postgres is not shipped and is not part of the cycle. No pack declares such a dependency today — the five kernel-side healthcare tests live in harness/core-tools/src/app/pack-healthcare — and this exemption is here so the next pack author is not blocked by a false error.',
     severity: 'error',
     from: { path: '^packs/', pathNot: ['\\.test\\.ts$', '\\.test-helpers\\.ts$'] },
-    to: { path: '^(harness|evals|scripts)/', pathNot: ['^harness/pack-api/src/', '^harness/shared/src/'] },
+    to: {
+      path: '^(harness|surfaces|evals|scripts)/',
+      pathNot: ['^harness/pack-api/src/', '^harness/shared/src/'],
+    },
+  },
+  {
+    name: 'a-surface-imports-only-api-and-shared',
+    comment:
+      'A messaging adapter depends on @harness/surface-api and @harness/shared only. An edge into @harness/approvals would be a cycle — the host loads the adapter — and an edge into @harness/core-tools, @harness/db or a pack would tie one transport to one area of the product. Its own tests are not exempt: an adapter that needed the kernel to test itself would be an adapter that knows too much.',
+    severity: 'error',
+    from: { path: '^surfaces/([^/]+)/' },
+    to: {
+      // `surfaces` is in the alternation so one adapter cannot import another: two transports
+      // sharing code is a third package, not an edge. `^surfaces/$1/` is the group captured
+      // above, so an adapter still reaches its own modules and only its own.
+      path: '^(harness|packs|surfaces|evals|scripts)/',
+      pathNot: ['^harness/surface-api/src/', '^harness/shared/src/', '^surfaces/$1/'],
+    },
   },
   {
     name: 'shared-has-no-workspace-dependencies',
@@ -215,7 +263,7 @@ const GLOBAL_RULES = [
       '@harness/shared is the bottom of the graph. @harness/db and every pack import it, so a dependency on any other workspace package would be a cycle. Node built-ins only.',
     severity: 'error',
     from: { path: '^harness/shared/src/' },
-    to: { path: '^(harness|packs|evals|scripts)/', pathNot: '^harness/shared/src/' },
+    to: { path: '^(harness|packs|surfaces|evals|scripts)/', pathNot: '^harness/shared/src/' },
   },
   ...WORKSPACE_DIRS.map(crossPackageRule),
 ];
@@ -237,12 +285,14 @@ module.exports = {
         // One node per package layer, not per file: the graph answers "may this package import
         // that one", which is the same question the rules above answer. `index.ts` is left
         // uncollapsed everywhere, because it is the node every cross-package arrow should land
-        // on. `@harness/shared` and `@harness/pack-api` are flat — they are one layer each — so
-        // they get a pattern of their own, as do the pack's two generator directories.
+        // on. `@harness/shared`, `@harness/pack-api` and `@harness/surface-api` are flat — they
+        // are one layer each — so they get a pattern of their own, as do the pack's two
+        // generator directories.
         collapsePattern: [
           '^(harness|packs|evals|scripts)/[^/]+/(src/)?(shared|domain|tools|app)',
-          '^harness/(shared|pack-api)/src/(?!index[.]ts)',
+          '^harness/(shared|pack-api|surface-api)/src/(?!index[.]ts)',
           '^packs/[^/]+/(synthetic|forms)/',
+          '^surfaces/[^/]+/src/(?!index[.]ts)',
         ],
       },
     },

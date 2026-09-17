@@ -1,5 +1,5 @@
 /**
- * The only three error types this codebase raises deliberately. Everything else is a plain
+ * The only five error types this codebase raises deliberately. Everything else is a plain
  * `Error`, which the tooling kernel masks before it can reach an agent — see `runAuto`.
  *
  * The distinction is not stylistic. A raw error message can carry a provider's name, a row id
@@ -51,4 +51,38 @@ export class ConfigError extends Error {
  */
 export function describeError(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+/**
+ * A messaging surface could not do what was asked: a conversation id that is not that surface's
+ * shape, a capability it does not have, or a transport that refused.
+ *
+ * Deliberately **not** a `ToolError`. It is raised below the tool layer, by an adapter, and it
+ * never reaches an agent by itself — the host decides what to do with it, which is to record it
+ * on the effect row or to say it in the thread. Both of those are plaintext, so the message
+ * names the surface and the operation and never a path, a token or a payload value.
+ */
+export class SurfaceError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'SurfaceError';
+  }
+}
+
+/**
+ * The surface took the message but answered without anything to address it by later.
+ *
+ * A `SurfaceError` subclass, so a caller that only wants "this did not work" needs no change.
+ * The distinction is for the caller that has to decide whether to try again: the message is out
+ * and a human can already see it, so retrying posts a second copy. A plain `SurfaceError` from
+ * the same method means the opposite — nothing was sent, and trying again is the repair.
+ *
+ * An adapter raises this only when its own transport reported success: Slack answering `ok` with
+ * no `ts`, or a surface whose send API returns nothing addressable. Never for a refusal.
+ */
+export class SurfaceAcceptedError extends SurfaceError {
+  constructor(message: string) {
+    super(message);
+    this.name = 'SurfaceAcceptedError';
+  }
 }

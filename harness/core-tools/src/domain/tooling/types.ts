@@ -83,7 +83,7 @@ export interface ToolDeps {
    * that requires a BAA with the model vendor (spec section 4.4).
    */
   restrictedToModel: boolean;
-  /** External-effect senders keyed by sink name (e.g. 'slack'). Empty in Plan 1.1; Plan 3 registers real ones. */
+  /** External-effect senders keyed by sink name (e.g. 'surface_message'). Empty in Plan 1.1; Plan 3 registers real ones. */
   sinks: SinkRegistry;
   /** Per-process session context (run, skill, tool) stamped on audit rows; see `context.ts`. */
   context: SessionContext;

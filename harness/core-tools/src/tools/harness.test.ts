@@ -72,7 +72,7 @@ describe('session context and lineage', () => {
     expect(entries.find((e) => e.id === secondAudit.id)!.derived_from).toEqual([firstAudit.id]);
   });
 
-  it('stages a slack_message effect instead of sending', async () => {
+  it('stages a surface_message effect instead of sending', async () => {
     const client = await connectServer();
     const out = resultOf<{ effect_id: string; staged: boolean }>(
       await client.callTool({
@@ -82,11 +82,33 @@ describe('session context and lineage', () => {
     );
     expect(out.staged).toBe(true);
     const [row] = await db.select().from(toolEffects);
-    expect(row).toMatchObject({ sink: 'slack_message', tool: 'harness_notify', status: 'staged', client: 'test' });
+    expect(row).toMatchObject({ sink: 'surface_message', tool: 'harness_notify', status: 'staged', client: 'test' });
     expect(row.idempotencyKey).toBe('test:expirations:2026-09-15');
     // The text is the payload, which is encrypted; the summary is a label.
     expect(row.payloadEncrypted.toString('utf8')).not.toContain('expire within 90 days');
     expect(row.summary).not.toContain('expire within 90 days');
+  });
+
+  it('addresses the effect to a named surface and conversation when the caller gives them', async () => {
+    const client = await connectServer();
+    await client.callTool({
+      name: 'harness_notify',
+      arguments: { text: 'one item', idempotency_key: 'k-addressed', channel: 'memory', surface: 'memory' },
+    });
+    const [row] = await db.select().from(toolEffects);
+    expect(row.sink).toBe('surface_message');
+    // The payload is encrypted; what an operator can read is the sink and the summary.
+    expect(row.summary).toBe('Message (8 characters)');
+  });
+
+  it('refuses a conversation id that is not a bare identifier', async () => {
+    const client = await connectServer();
+    const res = await client.callTool({
+      name: 'harness_notify',
+      arguments: { text: 'one item', idempotency_key: 'k-bad', channel: 'not a channel' },
+    });
+    expect(res.isError).toBe(true);
+    expect(await db.select().from(toolEffects)).toHaveLength(0);
   });
 
   it('stages the same digest once', async () => {
@@ -103,6 +125,30 @@ describe('session context and lineage', () => {
     const res = await client.callTool({
       name: 'harness_notify',
       arguments: { text: 'Dr. Reyes SSN 123-45-6789 is on file', idempotency_key: 'x' },
+    });
+    expect(res.isError).toBe(true);
+    expect(await db.select().from(toolEffects)).toHaveLength(0);
+  });
+
+  it('refuses a conversation id that looks like a restricted identifier', async () => {
+    const client = await connectServer();
+    // `CONVERSATION_ID_PATTERN` admits this, because the kernel cannot know a surface's id
+    // format. Nothing downstream would catch it: the id is stored in plaintext, and the adapter
+    // that rejects it writes its complaint into the plaintext `tool_effects.last_error`.
+    const res = await client.callTool({
+      name: 'harness_notify',
+      arguments: { text: 'one item', idempotency_key: 'k-ssn-channel', channel: '123-45-6789' },
+    });
+    expect(res.isError).toBe(true);
+    expect(await db.select().from(toolEffects)).toHaveLength(0);
+  });
+
+  it('refuses a surface name that looks like a restricted identifier', async () => {
+    const client = await connectServer();
+    // A DEA registration is two letters and seven digits, which `SURFACE_NAME_PATTERN` accepts.
+    const res = await client.callTool({
+      name: 'harness_notify',
+      arguments: { text: 'one item', idempotency_key: 'k-dea-surface', surface: 'ab1234567' },
     });
     expect(res.isError).toBe(true);
     expect(await db.select().from(toolEffects)).toHaveLength(0);

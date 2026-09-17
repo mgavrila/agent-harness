@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, it, expect } from 'vitest';
+import { CONVERSATION_ID_PATTERN, SURFACE_NAME_PATTERN } from '@harness/pack-api';
 import {
   ARCHITECTURE_DIR,
   envNamesFromExample,
@@ -52,4 +53,70 @@ describe('public surface', () => {
     expect(rendered).not.toMatch(/AIza[0-9A-Za-z_-]{10}|sk-[0-9A-Za-z]{16}|xox[baps]-/);
     expect(rendered).toBe(await readFile(path.join(architecture, 'compose-surface.yaml'), 'utf8'));
   }, 60_000);
+});
+
+/**
+ * Plan 6 changed the recorded tool surface in four places and in no others.
+ *
+ * Stated as four properties rather than as a diff against a second committed copy of the
+ * snapshot: a copy is a file that has to be updated twice forever, and the first time someone
+ * updates one of the two it stops being evidence of anything.
+ */
+const RECORDED_TOOLS = [
+  'approvals_execute',
+  'audit_query',
+  'deadlines_compute',
+  'deadlines_upcoming',
+  'documents_classify',
+  'documents_extract',
+  'documents_get',
+  'documents_ingest',
+  'documents_list',
+  'forms_fill',
+  'forms_list_templates',
+  'forms_release',
+  'forms_roster',
+  'harness_notify',
+  'harness_reconcile',
+  'harness_set_context',
+  'providers_confirm_field',
+  'providers_get',
+  'providers_list_pending',
+  'providers_search',
+  'providers_upsert',
+  'verify_nppes',
+  'verify_state_license',
+];
+
+type InputSchema = { properties: Record<string, { pattern?: string }>; required?: string[] };
+
+describe('the four places Plan 6 moved the tool surface', () => {
+  const recorded = async (): Promise<ToolSurfaceEntry[]> =>
+    JSON.parse(await readFile(path.join(architecture, 'tool-surface.json'), 'utf8')) as ToolSurfaceEntry[];
+
+  it('publishes the same twenty-three tools it did before', async () => {
+    expect((await recorded()).map((tool) => tool.name)).toEqual(RECORDED_TOOLS);
+  });
+
+  it('carries no Slack channel id shape anywhere, which is what this plan was for', async () => {
+    expect(JSON.stringify(await recorded())).not.toContain('[CGD]');
+  });
+
+  it('validates both `channel` arguments as a neutral conversation id', async () => {
+    const entries = await recorded();
+    for (const name of ['forms_release', 'harness_notify']) {
+      const schema = entries.find((tool) => tool.name === name)?.inputSchema as InputSchema;
+      expect(schema.properties.channel.pattern, name).toBe(CONVERSATION_ID_PATTERN.source);
+    }
+  });
+
+  it('adds one optional `surface` argument, to exactly those two tools', async () => {
+    const withSurface = (await recorded()).filter((tool) => 'surface' in (tool.inputSchema as InputSchema).properties);
+    expect(withSurface.map((tool) => tool.name)).toEqual(['forms_release', 'harness_notify']);
+    for (const tool of withSurface) {
+      const schema = tool.inputSchema as InputSchema;
+      expect(schema.properties.surface.pattern).toBe(SURFACE_NAME_PATTERN.source);
+      expect(schema.required ?? []).not.toContain('surface');
+    }
+  });
 });

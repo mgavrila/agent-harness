@@ -6,7 +6,7 @@ classes:
   read: auto
   # Writing to our own Postgres. Reversible and fully audited.
   write.internal: auto
-  # Anything that leaves the building: a roster to a payer, a file to Slack.
+  # Anything that leaves the building: a roster to a payer, a file released to a human.
   external: approval
   # Moving money. Not part of credentialing at all.
   financial: blocked

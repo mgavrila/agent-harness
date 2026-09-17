@@ -124,7 +124,7 @@ acknowledged or not, the `auto` row means the data is there.
 
 ## Effects outbox
 
-External side effects (Slack messages, file uploads) are never sent from
+External side effects (messages on a surface, file uploads) are never sent from
 inside a tool handler. The handler stages a row in `tool_effects` within its
 transaction; a dispatcher sends staged rows after commit, keyed by
 `idempotency_key`. Statuses: `staged` → `dispatching` → `dispatched`, or
@@ -141,8 +141,8 @@ update tool_effects set status = 'cancelled' where id = '<id>';
 
 A `needs_review` row does **not** mean nothing was sent. It means the dispatcher
 never reported back — the sink may well have delivered the message before the
-process died. Always check the sink itself (did the Slack message arrive? does
-the remote file exist?) before resolving the row, and never assume a re-send is
+process died. Always check the sink itself (did the message arrive on the
+surface? does the remote file exist?) before resolving the row, and never assume a re-send is
 safe because the status is not `dispatched`.
 
 `summary`, `last_error` and `result` are stored in **plaintext**. They must never
@@ -158,23 +158,23 @@ contain restricted values:
   remote file id) so an operator can trace an effect to what it produced. A sink
   is responsible for returning identifiers only, never payload content.
 
-The approvals app drains the outbox. `startRunner`
+The approvals host drains the outbox. `startRunner`
 (`harness/approvals/src/domain/runner.ts`) runs a `dispatch` loop every
 `EFFECTS_DISPATCH_SECONDS` seconds (default 5) that calls
-`dispatchStagedEffects` over the `slack_message` and `slack_file` sinks
+`dispatchStagedEffects` over the `surface_message` and `surface_file` sinks
 `main.ts` registers. Each tick is guarded against overlapping itself, and a
-failure is logged and swallowed, so a Slack outage never crashes the loop: the
+failure is logged and swallowed, so an outage on one surface never crashes the loop: the
 next tick retries each effect until `maxAttempts` (default 3) is reached, after
 which the effect is marked `failed` and waits for a human, as described above.
 A backlog of `staged` rows between ticks is normal and does not fail `/healthz`.
 
-A dispatch that never reported back is caught by the app's third loop, which
+A dispatch that never reported back is caught by the host's third loop, which
 runs every `RECONCILE_SECONDS` seconds (default 300) and calls
 `harness_reconcile` through the MCP server, parking a dispatch older than ten
 minutes as `needs_review`. So staged rows accumulating is *not* expected
-behaviour: if they do, the approvals app is not running, its dispatch loop is
+behaviour: if they do, the approvals host is not running, its dispatch loop is
 erroring (check `/healthz` and the log), or the rows belong to a different
-`client` than the app serves.
+`client` than the host serves.
 
 ## Reconciliation
 
@@ -236,6 +236,27 @@ copy, so a reverse would have to invent the `pack`/`kind` split back out of `rec
 lose any row a second pack wrote in the meantime. If `0008` has to be undone, restore the
 database from a backup taken before it ran, as the migration role described under "Database
 roles".
+
+### Migration 0009 and surface addressing
+
+`0009_surface_addressing` replaces `approvals.slack_channel` and `slack_ts` with `surface`,
+`conversation_id` and `message_ref`, and copies the existing addressing across with
+`surface = 'slack'` wherever a card had been posted. A row that was claimed but never posted keeps
+its `claimed_at` and lands with `conversation_id` set and `message_ref` null, which is exactly the
+state the poller's stale sweep recovers — so a claim taken before the upgrade is still recovered
+after it.
+
+It also renames the sink on `tool_effects` rows that can still be sent — `staged`, `dispatching`
+and `needs_review` — from `slack_message`/`slack_file` to `surface_message`/`surface_file`. Rows
+that already dispatched or failed keep the name they were sent under, because that is the record
+of what happened.
+
+Their **payloads are not rewritten**, because they cannot be: `payload_encrypted` is ciphertext
+and a migration has no key. An in-flight row therefore carries no `surface` and spells its
+conversation `channel`; the host's sinks read both — no `surface` means the primary one — so the
+row delivers exactly where it would have.
+
+There is no down migration. Recovery from a bad 0009 is a database restore, as for 0008.
 
 ## Model calls
 
@@ -360,7 +381,7 @@ the symlink-resolved path against its root, so neither an absolute path, nor a
 
 In Compose, the same named volume is mounted into the `hermes` container (where
 the core-tools child writes the file) and the `approvals` container (where the
-Slack sink reads it). If a file upload fails with ENOENT, the two mounts have
+`surface_file` sink reads it). If a file upload fails with ENOENT, the two mounts have
 drifted apart — check both services' `volumes:` entries before anything else.
 
 Storage isolation is per process, not per request: a core-tools process is
@@ -370,47 +391,60 @@ never serves two clients, so there is no per-call tenant check on file paths —
 the isolation comes entirely from which process, and which storage root, a
 given client's traffic is routed to.
 
-## The Slack approvals app
+## The approvals host and its surfaces
 
-`@harness/approvals` is the only writer of approval decisions and the only
-caller of `approvals_execute`. It runs three loops:
+`@harness/approvals` is the only writer of approval decisions and the only caller of
+`approvals_execute`. It holds no transport of its own: it loads messaging adapters by name from
+`HARNESS_SURFACES`, and the **first one is primary** — the surface approval cards are posted on.
+The variable is required and the process has no default for it: where a card is posted is a
+deployment's decision, so Compose supplies the demo's `@harness/surface-slack`. It runs three
+loops:
 
 | Loop | Default | What it does |
 |---|---|---|
-| poll | 5s | posts a Block Kit card for every `pending` approval with no `slack_ts` |
-| dispatch | 5s | drains `tool_effects` through the `slack_message` and `slack_file` sinks |
+| poll | 5s | posts a card on the primary surface for every `pending` approval with no `message_ref` |
+| dispatch | 5s | drains `tool_effects` through the `surface_message` and `surface_file` sinks |
 | reconcile | 300s | calls `harness_reconcile` through the core-tools MCP server |
 
-Reconciliation goes through MCP rather than calling the helper directly, so the
-repair is scoped to the client and lands in `audit_log` like any other call.
-The app has no privileged route into the data.
+Reconciliation goes through MCP rather than calling the helper directly, so the repair is scoped
+to the client and lands in `audit_log` like any other call. The host has no privileged route into
+the data.
 
-**Run one approvals app per client.** The poller claims each row before it
-posts, by setting `slack_channel` under a guard on the row still being
-`pending` with `slack_channel IS NULL`. Only one claim can win that guard, so
-two pollers never both post a card for the same approval; the loser's update
-affects zero rows and it logs the row as `orphaned`.
+**Run one approvals host per client.** The poller claims each row before it posts, by setting
+`conversation_id` under a guard on the row still being `pending` with `conversation_id IS NULL`.
+Only one claim can win that guard, so two pollers never both post a card for the same approval;
+the loser's update affects zero rows and it logs the row as `orphaned`.
 
-A claim can outlive the process that took it, so a claim older than two
-minutes that never got a `slack_ts` is released at the top of the next run and
-the row is posted again. The window runs from `claimed_at` (migration 0007),
-not from `created_at`, so an old row claimed just now is not released on the
-next tick.
+A claim can outlive the process that took it, so a claim older than two minutes that never got a
+`message_ref` is released at the top of the next run and the row is posted again. The window runs
+from `claimed_at` (migration 0007), not from `created_at`, so an old row claimed just now is not
+released on the next tick.
 
-Two failure points sit either side of the post and are handled differently.
-A post that fails releases the claim, so the next run retries immediately. A
-post that succeeds but whose `slack_ts` write fails keeps the claim, because
-the card is already in the channel and releasing it would put a second one
-beside it; that row waits for the two-minute sweep. A line in the log reading
-"posted the card … but could not record its timestamp" is that case.
+Two failure points sit either side of the post and are handled differently. A post that fails
+releases the claim, so the next run retries immediately. A post that succeeds but whose
+`message_ref` write fails keeps the claim, because the card is already posted and releasing it
+would put a second one beside it; that row waits for the two-minute sweep. A line in the log
+reading "posted the card … but could not record its message reference" is that case.
 
-`SLACK_ALLOWED_USERS` is required and fail-closed: with it unset or empty, the
-app refuses every decision. There is no default allowlist and no bypass —
-missing or empty means no Slack user can approve, reject, or edit anything,
-not that everyone can.
+**A decision is accepted only on the surface that posted the card.** `approvals.surface` records
+which one that was. A press arriving from any other loaded surface is refused with the same
+message an unknown approval gets, because from where the person is standing that is what it is.
 
-**Slack credentials: two apps are required.** Not a hardening recommendation —
-one app does not work. Slack delivers each Socket Mode event to exactly one of
+**Allowlists are per surface**, parsed by each adapter from its own variable, and fail closed:
+with `SLACK_ALLOWED_USERS` unset or empty, the Slack surface refuses every decision. There is no
+default allowlist and no bypass.
+
+**Effects are addressed, not assumed.** A staged effect's payload may name a `surface` and a
+`conversation`; with neither, it goes to the primary surface's default conversation. A payload
+naming a surface this host has not loaded fails that one effect, and only that one, with
+`surface_message: no surface named "…" is loaded (effect …)` in `tool_effects.last_error`. The
+row is retried until `maxAttempts` (default 3) and then marked `failed` for a human, as under
+"Effects outbox".
+
+### Slack credentials: two apps are required
+
+Not a hardening recommendation — one app does not work.
+Slack delivers each Socket Mode event to exactly one of
 an app's open connections, which is what makes rolling restarts possible. With
 the Hermes gateway and the approvals app both connected on one
 `SLACK_APP_TOKEN`, roughly half of every `block_actions` and `view_submission`
@@ -436,6 +470,16 @@ and `hermes-init` strips those lines out of the `.env` it copies to
 `$HERMES_HOME/.env`. Approval decisions are gated by `SLACK_ALLOWED_USERS`
 regardless of which token is present.
 
+**Hermes's own chat surface is a separate thing.** The two apps above are the harness's: one for
+the agent's gateway, one for the approvals host's Slack adapter. Which platform *Hermes* speaks
+is Hermes's own configuration, not this repository's code:
+`clients/<client>/hermes.config.yaml` selects it, under `platforms:` and `platform_toolsets:`,
+where the demo names `slack` and `cli`. Pointing the agent at a platform Hermes supports and the
+approvals host at Slack is a supported combination; they are two independent connections and
+neither knows about the other.
+
+### Health
+
 Health is on `http://127.0.0.1:${APPROVALS_HEALTH_HOST_PORT:-8787}/healthz` on the host (container port 8787, `APPROVALS_HEALTH_PORT`). It returns counts
 and loop timestamps only, never a summary or a payload, because anything
 reachable over HTTP is outside the audit trail. It answers 503 when an effect
@@ -454,7 +498,9 @@ itself is the boundary. Both watchdog scripts default to
 which is how they are pointed at `http://127.0.0.1:8787/healthz` for a manual
 check outside Compose.
 
-Restricted values are kept out of Slack in three places, on purpose:
+### Keeping restricted values off a surface
+
+Restricted values are kept away from a human in three places, on purpose:
 
 1. Tools redact `approvals.payload` when they park a request.
 2. `payloadPreview` re-checks the rendered payload against the SSN, EIN and DEA

@@ -160,8 +160,22 @@ export const approvals = pgTable(
     executedAt: timestamp('executed_at', { withTimezone: true }),
     expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
     idempotencyKey: text('idempotency_key').notNull(),
-    slackChannel: text('slack_channel'),
-    slackTs: text('slack_ts'),
+    /**
+     * The loaded surface this approval's card was posted on: `slack`, `memory`, whatever
+     * `HARNESS_SURFACES` names. Null until the poller claims the row, and the only thing that
+     * says which adapter a decision arriving from somewhere is allowed to come from.
+     */
+    surface: text('surface'),
+    /**
+     * The conversation the card lives in, in that surface's own id shape.
+     *
+     * Doubles as the poller's claim marker: a poller claims a row by writing this before it
+     * posts, guarded on the column still being null, so two pollers can never both post a card
+     * for one approval.
+     */
+    conversationId: text('conversation_id'),
+    /** That surface's id for the card message, so a decision can edit it and reply under it. */
+    messageRef: text('message_ref'),
     /** When the poller claimed the row for posting; null until claimed and after a release. */
     claimedAt: timestamp('claimed_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -185,7 +199,7 @@ export const runs = pgTable('runs', {
 });
 
 /**
- * Outbox for external side effects (Slack messages, file uploads, emails).
+ * Outbox for external side effects (surface messages, file uploads, emails).
  * A handler stages a row inside its transaction; a dispatcher sends it after
  * commit, keyed by idempotency_key so a crash never double-sends. Rows that
  * cannot be resolved automatically are parked as needs_review.
@@ -205,7 +219,7 @@ export const toolEffects = pgTable(
     attempts: integer('attempts').notNull().default(0),
     lastError: text('last_error'),
     /**
-     * What the sink returned on a successful dispatch (a Slack message ts, a
+     * What the sink returned on a successful dispatch (a surface's message id, a
      * remote file id) so an operator can trace the effect to the thing it made.
      * Plaintext jsonb: a sink must return only non-restricted values.
      */

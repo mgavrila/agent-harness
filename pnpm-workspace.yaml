@@ -1,6 +1,7 @@
 packages:
   - 'harness/*'
   - 'packs/*'
+  - 'surfaces/*'
   - 'evals'
   - 'scripts'
 allowBuilds:

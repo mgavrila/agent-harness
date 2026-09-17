@@ -28,6 +28,10 @@ One app cannot serve both. Slack routes each Socket Mode event to exactly one
 open connection, so a shared app sends about half the button clicks to Hermes,
 which has no handler for them, and step 4 below fails silently.
 
+The approvals host posts on whichever surface `HARNESS_SURFACES` names first. It has no default
+of its own; the demo's `.env` and the `approvals` service both set
+`@harness/surface-slack`, which is why Slack is what you see here.
+
 Then in Slack, invite the Hermes bot to `SLACK_HOME_CHANNEL` and the approvals
 bot to `SLACK_APPROVALS_CHANNEL`. Generate the synthetic provider files with the
 generator from the document-pipeline plan (`packs/healthcare/synthetic/`) and

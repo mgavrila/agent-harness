@@ -1,10 +1,13 @@
 import type {
+  SlackAction,
   SlackApi,
   SlackEphemeralArgs,
+  SlackEvents,
   SlackPostMessageArgs,
   SlackPostResult,
   SlackUpdateArgs,
   SlackUploadArgs,
+  SlackView,
   SlackViewOpenArgs,
 } from './types.js';
 
@@ -20,6 +23,11 @@ export class FakeSlack implements SlackApi {
   ephemeral: SlackEphemeralArgs[] = [];
   /** When set, every call rejects with this message. */
   failWith?: string;
+  /**
+   * When set, `chat.postMessage` records the message and answers `ok` with no `ts`, which Slack's
+   * own response type allows. The message is sent; there is just nothing to address it by later.
+   */
+  acceptWithoutTs = false;
 
   private seq = 0;
 
@@ -36,6 +44,7 @@ export class FakeSlack implements SlackApi {
     postMessage: async (args: SlackPostMessageArgs): Promise<SlackPostResult> => {
       this.guard();
       this.posts.push(args);
+      if (this.acceptWithoutTs) return { ok: true, channel: args.channel };
       return { ok: true, ts: this.nextTs(), channel: args.channel };
     },
     update: async (args: SlackUpdateArgs): Promise<SlackPostResult> => {
@@ -65,4 +74,38 @@ export class FakeSlack implements SlackApi {
       return { ok: true };
     },
   };
+}
+
+/** The inbound half of `FakeSlack`: a test calls `emitAction` where Slack would. */
+export class FakeSlackEvents implements SlackEvents {
+  started = false;
+  stopped = false;
+  private actionHandler: ((action: SlackAction) => Promise<void>) | null = null;
+  private viewHandler: ((view: SlackView) => Promise<void>) | null = null;
+
+  onAction(handler: (action: SlackAction) => Promise<void>): void {
+    this.actionHandler = handler;
+  }
+
+  onView(handler: (view: SlackView) => Promise<void>): void {
+    this.viewHandler = handler;
+  }
+
+  async start(): Promise<void> {
+    this.started = true;
+  }
+
+  async stop(): Promise<void> {
+    this.stopped = true;
+  }
+
+  async emitAction(action: SlackAction): Promise<void> {
+    if (!this.actionHandler) throw new Error('no action handler is registered');
+    await this.actionHandler(action);
+  }
+
+  async emitView(view: SlackView): Promise<void> {
+    if (!this.viewHandler) throw new Error('no view handler is registered');
+    await this.viewHandler(view);
+  }
 }

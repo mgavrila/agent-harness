@@ -152,8 +152,11 @@ export const ENV_READING_HELPERS = [
  * `clients/` is per-client configuration (`.env`, `policy.yaml`, `SOUL.md`, `hermes.config.yaml`)
  * and the root holds only config. Add the directory here if you put source in either, or the
  * variables it reads will go unrecorded and the `.env.example` check will pass while missing them.
+ * `surfaces/` is there for the same reason `packs/` is: an adapter reads its own variables, and a
+ * scan that did not walk it would let them go undocumented — including the primary adapter's
+ * conversation variable, which `surface.test.ts` anchors on.
  */
-const SOURCE_ROOTS = ['harness', 'packs', 'evals', 'scripts'];
+const SOURCE_ROOTS = ['harness', 'packs', 'surfaces', 'evals', 'scripts'];
 const DIRECT_ENV = /process\.env\.([A-Z][A-Z0-9_]*)/g;
 const INDEXED_ENV = /process\.env\[\s*'([A-Z][A-Z0-9_]*)'\s*\]/g;
 const HELPER_ENV = new RegExp(

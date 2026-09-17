@@ -1,7 +1,14 @@
 import { describe, it, expect } from 'vitest';
-import { ConfigError, ModelOutputError, ToolError, describeError } from './errors.js';
+import {
+  ConfigError,
+  ModelOutputError,
+  SurfaceAcceptedError,
+  SurfaceError,
+  ToolError,
+  describeError,
+} from './errors.js';
 
-describe('the three error types', () => {
+describe('the five error types', () => {
   it('names itself, so an audit row says which kind it was', () => {
     expect(new ToolError('nope').name).toBe('ToolError');
     expect(new ConfigError('nope').name).toBe('ConfigError');
@@ -29,5 +36,22 @@ describe('describeError', () => {
     expect(describeError('boom')).toBe('boom');
     expect(describeError(42)).toBe('42');
     expect(describeError(null)).toBe('null');
+  });
+});
+
+describe('SurfaceError', () => {
+  it('is its own name, so a catch can tell it from a ToolError', () => {
+    const err = new SurfaceError('slack: that is not a conversation id (4 characters)');
+    expect(err.name).toBe('SurfaceError');
+    expect(err).toBeInstanceOf(Error);
+    expect(err).not.toBeInstanceOf(ToolError);
+  });
+
+  it('makes SurfaceAcceptedError one of its own, so a caller that only wants "it failed" still catches it', () => {
+    const err = new SurfaceAcceptedError('slack: the card was accepted without a timestamp');
+    expect(err.name).toBe('SurfaceAcceptedError');
+    expect(err).toBeInstanceOf(SurfaceError);
+    // The whole point of the subclass: a caller deciding whether to retry can tell the two apart.
+    expect(new SurfaceError('slack: chat.postMessage failed')).not.toBeInstanceOf(SurfaceAcceptedError);
   });
 });

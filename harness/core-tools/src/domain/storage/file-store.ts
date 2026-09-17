@@ -29,7 +29,7 @@ export async function resolveStoragePath(storageDir: string, requested: string):
  *
  * The lexical check is not enough on its own: a symlink planted under the out
  * tree lexically resolves inside it, and both `stat` in `forms_release` and
- * `readFile` in the Slack file sink follow symlinks, so the target would be
+ * `readFile` in the host's file sink follow symlinks, so the target would be
  * uploaded. The real paths are compared as well.
  */
 export async function resolveOutFile(fileId: string, root: string): Promise<string> {

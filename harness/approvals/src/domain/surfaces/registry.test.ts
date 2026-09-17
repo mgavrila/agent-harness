@@ -1,0 +1,114 @@
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { ConfigError, createLogger } from '@harness/shared';
+import { MemorySurface } from '@harness/surface-api/testing';
+import { loadSurfaces, surfacesOf } from './registry.js';
+
+const deps = { env: {}, log: createLogger('test'), storageDir: '/nonexistent' };
+const here = path.dirname(fileURLToPath(import.meta.url));
+
+describe('loadSurfaces', () => {
+  it('loads an adapter by name and makes the first one primary', async () => {
+    const surfaces = await loadSurfaces(['@harness/surface-memory'], deps);
+    expect(surfaces.all).toHaveLength(1);
+    expect(surfaces.primary.name).toBe('memory');
+    expect(surfaces.find('memory')).toBe(surfaces.primary);
+    expect(surfaces.secrets).toEqual([]);
+  });
+
+  it('refuses an empty list rather than starting a host nobody can answer', async () => {
+    await expect(loadSurfaces([], deps)).rejects.toThrow(ConfigError);
+    await expect(loadSurfaces([], deps)).rejects.toThrow(/HARNESS_SURFACES/);
+  });
+
+  it('names the module, and nothing about the filesystem, when one cannot be resolved', async () => {
+    const err = await loadSurfaces(['@harness/surface-nope'], deps).catch((caught: unknown) => caught);
+    expect(err).toBeInstanceOf(ConfigError);
+    expect((err as Error).message).toBe(
+      'cannot load surface "@harness/surface-nope"; add it to @harness/approvals dependencies and run pnpm install',
+    );
+    expect((err as Error).message).not.toContain('node_modules');
+  });
+
+  it('refuses two adapters that answer to the same name', async () => {
+    await expect(loadSurfaces(['@harness/surface-memory', '@harness/surface-memory'], deps)).rejects.toThrow(
+      /both named "memory"/,
+    );
+  });
+});
+
+describe('surfacesOf', () => {
+  it('answers by name and reports an unknown one as undefined', () => {
+    const memory = new MemorySurface();
+    const other = new MemorySurface({ name: 'other', conversation: 'other' });
+    const surfaces = surfacesOf([memory, other], ['A_TOKEN']);
+    expect(surfaces.primary).toBe(memory);
+    expect(surfaces.find('other')).toBe(other);
+    expect(surfaces.find('teams')).toBeUndefined();
+    expect(surfaces.secrets).toEqual(['A_TOKEN']);
+  });
+
+  it('refuses an empty list, because `primary` would be undefined and every caller assumes it', () => {
+    expect(() => surfacesOf([])).toThrow(ConfigError);
+  });
+});
+
+/**
+ * Connecting fails the same three ways importing does, and an adapter that cannot reach its
+ * transport must say so at startup rather than leave an approval nobody sees. Each fixture is a
+ * throwaway module written under a temp directory next to this test and loaded by its absolute
+ * `file://` URL, so none of them touches a real workspace package. Every temp directory is
+ * removed after its test, pass or fail.
+ */
+describe('loadSurfaces when an adapter cannot connect', () => {
+  const tempDirs: string[] = [];
+
+  afterEach(() => {
+    for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+  });
+
+  function fixture(connectBody: string): string {
+    const dir = mkdtempSync(path.join(here, '.tmp-surface-fixture-'));
+    tempDirs.push(dir);
+    const file = path.join(dir, 'surface.ts');
+    writeFileSync(
+      file,
+      `
+      import { ConfigError } from '@harness/shared';
+      import { defineSurface } from '@harness/surface-api';
+      export const surface = defineSurface({
+        name: 'unreachable',
+        version: '0.0.0',
+        secrets: [],
+        connect: () => { ${connectBody} },
+      });
+      `,
+      'utf8',
+    );
+    return pathToFileURL(file).href;
+  }
+
+  it('re-raises a ConfigError from connect with the adapter named in front', async () => {
+    // A missing credential is the ordinary way this happens, and the operator needs to know
+    // which of the surfaces they listed is the one complaining.
+    const url = fixture(`throw new ConfigError('MY_ADAPTER_TOKEN is not set');`);
+    await expect(loadSurfaces([url], deps)).rejects.toThrow(ConfigError);
+    await expect(loadSurfaces([url], deps)).rejects.toThrow(`surface "${url}": MY_ADAPTER_TOKEN is not set`);
+  });
+
+  it('replaces any other connect failure with a message naming only the adapter, and logs the original', async () => {
+    const secret = '/etc/only-the-log-should-see-this';
+    const url = fixture(`throw new Error('could not read ${secret}');`);
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      await expect(loadSurfaces([url], deps)).rejects.toThrow(ConfigError);
+      await expect(loadSurfaces([url], deps)).rejects.toThrow(`surface "${url}" failed to connect`);
+      await expect(loadSurfaces([url], deps)).rejects.not.toThrow(new RegExp(secret.replace(/\//g, '\\/')));
+      expect(errorSpy.mock.calls.some((call) => call.some((arg) => String(arg).includes(secret)))).toBe(true);
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+});

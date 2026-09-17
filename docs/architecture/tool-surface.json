@@ -1089,7 +1089,11 @@
         },
         "channel": {
           "type": "string",
-          "pattern": "^[CGD][A-Z0-9]{2,}$"
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9:_@.-]{0,127}$"
+        },
+        "surface": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$"
         },
         "derived_from": {
           "description": "audit_log ids of earlier results these arguments were built from",
@@ -1260,7 +1264,11 @@
         },
         "channel": {
           "type": "string",
-          "pattern": "^[CGD][A-Z0-9]{2,}$"
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9:_@.-]{0,127}$"
+        },
+        "surface": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$"
         },
         "derived_from": {
           "description": "audit_log ids of earlier results these arguments were built from",

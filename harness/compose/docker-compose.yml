@@ -223,6 +223,10 @@ services:
       # only because the demo mounts the pack read-only at this path.
       HARNESS_FORMS_DIR: '/srv/agent-harness/packs/healthcare/forms'
       HARNESS_PACKS: '${HARNESS_PACKS:-@harness/pack-healthcare}'
+      # Which messaging surfaces this host serves, first one primary. Same shape
+      # as HARNESS_PACKS: the adapter is loaded by name at startup, so switching
+      # the demo to another surface is this line plus that adapter's variables.
+      HARNESS_SURFACES: '${HARNESS_SURFACES:-@harness/surface-slack}'
       HARNESS_POLICY_FILE: '/srv/agent-harness/clients/demo-practice/policy.yaml'
       # Passed to the core-tools child this app spawns, which refuses to start
       # without a gateway key. Same proxy as Hermes, reached on the compose
@@ -248,8 +252,8 @@ services:
       - '127.0.0.1:${APPROVALS_HEALTH_HOST_PORT:-8787}:8787'
     volumes:
       # The same named volume as hermes: core-tools writes the file there and
-      # the Slack sink reads it back. Drifting mounts are the usual cause of an
-      # upload failing with ENOENT.
+      # the surface_file sink reads it back. Drifting mounts are the usual cause
+      # of an upload failing with ENOENT.
       - storage:/srv/harness-storage
       - ../../packs:/srv/agent-harness/packs:ro
       - ../../clients:/srv/agent-harness/clients:ro

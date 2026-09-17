@@ -4,7 +4,7 @@
  *
  *   SHAPE_PATTERNS / containsRestrictedPattern
  *     Three strict-digit shapes, no validity gate. This is the LAST line of defence on text
- *     about to reach a human channel: a Slack card, a decision note, a staged message. It
+ *     about to reach a human: an approval card, a decision note, a staged message. It
  *     over-reports on purpose, because a false positive costs an approver one look at the
  *     audit log and a false negative puts an SSN in a channel. Two byte-identical copies of
  *     this list used to live in `tools/harness.ts` and `approvals/render.ts`.
@@ -15,9 +15,10 @@
  *     false positive fabricates an identifier that was never on the page.
  *
  * Collapsing them into one list changes behaviour in both directions: a shape-only
- * `AB1234567` would stop tripping the Slack guard, and an OCR-noisy `O12-34-5678` would start
- * tripping it.
+ * `AB1234567` would stop tripping the human-channel guard, and an OCR-noisy `O12-34-5678` would
+ * start tripping it.
  */
+import { ToolError } from '@harness/shared';
 
 export type RestrictedKind = 'ssn' | 'ein' | 'dea';
 
@@ -34,6 +35,27 @@ const SHAPE_PATTERNS: RegExp[] = [
 /** True when `text` looks like it carries a restricted identifier. Cheap, and over-reports. */
 export function containsRestrictedPattern(text: string): boolean {
   return SHAPE_PATTERNS.some((re) => re.test(text));
+}
+
+/**
+ * Refuse an agent-supplied argument that looks like a restricted identifier, in the one wording
+ * every staging tool uses.
+ *
+ * Every argument staged onto an effect needs this, not only the one that carries the prose. An
+ * addressing argument is agent-chosen too, and it is validated as a *shape* — a conversation id
+ * may be any of `123-45-6789`, `12-3456789` or `ab1234567` as far as the kernel can tell, because
+ * the kernel cannot know a surface's id format. Those arguments are stored in plaintext and an
+ * adapter that rejects one writes it into `tool_effects.last_error`, which is plaintext too, so
+ * the guard belongs before the row is written rather than after.
+ *
+ * `what` names the argument as the agent knows it, and goes in front of the shared sentence.
+ */
+export function assertNoRestrictedPattern(value: string | null | undefined, what: string): void {
+  if (value !== null && value !== undefined && containsRestrictedPattern(value)) {
+    throw new ToolError(
+      `${what} refused: it looks like it contains a restricted identifier; restricted values never leave the harness`,
+    );
+  }
 }
 
 /**

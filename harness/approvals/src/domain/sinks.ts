@@ -1,110 +1,125 @@
-import { readFile } from 'node:fs/promises';
 import path from 'node:path';
-import * as z from 'zod/v4';
 import type { SinkHandler, SinkRegistry } from '@harness/core-tools/effects';
-import { assertInsideRoot } from '@harness/shared';
-import type { SlackApi } from './slack/types.js';
-
-// `channel` is nullable as well as optional: a staging tool writes an explicit
-// null when the caller did not pick one, and that must mean "use the default",
-// not "invalid payload".
-const MessagePayload = z.object({
-  channel: z.string().min(1).nullable().optional(),
-  text: z.string().min(1).max(3000),
-  thread_ts: z.string().optional(),
-});
-
-const FilePayload = z.object({
-  channel: z.string().min(1).nullable().optional(),
-  path: z.string().min(1),
-  filename: z.string().min(1),
-  thread_ts: z.string().optional(),
-  file_id: z.string().optional(),
-});
+import { assertInsideRoot, SurfaceError } from '@harness/shared';
+import {
+  SurfaceFilePayloadShape,
+  SurfaceMessagePayloadShape,
+  type Conversation,
+  type SurfaceSession,
+} from '@harness/surface-api';
+import * as z from 'zod/v4';
+import type { LoadedSurfaces } from './surfaces/registry.js';
 
 /**
- * Validate an outbox payload without ever repeating it. A zod message can name
- * a key and a type, and `tool_effects.last_error` is stored in plaintext, so
- * the sink reports only that validation failed and leaves the detail to the
- * staging tool, which knows what it wrote.
- */
-function parsePayload<T>(schema: z.ZodType<T>, payload: unknown, sink: string): T {
-  const parsed = schema.safeParse(payload);
-  if (!parsed.success) throw new Error(`${sink} payload failed validation`);
-  return parsed.data;
-}
-
-/**
- * Reject a staged path that does not resolve inside `root`. `forms_release`
- * already confines the path it stages to the out tree via `resolveOutFile`,
- * so this is defence in depth against a corrupted or otherwise-produced row,
- * not the primary guarantee.
+ * Reject a staged path that does not resolve inside `root`. The staging tool already confines the
+ * path it stages to the out tree, so this is defence in depth against a corrupted or
+ * otherwise-produced row, not the primary guarantee.
  *
- * Lexical resolution alone is not enough, because `readFile` below follows
- * symlinks: a link planted under the out tree passes `path.relative` and then
- * uploads whatever it points at. Both sides are compared as real paths too.
+ * Lexical resolution alone is not enough, because the adapter that reads the file follows
+ * symlinks: a link planted under the out tree passes `path.relative` and then uploads whatever it
+ * points at. Both sides are compared as real paths too.
  */
 async function assertUnderRoot(candidate: string, root: string, effectId: string): Promise<void> {
   await assertInsideRoot(
-    // Resolve against the working directory first, matching this guard's own
-    // pre-refactor `path.resolve(candidate)` exactly. `assertInsideRoot`
-    // resolves a relative candidate *inside `root`*, which would silently
-    // loosen this check for a relative path — see the note above this function.
+    // Resolve against the working directory first. `assertInsideRoot` resolves a relative
+    // candidate *inside `root`*, which would silently loosen this check for a relative path.
     path.resolve(candidate),
     root,
     (reason) => {
       throw new Error(
         reason === 'unreadable'
-          ? `slack_file: staged file unavailable (effect ${effectId})`
-          : `slack_file: path outside the release directory (effect ${effectId})`,
+          ? `surface_file: staged file unavailable (effect ${effectId})`
+          : `surface_file: path outside the release directory (effect ${effectId})`,
       );
     },
-    // realpath errors (ELOOP, EACCES, ENOTDIR) carry the absolute path in their
-    // message; keep it out of the plaintext `tool_effects.last_error`.
+    // realpath errors (ELOOP, EACCES, ENOTDIR) carry the absolute path in their message; keep it
+    // out of the plaintext `tool_effects.last_error`.
     { onUnreadable: 'escape' },
   );
 }
 
+/** The three fields that say where an effect goes, which both payload shapes carry. */
+type Addressing = { surface?: string | null; conversation?: string | null; channel?: string | null };
+
 /**
- * Slack senders for the effects outbox. Each returns only identifiers: the
- * dispatcher stores the return value in `tool_effects.result` as plaintext
- * jsonb, so nothing from the payload may come back out.
+ * An adapter's failure is expected and is recorded on the row; anything else is a bug and keeps
+ * its own message. Either way the effect id goes on, because that is what an operator greps for.
  */
-export function slackSinks(api: SlackApi, opts: { defaultChannel: string; outDir?: string }): SinkRegistry {
-  const messageSink: SinkHandler = async (payload) => {
-    const p = parsePayload(MessagePayload, payload, 'slack_message');
-    const channel = p.channel ?? opts.defaultChannel;
-    const res = await api.chat.postMessage({ channel, text: p.text, thread_ts: p.thread_ts });
-    return { slack_ts: res.ts ?? null, slack_channel: res.channel ?? channel };
+async function viaSurface<T>(sink: string, effectId: string, run: () => Promise<T>): Promise<T> {
+  try {
+    return await run();
+  } catch (err) {
+    if (err instanceof SurfaceError) throw new Error(`${sink}: ${err.message} (effect ${effectId})`);
+    throw err;
+  }
+}
+
+/**
+ * The two senders the effects outbox drains through.
+ *
+ * Both are generic: the dispatcher looks a sink up by the string on the row, and these two names
+ * carry no transport in them. Each returns only identifiers — the dispatcher stores the return
+ * value in `tool_effects.result` as plaintext jsonb, so nothing from the payload may come back out.
+ */
+export function surfaceSinks(surfaces: LoadedSurfaces, opts: { outDir?: string } = {}): SinkRegistry {
+  /**
+   * Read an outbox row: what it says, and where it is addressed.
+   *
+   * The payload is validated without ever being repeated. A zod message can name a key and a
+   * type, and `tool_effects.last_error` is stored in plaintext, so a failure reports only that
+   * validation failed and leaves the detail to the staging tool, which knows what it wrote.
+   *
+   * `payload.surface` names one of the loaded surfaces; with none, it is the primary. The
+   * conversation is the payload's, or that surface's default. `channel` is read after
+   * `conversation` for one reason: a row staged before migration 0009 spells it that way and is
+   * still in the outbox.
+   */
+  function addressed<T extends Addressing>(
+    schema: z.ZodType<T>,
+    raw: unknown,
+    sink: string,
+    effectId: string,
+  ): { payload: T; session: SurfaceSession; conversation: Conversation['id'] } {
+    const parsed = schema.safeParse(raw);
+    if (!parsed.success) throw new Error(`${sink} payload failed validation`);
+    const name = parsed.data.surface ?? null;
+    const session = name === null ? surfaces.primary : surfaces.find(name);
+    if (!session) throw new Error(`${sink}: no surface named "${name}" is loaded (effect ${effectId})`);
+    return {
+      payload: parsed.data,
+      session,
+      conversation: parsed.data.conversation ?? parsed.data.channel ?? session.defaultConversation,
+    };
+  }
+
+  const messageSink: SinkHandler = async (raw, effect) => {
+    const { payload, session, conversation } = addressed(SurfaceMessagePayloadShape, raw, 'surface_message', effect.id);
+    // No reply target: an outbox message is a standalone post. The only reply this host writes is
+    // the decisions thread reply, which goes straight through `postText({ replyTo })`.
+    const ref = await viaSurface('surface_message', effect.id, () => session.postText(conversation, payload.text));
+    return { surface: session.name, conversation, message_id: ref.id };
   };
 
-  const fileSink: SinkHandler = async (payload, effect) => {
-    const p = parsePayload(FilePayload, payload, 'slack_file');
-    const channel = p.channel ?? opts.defaultChannel;
-    // `outDir` is the fill output tree (`<HARNESS_STORAGE_DIR>/out`), not the
-    // whole store: the rest of it holds ingested documents, which must never
-    // be uploadable. Optional so today's tests, which stage paths under an
-    // arbitrary tmpdir, are unaffected; main.ts always passes it.
-    if (opts.outDir) await assertUnderRoot(p.path, opts.outDir, effect.id);
-    let bytes: Buffer;
-    try {
-      bytes = await readFile(p.path);
-    } catch {
-      // Node's fs error message includes the absolute path; never let that
-      // reach the plaintext `tool_effects.last_error` column.
-      throw new Error(`slack_file: staged file unavailable (effect ${effect.id})`);
-    }
-    await api.files.uploadV2({
-      channel_id: channel,
-      file: bytes,
-      filename: p.filename,
-      // The staging tool already wrote a restricted-free label; reuse it rather
-      // than composing a new comment out of payload values.
-      initial_comment: effect.summary,
-      thread_ts: p.thread_ts,
-    });
-    return { slack_channel: channel, filename: p.filename };
+  const fileSink: SinkHandler = async (raw, effect) => {
+    const { payload, session, conversation } = addressed(SurfaceFilePayloadShape, raw, 'surface_file', effect.id);
+    // `outDir` is the fill output tree (`<HARNESS_STORAGE_DIR>/out`), not the whole store: the
+    // rest of it holds ingested documents, which must never be uploadable. Optional so a test
+    // that stages a path under an arbitrary tmpdir is unaffected; main.ts always passes it.
+    if (opts.outDir) await assertUnderRoot(payload.path, opts.outDir, effect.id);
+    await viaSurface('surface_file', effect.id, () =>
+      session.uploadFile(conversation, {
+        path: payload.path,
+        filename: payload.filename,
+        // The staging tool already wrote a restricted-free label; reuse it rather than composing
+        // a new comment out of payload values.
+        comment: effect.summary,
+      }),
+    );
+    return { surface: session.name, conversation, filename: payload.filename };
   };
 
-  return { slack_message: messageSink, slack_file: fileSink };
+  return {
+    surface_message: messageSink,
+    surface_file: fileSink,
+  };
 }

@@ -241,6 +241,83 @@ declare the same record kind.
 not applied. Set the client's `HARNESS_POLICY_FILE` if you need a different action-class table
 today.
 
+## Adding a surface
+
+A surface is a place a human is talked to — Slack, Microsoft Teams, Telegram — that the approvals
+host loads through a contract instead of importing by name. `surfaces/memory` is the smallest
+complete one; read it alongside this, and read `surfaces/slack` for the real thing.
+
+1. **Create the package.** `mkdir -p surfaces/<name>/src` and a `package.json` named
+   `@harness/surface-<name>`, with `"." : "./src/index.ts"` in `exports` and
+   `@harness/surface-api` and `@harness/shared` in `dependencies`. **Never** depend on
+   `@harness/approvals`, `@harness/core-tools`, `@harness/db` or another adapter; `pnpm arch`
+   fails the build on any of them, tests included. Add one `PACKAGES` row and one
+   `WORKSPACE_DIRS` entry in `.dependency-cruiser.cjs`, and nothing else.
+
+2. **Declare the surface.**
+
+   ```ts
+   export const surface = defineSurface({
+     name: 'teams',
+     version: '0.1.0',
+     secrets: ['TEAMS_APP_PASSWORD'],
+     connect: async (deps) => createTeamsSession(transport(teamsConfig(deps.env)), config),
+   });
+   ```
+
+   `name` is lowercase and stable: it is stored in `approvals.surface` and named in an effect
+   payload. `secrets` lists the environment variables you read that are credentials; the host
+   subtracts them from the core-tools child's environment, so leaving one out is a credential
+   travelling where it should not.
+
+3. **Read configuration from `deps.env`, never from `process.env`.** Use `@harness/shared`'s env
+   helpers with `deps.env` as their last argument, so your variables are validated and worded like
+   everyone else's — and so a test suite cannot open a real connection because the machine running
+   it has a filled-in `.env`. Document every name in `.env.example` in the same commit:
+   `surface.test.ts` walks `surfaces/` and fails on one you did not. It finds names read through
+   those helpers, so a value taken straight off `deps.env` — as `surfaces/memory` does, because
+   unset and empty have to mean different things there — is invisible to the scan and has to be
+   documented by hand.
+
+4. **Implement `SurfaceSession`.** Post and update a card, post text with an optional reply
+   target, send a private note, upload a file, open a form, deliver actions and submissions, start
+   and stop. Declare honestly what you cannot do:
+
+   | Surface            | forms                  | privateReply                    | update |
+   | ------------------ | ---------------------- | ------------------------------- | ------ |
+   | `slack`            | yes (a modal)          | yes (ephemeral)                 | yes    |
+   | `memory`           | yes                    | yes                             | yes    |
+   | Teams (planned)    | yes (a task module)    | no — post in the thread instead | yes    |
+   | Telegram (planned) | no — there is no modal | no                              | yes    |
+
+   The host reads those flags rather than trying and catching: a surface without `forms` gets an
+   approval card with no Edit button, which is honest and needs no fallback protocol.
+
+5. **Render the neutral models.** A `Card` has a title, an optional subtitle, body lines and
+   actions; a `CardLine` is plain text, a labelled value, a preformatted block or a `note` of rich
+   parts; a `NotePart` is text, a code span, a timestamp, a mention or an outcome icon. Turn each
+   into whatever your surface draws. `Card.notice` is the one line to show where the card itself
+   cannot go — a notification preview, a surface with no rich content.
+
+6. **Throw `SurfaceError`, and watch what is in the message.** A bad conversation id, a missing
+   capability, a transport that refused. The host writes that message into
+   `tool_effects.last_error`, which is plaintext and which an operator pastes into a ticket, so
+   name the surface and the operation and never a path, a token or a payload value — not even the
+   conversation id you are rejecting, which is agent-chosen and validated only as a shape. Say
+   its length instead.
+
+   One rejection is not a failure: when your transport **accepts** a card and answers with nothing
+   to address it by, throw `SurfaceAcceptedError`, the `SurfaceError` subclass that says so. A
+   card is live and a human can press its buttons, and the host reads that to keep its claim on
+   the row rather than post a second card on the next tick.
+
+7. **Test it against fakes.** Split the transport out behind an interface of your own, the way
+   `surfaces/slack/src/transport/` does, and export a wired-to-fakes session from a `./testing`
+   subpath. No test makes a real network call.
+
+8. **Load it.** Add the package to `@harness/approvals`' dependencies and put its name in
+   `HARNESS_SURFACES`. Nothing in the host changes.
+
 ## Adding a client
 
 ```bash
@@ -273,8 +350,9 @@ name the code reads and fails on any the example file does not document.
 Tests live beside the code they test, named `*.test.ts`, and are never imported by shipping
 code. Database tests use the real Postgres on `127.0.0.1:15432` and truncate between tests
 through `useTestDb()` from `@harness/db/testing`. Fakes come from a package's `./testing`
-subpath: `FakeGateway`, `FakeSlack`, `FakeCoreToolsClient`, `makeTestDeps`, `connectTools`.
-No test makes a real network call, a real Slack call or a real model call.
+subpath: `FakeGateway`, `MemorySurface`, `FakeCoreToolsClient`, `fakeSlackSession`,
+`makeTestDeps`, `connectTools`. No test makes a real network call, a real model call, or a real
+call to a messaging surface.
 
 ## Commit conventions
 
