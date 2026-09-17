@@ -193,8 +193,9 @@ never re-sends anything.
 The MCP tool repairs **only the calling client's rows**, so an agent acting for
 one practice can never retire another practice's approvals. The startup pass in
 `main.ts` runs **unscoped**, as an operator-level task across every tenant; when
-it actually repairs something it writes one `audit_log` row with
-`caller = 'startup'` and `tool = 'harness_reconcile'`.
+it actually repairs something it writes one `audit_log` row with `caller` set to
+the principal the process runs as (`svc-local`, `svc-hermes` or `svc-approvals`
+in the shipped configs) and `tool = 'harness_reconcile'`.
 
 ## Runs and principals
 
