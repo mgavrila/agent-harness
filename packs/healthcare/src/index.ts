@@ -71,7 +71,18 @@ export const pack = definePack({
       'malpractice_coverage',
     ],
     generate: '@harness/pack-healthcare/generate',
-    readback: { tool: 'providers_get', recordIdKey: 'provider_id', attachmentsKey: 'credentials' },
+    // Every one of the five, including the three that happen to equal the kernel's names: they
+    // are this pack's own same-named replacements (see `HEALTHCARE_REPLACES`), so an eval
+    // measuring this pack is driving healthcare's tools and reading healthcare's keys, not the
+    // kernel's. Saying so is what lets a second pack loaded beside this one be measured too.
+    readback: {
+      ingestTool: 'documents_ingest',
+      classifyTool: 'documents_classify',
+      extractTool: 'documents_extract',
+      readTool: 'providers_get',
+      recordIdKey: 'provider_id',
+      attachmentsKey: 'credentials',
+    },
   },
   replaces: HEALTHCARE_REPLACES,
   tools: healthcareTools,

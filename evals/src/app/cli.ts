@@ -4,7 +4,6 @@ import { fileURLToPath } from 'node:url';
 import { gatewayFromEnv, loadPacks, type Pack } from '@harness/core-tools';
 import { describeError, optionalEnv } from '@harness/shared';
 import { runEvals } from '../domain/orchestrate.js';
-import { DEFAULT_READBACK } from '../domain/pipeline.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 // evals/src/app -> the repository root
@@ -172,7 +171,6 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     recordKinds: measured.records.map((r) => r.kind),
     judgedFields: evals.judgedFields,
     intakeSkillFile: evals.intakeSkill,
-    readback: evals.readback ?? DEFAULT_READBACK,
   });
 
   process.stdout.write(`${markdown}\n`);

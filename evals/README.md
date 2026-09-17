@@ -6,9 +6,19 @@ the model said, and compares the result to a committed baseline.
 
 It imports no pack. `HARNESS_PACKS` names what is loaded, exactly as it does for a server, and
 `--pack` picks one of them when several are; the corpus, the cases, the injection file, the
-intake skill, the judged fields and the readback tool names all come off that pack's
+intake skill, the judged fields and the pipeline's tool names all come off that pack's
 `evals` block. The report records which pack and which record kinds it measured, because the
 same metric name carries a different meaning for each.
+
+**The measured pack decides which tools the harness calls.** Not one of the three steps — ingest,
+extract, read back — is named by a literal here. `evals.readback` names them and the keys their
+results carry, each member falling back to the kernel's `documents_ingest`,
+`documents_classify`, `documents_extract`, `records_get`, `record_id` and `attachments`. A pack
+that ships no tools of its own may omit the block; healthcare declares all of it, because it
+replaces the three document tools under the same names and renames the read to `providers_get`.
+One key is resolved against the deployment rather than the measured pack alone: `Pack.replaces`
+is process-wide, so the key the _extract result_ carries comes from whichever loaded pack
+publishes that tool. That is why a second pack can be measured beside healthcare at all.
 
 ## Layout
 
@@ -31,7 +41,7 @@ src/index.ts              the public API
 | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | running   | `runEvals`, `selectCases`, `injectionCasesFor`, `type RunOptions`                                                                                                                                                                                                                    |
 | cases     | `loadExtractionCases`, `loadInjectionCases`, `loadJsonl`, `declaredToolsOf`, `type ExtractionCase`, `type InjectionCase`, `type ExpectedAttachment`                                                                                                                                  |
-| pipeline  | `openPipeline`, `runCase`, `normalizeMasking`, `DEFAULT_READBACK`, `type PipelineHandle`, `type OpenPipelineOptions`                                                                                                                                                                 |
+| pipeline  | `openPipeline`, `runCase`, `normalizeMasking`, `resolvePipelineTools`, `KERNEL_PIPELINE_TOOLS`, `type PipelineHandle`, `type OpenPipelineOptions`, `type PipelineTools`                                                                                                              |
 | scoring   | `scoreExtraction`, `scoreCalibration`, `scoreInjection`, `normalizeValue`, `judgeFreeText`, `type Tally`, `type CalibrationScore`, `type CaseOutcome`, `type StoredField`, `type StoredAttachment`, `type CalibrationRow`, `type JudgeItem`, `type JudgeResult`, `type JudgeVerdict` |
 | reporting | `buildReport`, `compareToBaseline`, `renderMarkdown`, `DEFAULT_TOLERANCE`, `METRIC_KEYS`, `type Report`, `type SplitReport`, `type BuildReportInput`, `type BaselineComparison`, `type Delta`                                                                                        |
 
@@ -47,6 +57,9 @@ pnpm evals:baseline   # the same, then writes the report to evals/baseline.json
 
 HARNESS_PACKS=@harness/pack-healthcare,@harness/pack-stories pnpm evals -- --pack=stories
 ```
+
+The last line loads both packs and measures the second. Everything follows `--pack`: its corpus,
+its cases, its judged fields, its tools and its `formsDir`. Load order decides nothing.
 
 It uses its own database, `harness_evals`, because it truncates every table between cases.
 The exit code is the CI contract: non-zero on a regression, on a metric the baseline measured

@@ -7,7 +7,6 @@ import { pack as healthcarePack } from '@harness/pack-healthcare';
 import { startFakeGateway, type FakeGateway } from '@harness/core-tools/fake-gateway';
 import { EVALS_DATABASE_URL, EXTRACTION, VERDICTS, writeEvalCorpus } from '../corpus.test-helpers.js';
 import { openJudgeDeps } from '../judge-deps.test-helpers.js';
-import { DEFAULT_READBACK } from './pipeline.js';
 import { runEvals, selectCases, injectionCasesFor } from './orchestrate.js';
 import type { ExtractionCase, InjectionCase } from './cases.js';
 import type { Report } from './report/types.js';
@@ -84,7 +83,6 @@ function options(overrides: Partial<Parameters<typeof runEvals>[0]> = {}) {
     recordKinds: healthcarePack.records.map((r) => r.kind),
     judgedFields: healthcarePack.evals!.judgedFields,
     intakeSkillFile: healthcarePack.evals!.intakeSkill,
-    readback: healthcarePack.evals!.readback ?? DEFAULT_READBACK,
     ...overrides,
   };
 }

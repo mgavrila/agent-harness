@@ -94,4 +94,22 @@ describe('definePack', () => {
       /replaces 1 kernel tools but contributes none/,
     );
   });
+
+  /**
+   * Every member of `evals.readback` is looked up by exact string while a case runs, so a typo
+   * there is not a startup failure by default: the eval calls a tool that does not exist, or
+   * reads a key nothing carries, and the case fails as if the model had missed.
+   */
+  it('refuses a readback tool or key that is not a lowercase snake-case name', () => {
+    const evals = { casesFile: '/c.jsonl', intakeSkill: '/s/SKILL.md', judgedFields: [] };
+    expect(() => definePack({ ...base, evals: { ...evals, readback: { readTool: 'providers_get ' } } })).toThrow(
+      /evals\.readback\.readTool must be lowercase letters, digits and underscores, got "providers_get "/,
+    );
+    expect(() => definePack({ ...base, evals: { ...evals, readback: { recordIdKey: '' } } })).toThrow(
+      /evals\.readback\.recordIdKey must be lowercase/,
+    );
+    // Absent is legal for every member: that is how a pack takes the kernel's names.
+    expect(() => definePack({ ...base, evals: { ...evals, readback: {} } })).not.toThrow();
+    expect(() => definePack({ ...base, evals })).not.toThrow();
+  });
 });

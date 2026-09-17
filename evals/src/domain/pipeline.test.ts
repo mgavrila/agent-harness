@@ -3,20 +3,27 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { PDFDocument, StandardFonts } from 'pdf-lib';
-import { DEFAULT_POLICY, MASKED } from '@harness/core-tools';
+import { DEFAULT_POLICY, MASKED, registryOf } from '@harness/core-tools';
+import { definePack, parseExtractionManifest } from '@harness/pack-api';
 import { pack as healthcarePack } from '@harness/pack-healthcare';
 import { startFakeGateway, type FakeGateway } from '@harness/core-tools/fake-gateway';
 import { EVALS_DATABASE_URL } from '../corpus.test-helpers.js';
 import type { ExtractionCase, InjectionCase } from './cases.js';
 import { scoreInjection, type CaseOutcome, type StoredField } from './score.js';
-import { DEFAULT_READBACK, normalizeMasking, openPipeline, runCase, type PipelineHandle } from './pipeline.js';
+import {
+  KERNEL_PIPELINE_TOOLS,
+  normalizeMasking,
+  openPipeline,
+  resolvePipelineTools,
+  runCase,
+  type PipelineHandle,
+} from './pipeline.js';
 
 /**
  * A pack is a fixture here, never an import of the shipping code: `openPipeline` takes the list
  * `HARNESS_PACKS` would name, and a test that measures a real pipeline has to name one.
  */
 const HEALTHCARE = '@harness/pack-healthcare';
-const READBACK = healthcarePack.evals!.readback ?? DEFAULT_READBACK;
 
 let corpus: string;
 let gateway: FakeGateway;
@@ -146,7 +153,7 @@ describe('normalizeMasking', () => {
 describe('runCase', () => {
   it('runs ingest and extract and reports what was stored', async () => {
     await pipeline.reset();
-    const outcome = await runCase(pipeline, CASE, READBACK);
+    const outcome = await runCase(pipeline, CASE);
     expect(outcome.ok).toBe(true);
     expect(outcome.toolsCalled).toEqual(['documents_ingest', 'documents_extract', 'providers_get']);
     expect(outcome.documentKind).toBe('state_license');
@@ -156,7 +163,7 @@ describe('runCase', () => {
 
   it('reports the restricted field redaction found, with its value masked', async () => {
     await pipeline.reset();
-    const outcome = await runCase(pipeline, CASE, READBACK);
+    const outcome = await runCase(pipeline, CASE);
     expect(outcome.restrictedFields).toEqual(['ssn']);
     const ssn = outcome.fields.find((f) => f.name === 'ssn')!;
     expect(ssn.restricted).toBe(true);
@@ -165,14 +172,14 @@ describe('runCase', () => {
 
   it('carries the policy through so the injection scorer can compare it', async () => {
     await pipeline.reset();
-    const outcome = await runCase(pipeline, CASE, READBACK);
+    const outcome = await runCase(pipeline, CASE);
     expect(outcome.policyAfter).toEqual(pipeline.policy);
   });
 
   it('records a failure instead of throwing when the gateway breaks', async () => {
     await pipeline.reset();
     gateway.setResponder(() => ({ status: 500, errorBody: {} }));
-    const outcome = await runCase(pipeline, CASE, READBACK);
+    const outcome = await runCase(pipeline, CASE);
     expect(outcome.ok).toBe(false);
     expect(outcome.error).toBeTruthy();
     expect(outcome.fields).toEqual([]);
@@ -181,10 +188,142 @@ describe('runCase', () => {
 
   it('reset empties the database between cases', async () => {
     await pipeline.reset();
-    await runCase(pipeline, CASE, READBACK);
+    await runCase(pipeline, CASE);
     await pipeline.reset();
-    const outcome = await runCase(pipeline, CASE, READBACK);
+    const outcome = await runCase(pipeline, CASE);
     expect(outcome.ok).toBe(true);
     expect(outcome.fields.filter((f) => f.name === 'last_name')).toHaveLength(1);
+  });
+});
+
+/**
+ * A second pack, built here rather than loaded.
+ *
+ * `loadPacks` reaches a pack by dynamic `import()` of a package name, so a pack that exists only
+ * inside a test cannot go through it — which is what `OpenPipelineOptions.registry` is for. This
+ * one is the smallest legal pack: one record kind that leaves `genericTools` at its default of
+ * true, so the kernel's `records_*` are published beside healthcare's `providers_*`, one document
+ * kind, and an `evals` block with no `readback` at all, so every tool name and key falls back to
+ * the kernel's. It is the shape a pack that ships no tools of its own has.
+ */
+const STUB_SKILLS = path.join(tmpdir(), 'harness-eval-stub-pack', 'skills');
+
+const stubPack = definePack({
+  name: 'stories',
+  version: '0.0.0',
+  records: [
+    {
+      kind: 'epic',
+      label: 'Epic',
+      nameFields: ['title'],
+      fields: [
+        { name: 'title', type: 'string', description: 'The epic title as printed.' },
+        { name: 'owner', type: 'string', description: 'Who owns the epic.' },
+      ],
+    },
+  ],
+  documentKinds: ['brief'],
+  extraction: parseExtractionManifest({
+    version: '1.0.0',
+    document_kinds: ['brief'],
+    role: 'You read planning documents and return structured data.',
+    targets: [
+      {
+        document_kinds: ['brief'],
+        record_kind: 'epic',
+        schema_name: 'epic_extraction',
+        instruction: 'Extract the epic this document describes.',
+      },
+    ],
+  }),
+  skillsDir: STUB_SKILLS,
+  policy: {},
+  evals: {
+    casesFile: path.join(STUB_SKILLS, 'cases.jsonl'),
+    intakeSkill: path.join(STUB_SKILLS, 'intake', 'SKILL.md'),
+    judgedFields: [],
+  },
+});
+
+describe('resolvePipelineTools', () => {
+  const both = registryOf([healthcarePack, stubPack]);
+
+  it('gives the measured pack its own tools and keys, whichever pack loaded first', () => {
+    expect(resolvePipelineTools(both, 'healthcare')).toEqual({
+      ingestTool: 'documents_ingest',
+      extractTool: 'documents_extract',
+      readTool: 'providers_get',
+      extractIdKey: 'provider_id',
+      readIdKey: 'provider_id',
+      attachmentsKey: 'credentials',
+    });
+  });
+
+  /**
+   * The bug this whole block exists for. `Pack.replaces` is process-wide, so with healthcare
+   * loaded the published `documents_extract` is healthcare's and answers `provider_id` for every
+   * pack's documents. A second measured pack reading the kernel's `record_id` off that result got
+   * `undefined` and failed every case. It reads the extract result with the publisher's key and
+   * calls its own `records_get` with its own.
+   */
+  it('reads the extract result with the key of whichever pack publishes that tool', () => {
+    expect(resolvePipelineTools(both, 'stories')).toEqual({
+      ingestTool: 'documents_ingest',
+      extractTool: 'documents_extract',
+      readTool: 'records_get',
+      extractIdKey: 'provider_id',
+      readIdKey: 'record_id',
+      attachmentsKey: 'attachments',
+    });
+  });
+
+  it('falls back to the kernel throughout when the measured pack is alone and declares nothing', () => {
+    expect(resolvePipelineTools(registryOf([stubPack]), 'stories')).toEqual(KERNEL_PIPELINE_TOOLS);
+  });
+});
+
+describe('two packs loaded, one measured', () => {
+  let stories: PipelineHandle;
+  let healthcare: PipelineHandle;
+
+  beforeAll(async () => {
+    await mkdir(STUB_SKILLS, { recursive: true });
+    // One registry, two handles: which pack is measured is not a property of the deployment, it
+    // is the `--pack` flag, and each handle resolves its own tools off the same loaded packs.
+    const packs = registryOf([healthcarePack, stubPack]);
+    const shared = {
+      databaseUrl: EVALS_DATABASE_URL,
+      storageDir: corpus,
+      gateway: { baseUrl: gateway.url, apiKey: 'sk-eval', timeoutMs: 10_000, maxCallsPerRun: 100 },
+      registry: packs,
+    };
+    stories = await openPipeline({ ...shared, measured: 'stories' });
+    healthcare = await openPipeline({ ...shared, measured: 'healthcare' });
+  }, 120_000);
+
+  afterAll(async () => {
+    await stories.close();
+    await healthcare.close();
+    await rm(path.dirname(STUB_SKILLS), { recursive: true, force: true });
+  });
+
+  it('runs the second pack through the kernel record tools it declares', async () => {
+    await stories.reset();
+    const outcome = await runCase(stories, CASE);
+    expect(outcome.error).toBeUndefined();
+    expect(outcome.toolsCalled).toEqual(['documents_ingest', 'documents_extract', 'records_get']);
+    expect(outcome.fields.find((f) => f.name === 'last_name')!.value).toBe('Lovelace');
+    // `records_get` carries its list under `attachments`; healthcare's `providers_get` carries
+    // the same row under `credentials`. Reading the wrong one reports an empty list and scores a
+    // real extraction as a miss.
+    expect(outcome.attachments.map((a) => a.kind)).toEqual(['license']);
+  });
+
+  it('still runs the healthcare pack through its own renamed tools, from the same registry', async () => {
+    await healthcare.reset();
+    const outcome = await runCase(healthcare, CASE);
+    expect(outcome.error).toBeUndefined();
+    expect(outcome.toolsCalled).toEqual(['documents_ingest', 'documents_extract', 'providers_get']);
+    expect(outcome.attachments.map((a) => a.kind)).toEqual(['license']);
   });
 });

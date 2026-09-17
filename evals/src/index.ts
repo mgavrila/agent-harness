@@ -15,12 +15,14 @@ export {
   type InjectionCase,
 } from './domain/cases.js';
 export {
-  DEFAULT_READBACK,
+  KERNEL_PIPELINE_TOOLS,
   normalizeMasking,
   openPipeline,
+  resolvePipelineTools,
   runCase,
   type OpenPipelineOptions,
   type PipelineHandle,
+  type PipelineTools,
 } from './domain/pipeline.js';
 export {
   normalizeValue,

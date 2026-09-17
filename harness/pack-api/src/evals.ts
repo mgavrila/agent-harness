@@ -23,30 +23,56 @@ export interface PackEvals {
   judgedFields: readonly string[];
   /** Module specifier exporting `generate(options)` for the synthetic corpus, e.g. `@harness/pack-stories/generate`. */
   generate?: string;
-  /** How a case reads back what it stored. Defaults to the kernel's names. */
+  /**
+   * Which tools one eval case drives, and which keys their results carry. Every member defaults
+   * to the kernel's own name, so a pack that ships no tools of its own may omit the block.
+   */
   readback?: EvalReadback;
 }
 
 /**
- * How one extraction case reads back what it stored.
+ * Which tools one extraction case drives, and which keys their results carry.
  *
- * A pack that ships no tools uses the kernel's three — `documents_ingest`, `documents_extract`,
- * `records_get` — and needs none of this. A pack that renames them, as healthcare does, says so
- * here rather than making the eval runner guess: the tool the runner reads with, the key on the
- * extract result that carries the record id, and the key on the read result that carries the
- * attachment list.
+ * `@harness/evals` runs the same three steps for every pack — ingest the document, extract it,
+ * read the record back — and before this block existed it named those steps' tools as string
+ * literals. That is only correct for a deployment whose tools are the kernel's. A pack may
+ * replace a kernel tool under the same name and answer in its own vocabulary, which healthcare
+ * does: its `documents_extract` returns the new record's id under `provider_id`, not
+ * `record_id`. A second pack measured beside it read a key that was never there, got
+ * `undefined`, and failed every case — which is what this block exists to prevent.
+ *
+ * Every member is optional and defaults to the kernel's name, so a pack that ships no tools of
+ * its own needs none of them. A pack that renames or replaces one says so here rather than
+ * making the eval runner guess.
  */
 export interface EvalReadback {
-  /** The tool that reads a stored record back, e.g. `records_get` or healthcare's `providers_get`. */
-  tool: string;
+  /** Registers the document. Takes `{ path }`. Default `documents_ingest`. */
+  ingestTool?: string;
   /**
-   * The key the record id travels under, used twice: the runner reads it off the
-   * `documents_extract` result, then passes it back as `tool`'s single argument under the same
-   * name. `records_get` wants `record_id` and `providers_get` wants `provider_id`, and in both
-   * cases the extract result spelled it the same way — said out loud here rather than relied on
-   * silently.
+   * Decides the document's kind. Default `documents_classify`.
+   *
+   * Declared for completeness — a pack describes its whole pipeline here, and a reader of the
+   * pack should not have to know which of the three steps today's `runCase` happens to drive.
+   * `runCase` does not call it: an eval case declares its own kind, and adding a call would
+   * change what every existing run measures.
    */
-  recordIdKey: string;
-  /** The key on the read result carrying the attachment list, e.g. `attachments`. */
-  attachmentsKey: string;
+  classifyTool?: string;
+  /** Reads the document and writes the record. Takes `{ document_id }`. Default `documents_extract`. */
+  extractTool?: string;
+  /** Reads a stored record back, e.g. `records_get` or healthcare's `providers_get`. Default `records_get`. */
+  readTool?: string;
+  /**
+   * The key the record id travels under: read off `extractTool`'s result, then passed back as
+   * `readTool`'s single argument under the same name. `records_get` wants `record_id` and
+   * `providers_get` wants `provider_id`. Default `record_id`.
+   *
+   * The two halves can come apart, and the eval runner resolves them separately: `replaces` is
+   * process-wide, so the pack that publishes `documents_extract` in a given deployment need not
+   * be the pack being measured. The runner takes the key it reads the extract result with from
+   * whichever loaded pack publishes that tool, and the key it calls `readTool` with from the
+   * measured pack. Both are this member, each read off its own pack.
+   */
+  recordIdKey?: string;
+  /** The key on the read result carrying the attachment list, e.g. `attachments`. Default `attachments`. */
+  attachmentsKey?: string;
 }

@@ -2,7 +2,6 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { createLogger } from '@harness/shared';
 import type { GatewayConfig, ToolDeps } from '@harness/core-tools';
-import type { EvalReadback } from '@harness/pack-api';
 import {
   declaredToolsOf,
   loadExtractionCases,
@@ -35,9 +34,13 @@ export interface RunOptions {
   limit?: number;
   /** Threshold the pipeline applies and the scorers assert on. Defaults to the shipped one. */
   confidenceThreshold?: number;
-  /** Packs to load, as `HARNESS_PACKS` would name them. The first is the one being measured. */
+  /**
+   * Packs to load, as `HARNESS_PACKS` would name them, first one first. Which of them is
+   * measured is `packName`, not the order: `--pack` picks it, and everything the run reads —
+   * the corpus, the cases, the judged fields, the tools `runCase` drives — follows that one.
+   */
   packs: readonly string[];
-  /** The measured pack's `Pack.name`, recorded on the report. */
+  /** The measured pack's `Pack.name`. Recorded on the report, and what selects it out of `packs`. */
   packName: string;
   /** The measured pack's record kinds, recorded on the report. */
   recordKinds: readonly string[];
@@ -45,8 +48,6 @@ export interface RunOptions {
   judgedFields: readonly string[];
   /** The measured pack's `evals.intakeSkill`; the injection check is written against its tools. */
   intakeSkillFile: string;
-  /** The measured pack's `evals.readback`, or `DEFAULT_READBACK`. */
-  readback: EvalReadback;
 }
 
 /**
@@ -135,6 +136,7 @@ export async function runEvals(opts: RunOptions): Promise<{ report: Report; mark
     gateway: opts.gateway,
     confidenceThreshold: opts.confidenceThreshold,
     packs: opts.packs,
+    measured: opts.packName,
   });
 
   interface Bucket {
@@ -171,7 +173,7 @@ export async function runEvals(opts: RunOptions): Promise<{ report: Report; mark
   try {
     for (const c of selected) {
       await pipeline.reset();
-      const outcome: CaseOutcome = await runCase(pipeline, c, opts.readback);
+      const outcome: CaseOutcome = await runCase(pipeline, c);
       const bucket = totals[c.split];
       bucket.cases += 1;
       if (!outcome.ok) {

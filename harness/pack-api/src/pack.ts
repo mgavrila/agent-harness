@@ -8,6 +8,13 @@ export type { Pack } from './types.js';
 const NAME = /^[a-z][a-z0-9-]*$/;
 
 /**
+ * Every tool name and every result key in the harness is lowercase snake case — `documents_get`,
+ * `providers_get`, `record_id`, `credentials` — so one pattern covers both halves of
+ * `evals.readback`.
+ */
+const TOOL_OR_KEY = /^[a-z][a-z0-9_]*$/;
+
+/**
  * Declare a pack. Identity at runtime, plus the checks that turn a typo into a startup failure
  * naming the pack rather than a `forms_list_templates` that quietly reports no templates.
  *
@@ -59,6 +66,17 @@ export function definePack(pack: Pack): Pack {
   for (const kind of pack.documentKinds) {
     if (!targetFor(pack.extraction, kind)) {
       throw new ConfigError(`pack "${pack.name}" document kind "${kind}" reaches no extraction target`);
+    }
+  }
+  // Every member of `evals.readback` is looked up by exact string at run time: a tool the eval
+  // runner calls, or a key it reads off a result. A stray space or an empty string there makes a
+  // case fail as a model miss — the runner calls a tool that does not exist, or reads a key
+  // nothing carries — rather than as the typo it is, and the number lands in a report.
+  for (const [field, value] of Object.entries(pack.evals?.readback ?? {}) as [string, string | undefined][]) {
+    if (value !== undefined && !TOOL_OR_KEY.test(value)) {
+      throw new ConfigError(
+        `pack "${pack.name}" evals.readback.${field} must be lowercase letters, digits and underscores, got "${value}"`,
+      );
     }
   }
   // A pack that replaces a tool has to ship one.
