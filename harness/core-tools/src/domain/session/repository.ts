@@ -1,3 +1,4 @@
+import { eq } from 'drizzle-orm';
 import { runs, type Db } from '@harness/db';
 import type { Principal } from '@harness/identity-api';
 import type { RunContext, ToolDeps } from '../tooling/types.js';
@@ -36,7 +37,6 @@ export async function openRun(db: Db, input: OpenRunInput): Promise<RunContext &
     .values({
       ...(input.id === undefined ? {} : { id: input.id }),
       client: input.client,
-      caller: input.principal.id,
       principalId: input.principal.id,
       threadId,
       surface,
@@ -44,6 +44,18 @@ export async function openRun(db: Db, input: OpenRunInput): Promise<RunContext &
     })
     .returning({ id: runs.id });
   return { runId: row.id, threadId, surface, conversation };
+}
+
+export type RunStatus = 'running' | 'done' | 'error' | 'cancelled';
+
+/** Close a run: the status it ended in and when. The one writer of `runs.status` after `openRun`. */
+export async function closeRun(
+  db: Db,
+  runId: string,
+  status: RunStatus,
+  now: () => Date = () => new Date(),
+): Promise<void> {
+  await db.update(runs).set({ status, endedAt: now() }).where(eq(runs.id, runId));
 }
 
 /**

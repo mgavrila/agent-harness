@@ -45,7 +45,7 @@ export {
 export { allTools, createCoreToolsServer, kernelTools, publishedTools } from './tools/catalog.js';
 
 // --- Domains ------------------------------------------------------------------------------
-export { openRun, type OpenRunInput } from './domain/session/repository.js';
+export { closeRun, openRun, type OpenRunInput, type RunStatus } from './domain/session/repository.js';
 export { createOrReuseApproval } from './domain/approvals/repository.js';
 export { executeApproval, type ExecutedApproval } from './domain/approvals/execute.js';
 export {

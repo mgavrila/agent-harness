@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import * as z from 'zod/v4';
 import { eq } from 'drizzle-orm';
-import { approvals, auditLog, encrypt, records } from '@harness/db';
+import { approvals, auditLog, encrypt, records, threads } from '@harness/db';
 import { ToolError } from '@harness/shared';
 import { defineTool } from '../domain/tooling/registry.js';
 import {
@@ -223,5 +223,26 @@ describe('approvals_execute', () => {
     expect(textOf(res)).toContain('blocked by policy');
     const [after] = await db.select().from(approvals).where(eq(approvals.id, row.id));
     expect(after.status).toBe('approved');
+  });
+});
+
+describe('parking an approval', () => {
+  it('records the thread the call was made from', async () => {
+    const [thread] = await db
+      .insert(threads)
+      .values({ client: 'test', surface: 'memory', conversation: 'memory', principalId: 'u-test' })
+      .returning();
+    const threadDeps = makeTestDeps(db, { context: { threadId: thread.id } });
+    const client = await connectTools('approvals-test-thread', replayableTools, threadDeps);
+    const id = await park(client, { name: 'Dr. Threaded' });
+    const [row] = await db.select().from(approvals).where(eq(approvals.id, id));
+    expect(row.threadId).toBe(thread.id);
+  });
+
+  it('parks with a null thread outside a thread', async () => {
+    const client = await connectApprovals();
+    const id = await park(client, { name: 'Dr. Threadless' });
+    const [row] = await db.select().from(approvals).where(eq(approvals.id, id));
+    expect(row.threadId).toBeNull();
   });
 });
