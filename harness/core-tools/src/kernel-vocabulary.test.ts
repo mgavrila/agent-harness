@@ -114,7 +114,7 @@ async function sourceFiles(dir: string, skip: RegExp[]): Promise<string[]> {
   return found.filter((file) => !skip.some((pattern) => pattern.test(file.split(path.sep).join('/'))));
 }
 
-describe('the kernel names no area of the product', () => {
+describe('the kernel, the packs and the evals name no area of the product', () => {
   for (const { what, root, forbidden, minFiles, skip } of SCANNED) {
     it(`finds no ${what} in ${root}`, async () => {
       const hits: string[] = [];
