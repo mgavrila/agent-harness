@@ -43,14 +43,14 @@ describe('approvalCard', () => {
     expect(approvalCard(row(), CAN)).toEqual({
       id: 'harness_approval',
       title: 'Approval needed',
-      subtitle: 'forms_release (external) requested by hermes',
-      notice: 'Approval needed: forms_release (external) requested by hermes',
+      subtitle: 'forms_release (external) requested by u-coordinator',
+      notice: 'Approval needed: forms_release (external) requested by u-coordinator',
       body: [
         {
           note: [
             { code: 'forms_release' },
             { text: ' · requested by ' },
-            { code: 'hermes' },
+            { code: 'u-coordinator' },
             { text: ' · expires ' },
             { at: new Date('2026-09-16T12:00:00Z') },
           ],

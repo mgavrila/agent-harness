@@ -22,9 +22,8 @@ export interface HealthServer {
  * because anything reachable over HTTP is outside the audit trail.
  *
  * `bind` defaults to every interface. In Compose that is the only bind that
- * works: Docker's port publish DNATs to the container's bridge address and the
- * Hermes watchdogs reach `http://approvals:8787/healthz` on the same address,
- * so a container-loopback listener answers neither. Exposure is controlled one
+ * works: Docker's port publish DNATs to the container's bridge address, which
+ * a container-loopback listener cannot answer. Exposure is controlled one
  * layer out, by the port mapping, which is pinned to `127.0.0.1` on the host.
  * Pass `127.0.0.1` for a bare-metal run (and in tests) where the process, not
  * Compose, is the boundary.

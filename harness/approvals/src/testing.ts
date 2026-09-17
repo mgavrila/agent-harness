@@ -16,8 +16,8 @@ const PENDING = () => ({
   client: 'demo-practice',
   action: 'forms_release',
   payload: { tool: 'forms_release', args: { file_id: 'roster/aetna-abc123def456.csv' } },
-  summary: 'forms_release (external) requested by hermes',
-  requestedBy: 'hermes',
+  summary: 'forms_release (external) requested by u-coordinator',
+  requestedBy: 'u-coordinator',
   idempotencyKey: 'k1',
   // A fresh Date per call: a shared instance would be one mutable object handed to every row.
   expiresAt: new Date('2026-09-16T12:00:00Z'),

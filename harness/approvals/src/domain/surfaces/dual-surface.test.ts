@@ -77,7 +77,7 @@ describe('a host with several surfaces loaded', () => {
     await postPendingApprovals({ db, surface: surfaces.primary, client: 'demo-practice', now });
     const blocks = slack.api.posts[0].blocks as { type: string }[];
     expect(blocks.map((b) => b.type)).toEqual(['section', 'context', 'section', 'actions', 'context']);
-    expect(slack.api.posts[0].text).toBe('Approval needed: forms_release (external) requested by hermes');
+    expect(slack.api.posts[0].text).toBe('Approval needed: forms_release (external) requested by u-coordinator');
   });
 
   it('accepts the decision on the surface that posted the card, and edits it there', async () => {

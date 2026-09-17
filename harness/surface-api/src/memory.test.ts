@@ -6,8 +6,8 @@ import type { ActionEvent, Card, Form, FormEvent, MessageEvent } from './types.j
 const card = (over: Partial<Card> = {}): Card => ({
   id: 'demo_card',
   title: 'Approval needed',
-  subtitle: 'forms_release (external) requested by hermes',
-  notice: 'Approval needed: forms_release (external) requested by hermes',
+  subtitle: 'forms_release (external) requested by u-coordinator',
+  notice: 'Approval needed: forms_release (external) requested by u-coordinator',
   body: [{ code: '{ "a": 1 }' }],
   actions: [{ id: 'demo_approve', label: 'Approve', style: 'primary', value: 'a1' }],
   footer: [{ text: 'Approval ' }, { code: 'a1' }],

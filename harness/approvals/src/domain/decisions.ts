@@ -44,7 +44,7 @@ export type DecisionResult =
 const WITHHELD = '(withheld: it did not pass the redaction check)';
 
 /**
- * The reply Hermes reads as a new turn. It reports what already happened — the host executes
+ * The reply the host reads as a new turn. It reports what already happened — the host executes
  * before replying — so the agent never has to guess, and never says an action succeeded while it
  * is still pending. `who` is the deciding principal's display name.
  */
