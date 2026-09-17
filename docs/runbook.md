@@ -512,10 +512,11 @@ message an unknown approval gets, because from where the person is standing that
 **Who may decide is the identity plug-in's answer, not a surface setting.** A decision is
 accepted only from a principal of `kind: 'user'` at level `lead` or above, resolved from the
 surface user id that pressed the button, on the surface the card was posted on; a service
-principal is refused regardless of its level. Every refusal — an unknown user, a service
-principal, a decision on the wrong surface, a malformed approval id — gets the identical
-message, so an outsider learns nothing about whether the approval even exists. There is no
-allowlist and no bypass.
+principal is refused regardless of its level. An unauthorised presser — an unknown user, a
+service principal, a user under `lead` — always gets the same message, "You are not an approver
+for this workspace.", before the approval is even looked up, so an outsider learns nothing about
+whether it exists. An authorised presser may instead see "That approval no longer exists.": for a
+malformed approval id, or a decision on the wrong surface. There is no allowlist and no bypass.
 
 **Effects are addressed, not assumed.** A staged effect's payload may name a `surface` and a
 `conversation`; with neither, it goes to the primary surface's default conversation. A payload

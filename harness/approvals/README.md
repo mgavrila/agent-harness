@@ -33,8 +33,12 @@ src/testing.ts           ./testing: MemorySurface, FakeCoreToolsClient, useTestD
 
 A decision is accepted only from a `kind: 'user'` principal the identity plug-in resolves for the
 surface user id that pressed the button, whose level clears `lead` — never from a service
-principal, whatever its level, and never from an allowlist. Every refusal, whatever the reason,
-gets the identical message: an outsider learns nothing about whether the approval even exists.
+principal, whatever its level, and never from an allowlist. An unauthorised presser — an unknown
+user, a service principal, a level under `lead` — always gets `UNAUTHORIZED_TEXT`
+("You are not an approver for this workspace.") before the approval is even looked up, so an
+outsider learns nothing about whether it exists. An authorised presser may instead see
+`NOT_FOUND_TEXT` ("That approval no longer exists."): for a malformed approval id, or a decision
+on the wrong surface.
 
 `decideApproval` executes the action through `CoreToolsClient.execute(approvalId, principal)`
 **as that principal**: `createInProcessCoreToolsClient` (`src/domain/execute/in-process.ts`) opens
