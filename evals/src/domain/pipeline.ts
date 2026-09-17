@@ -142,10 +142,11 @@ export function resolvePipelineTools(packs: PackRegistry, measured: string): Pip
  * is the correction this function exists for. `Pack.replaces` is process-wide, so the pack that
  * publishes `documents_extract` in a given deployment need not be the pack being measured — and
  * a pack that takes the name over does **not** answer in its own vocabulary for every document
- * it is handed. The shipped healthcare replacement renames the id to `provider_id` for a
- * credentialing document and passes another pack's document straight back as the kernel produced
- * it, under `record_id`, because renaming another pack's record would be a lie. Reading one key
- * for the whole run therefore got `undefined` on every case of the second pack.
+ * it is handed. A shipped pack does exactly this: it renames the new record's id to its own word
+ * for a document of its own kind, and hands a document of another pack's kind straight back as
+ * the kernel produced it, under `record_id`, because renaming another pack's record would be a
+ * lie. Reading one key for the whole run therefore got `undefined` on every case of the second
+ * pack.
  *
  * So the question is asked per document: whichever pack *claims the document's kind* owns the
  * result shape, and `targetFor` is the same routing the kernel's own extract does — an exact
