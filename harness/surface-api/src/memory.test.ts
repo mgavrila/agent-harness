@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { SurfaceError } from '@harness/shared';
+import { ANY_USER, allowsUser } from './surface.js';
 import { MemorySurface } from './testing.js';
 import type { ActionEvent, Card, Form, FormEvent } from './types.js';
 
@@ -41,6 +42,12 @@ describe('MemorySurface', () => {
     await expect(surface.updateCard({ ...ref, id: 'm99' }, card())).rejects.toThrow(SurfaceError);
   });
 
+  it('refuses an update whose reference names a different surface', async () => {
+    const surface = new MemorySurface();
+    const ref = await surface.postCard('memory', card());
+    await expect(surface.updateCard({ ...ref, surface: 'slack' }, card())).rejects.toThrow(SurfaceError);
+  });
+
   it('records a reply under the message it replies to', async () => {
     const surface = new MemorySurface();
     const ref = await surface.postCard('memory', card());
@@ -80,6 +87,82 @@ describe('MemorySurface', () => {
   it('refuses to open a form when it was built without the capability', async () => {
     const surface = new MemorySurface({ capabilities: { forms: false } });
     await expect(surface.openForm('t1', form)).rejects.toThrow(/cannot open a form/);
+  });
+
+  it('reports a submission in the conversation of the card the form was opened from', async () => {
+    const surface = new MemorySurface();
+    const seen: FormEvent[] = [];
+    surface.onFormSubmit(async (event) => {
+      seen.push(event);
+    });
+    await surface.postCard('C0DEMO', card());
+    await surface.openForm('t1', form);
+    await surface.submit('demo_form', { note: 'Use the Q4 roster.' }, 'U012');
+    expect(seen[0].conversation).toBe('C0DEMO');
+  });
+
+  it('records an upload and hands back the filename the host asked for', async () => {
+    const surface = new MemorySurface();
+    const sent = await surface.uploadFile('memory', {
+      path: '/srv/harness-storage/out/roster/a.csv',
+      filename: 'a.csv',
+      comment: 'The Q4 roster.',
+    });
+    expect(sent).toEqual({ filename: 'a.csv' });
+    expect(surface.uploads).toEqual([
+      {
+        conversation: 'memory',
+        filename: 'a.csv',
+        path: '/srv/harness-storage/out/roster/a.csv',
+        comment: 'The Q4 roster.',
+      },
+    ]);
+  });
+
+  it('records an upload with no comment as a null one, not an absent key', async () => {
+    const surface = new MemorySurface();
+    await surface.uploadFile('memory', { path: '/srv/harness-storage/out/roster/b.csv', filename: 'b.csv' });
+    expect(surface.uploads[0].comment).toBeNull();
+  });
+
+  it('records a private note, and refuses one when it was built without the capability', async () => {
+    const surface = new MemorySurface();
+    await surface.postPrivate('memory', 'U012', 'Only you can see this.');
+    expect(surface.privates).toEqual([{ conversation: 'memory', userId: 'U012', text: 'Only you can see this.' }]);
+
+    const quiet = new MemorySurface({ capabilities: { privateReply: false } });
+    await expect(quiet.postPrivate('memory', 'U012', 'nope')).rejects.toThrow(/cannot send a private note/);
+    expect(quiet.privates).toEqual([]);
+  });
+
+  it('refuses to update a card when it was built without the capability', async () => {
+    const surface = new MemorySurface({ capabilities: { update: false } });
+    const ref = await surface.postCard('memory', card());
+    await expect(surface.updateCard(ref, card({ actions: [] }))).rejects.toThrow(/cannot update a message/);
+    expect(surface.cards[0].card.actions).toHaveLength(1);
+  });
+
+  it('flags itself started and stopped, so a host test can prove it ran the lifecycle', async () => {
+    const surface = new MemorySurface();
+    expect(surface.started).toBe(false);
+    expect(surface.stopped).toBe(false);
+    await surface.start();
+    expect(surface.started).toBe(true);
+    expect(surface.stopped).toBe(false);
+    await surface.stop();
+    expect(surface.stopped).toBe(true);
+  });
+
+  it('allows everybody by default, because it has no transport to protect', () => {
+    const surface = new MemorySurface();
+    expect([...surface.allowedUsers]).toEqual([ANY_USER]);
+    expect(allowsUser(surface.allowedUsers, 'anyone-at-all')).toBe(true);
+  });
+
+  it('takes an allowlist that names names, and then fails closed for everyone else', () => {
+    const surface = new MemorySurface({ allowedUsers: new Set(['U012']) });
+    expect(allowsUser(surface.allowedUsers, 'U012')).toBe(true);
+    expect(allowsUser(surface.allowedUsers, 'U999')).toBe(false);
   });
 
   it('fails every call while failWith is set, the way an unreachable transport does', async () => {

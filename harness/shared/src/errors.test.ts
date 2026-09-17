@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { ConfigError, ModelOutputError, SurfaceError, ToolError, describeError } from './errors.js';
 
-describe('the three error types', () => {
+describe('the four error types', () => {
   it('names itself, so an audit row says which kind it was', () => {
     expect(new ToolError('nope').name).toBe('ToolError');
     expect(new ConfigError('nope').name).toBe('ConfigError');

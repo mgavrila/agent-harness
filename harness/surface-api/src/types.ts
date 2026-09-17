@@ -176,8 +176,10 @@ export interface SurfaceSession {
   /** How this surface spells a mention of a user inside plain text. */
   mention(userId: string): string;
   postCard(conversation: string, card: Card): Promise<MessageRef>;
+  /** Rejects with a `SurfaceError` when `capabilities.update` is false. */
   updateCard(ref: MessageRef, card: Card): Promise<void>;
   postText(conversation: string, text: string, opts?: { replyTo?: MessageRef }): Promise<MessageRef>;
+  /** Rejects with a `SurfaceError` when `capabilities.privateReply` is false. */
   postPrivate(conversation: string, userId: string, text: string): Promise<void>;
   uploadFile(conversation: string, file: UploadRequest): Promise<{ filename: string }>;
   /** Rejects with a `SurfaceError` when `capabilities.forms` is false. */

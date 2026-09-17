@@ -79,7 +79,10 @@ export class MemorySurface implements SurfaceSession {
 
   async updateCard(ref: MessageRef, card: Card): Promise<void> {
     this.guard();
-    const found = this.cards.findIndex((c) => c.ref.id === ref.id && c.ref.conversation === ref.conversation);
+    if (!this.capabilities.update) throw new SurfaceError(`${this.name}: cannot update a message`);
+    const found = this.cards.findIndex(
+      (c) => c.ref.id === ref.id && c.ref.conversation === ref.conversation && c.ref.surface === ref.surface,
+    );
     if (found === -1) throw new SurfaceError(`${this.name}: no message "${ref.id}" to update`);
     this.cards[found] = { ref: this.cards[found].ref, card };
   }
@@ -143,7 +146,11 @@ export class MemorySurface implements SurfaceSession {
     });
   }
 
-  /** A human submits a form. `metadata` defaults to the most recently opened form's. */
+  /**
+   * A human submits a form. `metadata` defaults to the most recently opened form's, and the
+   * conversation to the most recently posted card's — a form is opened from a button on a card,
+   * so that is the conversation the submission belongs to. `over` overrides either.
+   */
   async submit(
     formId: string,
     values: Record<string, string>,
@@ -152,10 +159,11 @@ export class MemorySurface implements SurfaceSession {
   ): Promise<void> {
     if (!this.formHandler) throw new SurfaceError(`${this.name}: no form handler is registered`);
     const last = this.forms.at(-1) ?? null;
+    const lastCard = this.cards.at(-1) ?? null;
     await this.formHandler({
       surface: this.name,
       userId,
-      conversation: this.defaultConversation,
+      conversation: lastCard?.ref.conversation ?? this.defaultConversation,
       formId,
       metadata: last?.form.metadata ?? '',
       values,

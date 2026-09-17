@@ -15,7 +15,8 @@ export { CONVERSATION_ID_PATTERN, SURFACE_NAME_PATTERN } from '@harness/shared';
  * `surface` and `conversation` are nullable as well as optional: a staging tool writes an
  * explicit null when the caller named neither, and that means "the default", not "invalid".
  * `channel` is the same field under its pre-0009 name — rows staged before the upgrade are still
- * in the outbox and still have to deliver.
+ * in the outbox and still have to deliver. A row carrying both is read as `conversation`: the
+ * newer name wins, because only a writer that knows about `conversation` can have set it.
  */
 const surfaceName = z
   .string()
