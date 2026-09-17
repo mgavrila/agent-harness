@@ -19,6 +19,6 @@ describe('parseManifest', () => {
   });
 
   it('refuses an empty list, because a record kind with no fields can store nothing', () => {
-    expect(() => parseManifest([], never)).toThrow(/provider manifest is invalid/);
+    expect(() => parseManifest([], never)).toThrow(/record manifest is invalid/);
   });
 });

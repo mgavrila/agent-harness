@@ -36,7 +36,7 @@ GRANT INSERT, SELECT ON TABLE audit_log TO harness_app;
 -- Everything else is read/write but never destructive.
 GRANT SELECT, INSERT, UPDATE ON TABLE
   records, documents, fields, attachments, deadlines,
-  approvals, runs, model_calls
+  approvals, runs, model_calls, tool_effects
 TO harness_app;
 
 -- `deadlines_compute` retires deadlines whose attachment lost its expiry date,

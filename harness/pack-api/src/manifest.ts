@@ -36,16 +36,16 @@ export function refineFields(fields: ManifestField[], { isRestrictedName }: Mani
   for (const f of fields) {
     // A restricted value must never be something a model is asked to produce.
     if (f.restricted && f.source !== 'redaction') {
-      throw new Error(`provider manifest is invalid: field "${f.name}" is restricted but not sourced from redaction`);
+      throw new Error(`record manifest is invalid: field "${f.name}" is restricted but not sourced from redaction`);
     }
     if (f.source === 'redaction' && !f.restricted) {
-      throw new Error(`provider manifest is invalid: field "${f.name}" is redaction-sourced but not marked restricted`);
+      throw new Error(`record manifest is invalid: field "${f.name}" is redaction-sourced but not marked restricted`);
     }
     // The storage layer decides what to encrypt from the field *name*. A restricted field whose
     // name it does not recognise would be stored in plaintext, so the manifest refuses one.
     if (f.restricted && !isRestrictedName(f.name)) {
       throw new Error(
-        `provider manifest is invalid: restricted field "${f.name}" is not recognised by isRestrictedName; add its stem to RESTRICTED_NAME_KEYS in shared/redaction/names.ts`,
+        `record manifest is invalid: restricted field "${f.name}" is not recognised by isRestrictedName; add its stem to RESTRICTED_NAME_KEYS in shared/redaction/names.ts`,
       );
     }
   }
@@ -54,7 +54,7 @@ export function refineFields(fields: ManifestField[], { isRestrictedName }: Mani
 /** Validate a bare list of fields. Used by `parseRecordKind` and by core-tools' own tests. */
 export function parseManifest(raw: unknown, checks: ManifestChecks): ManifestField[] {
   const parsed = z.array(ManifestFieldShape).min(1).safeParse(raw);
-  if (!parsed.success) throw new Error(`provider manifest is invalid: ${z.prettifyError(parsed.error)}`);
+  if (!parsed.success) throw new Error(`record manifest is invalid: ${z.prettifyError(parsed.error)}`);
   refineFields(parsed.data, checks);
   return parsed.data;
 }

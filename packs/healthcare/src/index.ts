@@ -34,7 +34,7 @@ const extraction = parseExtractionManifest(raw.extraction);
 /**
  * The action-class defaults this pack ships, read from the file a human edits. The `Pack`
  * contract carries this field, but core's `loadPolicy` does not merge it into `deps.policy`
- * yet — see ARCHITECTURE.md, "Packs are plug-ins, not dependencies".
+ * yet — see ARCHITECTURE.md, "The kernel and a pack".
  */
 const { classes = {} } = parseYaml(readFileSync(path.join(root, 'policy.yaml'), 'utf8')) as {
   classes?: Partial<Policy>;

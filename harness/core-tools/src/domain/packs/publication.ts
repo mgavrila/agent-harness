@@ -2,8 +2,8 @@ import { ConfigError } from '@harness/shared';
 import type { AnyToolDef } from '../tooling/types.js';
 
 /**
- * One contributor of tools to the published catalogue: a loaded pack, or the transitional
- * compat layer that stands in for one until Plan 5 Task 4 moves it into the healthcare pack.
+ * One contributor of tools to the published catalogue: a loaded pack, described by what it
+ * replaces and what it adds, so the publication rules can name it in a failure message.
  */
 export interface ToolSource {
   /** Names the source in every failure message an operator reads. */
