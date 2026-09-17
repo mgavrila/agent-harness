@@ -8,6 +8,13 @@ import type { PageText, ParsedDocument } from './types.js';
 /** Below this many characters per page, on average, a PDF is treated as having no usable text layer. */
 export const MIN_CHARS_PER_PAGE = 40;
 
+/**
+ * A document with more pages than this is refused before `pdftotext` or `pdftoppm` ever run on
+ * it: `pdfinfo`'s page count comes from an untrusted file, and looping over it unbounded would
+ * let one upload buy an arbitrarily long render-and-OCR run.
+ */
+export const MAX_PAGES = 500;
+
 const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.tif', '.tiff', '.bmp']);
 
 const BINARIES = ['pdfinfo', 'pdftotext', 'pdftoppm', 'tesseract'] as const;
@@ -65,6 +72,11 @@ async function isPdf(absPath: string): Promise<boolean> {
   try {
     const { buffer, bytesRead } = await handle.read(Buffer.alloc(5), 0, 5, 0);
     return bytesRead === 5 && buffer.toString('latin1') === '%PDF-';
+  } catch (err) {
+    // A path that resolved to a directory reads as EISDIR, not ENOENT: the containment check
+    // only confirms the path exists and is inside the root, not that it names a regular file.
+    if ((err as NodeJS.ErrnoException).code === 'EISDIR') throw new ParseError(404, 'no such document');
+    throw err;
   } finally {
     await handle.close();
   }
@@ -160,6 +172,9 @@ export async function extractDocument(absPath: string, options: ExtractOptions =
     return { pages, text: joinPages(pages), ocrUsed: true };
   }
   const count = await pageCount(absPath, opts.textTimeoutMs);
+  if (count > MAX_PAGES) {
+    throw new ParseError(422, `${path.basename(absPath)} has ${count} pages, over the ${MAX_PAGES}-page limit`);
+  }
   const layer = await textLayer(absPath, count, opts.textTimeoutMs);
   const total = layer.reduce((sum, p) => sum + p.text.trim().length, 0);
   if (total >= MIN_CHARS_PER_PAGE * Math.max(count, 1)) return { pages: layer, text: joinPages(layer), ocrUsed: false };

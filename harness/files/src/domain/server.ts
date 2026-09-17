@@ -41,10 +41,14 @@ async function resolveInside(storageDir: string, requested: unknown): Promise<st
   return assertInsideRoot(
     requested,
     storageDir,
-    () => {
+    (reason) => {
+      // A path that traverses through a regular file, or through a segment `realpath` cannot
+      // read, resolves to nothing rather than to something outside the root: that is a missing
+      // document, not an escape attempt, so it is answered as 404.
+      if (reason === 'unreadable') throw new ParseError(404, 'no such document');
       throw new ParseError(403, 'path is outside the storage root');
     },
-    { allowRoot: false },
+    { allowRoot: false, onUnreadable: 'escape' },
   );
 }
 

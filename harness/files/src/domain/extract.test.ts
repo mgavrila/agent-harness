@@ -6,7 +6,7 @@ import { promisify } from 'node:util';
 import { PDFDocument, StandardFonts } from 'pdf-lib';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { ParseError } from './errors.js';
-import { extractDocument, missingBinaries } from './extract.js';
+import { MAX_PAGES, extractDocument, missingBinaries } from './extract.js';
 
 const run = promisify(execFile);
 let dir: string;
@@ -113,6 +113,30 @@ describe('extractDocument', () => {
     expect((err as ParseError).status).toBe(404);
     expect((err as Error).message).not.toContain(dir);
   });
+
+  it('reports a directory as 404 rather than a raw filesystem error', async () => {
+    const err = await extractDocument(dir).catch((caught: unknown) => caught);
+    expect(err).toBeInstanceOf(ParseError);
+    expect((err as ParseError).status).toBe(404);
+    expect((err as Error).message).not.toContain(dir);
+  });
+
+  it.skipIf(!popplerAvailable)(
+    'refuses a document over the page limit with 422 before running pdftotext or OCR',
+    async () => {
+      const huge = path.join(dir, 'huge.pdf');
+      const doc = await PDFDocument.create();
+      for (let i = 0; i < MAX_PAGES + 1; i += 1) doc.addPage([612, 792]);
+      await writeFile(huge, await doc.save());
+      const err = await extractDocument(huge).catch((caught: unknown) => caught);
+      expect(err).toBeInstanceOf(ParseError);
+      expect((err as ParseError).status).toBe(422);
+      expect((err as Error).message).toContain(String(MAX_PAGES + 1));
+      expect((err as Error).message).toContain(String(MAX_PAGES));
+      expect((err as Error).message).not.toContain(dir);
+    },
+    30_000,
+  );
 
   it.skipIf(!ocrAvailable)(
     'reports a timeout as 422 and never quotes the path',

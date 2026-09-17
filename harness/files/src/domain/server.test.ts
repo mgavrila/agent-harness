@@ -80,6 +80,12 @@ describe('POST /extract', () => {
     expect((await post({ path: 'incoming/missing.pdf' })).status).toBe(404);
   });
 
+  it('answers 404, not 500, to a path that traverses through a regular file', async () => {
+    const { status, json } = await post({ path: 'incoming/license.pdf/y' });
+    expect(status).toBe(404);
+    expect(JSON.stringify(json)).not.toContain(storageDir);
+  });
+
   it('answers 404 to any other route and 200 to the health probe', async () => {
     expect((await fetch(`${base}/other`)).status).toBe(404);
     expect(await (await fetch(`${base}/healthz`)).json()).toEqual({ ok: true });

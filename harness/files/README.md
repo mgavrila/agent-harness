@@ -15,7 +15,9 @@ GET  /healthz  { "ok": true }
 40 characters per page on average it is rasterised page by page with `pdftoppm` and read with
 `tesseract`, exactly as core-tools' own `localParser` does. An image is read with `tesseract`
 directly. A path that is absolute, or resolves outside the storage root through `..` or a
-symlink, is refused with `403` before anything is read.
+symlink, is refused with `403` before anything is read. A document reporting more than
+`MAX_PAGES` (500) pages from `pdfinfo` is refused with `422` before `pdftotext` or `pdftoppm`
+ever runs on it, so one upload cannot buy an unbounded render-and-OCR run.
 
 | Variable              | Meaning                                                     |
 | --------------------- | ----------------------------------------------------------- |
@@ -25,6 +27,16 @@ symlink, is refused with `403` before anything is read.
 
 Error bodies are `{ "error": "…" }` and name a file's basename at most, never a path and never a
 line of the page: the message ends up in `audit_log.error` on the core-tools side.
+
+| Status | When                                                                                                                    |
+| ------ | ----------------------------------------------------------------------------------------------------------------------- |
+| `400`  | the body is not JSON, or has no `path`                                                                                  |
+| `403`  | `path` is absolute, or resolves outside the storage root (`..`, a symlink)                                              |
+| `404`  | no such file, `path` names a directory, or `path` traverses through a regular file                                      |
+| `413`  | the body is over 64 KiB                                                                                                 |
+| `415`  | the file is neither a PDF nor an image                                                                                  |
+| `422`  | `pdfinfo`/`pdftotext`/`pdftoppm`/`tesseract` failed or timed out, or the document has more than `MAX_PAGES` (500) pages |
+| `500`  | anything else                                                                                                           |
 
 ```bash
 pnpm --filter @harness/files test      # the OCR cases skip when poppler or tesseract is missing
