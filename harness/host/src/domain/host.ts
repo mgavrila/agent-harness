@@ -50,4 +50,11 @@ export interface Host {
   active: Map<string, ActiveRun>;
   /** The tail of each thread's turn chain, by thread id; the entry is dropped when the chain drains. */
   turns: Map<string, Promise<void>>;
+  /**
+   * Set once `drainActive` begins and never cleared: the process is stopping. A turn still queued
+   * on a thread's chain must not start after that, or it would open a run against a runtime and a
+   * database pool the shutdown is about to close — the stranded `running` row the drain exists to
+   * prevent, arriving one link later.
+   */
+  draining: boolean;
 }

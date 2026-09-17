@@ -254,6 +254,27 @@ describe('drainActive', () => {
     expect(f.surface.texts).toEqual([]);
   });
 
+  it('refuses a turn queued behind a draining one instead of opening a run after shutdown', async () => {
+    const f = await hostFixture(db, {
+      trajectory: (request) => (request.input.text === 'first' ? [{ sleep: 10_000 }] : [{ say: 'two' }]),
+    });
+    attachMessageHandlers(f.host);
+    const turns = [f.surface.say('U012', 'first'), f.surface.say('U012', 'second')];
+    await new Promise((r) => setTimeout(r, 50));
+
+    await drainActive(f.host, 10_000);
+    await Promise.all(turns);
+
+    // The second turn was next on the thread's chain; starting it now would open a run against a
+    // runtime and a pool the caller is about to stop.
+    const rows = await db.select().from(runs);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].status).toBe('cancelled');
+    expect(f.runtime.requests.map((r) => r.input.text)).toEqual(['first']);
+    expect(await db.select().from(messages)).toHaveLength(1);
+    expect(f.surface.texts).toEqual([]);
+  });
+
   it('gives up on a turn that does not end within the bound rather than blocking shutdown', async () => {
     const f = await hostFixture(db, { trajectory: [{ say: 'unused' }] });
     const controller = new AbortController();

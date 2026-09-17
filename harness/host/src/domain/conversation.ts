@@ -219,10 +219,20 @@ export async function runTurn(host: Host, turn: TurnInput): Promise<TurnResult> 
  * The chain's tail is stored with its failures swallowed — a turn that throws must not stop the
  * next message on that thread — and dropped from the map once it drains, so an idle thread leaves
  * nothing behind.
+ *
+ * A turn whose turn comes once the host is draining is dropped rather than started: the process is
+ * on its way out, and the run it would open is one nothing would be left to close. The human is
+ * told nothing, because there is no longer a process to tell them from.
  */
-export function serialize<T>(host: Host, threadId: string, fn: () => Promise<T>): Promise<T> {
+export function serialize<T>(host: Host, threadId: string, fn: () => Promise<T>): Promise<T | undefined> {
   const previous = host.turns.get(threadId) ?? Promise.resolve();
-  const result = previous.then(fn);
+  const result = previous.then(() => {
+    if (host.draining) {
+      host.log.info(`thread ${threadId}: the host is shutting down; the turn was not started`);
+      return undefined;
+    }
+    return fn();
+  });
   const chain = result.then(
     () => undefined,
     () => undefined,
@@ -235,13 +245,15 @@ export function serialize<T>(host: Host, threadId: string, fn: () => Promise<T>)
 }
 
 /**
- * Cancel every turn in flight and wait for them, for at most `boundMs`. What shutdown calls
- * between aborting and stopping anything the turns are still using: each entry's promise resolves
+ * Cancel every turn in flight and wait for them, for at most `boundMs`, and refuse every turn that
+ * has not started yet. What shutdown calls between aborting and stopping anything the turns are
+ * still using: each entry's promise resolves
  * only once that turn has closed its run row, so a drained host leaves no run `running` forever.
  * Nothing sweeps such a row afterwards — `harness_reconcile` touches approvals and dispatches, not
  * runs — which is why the bound is a bound and not the absence of one.
  */
 export async function drainActive(host: Host, boundMs: number): Promise<void> {
+  host.draining = true;
   const inflight = [...host.active.entries()];
   if (inflight.length === 0) return;
   for (const [runId] of inflight) cancelRun(host, runId);

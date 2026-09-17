@@ -71,7 +71,10 @@ health server, stop every surface, stop the runtime, stop the identity plug-in, 
 core-tools client, close the database pool. The drain comes first because everything after it
 takes away something a turn is still using: the runtime's `stop()` ends its checkpointer pool and
 `closeDb()` the host's, and a turn that lost that race left its `runs` row `running` forever.
-Nothing sweeps such a row — `harness_reconcile` reads approvals and dispatches, never `runs`.
+Nothing sweeps such a row — `harness_reconcile` reads approvals and dispatches, never `runs`. The
+drain also sets `host.draining`, which is what keeps a turn still queued on a thread's chain from
+starting behind it: it is dropped with a log line rather than opening a run nothing would be left
+to close.
 
 ## Layout
 

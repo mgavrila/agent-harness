@@ -106,6 +106,7 @@ export async function hostFixture(
     now: () => new Date('2026-09-15T12:00:00Z'),
     active: new Map(),
     turns: new Map(),
+    draining: false,
   };
   return {
     host,

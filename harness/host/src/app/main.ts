@@ -97,6 +97,7 @@ const host: Host = {
   now: () => new Date(),
   active: new Map(),
   turns: new Map(),
+  draining: false,
 };
 
 const core = createInProcessCoreToolsClient({ db, config, client: config.client, servicePrincipal });
