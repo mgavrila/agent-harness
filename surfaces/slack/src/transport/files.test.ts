@@ -110,6 +110,66 @@ describe('downloadAttachments', () => {
   });
 });
 
+describe('downloadAttachments host pinning', () => {
+  it('refuses a URL that is not https on a Slack host, never sending the bot token', async () => {
+    for (const url of ['http://evil.example/x.pdf', 'https://evil.example/x.pdf', 'http://files.slack.com/x.pdf']) {
+      const warned: string[] = [];
+      let called = 0;
+      const fetchStub = (async () => {
+        called += 1;
+        return new Response('x');
+      }) as typeof fetch;
+      const out = await downloadAttachments('1.1', [{ name: 'x.pdf', url }], {
+        token: 'xoxb-test',
+        storageDir,
+        fetch: fetchStub,
+        log: { ...log, warn: (m: string) => warned.push(m) },
+      });
+      expect(called).toBe(0);
+      expect(out).toEqual([]);
+      expect(warned[0]).toContain('x.pdf');
+      expect(warned[0]).not.toContain('evil.example');
+    }
+  });
+
+  it('fetches a files.slack.com URL and a workspace subdomain, and refuses a redirect', async () => {
+    const seen: (string | undefined)[] = [];
+    const fetchStub = (async (_url: string | URL | Request, init?: RequestInit) => {
+      seen.push(init?.redirect);
+      return new Response('PDF');
+    }) as typeof fetch;
+    const out = await downloadAttachments(
+      '1.1',
+      [
+        { name: 'a.pdf', url: 'https://files.slack.com/files-pri/T1-F1/a.pdf' },
+        { name: 'b.pdf', url: 'https://acme.enterprise.slack.com/files-pri/T1-F2/b.pdf' },
+      ],
+      { token: 'xoxb-test', storageDir, fetch: fetchStub, log },
+    );
+    expect(out).toEqual([
+      { name: 'a.pdf', path: '1-1-a.pdf' },
+      { name: 'b.pdf', path: '1-1-b.pdf' },
+    ]);
+    expect(seen).toEqual(['error', 'error']);
+  });
+
+  it('refuses a host that merely ends with the Slack host as a suffix', async () => {
+    let called = 0;
+    const fetchStub = (async () => {
+      called += 1;
+      return new Response('x');
+    }) as typeof fetch;
+    const out = await downloadAttachments('1.1', [{ name: 'x.pdf', url: 'https://notslack.com/x.pdf' }], {
+      token: 't',
+      storageDir,
+      fetch: fetchStub,
+      log,
+    });
+    expect(called).toBe(0);
+    expect(out).toEqual([]);
+  });
+});
+
 describe('downloadAttachments size cap', () => {
   it('exports a 64 MiB default', () => {
     expect(MAX_ATTACHMENT_BYTES).toBe(64 * 1024 * 1024);

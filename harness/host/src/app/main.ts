@@ -16,7 +16,7 @@ import { buildKernelConfig, loadIdentity } from '@harness/core-tools';
 import { outRoot } from '@harness/core-tools/storage';
 import { createDb } from '@harness/db';
 import { ConfigError, createLogger, envOrDefault, numberFromEnv, requiredEnv } from '@harness/shared';
-import { attachMessageHandlers } from '../domain/conversation.js';
+import { SHUTDOWN_DRAIN_MS, TIMEOUT_MARGIN_MS, attachMessageHandlers, drainActive } from '../domain/conversation.js';
 import type { Host } from '../domain/host.js';
 import { readPersona } from '../domain/persona.js';
 import { decisionDeps } from '../domain/resume.js';
@@ -89,12 +89,14 @@ const host: Host = {
     maxModelCalls: numberFromEnv('HARNESS_RUN_MAX_MODEL_CALLS', 30, { min: 1, max: 1_000, integer: true }),
     maxToolCalls: numberFromEnv('HARNESS_RUN_MAX_TOOL_CALLS', 60, { min: 1, max: 5_000, integer: true }),
     timeoutMs: seconds('HARNESS_RUN_TIMEOUT_S', 600) * 1000,
+    timeoutMarginMs: TIMEOUT_MARGIN_MS,
     maxHistoryMessages: numberFromEnv('HARNESS_HISTORY_MAX_MESSAGES', 40, { min: 0, max: 500, integer: true }),
   },
   servicePrincipal,
   log,
   now: () => new Date(),
   active: new Map(),
+  turns: new Map(),
 };
 
 const core = createInProcessCoreToolsClient({ db, config, client: config.client, servicePrincipal });
@@ -134,7 +136,10 @@ log.info(
 async function shutdown(signal: string): Promise<void> {
   log.info(`${signal} received, stopping`);
   try {
-    for (const controller of host.active.values()) controller.abort();
+    // Abort the turns in flight and wait for them, bounded, before anything they are still using
+    // goes away: `runtime.stop()` ends the runtime's own pool and `closeDb()` the host's, and a
+    // turn that loses that race leaves its `runs` row `running` with nothing to sweep it.
+    await drainActive(host, SHUTDOWN_DRAIN_MS);
     await runner.stop();
     await health.close();
     for (const session of surfaces.all) await session.stop();

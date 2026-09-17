@@ -169,6 +169,31 @@ describe('runDeepAgent', () => {
     expect(gateway.calls).toHaveLength(1);
   });
 
+  it('cancels a kernel tool that is still running, and claims no result for it', async () => {
+    const slow = await toolServerFixture([
+      {
+        name: 'slow_search',
+        description: 'search',
+        inputSchema: { type: 'object', properties: {} },
+        handler: () => new Promise((resolve) => setTimeout(() => resolve({ status: 'ok' }), 10_000)),
+      },
+    ]);
+    try {
+      script([{ toolCalls: [{ name: 'slow_search', arguments: {} }] }]);
+      const controller = new AbortController();
+      setTimeout(() => controller.abort(), 150);
+      const started = Date.now();
+      const events = await run(request({ tools: slow.client, signal: controller.signal }));
+      expect(Date.now() - started).toBeLessThan(5_000);
+      expect(slow.calls).toEqual([{ name: 'slow_search', args: {} }]);
+      expect(events).toContainEqual({ type: 'tool_call', name: 'slow_search', argsHash: hashArgs({}) });
+      expect(events.filter((e) => e.type === 'tool_result')).toEqual([]);
+      expect(events.at(-1)).toEqual({ type: 'error', message: 'cancelled' });
+    } finally {
+      await slow.close();
+    }
+  });
+
   it('stops within one call of the model-call budget', async () => {
     script([{ toolCalls: [{ name: 'records_search', arguments: { query: 'again' } }] }]);
     const events = await run(request({ budget: { maxModelCalls: 3, maxToolCalls: 100, timeoutMs: 30_000 } }));

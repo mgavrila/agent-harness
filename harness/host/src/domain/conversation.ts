@@ -11,6 +11,18 @@ import { HISTORY_MAX_CHARS, trimHistory } from './threads/trim.js';
 
 export const UNAUTHORISED_TEXT = 'You are not authorised to use this assistant.';
 
+/**
+ * The production value of `budget.timeoutMarginMs`: how long after the run's own budget the host's
+ * abort fires. A runtime arms its timeout on `budget.timeoutMs` exactly, so without a margin the
+ * two timers race and the human reads whichever won — "The run stopped: cancelled." from here or
+ * "the run timed out" from the runtime. The margin makes the runtime's own message the one that
+ * wins and leaves this timer as the backstop for a runtime that never returns at all.
+ */
+export const TIMEOUT_MARGIN_MS = 5_000;
+
+/** How long `app/main.ts` gives the turns in flight to unwind before it stops the runtime. */
+export const SHUTDOWN_DRAIN_MS = 10_000;
+
 export interface TurnInput {
   thread: ThreadRow;
   principal: Principal;
@@ -58,8 +70,15 @@ export async function runTurn(host: Host, turn: TurnInput): Promise<TurnResult> 
   });
   const runId = kernel.context.runId;
   const controller = new AbortController();
-  host.active.set(runId, controller);
-  const timer = setTimeout(() => controller.abort(), host.budget.timeoutMs);
+  // `finished` is what `drainActive` waits on: it resolves in the `finally` below, after the run
+  // row and the kernel are closed, so a shutdown that waits for it cannot stop the runtime or end
+  // the pool under a turn that is still unwinding.
+  let finish!: () => void;
+  const finished = new Promise<void>((resolve) => {
+    finish = resolve;
+  });
+  host.active.set(runId, { controller, done: finished });
+  const timer = setTimeout(() => controller.abort(), host.budget.timeoutMs + host.budget.timeoutMarginMs);
 
   // `status` starts as the pessimistic outcome: a throw anywhere below, before the happy path
   // (or the runtime's own error/cancel handling) gets to set it, still has to close the run and
@@ -180,7 +199,63 @@ export async function runTurn(host: Host, turn: TurnInput): Promise<TurnResult> 
   } finally {
     clearTimeout(timer);
     host.active.delete(runId);
-    await kernel.close(status);
+    try {
+      await kernel.close(status);
+    } finally {
+      finish();
+    }
+  }
+}
+
+/**
+ * Run `fn` after every turn already queued on this thread, and never beside one.
+ *
+ * Two messages from one person a few seconds apart are ordinary; so is a decision resuming a
+ * thread that is still mid-turn. Run concurrently they both read the same history, and a runtime
+ * that keeps its own per-thread state (a checkpointer, keyed on the thread id) has two turns
+ * appending to the same checkpoint, where whichever finishes last silently becomes the thread's
+ * state. The chain is per thread, so different conversations still run at the same time.
+ *
+ * The chain's tail is stored with its failures swallowed — a turn that throws must not stop the
+ * next message on that thread — and dropped from the map once it drains, so an idle thread leaves
+ * nothing behind.
+ */
+export function serialize<T>(host: Host, threadId: string, fn: () => Promise<T>): Promise<T> {
+  const previous = host.turns.get(threadId) ?? Promise.resolve();
+  const result = previous.then(fn);
+  const chain = result.then(
+    () => undefined,
+    () => undefined,
+  );
+  host.turns.set(threadId, chain);
+  void chain.then(() => {
+    if (host.turns.get(threadId) === chain) host.turns.delete(threadId);
+  });
+  return result;
+}
+
+/**
+ * Cancel every turn in flight and wait for them, for at most `boundMs`. What shutdown calls
+ * between aborting and stopping anything the turns are still using: each entry's promise resolves
+ * only once that turn has closed its run row, so a drained host leaves no run `running` forever.
+ * Nothing sweeps such a row afterwards — `harness_reconcile` touches approvals and dispatches, not
+ * runs — which is why the bound is a bound and not the absence of one.
+ */
+export async function drainActive(host: Host, boundMs: number): Promise<void> {
+  const inflight = [...host.active.entries()];
+  if (inflight.length === 0) return;
+  for (const [runId] of inflight) cancelRun(host, runId);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const bounded = new Promise<false>((resolve) => {
+    timer = setTimeout(() => resolve(false), boundMs);
+  });
+  try {
+    const drained = await Promise.race([Promise.all(inflight.map(([, run]) => run.done)).then(() => true), bounded]);
+    if (!drained) {
+      host.log.warn(`${inflight.length} run(s) had not finished ${boundMs}ms after the abort; stopping anyway`);
+    }
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -219,14 +294,16 @@ export async function handleMessage(host: Host, event: MessageEvent): Promise<vo
     conversation: event.conversation,
     principalId: principal.id,
   });
-  await runTurn(host, {
-    thread,
-    principal,
-    role: 'user',
-    text: event.text,
-    attachments: event.attachments,
-    replyTo: event.message,
-  });
+  await serialize(host, thread.id, () =>
+    runTurn(host, {
+      thread,
+      principal,
+      role: 'user',
+      text: event.text,
+      attachments: event.attachments,
+      replyTo: event.message,
+    }),
+  );
 }
 
 /** Register the flow on every loaded surface. A handler's failure is logged, never thrown into the adapter. */
@@ -244,9 +321,9 @@ export function attachMessageHandlers(host: Host): void {
 
 /** Abort a run in flight. False when no such run is active. Plan 10's run API calls this. */
 export function cancelRun(host: Host, runId: string): boolean {
-  const controller = host.active.get(runId);
-  if (!controller) return false;
+  const run = host.active.get(runId);
+  if (!run) return false;
   host.active.delete(runId);
-  controller.abort();
+  run.controller.abort();
   return true;
 }

@@ -217,7 +217,17 @@ export async function startFakeGateway(responder: Responder = () => ({})): Promi
         res.writeHead(404).end('{}');
         return;
       }
-      const body = JSON.parse(await readBody(req)) as RequestBody;
+      // A body that is not JSON is a test's mistake, not a crash: answered 400 here, it stays a
+      // failed request the caller can assert on rather than an unhandled rejection that takes the
+      // whole suite down from inside this handler.
+      let body: RequestBody;
+      try {
+        body = JSON.parse(await readBody(req)) as RequestBody;
+      } catch {
+        res.writeHead(400, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ error: { message: 'the request body is not JSON', type: 'invalid_request_error' } }));
+        return;
+      }
       const call: FakeGatewayCall = {
         model: body.model,
         messages: body.messages,

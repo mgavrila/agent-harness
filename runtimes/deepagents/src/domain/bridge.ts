@@ -9,6 +9,12 @@ export interface BridgeSink {
   maxToolCalls: number;
   /** Called once, on the first call past the budget. The caller aborts the run. */
   onBudgetExceeded(): void;
+  /**
+   * The run's signal: cancel, the budget and the timeout all end here. It is handed to every
+   * `callTool`, so a cancel stops the client waiting on a kernel tool that is still executing
+   * instead of leaving the call to land on a run that has already closed.
+   */
+  signal: AbortSignal;
 }
 
 interface CallResult {
@@ -60,8 +66,12 @@ export async function bridgeTools(client: Client, sink: BridgeSink): Promise<Str
         sink.emit({ type: 'tool_call', name: def.name, argsHash: hashArgs(input) });
         let res: CallResult;
         try {
-          res = await client.callTool({ name: def.name, arguments: input });
+          res = await client.callTool({ name: def.name, arguments: input }, { signal: sink.signal });
         } catch (err) {
+          // A rejection under an aborted signal is the run ending, not the tool failing: no
+          // `tool_result` is claimed for a call whose outcome nobody waited for, and the rejection
+          // propagates so the graph stops here rather than telling the model the tool broke.
+          if (sink.signal.aborted) throw err;
           sink.emit({ type: 'tool_result', name: def.name, status: 'error' });
           return `Tool ${def.name} could not be reached: ${err instanceof Error ? err.name : 'error'}.`;
         }

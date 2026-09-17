@@ -8,10 +8,11 @@ import { webClientApi } from './web-client.js';
 /**
  * What an inbound payload means, or null to drop it (decision 1 of Plan 8b).
  *
- * `app_mention` is the one event that says the assistant was addressed in a channel; a `message`
- * that carries the mention is the same message arriving a second time (when the bot is a member)
- * and is dropped. A direct message is addressed by construction. Bots, edits, deletions and joins
- * are not messages from a person; a `file_share` is.
+ * `app_mention` is the one event that says the assistant was addressed in a channel; a channel
+ * `message` that carries the mention is the same message arriving a second time (when the bot is a
+ * member) and is dropped. A direct message is addressed by construction and is kept even when it
+ * names the bot, with the token stripped. Bots, edits, deletions and joins are not messages from a
+ * person; a `file_share` is.
  */
 export function classifyMessage(
   event: RawMessage,
@@ -35,8 +36,14 @@ export function classifyMessage(
     };
   }
   if (event.subtype !== undefined && event.subtype !== 'file_share') return null;
-  if (mention && text.includes(mention)) return null;
-  return { userId: event.user, text: text.trim(), mentioned: event.channel_type === 'im', files };
+  const direct = event.channel_type === 'im';
+  // In a channel the same message arrives twice when the bot is a member, once as `app_mention`;
+  // this is the copy to drop. A direct message is addressed by construction and `app_mention` is
+  // documented for channels, so a DM is kept whether or not it names the bot — dropping it would
+  // silently lose a message the person expects an answer to.
+  if (!direct && mention && text.includes(mention)) return null;
+  const stripped = direct && mention ? text.replaceAll(mention, '') : text;
+  return { userId: event.user, text: stripped.trim(), mentioned: direct, files };
 }
 
 /**

@@ -96,6 +96,20 @@ describe('startFakeGateway', () => {
     expect(res.status).toBe(503);
   });
 
+  it('answers a body that is not JSON with 400 instead of failing the process', async () => {
+    const res = await fetch(`${gateway.url}/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: 'not json',
+    });
+    expect(res.status).toBe(400);
+    await res.text();
+    expect(gateway.calls).toHaveLength(0);
+    // The server is still answering afterwards.
+    gateway.setResponder(() => ({ content: 'still here' }));
+    expect((await post({})).status).toBe(200);
+  });
+
   it('closes while a responder is still hanging', async () => {
     gateway.setResponder(() => new Promise<never>(() => {}));
     const pending = post({}).catch(() => 'closed');

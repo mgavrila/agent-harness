@@ -2,7 +2,7 @@ import type { CoreToolsClient, DecidedOutcome, DecisionDeps } from '@harness/app
 import { containsRestrictedPattern } from '@harness/core-tools/redaction';
 import { eq } from 'drizzle-orm';
 import { threads } from '@harness/db';
-import { runTurn } from './conversation.js';
+import { runTurn, serialize } from './conversation.js';
 import type { Host } from './host.js';
 import { WITHHELD } from './threads/repository.js';
 
@@ -48,7 +48,11 @@ export function resumeOnDecision(host: Host): (outcome: DecidedOutcome) => Promi
       );
       return;
     }
-    await runTurn(host, { thread, principal, role: 'host', text: resumeText(outcome), attachments: [], replyTo: null });
+    // Through the thread's own chain: a decision can land while the thread is still mid-turn, and
+    // the resume is a turn like any other.
+    await serialize(host, thread.id, () =>
+      runTurn(host, { thread, principal, role: 'host', text: resumeText(outcome), attachments: [], replyTo: null }),
+    );
   };
 }
 

@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { approvals, auditLog, messages, runs, threads } from '@harness/db';
 import { COORDINATOR, hostFixture, useTestDb } from '../testing.js';
-import { UNAUTHORISED_TEXT, attachMessageHandlers, cancelRun } from './conversation.js';
+import { TIMEOUT_MARGIN_MS, UNAUTHORISED_TEXT, attachMessageHandlers, cancelRun, drainActive } from './conversation.js';
 import * as threadsRepository from './threads/repository.js';
 
 const db = useTestDb();
@@ -148,8 +148,12 @@ describe('a message on a surface', () => {
   });
 
   it('records an error status and tells the human once when the runtime fails', async () => {
-    const f = await hostFixture(db, { trajectory: [{ sleep: 10_000 }] });
-    f.host.budget.timeoutMs = 20;
+    // `timeoutMarginMs: 0` arms the host's backstop at the budget itself: the scripted runtime has
+    // no timeout of its own to fire first, so the margin would only make the test wait for it.
+    const f = await hostFixture(db, {
+      trajectory: [{ sleep: 10_000 }],
+      budget: { timeoutMs: 20, timeoutMarginMs: 0 },
+    });
     attachMessageHandlers(f.host);
     await f.surface.say('U012', 'hang');
     const [run] = await db.select().from(runs);
@@ -178,8 +182,11 @@ describe('a message on a surface', () => {
   });
 
   it('posts the stopped notice as a reply once a stream has already begun', async () => {
-    const f = await hostFixture(db, { trajectory: [{ say: 'Part one.' }, { sleep: 10_000 }], streaming: true });
-    f.host.budget.timeoutMs = 20;
+    const f = await hostFixture(db, {
+      trajectory: [{ say: 'Part one.' }, { sleep: 10_000 }],
+      streaming: true,
+      budget: { timeoutMs: 20, timeoutMarginMs: 0 },
+    });
     attachMessageHandlers(f.host);
     await f.surface.say('U012', 'go');
     const [run] = await db.select().from(runs);
@@ -189,5 +196,94 @@ describe('a message on a surface', () => {
     expect(f.surface.texts[0].text).toBe('Part one.');
     expect(f.surface.texts[1].text).toContain('cancelled');
     expect(f.surface.texts[1].replyTo).toEqual({ surface: 'memory', conversation: 'memory', id: 'm1' });
+  });
+});
+
+describe('two turns on one thread', () => {
+  it('runs them one at a time, in the order they arrived, and lets the second see the first in its history', async () => {
+    const f = await hostFixture(db, {
+      trajectory: (request) => (request.input.text === 'first' ? [{ sleep: 150 }, { say: 'one' }] : [{ say: 'two' }]),
+    });
+    attachMessageHandlers(f.host);
+    // Both messages are in flight at once, the way two Slack messages a moment apart arrive.
+    const turns = [f.surface.say('U012', 'first'), f.surface.say('U012', 'second')];
+    await new Promise((r) => setTimeout(r, 60));
+    // The second turn has not opened a run while the first is still inside the runtime.
+    expect(f.runtime.requests.map((r) => r.input.text)).toEqual(['first']);
+    await Promise.all(turns);
+
+    expect(f.runtime.requests.map((r) => r.input.text)).toEqual(['first', 'second']);
+    expect(f.runtime.requests[1].history).toEqual([
+      { role: 'user', content: 'first' },
+      { role: 'assistant', content: 'one' },
+    ]);
+    expect(await db.select().from(threads)).toHaveLength(1);
+    expect(f.surface.texts.map((t) => t.text)).toEqual(['one', 'two']);
+  });
+
+  it('still runs two conversations at the same time', async () => {
+    const f = await hostFixture(db, { trajectory: [{ sleep: 150 }, { say: 'done' }] });
+    attachMessageHandlers(f.host);
+    const turns = [
+      f.surface.say('U012', 'in C1', { conversation: 'C1' }),
+      f.surface.say('U012', 'in C2', { conversation: 'C2' }),
+    ];
+    await new Promise((r) => setTimeout(r, 60));
+    expect(f.runtime.requests.map((r) => r.input.text).sort()).toEqual(['in C1', 'in C2']);
+    await Promise.all(turns);
+    expect(await db.select().from(runs)).toHaveLength(2);
+  });
+});
+
+describe('drainActive', () => {
+  it('cancels every run in flight and returns only once its row is closed', async () => {
+    const f = await hostFixture(db, { trajectory: [{ sleep: 10_000 }, { say: 'never' }] });
+    attachMessageHandlers(f.host);
+    const turn = f.surface.say('U012', 'slow one');
+    await new Promise((r) => setTimeout(r, 50));
+    expect(f.host.active.size).toBe(1);
+
+    await drainActive(f.host, 10_000);
+
+    // Shutdown stops the runtime next, so the row has to be closed by the time this returns.
+    const [run] = await db.select().from(runs);
+    expect(run.status).toBe('cancelled');
+    expect(run.endedAt).not.toBeNull();
+    expect(f.host.active.size).toBe(0);
+    await turn;
+    expect(f.surface.texts).toEqual([]);
+  });
+
+  it('gives up on a turn that does not end within the bound rather than blocking shutdown', async () => {
+    const f = await hostFixture(db, { trajectory: [{ say: 'unused' }] });
+    const controller = new AbortController();
+    f.host.active.set('stuck', { controller, done: new Promise<void>(() => {}) });
+    const started = Date.now();
+    await drainActive(f.host, 50);
+    expect(Date.now() - started).toBeLessThan(2_000);
+    expect(controller.signal.aborted).toBe(true);
+  });
+
+  it('returns at once when nothing is in flight', async () => {
+    const f = await hostFixture(db, { trajectory: [{ say: 'unused' }] });
+    await expect(drainActive(f.host, 10_000)).resolves.toBeUndefined();
+  });
+});
+
+describe("the host's timeout backstop", () => {
+  it("is armed a margin after the budget, so the runtime's own timeout is the one that fires", async () => {
+    // The runtime arms `AbortSignal.timeout(budget.timeoutMs)`; the host's timer is the backstop
+    // for a runtime that ignores it, and firing first would replace "the run timed out" with
+    // "cancelled" for the human.
+    expect(TIMEOUT_MARGIN_MS).toBe(5_000);
+    const f = await hostFixture(db, {
+      trajectory: [{ sleep: 120 }, { say: 'in time' }],
+      budget: { timeoutMs: 20, timeoutMarginMs: 200 },
+    });
+    attachMessageHandlers(f.host);
+    await f.surface.say('U012', 'go');
+    const [run] = await db.select().from(runs);
+    expect(run.status).toBe('done');
+    expect(f.surface.texts.map((t) => t.text)).toEqual(['in time']);
   });
 });

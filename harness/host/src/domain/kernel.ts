@@ -55,9 +55,10 @@ export async function finishKernel(
  *
  * The run is opened first and is already `running` in the database before anything else here can
  * fail, so a throw while building the deps or connecting the in-process transport still has to
- * end it — left open, it would sit `running` forever rather than being picked up by reconcile as
- * a normal stale run. `close` is undefined until `connectInProcess` actually hands one back for
- * exactly that reason.
+ * end it: nothing sweeps a run left open. `harness_reconcile` expires approvals and parks stuck
+ * dispatches and never reads `runs`, so the only things that close a row are the turn's own
+ * `finally` and the drain a shutdown runs before it stops anything. `close` is undefined until
+ * `connectInProcess` actually hands one back for exactly that reason.
  */
 export async function openKernel(
   host: Pick<Host, 'db' | 'config' | 'client' | 'now'>,

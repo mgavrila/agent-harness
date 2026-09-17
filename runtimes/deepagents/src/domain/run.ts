@@ -71,8 +71,8 @@ function historyMessages(request: RunRequest): BaseMessage[] {
  * `updates` stream for model turns — counted against the budget, and watched for the `read_file`
  * of a skill body, which is what `skill_activated` means here (decision 6).
  *
- * Exactly one terminal event, always: `done` with the run's text, or `error` with one of three
- * fixed messages. The framework's and the gateway's own messages go to the log and never into
+ * Exactly one terminal event, always: `done` with the run's text, or `error` with one of four
+ * fixed messages (cancelled, the budget, the timeout, the failure). The framework's and the gateway's own messages go to the log and never into
  * an event, because an event reaches a surface (decision 9).
  */
 export async function runDeepAgent(request: RunRequest, ctx: RunContext, queue: EventQueue<RunEvent>): Promise<void> {
@@ -92,6 +92,7 @@ export async function runDeepAgent(request: RunRequest, ctx: RunContext, queue: 
       emit: (e) => queue.push(e),
       maxToolCalls: request.budget.maxToolCalls,
       onBudgetExceeded: exceed,
+      signal,
     });
     const model = chatModel(request.model, request.model.route);
     const middleware = [

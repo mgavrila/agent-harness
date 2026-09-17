@@ -9,6 +9,7 @@ import type { Principal } from '@harness/identity-api';
 import { StaticIdentity } from '@harness/identity-api/testing';
 import { ScriptedRuntime, type Trajectory } from '@harness/runtime-api/testing';
 import { MemorySurface } from '@harness/surface-api/testing';
+import { TIMEOUT_MARGIN_MS } from './domain/conversation.js';
 import type { Host, HostBudget } from './domain/host.js';
 
 export { useTestDb } from '@harness/db/testing';
@@ -86,7 +87,16 @@ export async function hostFixture(
     // forbids the product's own skill names in anything that is not itself a `*.test.ts` file.
     skills: [{ name: 'sample-skill', version: '1.0.0', description: 'a skill for tests', dir: '/nonexistent' }],
     model: { baseUrl: 'http://127.0.0.1:1', apiKey: 'sk-test', route: 'chat', fallbackRoute: 'reason' },
-    budget: { maxModelCalls: 30, maxToolCalls: 60, timeoutMs: 30_000, maxHistoryMessages: 40, ...opts.budget },
+    budget: {
+      maxModelCalls: 30,
+      maxToolCalls: 60,
+      timeoutMs: 30_000,
+      // The production margin, so a test reads the same ordering a deployment does. A test of the
+      // host's own backstop passes 0 rather than waiting five seconds for it.
+      timeoutMarginMs: TIMEOUT_MARGIN_MS,
+      maxHistoryMessages: 40,
+      ...opts.budget,
+    },
     servicePrincipal: HOST_PRINCIPAL,
     log: { info() {}, warn() {}, error() {} },
     // The same frozen clock `testKernelConfig`'s `now` carries (core-tools' `makeTestDeps`), so a
@@ -95,6 +105,7 @@ export async function hostFixture(
     // on when the suite happens to run, exactly the flakiness a frozen test clock exists to avoid.
     now: () => new Date('2026-09-15T12:00:00Z'),
     active: new Map(),
+    turns: new Map(),
   };
   return {
     host,

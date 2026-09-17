@@ -25,6 +25,17 @@ describe('classifyMessage', () => {
     ).toBeNull();
   });
 
+  it('keeps a direct message that also carries the mention token, with the token stripped', () => {
+    // Slack documents `app_mention` for channels; whether it fires in a DM is not something the
+    // adapter should bet the whole message on.
+    expect(
+      classifyMessage(
+        { type: 'message', channel: 'D1', channel_type: 'im', user: 'U012', text: `<@${BOT}> hi`, ts: '1.1' },
+        BOT,
+      ),
+    ).toEqual({ userId: 'U012', text: 'hi', mentioned: true, files: [] });
+  });
+
   it('takes an app_mention as addressed with the mention stripped', () => {
     expect(
       classifyMessage(

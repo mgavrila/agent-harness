@@ -31,7 +31,7 @@ beforeEach(async () => {
 });
 afterEach(() => fixture.close());
 
-function sink(max = 10) {
+function sink(max = 10, signal: AbortSignal = new AbortController().signal) {
   const events: RunEvent[] = [];
   let exceeded = 0;
   return {
@@ -41,6 +41,7 @@ function sink(max = 10) {
       emit: (e: RunEvent) => events.push(e),
       maxToolCalls: max,
       onBudgetExceeded: () => (exceeded += 1),
+      signal,
     },
   };
 }
@@ -76,6 +77,32 @@ describe('bridgeTools', () => {
       { type: 'tool_result', name: 'forms_release', status: 'pending' },
       { type: 'tool_result', name: 'explode', status: 'error' },
     ]);
+  });
+
+  it('passes the run signal to the client, so an abort ends the call rather than waiting it out', async () => {
+    const slow = await toolServerFixture([
+      {
+        name: 'slow_search',
+        description: 'Takes its time',
+        inputSchema: { type: 'object', properties: {} },
+        handler: () => new Promise((resolve) => setTimeout(() => resolve({ status: 'ok' }), 5_000)),
+      },
+    ]);
+    try {
+      const controller = new AbortController();
+      const { events, sink: s } = sink(10, controller.signal);
+      const tools = await bridgeTools(slow.client, s);
+      const started = Date.now();
+      const call = tools.find((t) => t.name === 'slow_search')!.invoke({});
+      setTimeout(() => controller.abort(), 50);
+      await expect(call).rejects.toThrow();
+      expect(Date.now() - started).toBeLessThan(2_000);
+      // An abort is the run ending, not the tool reporting: the call was announced, and nothing
+      // claims a result for it.
+      expect(events).toEqual([{ type: 'tool_call', name: 'slow_search', argsHash: hashArgs({}) }]);
+    } finally {
+      await slow.close();
+    }
   });
 
   it('stops calling the kernel once the tool budget is spent', async () => {

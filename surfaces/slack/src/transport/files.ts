@@ -104,17 +104,48 @@ async function writeCapped(res: Response, target: string, limit: number): Promis
   }
 }
 
+/** Raised for a URL the download refuses to send the bot token to. */
+class UntrustedHostError extends Error {
+  constructor() {
+    super('the URL is not an https Slack host');
+    this.name = 'UntrustedHostError';
+  }
+}
+
+/**
+ * Where the bot token may be sent: Slack's own file host over TLS, and nothing else.
+ *
+ * `url_private_download` comes from the inbound payload, and the request carries the workspace's
+ * bot token as a bearer. A payload naming another host would hand that token to whoever answers
+ * there, so the host is pinned here rather than trusted from the event, and `redirect: 'error'`
+ * at the call site keeps the answer from moving the request somewhere else afterwards. Node's
+ * `fetch` does drop `Authorization` across origins, which is a second line, not the first.
+ */
+export function isSlackFileUrl(raw: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    return false;
+  }
+  if (url.protocol !== 'https:') return false;
+  // `files.slack.com` is what Slack sends today; an enterprise grid signs the same URL on a
+  // workspace subdomain, which is why the suffix is allowed and not just the one host. The leading
+  // dot matters: without it `notslack.com` would pass.
+  return url.hostname.toLowerCase().endsWith('.slack.com');
+}
+
 /** The safe part of what went wrong: never a message, which may carry the absolute target path. */
 function reason(err: unknown): string {
-  if (err instanceof AttachmentTooLargeError) return err.message;
+  if (err instanceof AttachmentTooLargeError || err instanceof UntrustedHostError) return err.message;
   if (err instanceof Error) return (err as NodeJS.ErrnoException).code ?? err.name;
   return 'error';
 }
 
 /**
- * Fetch each file with the bot token into `<storageDir>/incoming/`. A failure — the request, the
- * size cap, or the write — drops that one file and warns with its name and the reason, never a
- * path or the signed URL. The target is checked against the storage root before anything is
+ * Fetch each file with the bot token into `<storageDir>/incoming/`. A failure — a URL that is not
+ * an https Slack host, the request, the size cap, or the write — drops that one file and warns
+ * with its name and the reason, never a path or the signed URL. The target is checked against the storage root before anything is
  * written, and two attachments sharing a name in one message are kept apart by a numeric suffix.
  */
 export async function downloadAttachments(
@@ -134,7 +165,11 @@ export async function downloadAttachments(
       const target = await assertInsideRoot(relative, incoming, () => {
         throw new Error('attachment path escapes the incoming directory');
       });
-      const res = await doFetch(file.url, { headers: { authorization: `Bearer ${deps.token}` } });
+      if (!isSlackFileUrl(file.url)) throw new UntrustedHostError();
+      const res = await doFetch(file.url, {
+        headers: { authorization: `Bearer ${deps.token}` },
+        redirect: 'error',
+      });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       await writeCapped(res, target, limit);
       out.push({ name: file.name, path: relative });
