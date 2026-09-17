@@ -175,6 +175,17 @@ const GLOBAL_RULES = [
     to: { path: '^packs/[^/]+/', dependencyTypesNot: ['dynamic-import'] },
   },
   {
+    name: 'the-host-never-statically-imports-a-surface',
+    comment:
+      'Adapters are loaded at runtime from HARNESS_SURFACES through a dynamic import in domain/surfaces/registry.ts. A static import would wire the approvals host to one messaging transport by name, which is the coupling the surface contract exists to remove. src/testing.ts and *.test.ts are exempt: they drive a real adapter on a fake transport and are not shipped.',
+    severity: 'error',
+    from: {
+      path: '^harness/approvals/src/',
+      pathNot: ['\\.test\\.ts$', '^harness/approvals/src/testing\\.ts$'],
+    },
+    to: { path: '^surfaces/[^/]+/', dependencyTypesNot: ['dynamic-import'] },
+  },
+  {
     name: 'no-unresolvable-workspace-import',
     comment:
       'An import the resolver cannot follow matches no other rule in this file, so a deep cross-package import written as a bare specifier (@harness/core-tools/src/domain/x.js) would pass every layer rule in silence. This catches it. Scoped to specifiers starting with `@harness/` or a relative `./` or `../`, deliberately: six third-party specifiers are unresolvable here for reasons that have nothing to do with the architecture (zod/v4, vitest and the @modelcontextprotocol subpaths resolve through export maps depcruise does not follow), and a rule that failed on those would have to be switched off rather than fixed. tsc --noEmit catches these too; this is the gate that says so at the architecture layer.',
