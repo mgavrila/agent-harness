@@ -11,6 +11,7 @@ import {
   type RawAttachmentKind,
   type RawRecordKind,
 } from '@harness/pack-api';
+import { PACK_NAME } from './pack-name.js';
 import { HEALTHCARE_REPLACES, healthcareTools } from './tools/index.js';
 
 /** The pack root: one level up from `src/`. Every path below is absolute, as the contract requires. */
@@ -48,7 +49,7 @@ const { classes = {} } = parseYaml(readFileSync(path.join(root, 'policy.yaml'), 
  * written twice.
  */
 export const pack = definePack({
-  name: 'healthcare',
+  name: PACK_NAME,
   version,
   records: raw.records,
   attachments: raw.attachments,

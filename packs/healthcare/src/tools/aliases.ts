@@ -35,6 +35,7 @@ import {
   type RecordsUpsertResult,
 } from '@harness/pack-api';
 import { CREDENTIAL_KINDS } from '../domain/credentials/kinds.js';
+import { PACK_NAME } from '../pack-name.js';
 import { FieldInput, URGENCY_BUCKETS } from './shapes.js';
 
 /**
@@ -122,9 +123,6 @@ const asDocumentView = (d: DocumentRecordView) => ({
   has_text: d.has_text,
   ingested_at: d.ingested_at,
 });
-
-/** This pack's own name, as `definePack` declares it and as `deps.packs.byName` answers to. */
-const PACK_NAME = 'healthcare';
 
 /**
  * The document kinds some other loaded pack declares.
