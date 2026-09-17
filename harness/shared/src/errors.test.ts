@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { ConfigError, ModelOutputError, ToolError, describeError } from './errors.js';
+import { ConfigError, ModelOutputError, SurfaceError, ToolError, describeError } from './errors.js';
 
 describe('the three error types', () => {
   it('names itself, so an audit row says which kind it was', () => {
@@ -29,5 +29,14 @@ describe('describeError', () => {
     expect(describeError('boom')).toBe('boom');
     expect(describeError(42)).toBe('42');
     expect(describeError(null)).toBe('null');
+  });
+});
+
+describe('SurfaceError', () => {
+  it('is its own name, so a catch can tell it from a ToolError', () => {
+    const err = new SurfaceError('slack: "nope" is not a conversation id');
+    expect(err.name).toBe('SurfaceError');
+    expect(err).toBeInstanceOf(Error);
+    expect(err).not.toBeInstanceOf(ToolError);
   });
 });

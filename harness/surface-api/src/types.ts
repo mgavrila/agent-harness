@@ -1,0 +1,219 @@
+import type { EnvSource, Logger } from '@harness/shared';
+
+/**
+ * Every declaration of the surface contract, in one leaf module.
+ *
+ * The same arrangement `@harness/pack-api` uses, and for the same reason: `surface.ts`,
+ * `models.ts` and `testing.ts` re-export from here and keep their own runtime functions, so no
+ * two modules of this package can end up importing each other. It imports types from
+ * `@harness/shared` and nothing else.
+ */
+
+/** Where a message can go on a named surface. What a row or an outbox payload stores. */
+export interface Conversation {
+  surface: string;
+  /** The conversation's id in that surface's own shape. */
+  id: string;
+}
+
+/** One message, addressable again later: to edit it, or to reply under it. */
+export interface MessageRef {
+  surface: string;
+  conversation: string;
+  /** The surface's own id for the message: a Slack `ts`, a Teams activity id, a Telegram message id. */
+  id: string;
+}
+
+/** The two outcomes a card reports. An adapter picks its own glyph. */
+export type CardIcon = 'approved' | 'declined';
+
+/**
+ * One piece of a rich line.
+ *
+ * Small on purpose: every surface can render all five. Slack turns `{ at }` into a `<!date>`
+ * token that reads in the viewer's own timezone and `{ user }` into a mention; a surface with
+ * neither prints an ISO timestamp and an `@id`. A host never formats a date or spells a
+ * mention itself, because a host that did would have picked a surface.
+ */
+export type NotePart = { text: string } | { code: string } | { at: Date } | { user: string } | { icon: CardIcon };
+
+/**
+ * One line of a card's body. Each renders as its own block.
+ *
+ * `{ note }` is the dimmer line a surface renders smaller — Slack's `context` block — and is the
+ * only line that carries rich parts. A note that has to span several visual lines carries
+ * `{ text: '\n' }` parts between them; the host builds those, so the adapter joins nothing.
+ */
+export type CardLine =
+  { text: string } | { label: string; value: string } | { code: string } | { note: readonly NotePart[] };
+
+/** One button. `id` is what comes back on the `ActionEvent`; `value` is what it carries. */
+export interface CardAction {
+  id: string;
+  label: string;
+  style: 'primary' | 'danger' | 'default';
+  value: string;
+}
+
+/**
+ * A message a human acts on.
+ *
+ * Neutral by construction: no Block Kit, no Adaptive Card, no inline keyboard. An adapter
+ * renders it; the host never sees a rendered shape.
+ */
+export interface Card {
+  /**
+   * A stable identifier for this *kind* of card, not for one instance of it. An adapter that
+   * needs to name the card's parts derives the names from it — the Slack adapter's actions
+   * block is `` `${card.id}_actions` `` — so two cards of different kinds never collide.
+   */
+  id: string;
+  title: string;
+  /** One line of plain text under the title, in the same block. */
+  subtitle?: string;
+  /**
+   * One line of plain text for wherever the card itself cannot go: a notification preview, a
+   * surface that renders no rich content. Required, because it is the only thing some readers
+   * ever see — and because a posted card and its edited replacement usually want to say
+   * different things.
+   */
+  notice: string;
+  body: readonly CardLine[];
+  /** Empty for a card that has been acted on already. */
+  actions: readonly CardAction[];
+  footer?: readonly NotePart[];
+}
+
+export interface FormField {
+  /** Stable; it is the key this field's answer comes back under on the `FormEvent`. */
+  id: string;
+  label: string;
+  multiline: boolean;
+  optional: boolean;
+  maxLength?: number;
+  placeholder?: string;
+}
+
+/** A short dialogue a surface may be able to open. `metadata` is opaque to the adapter. */
+export interface Form {
+  /** Stable; it is what comes back as `FormEvent.formId`. */
+  id: string;
+  title: string;
+  submitLabel: string;
+  cancelLabel: string;
+  /** A sentence above the fields, saying what submitting does. */
+  intro?: string;
+  fields: readonly FormField[];
+  /**
+   * The host's own string, carried out with the form and handed back on submission untouched.
+   * A surface stores it wherever it can (Slack: `private_metadata`) and never reads it.
+   */
+  metadata: string;
+}
+
+/** A human pressed a button. */
+export interface ActionEvent {
+  surface: string;
+  userId: string;
+  conversation: string;
+  /** The message the button was on, when the surface says which. */
+  message: MessageRef | null;
+  actionId: string;
+  value: string;
+  /** An opaque handle this surface will accept back in `openForm`, for as long as it lasts. */
+  trigger: string | null;
+}
+
+/** A human submitted a form. `values` is keyed by `FormField.id`. */
+export interface FormEvent {
+  surface: string;
+  userId: string;
+  conversation: string;
+  formId: string;
+  metadata: string;
+  values: Record<string, string>;
+}
+
+/**
+ * What this surface can do beyond posting.
+ *
+ * The host reads these rather than trying and catching: a card offered on a surface with no
+ * `forms` simply has no Edit button, which is honest, and needs no fallback protocol.
+ */
+export interface SurfaceCapabilities {
+  forms: boolean;
+  privateReply: boolean;
+  update: boolean;
+}
+
+export interface UploadRequest {
+  /** An absolute path the host has already checked. The adapter reads it and sends the bytes. */
+  path: string;
+  filename: string;
+  comment?: string;
+  replyTo?: MessageRef;
+}
+
+/**
+ * A connected surface.
+ *
+ * Every method that talks to the outside world rejects with a `SurfaceError` whose message is
+ * safe to write into a plaintext column: it names the surface and what failed, never a path, a
+ * token or a payload value.
+ */
+export interface SurfaceSession {
+  /** This adapter's name, as `HARNESS_SURFACES` named it and as `approvals.surface` stores it. */
+  readonly name: string;
+  readonly capabilities: SurfaceCapabilities;
+  /**
+   * Who may decide anything here, in this surface's own user ids. **Empty means nobody**, which
+   * is the fail-closed rule, not "everybody". The single member `ANY_USER` means everybody and
+   * is for a surface with no transport only. Read it through `allowsUser`, never `.has`.
+   */
+  readonly allowedUsers: ReadonlySet<string>;
+  /** Where this surface posts when nobody names a conversation. */
+  readonly defaultConversation: string;
+  /** How this surface spells a mention of a user inside plain text. */
+  mention(userId: string): string;
+  postCard(conversation: string, card: Card): Promise<MessageRef>;
+  updateCard(ref: MessageRef, card: Card): Promise<void>;
+  postText(conversation: string, text: string, opts?: { replyTo?: MessageRef }): Promise<MessageRef>;
+  postPrivate(conversation: string, userId: string, text: string): Promise<void>;
+  uploadFile(conversation: string, file: UploadRequest): Promise<{ filename: string }>;
+  /** Rejects with a `SurfaceError` when `capabilities.forms` is false. */
+  openForm(trigger: string, form: Form): Promise<void>;
+  /** One handler for every button on this surface. Replaces any previous one. */
+  onAction(handler: (event: ActionEvent) => Promise<void>): void;
+  /** One handler for every form submitted on this surface. Replaces any previous one. */
+  onFormSubmit(handler: (event: FormEvent) => Promise<void>): void;
+  start(): Promise<void>;
+  stop(): Promise<void>;
+}
+
+/**
+ * What an adapter is handed when it connects.
+ *
+ * `env` is the only environment an adapter may read — never the ambient one — for the same
+ * reason a pack reads `deps.env`: whoever builds the bag decides what the adapter can see, so a
+ * test suite cannot open a real socket because the machine running it has a filled-in `.env`.
+ */
+export interface SurfaceDeps {
+  env: EnvSource;
+  log: Logger;
+  /** The root of the file store. An adapter that stages nothing may ignore it. */
+  storageDir: string;
+}
+
+/** What a `@harness/surface-*` package exports as `surface`. */
+export interface Surface {
+  /** Lowercase, stable. `HARNESS_SURFACES` orders these and the first one is the primary. */
+  name: string;
+  version: string;
+  /**
+   * The environment variable names this adapter reads that are credentials. The host strips the
+   * union of every loaded surface's list from the environment of the core-tools child it
+   * spawns, so the allowlist there names no surface.
+   */
+  secrets: readonly string[];
+  connect(deps: SurfaceDeps): Promise<SurfaceSession>;
+}

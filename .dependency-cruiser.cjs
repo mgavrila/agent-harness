@@ -33,6 +33,7 @@ const path = require('node:path');
 const PACKAGES = [
   { name: 'shared', src: 'harness/shared/src', severity: 'error' },
   { name: 'pack-api', src: 'harness/pack-api/src', severity: 'error' },
+  { name: 'surface-api', src: 'harness/surface-api/src', severity: 'error' },
   { name: 'db', src: 'harness/db/src', severity: 'error' },
   { name: 'gateway', src: 'harness/gateway/src', severity: 'error' },
   { name: 'core-tools', src: 'harness/core-tools/src', severity: 'error' },
@@ -92,6 +93,7 @@ function layerRules({ name, src, severity }) {
 const WORKSPACE_DIRS = [
   'harness/shared',
   'harness/pack-api',
+  'harness/surface-api',
   'harness/db',
   'harness/gateway',
   'harness/core-tools',
@@ -199,7 +201,21 @@ const GLOBAL_RULES = [
       '@harness/pack-api is the contract a pack implements. It may import @harness/shared and zod, and no other workspace package: a contract that pulled in core-tools would defeat the point of having one.',
     severity: 'error',
     from: { path: '^harness/pack-api/src/' },
-    to: { path: '^(harness|packs|evals|scripts)/', pathNot: ['^harness/pack-api/src/', '^harness/shared/src/'] },
+    to: {
+      path: '^(harness|packs|surfaces|evals|scripts)/',
+      pathNot: ['^harness/pack-api/src/', '^harness/shared/src/'],
+    },
+  },
+  {
+    name: 'surface-api-imports-only-shared',
+    comment:
+      '@harness/surface-api is the contract an adapter implements. It may import @harness/shared and zod, and no other workspace package: a contract that pulled in @harness/approvals would defeat the point of having one, and one that pulled in @harness/pack-api would tie a messaging adapter to the pack contract. The two id patterns both contracts need live in @harness/shared for exactly that reason.',
+    severity: 'error',
+    from: { path: '^harness/surface-api/src/' },
+    to: {
+      path: '^(harness|packs|surfaces|evals|scripts)/',
+      pathNot: ['^harness/surface-api/src/', '^harness/shared/src/'],
+    },
   },
   {
     name: 'a-pack-never-imports-core-tools',
@@ -207,7 +223,10 @@ const GLOBAL_RULES = [
       'A pack depends on @harness/pack-api and @harness/shared only. An edge back into core-tools or @harness/db would be a cycle and would make the pack unloadable by anything else. Its *tests* may reach @harness/core-tools/testing: a test that boots the real kernel against Postgres is not shipped and is not part of the cycle. No pack declares such a dependency today — the five kernel-side healthcare tests live in harness/core-tools/src/app/pack-healthcare — and this exemption is here so the next pack author is not blocked by a false error.',
     severity: 'error',
     from: { path: '^packs/', pathNot: ['\\.test\\.ts$', '\\.test-helpers\\.ts$'] },
-    to: { path: '^(harness|evals|scripts)/', pathNot: ['^harness/pack-api/src/', '^harness/shared/src/'] },
+    to: {
+      path: '^(harness|surfaces|evals|scripts)/',
+      pathNot: ['^harness/pack-api/src/', '^harness/shared/src/'],
+    },
   },
   {
     name: 'shared-has-no-workspace-dependencies',
@@ -215,7 +234,7 @@ const GLOBAL_RULES = [
       '@harness/shared is the bottom of the graph. @harness/db and every pack import it, so a dependency on any other workspace package would be a cycle. Node built-ins only.',
     severity: 'error',
     from: { path: '^harness/shared/src/' },
-    to: { path: '^(harness|packs|evals|scripts)/', pathNot: '^harness/shared/src/' },
+    to: { path: '^(harness|packs|surfaces|evals|scripts)/', pathNot: '^harness/shared/src/' },
   },
   ...WORKSPACE_DIRS.map(crossPackageRule),
 ];
@@ -237,11 +256,12 @@ module.exports = {
         // One node per package layer, not per file: the graph answers "may this package import
         // that one", which is the same question the rules above answer. `index.ts` is left
         // uncollapsed everywhere, because it is the node every cross-package arrow should land
-        // on. `@harness/shared` and `@harness/pack-api` are flat — they are one layer each — so
-        // they get a pattern of their own, as do the pack's two generator directories.
+        // on. `@harness/shared`, `@harness/pack-api` and `@harness/surface-api` are flat — they
+        // are one layer each — so they get a pattern of their own, as do the pack's two
+        // generator directories.
         collapsePattern: [
           '^(harness|packs|evals|scripts)/[^/]+/(src/)?(shared|domain|tools|app)',
-          '^harness/(shared|pack-api)/src/(?!index[.]ts)',
+          '^harness/(shared|pack-api|surface-api)/src/(?!index[.]ts)',
           '^packs/[^/]+/(synthetic|forms)/',
         ],
       },
