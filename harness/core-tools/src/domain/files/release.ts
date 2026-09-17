@@ -1,6 +1,7 @@
 import { stat } from 'node:fs/promises';
 import path from 'node:path';
 import { ToolError } from '@harness/shared';
+import type { StagedRelease } from '@harness/pack-api';
 import type { ToolDeps } from '../tooling/types.js';
 import { resolveOutFile } from '../storage/file-store.js';
 import { stageEffect } from '../effects/outbox.js';
@@ -26,13 +27,12 @@ const MAX_RELEASE_BYTES = 25 * 1024 * 1024;
  */
 const RELEASE_KEY_PREFIX = 'forms_release:';
 
-export interface StagedRelease {
-  effect_id: string;
-  staged: boolean;
-  file_id: string;
-  filename: string;
-  bytes: number;
-}
+/**
+ * The contract's own shape, not a second copy of it: this function is what implements
+ * `PackKernel.stageRelease`, so the type a pack is promised and the type the kernel returns are
+ * one declaration. Re-exported because `src/index.ts` publishes it under this name.
+ */
+export type { StagedRelease } from '@harness/pack-api';
 
 /**
  * Stage a generated file for delivery. Resolves the id inside the out tree, refuses anything
