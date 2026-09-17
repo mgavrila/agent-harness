@@ -169,11 +169,13 @@ catch-all today; healthcare claims its five kinds by name.
 - **`deps.tools`** — what is published to MCP, which is also what `approvals_execute` replays a
   parked action from.
 
-Three rules turn the first into the second, and `domain/packs/publication.ts` is where each of
+Four rules turn the first into the second, and `domain/packs/publication.ts` is where each of
 them fails loudly. The generic `records_*` tools are published only when at least one loaded
 record kind leaves `genericTools` true. A kernel tool named in a loaded pack's `replaces` is
 dropped, and a name that is not a kernel tool is a `ConfigError` rather than a silent no-op. Two
-sources may not publish, or replace, the same name.
+sources may not publish, or replace, the same name. And a source that replaces a name must
+publish it: a name listed in `replaces` and missing from the catalogue the pack returns would
+otherwise delete the kernel's tool and leave nothing behind it.
 
 The kernel defines seventeen tools. A healthcare-only deployment therefore publishes five of
 them and eighteen of the pack's: twelve of those eighteen are wrappers that reproduce the

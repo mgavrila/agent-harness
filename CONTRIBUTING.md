@@ -179,10 +179,11 @@ complete one; read it alongside this.
    - read configuration from `deps.env`, never `process.env`. The ESLint rule enforces it, and
      it is what stops an eval run on a filled-in `.env` making a real outbound call;
    - list in `replaces` every kernel tool yours supersedes **under the same name**. A name that
-     is not a kernel tool is a startup failure, and two loaded packs may not replace the same
-     one. A tool of yours under a _different_ name is not a replacement and does not belong in
-     the list: `replaces` is process-wide, so a name you put there is gone for every other pack
-     too. To keep the generic `records_*` tools out of your own deployment, set
+     is not a kernel tool is a startup failure, a name your own `tools(deps)` does not publish is
+     a startup failure, and two loaded packs may not replace the same one. A tool of yours under
+     a _different_ name is not a replacement and does not belong in the list: `replaces` is
+     process-wide, so a name you put there is gone for every other pack too. To keep the generic
+     `records_*` tools out of your own deployment, set
      `genericTools: false` on your record kind instead — that is per kind, not per process, and
      it is why the healthcare pack replaces seven names rather than twelve.
 

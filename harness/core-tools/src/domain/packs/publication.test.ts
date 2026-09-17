@@ -75,6 +75,26 @@ describe('publishedCatalogue', () => {
     expect(() => publishedCatalogue(kernel, sources, new Set())).toThrow('pack "b" and pack "a" both publish');
   });
 
+  it('refuses a source that replaces a kernel tool it does not publish, naming both', () => {
+    // The inverse of the typo rule above, and the one case that was still silent: the kernel's
+    // tool is dropped for the whole process and the source ships nothing under that name, so
+    // the catalogue simply loses it.
+    const sources = [source('pack "a"', ['documents_ingest'], ['documents_ingest_v2'])];
+    expect(() => publishedCatalogue(kernel, sources, new Set())).toThrow(ConfigError);
+    expect(() => publishedCatalogue(kernel, sources, new Set())).toThrow(
+      'pack "a" replaces "documents_ingest" but publishes no tool of that name',
+    );
+  });
+
+  it('refuses a source whose replacement is published by a different source', () => {
+    // `replaces` is a claim to serve that name. Letting another pack satisfy it would make which
+    // tool an agent reaches depend on load order rather than on either pack's declaration.
+    const sources = [source('pack "a"', ['audit_query'], []), source('pack "b"', [], ['audit_query'])];
+    expect(() => publishedCatalogue(kernel, sources, new Set())).toThrow(
+      'pack "a" replaces "audit_query" but publishes no tool of that name',
+    );
+  });
+
   it('refuses a source publishing a kernel name it did not replace', () => {
     // Shadowing without saying so: the catalogue would carry the name twice and which one an
     // agent reached would be list order.

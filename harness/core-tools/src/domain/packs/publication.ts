@@ -16,7 +16,7 @@ export interface ToolSource {
 /**
  * Resolve the kernel's tools and every source's into the one list the MCP server publishes.
  *
- * Three rules, in this order, and each one fails loudly rather than quietly:
+ * Four rules, in this order, and each one fails loudly rather than quietly:
  *
  *  1. A kernel tool in `hidden` is not published. That set is how the generic `records_*` tools
  *     stay out of a catalogue whose every record kind is served by a pack's own tools.
@@ -25,6 +25,10 @@ export interface ToolSource {
  *     beside a half-working replacement and nothing would say so.
  *  3. Two sources may not publish the same name, and two sources may not replace the same name.
  *     Either is a `ConfigError` naming both.
+ *  4. A source that replaces a kernel name must publish that name itself. Rule 2 catches a typo
+ *     in the `replaces` list; this catches the inverse — a name spelled right there and missing
+ *     from, or misspelled in, the catalogue `tools(deps)` returns — which would otherwise delete
+ *     the kernel's tool from the process and leave nothing in its place.
  *
  * It lives in the domain rather than in `tools/catalog.ts` because every failure here is a
  * startup misconfiguration an operator reads, not a tool result an agent reads — which is the
@@ -58,6 +62,13 @@ export function publishedCatalogue(
       if (already) throw new ConfigError(`${source.label} and ${already} both publish "${tool.name}"`);
       from.set(tool.name, source.label);
       published.push(tool);
+    }
+  }
+
+  // Rule 4. Checked after every source has published, so the order of `sources` does not matter.
+  for (const [name, label] of replacedBy) {
+    if (from.get(name) !== label) {
+      throw new ConfigError(`${label} replaces "${name}" but publishes no tool of that name`);
     }
   }
   return published;
