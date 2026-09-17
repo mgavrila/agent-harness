@@ -64,6 +64,13 @@
       "when": 1789592881734,
       "tag": "0008_generic_records",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1789616836147,
+      "tag": "0009_surface_addressing",
+      "breakpoints": true
     }
   ]
 }

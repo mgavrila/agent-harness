@@ -54,8 +54,8 @@ export function threadReplyText(row: ApprovalRow, execution?: ExecuteOutcome): s
 
 /** Slack is best effort: a decision that is recorded must not be lost to a failed post. */
 async function tellSlack(deps: DecisionDeps, row: ApprovalRow, execution: ExecuteOutcome | undefined): Promise<void> {
-  if (!row.slackChannel || !row.slackTs) {
-    log.warn(`${row.id} has no card to update; the decision is recorded but not shown in Slack`);
+  if (!row.conversationId || !row.messageRef) {
+    log.warn(`${row.id} has no card to update; the decision is recorded but not shown to a human`);
     return;
   }
   const outcome = {
@@ -65,8 +65,8 @@ async function tellSlack(deps: DecisionDeps, row: ApprovalRow, execution: Execut
   };
   try {
     await deps.api.chat.update({
-      channel: row.slackChannel,
-      ts: row.slackTs,
+      channel: row.conversationId,
+      ts: row.messageRef,
       text: `Approval ${row.id} ${row.status}`,
       blocks: decidedBlocks(row, outcome),
     });
@@ -75,8 +75,8 @@ async function tellSlack(deps: DecisionDeps, row: ApprovalRow, execution: Execut
   }
   try {
     await deps.api.chat.postMessage({
-      channel: row.slackChannel,
-      thread_ts: row.slackTs,
+      channel: row.conversationId,
+      thread_ts: row.messageRef,
       text: threadReplyText(row, execution),
     });
   } catch (err) {

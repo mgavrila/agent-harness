@@ -23,7 +23,7 @@ class Registry implements HandlerRegistry {
 async function seed() {
   const [row] = await db
     .insert(approvals)
-    .values(pendingApproval({ slackChannel: 'C0DEMO', slackTs: '1789000000.000001' }))
+    .values(pendingApproval({ surface: 'slack', conversationId: 'C0DEMO', messageRef: '1789000000.000001' }))
     .returning();
   return row;
 }

@@ -12,7 +12,7 @@ const now = () => new Date('2026-09-15T12:00:00Z');
 async function seed(over: Record<string, unknown> = {}): Promise<ApprovalRow> {
   const [row] = await db
     .insert(approvals)
-    .values(pendingApproval({ slackChannel: 'C0DEMO', slackTs: '1789000000.000001', ...over }))
+    .values(pendingApproval({ surface: 'slack', conversationId: 'C0DEMO', messageRef: '1789000000.000001', ...over }))
     .returning();
   return row;
 }

@@ -48,8 +48,9 @@ export function approvalRow(over: Partial<ApprovalRow> = {}): ApprovalRow {
     decisionNote: null,
     executedAt: null,
     idempotencyKey: 'demo-practice:forms_release:abc',
-    slackChannel: null,
-    slackTs: null,
+    surface: null,
+    conversationId: null,
+    messageRef: null,
     createdAt: new Date('2026-09-15T12:00:00Z'),
     ...over,
   } as ApprovalRow;
