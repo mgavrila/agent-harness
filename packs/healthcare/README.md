@@ -51,7 +51,7 @@ pack-agnostic.
 ## The eighteen tools
 
 Six it owns — `verify_nppes`, `verify_state_license`, `forms_list_templates`, `forms_fill`,
-`forms_roster`, `forms_release` — and twelve wrappers in `src/tools/aliases.ts` over the
+`forms_roster`, `forms_release` — and twelve wrappers in `src/tools/aliases/` over the
 kernel's generic tools: `providers_upsert/get/search/confirm_field/list_pending` over
 `records_*`, and same-named replacements for `documents_ingest/get/list/classify/extract` and
 `deadlines_compute/upcoming`. Each wrapper's zod schema is the pre-Plan-5 definition character

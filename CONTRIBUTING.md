@@ -189,7 +189,7 @@ complete one; read it alongside this.
 
    A wrapper that reshapes a result has to cope with another pack's rows reaching it, because
    `replaces` is process-wide. Build the output schema from `deps` and pass a foreign row
-   through untouched, as `packs/healthcare/src/tools/aliases.ts` does.
+   through untouched, as `packs/healthcare/src/tools/aliases/documents.ts` does.
 
 7. **Write the skills.** One `<name>/SKILL.md` per skill under `skillsDir`, with
    `metadata.harness.tools` naming only tools the loaded catalogue publishes;
