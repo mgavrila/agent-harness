@@ -124,6 +124,17 @@ services:
         # sed, not `grep -v`: grep exits 1 when it prints nothing, which
         # would abort this script under `set -e`.
         sed '/^APPROVALS_SLACK_/d' /srv/env/.env > /data/.env
+        # Hermes interpolates the core-tools child's env block from this file,
+        # not from the process environment, so the two host-loopback addresses
+        # in the operator's .env must be rewritten to their compose-network
+        # forms here or the child cannot reach the database or the gateway.
+        sed -i \
+          -e 's#^DATABASE_URL=.*#DATABASE_URL=postgres://harness:harness@postgres:5432/harness#' \
+          -e 's#^HARNESS_GATEWAY_URL=.*#HARNESS_GATEWAY_URL=http://litellm:4000#' \
+          /data/.env
+        # An operator's .env may lack a trailing newline; append on a fresh line.
+        [ -z "$$(tail -c1 /data/.env)" ] || echo >> /data/.env
+        grep -q '^HARNESS_GATEWAY_URL=' /data/.env || echo 'HARNESS_GATEWAY_URL=http://litellm:4000' >> /data/.env
         chmod 600 /data/.env
         # jobs.json is deliberately NOT seeded: its record shape is not
         # documented, and Hermes creates it on the first `hermes cron create`.
