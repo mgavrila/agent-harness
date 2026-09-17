@@ -3,9 +3,6 @@ name: stories-intake
 description: Take product meeting notes into the record store as epics and ask about anything uncertain.
 version: 1.0.0
 metadata:
-  hermes:
-    tags: [stories, product, intake]
-    category: product
   harness:
     owner: demo-product
     parent_version: null

@@ -3,9 +3,6 @@ name: credentialing-expirations
 description: Nightly renewal watch. Reports credentials entering an urgency window and stays silent when there is nothing to report.
 version: 1.0.0
 metadata:
-  hermes:
-    tags: [credentialing, healthcare, playbook]
-    category: healthcare
   harness:
     owner: demo-practice
     parent_version: null

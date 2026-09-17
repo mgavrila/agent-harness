@@ -3,9 +3,6 @@ name: credentialing-roster
 description: Build a payer roster CSV for a set of providers and get a human to approve sending it.
 version: 1.0.0
 metadata:
-  hermes:
-    tags: [credentialing, healthcare, roster]
-    category: healthcare
   harness:
     owner: demo-practice
     parent_version: null

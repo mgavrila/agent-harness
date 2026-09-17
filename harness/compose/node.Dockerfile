@@ -27,7 +27,8 @@ RUN pnpm install --frozen-lockfile && chmod -R a+rX /srv/agent-harness
 
 # The storage volume's layout. Docker seeds a fresh named volume from the image's directory at the
 # mount path, ownership included, so the first container to mount `storage` leaves `incoming/` and
-# `out/` owned by the uid the host runs as. hermes-init used to chown the volume; nothing needs to.
+# `out/` owned by the uid the host runs as. The image seeds the layout and its ownership; no
+# init container is needed.
 RUN mkdir -p /srv/harness-storage/incoming /srv/harness-storage/out && chown -R node:node /srv/harness-storage
 
 # Runs as the base image's uid-1000 "node" user rather than root.

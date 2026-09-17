@@ -3,9 +3,6 @@ name: credentialing-intake
 description: Take new provider documents from Slack into the record store, ask about anything uncertain, and compute the renewal calendar.
 version: 1.0.0
 metadata:
-  hermes:
-    tags: [credentialing, healthcare, intake]
-    category: healthcare
   harness:
     owner: demo-practice
     parent_version: null
