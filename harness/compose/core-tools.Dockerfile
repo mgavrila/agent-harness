@@ -23,6 +23,7 @@ COPY packs ./packs
 COPY evals ./evals
 RUN pnpm install --frozen-lockfile
 
-# core-tools speaks MCP over stdio; Hermes launches it, so there is no port.
+# The stdio MCP server, for the MCP inspector and the eval runner on an operator's machine, so
+# there is no port. The host embeds core-tools in-process and does not use this image.
 WORKDIR /app/harness/core-tools
 CMD ["pnpm", "start"]

@@ -42,9 +42,11 @@ const MESSAGING_FORBIDDEN = /slack|bolt|block ?kit|thread_ts|\bblocks\b/i;
 
 /**
  * Words that belong to one agent framework or one identity vendor and must not appear in the
- * kernel, the identity contract or the evals (spec decision 20). The runtime plug-in of Plan 8 is
- * the only place the first three may live; the Entra plug-in and the Teams surface are Weave's
- * and live in `identities/entra` and `surfaces/teams` when they exist. `teams` and `entra` are
+ * kernel, the runtime contract, the identity contract or the evals (spec decision 20).
+ * `runtimes/deepagents` is the only place the first three may live — the runtime *contract* is
+ * scanned for them precisely because the plug-in beneath it is not, and the whole point of the
+ * contract is that the host can hold it without holding a framework. The Entra plug-in and the
+ * Teams surface are Weave's and live in `identities/entra` and `surfaces/teams` when they exist. `teams` and `entra` are
  * word-bounded: "teams" is also English, and `agreementRate` in the evals contains the five
  * letters of the other.
  */
@@ -65,6 +67,13 @@ const DEPLOYMENT_FORBIDDEN = /demo-practice|hermes/i;
  * excluded from the credentialing scan only, because `RESTRICTED_NAME_KEYS` is a list of
  * identifier stems — `dea_number` is one of them — that the kernel keeps on purpose (spec
  * section 6); it has no such exemption from the messaging scan, and needs none.
+ *
+ * `runtimes/deepagents/src` is scanned for everything *but* the framework words: it is the one
+ * directory in the workspace that may spell them. It is scanned for the other three lists like
+ * any other package — a runtime plug-in that knew what a credential was, or what a message
+ * surface was, or which client it was serving, would be the coupling the runtime contract exists
+ * to remove. The `credentialing-intake` and `credentialing-roster` skill names in its tests are
+ * why tests are skipped here, as they are everywhere.
  *
  * `minFiles` guards against the one way this test can lie: a scan that reached nothing passes.
  *
@@ -173,10 +182,73 @@ const SCANNED = [
     skip: [/\.test\.ts$/],
   },
   {
+    what: 'framework and vendor vocabulary',
+    root: 'harness/runtime-api/src',
+    forbidden: FRAMEWORK_FORBIDDEN,
+    minFiles: 5,
+    skip: [/\.test\.ts$/],
+  },
+  {
+    what: 'deployment vocabulary',
+    root: 'harness/runtime-api/src',
+    forbidden: DEPLOYMENT_FORBIDDEN,
+    minFiles: 5,
+    skip: [/\.test\.ts$/],
+  },
+  {
+    what: 'credentialing vocabulary',
+    root: 'runtimes/deepagents/src',
+    forbidden: DOMAIN_FORBIDDEN,
+    minFiles: 5,
+    skip: [/\.test\.ts$/],
+  },
+  {
+    what: 'messaging vocabulary',
+    root: 'runtimes/deepagents/src',
+    forbidden: MESSAGING_FORBIDDEN,
+    minFiles: 5,
+    skip: [/\.test\.ts$/],
+  },
+  {
+    what: 'deployment vocabulary',
+    root: 'runtimes/deepagents/src',
+    forbidden: DEPLOYMENT_FORBIDDEN,
+    minFiles: 5,
+    skip: [/\.test\.ts$/],
+  },
+  {
     what: 'deployment vocabulary',
     root: 'harness/files/src',
     forbidden: DEPLOYMENT_FORBIDDEN,
     minFiles: 4,
+    skip: [/\.test\.ts$/],
+  },
+  {
+    what: 'credentialing vocabulary',
+    root: 'harness/host/src',
+    forbidden: DOMAIN_FORBIDDEN,
+    minFiles: 8,
+    skip: [/\.test\.ts$/],
+  },
+  {
+    what: 'messaging vocabulary',
+    root: 'harness/host/src',
+    forbidden: MESSAGING_FORBIDDEN,
+    minFiles: 8,
+    skip: [/\.test\.ts$/],
+  },
+  {
+    what: 'framework and vendor vocabulary',
+    root: 'harness/host/src',
+    forbidden: FRAMEWORK_FORBIDDEN,
+    minFiles: 8,
+    skip: [/\.test\.ts$/],
+  },
+  {
+    what: 'deployment vocabulary',
+    root: 'harness/host/src',
+    forbidden: DEPLOYMENT_FORBIDDEN,
+    minFiles: 8,
     skip: [/\.test\.ts$/],
   },
 ];

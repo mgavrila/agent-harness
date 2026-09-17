@@ -151,6 +151,33 @@ export interface SurfaceCapabilities {
   forms: boolean;
   privateReply: boolean;
   update: boolean;
+  /** `startStream` works. Off, the host posts the whole reply once. */
+  streaming: boolean;
+  /** A card's buttons can sit in the conversation the question was asked in. Unused until a surface has it. */
+  inlineConfirm: boolean;
+}
+
+/** A human wrote to the assistant. Attachments are already under `<storageDir>/incoming`; `path` is relative to it. */
+export interface MessageEvent {
+  surface: string;
+  userId: string;
+  conversation: string;
+  text: string;
+  attachments: readonly { name: string; path: string }[];
+  /** The message itself, when the surface can address it again. */
+  message: MessageRef | null;
+  /**
+   * True when the assistant was addressed: mentioned in a channel, or written to directly. A
+   * direct message is addressed by construction, so an adapter sets this true there too. The
+   * host answers only when this is true.
+   */
+  mentioned: boolean;
+}
+
+/** A reply being written as it is produced. `end` posts what is left and returns the message. */
+export interface StreamHandle {
+  append(delta: string): void;
+  end(): Promise<MessageRef>;
 }
 
 export interface UploadRequest {
@@ -172,12 +199,6 @@ export interface SurfaceSession {
   /** This adapter's name, as `HARNESS_SURFACES` named it and as `approvals.surface` stores it. */
   readonly name: string;
   readonly capabilities: SurfaceCapabilities;
-  /**
-   * Who may decide anything here, in this surface's own user ids. **Empty means nobody**, which
-   * is the fail-closed rule, not "everybody". The single member `ANY_USER` means everybody and
-   * is for a surface with no transport only. Read it through `allowsUser`, never `.has`.
-   */
-  readonly allowedUsers: ReadonlySet<string>;
   /** Where this surface posts when nobody names a conversation. */
   readonly defaultConversation: string;
   /** How this surface spells a mention of a user inside plain text. */
@@ -204,6 +225,15 @@ export interface SurfaceSession {
   onAction(handler: (event: ActionEvent) => Promise<void>): void;
   /** One handler for every form submitted on this surface. Replaces any previous one. */
   onFormSubmit(handler: (event: FormEvent) => Promise<void>): void;
+  /** One handler for every message written to the assistant on this surface. Replaces any previous one. */
+  onMessage(handler: (event: MessageEvent) => Promise<void>): void;
+  /**
+   * Begin a streamed reply. Throws `SurfaceError` when `capabilities.streaming` is false. `recipient`
+   * is the user the reply is for, for a surface whose streaming API wants one.
+   */
+  startStream(conversation: string, opts?: { replyTo?: MessageRef; recipient?: string }): StreamHandle;
+  /** Show that a reply is coming, where the surface can. Optional. */
+  typing?(conversation: string): Promise<void>;
   start(): Promise<void>;
   stop(): Promise<void>;
 }
@@ -228,9 +258,8 @@ export interface Surface {
   name: string;
   version: string;
   /**
-   * The environment variable names this adapter reads that are credentials. The host strips the
-   * union of every loaded surface's list from the environment of the core-tools child it
-   * spawns, so the allowlist there names no surface.
+   * The environment variable names this adapter reads that are credentials: the host must never
+   * forward one to a runtime and must never log one.
    */
   secrets: readonly string[];
   connect(deps: SurfaceDeps): Promise<SurfaceSession>;

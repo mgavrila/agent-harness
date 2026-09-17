@@ -63,9 +63,5 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # The hermes service declares `env_file: ../../.env`. A build does not read it, but the
-      # placeholder file is put there so that a Compose release that validates it at load time
-      # cannot fail the job.
-      - run: cp .env.ci .env
       - name: Build every image the Compose stack defines
         run: docker compose --env-file .env.ci -f harness/compose/docker-compose.yml --profile demo --profile build-only build

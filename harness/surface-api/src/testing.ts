@@ -1,11 +1,12 @@
 import { SurfaceError } from '@harness/shared';
-import { ANY_USER, parseAllowedUsers } from './surface.js';
 import type {
   ActionEvent,
   Card,
   Form,
   FormEvent,
+  MessageEvent,
   MessageRef,
+  StreamHandle,
   SurfaceCapabilities,
   SurfaceSession,
   UploadRequest,
@@ -14,7 +15,6 @@ import type {
 export interface MemorySurfaceOptions {
   name?: string;
   conversation?: string;
-  allowedUsers?: ReadonlySet<string>;
   capabilities?: Partial<SurfaceCapabilities>;
 }
 
@@ -24,16 +24,16 @@ export interface MemorySurfaceOptions {
  * It is two things at once and deliberately so: the whole of `@harness/surface-memory`, the
  * adapter a developer runs the host with when they have no Slack workspace, and the fake every
  * host test drives. One implementation means the thing the suite proves the host against is the
- * thing that runs. It lives under the `testing` subpath because that is where a package's fakes
- * live in this repository, and `@harness/surface-memory` is a thin wrapper that gives it a name,
- * an allowlist and a `defineSurface` declaration.
+ * thing that runs, and the first inbound surface: `say` drives a test's turn the way a real
+ * message would. It lives under the `testing` subpath because that is where a package's fakes
+ * live in this repository, and `@harness/surface-memory` is a thin wrapper that gives it a name
+ * and a `defineSurface` declaration.
  *
  * Message ids count up from `m1`, so an assertion can rely on ordering without a clock.
  */
 export class MemorySurface implements SurfaceSession {
   readonly name: string;
   readonly capabilities: SurfaceCapabilities;
-  readonly allowedUsers: ReadonlySet<string>;
   readonly defaultConversation: string;
 
   readonly cards: { ref: MessageRef; card: Card }[] = [];
@@ -41,6 +41,7 @@ export class MemorySurface implements SurfaceSession {
   readonly privates: { conversation: string; userId: string; text: string }[] = [];
   readonly uploads: { conversation: string; filename: string; path: string; comment: string | null }[] = [];
   readonly forms: { trigger: string; form: Form }[] = [];
+  readonly streams: { conversation: string; text: string; ended: boolean; replyTo: MessageRef | null }[] = [];
   started = false;
   stopped = false;
   /** When set, every outbound call rejects with this message, the way an unreachable transport does. */
@@ -49,12 +50,19 @@ export class MemorySurface implements SurfaceSession {
   private seq = 0;
   private actionHandler: ((event: ActionEvent) => Promise<void>) | null = null;
   private formHandler: ((event: FormEvent) => Promise<void>) | null = null;
+  private messageHandler: ((event: MessageEvent) => Promise<void>) | null = null;
 
   constructor(opts: MemorySurfaceOptions = {}) {
     this.name = opts.name ?? 'memory';
     this.defaultConversation = opts.conversation ?? 'memory';
-    this.allowedUsers = opts.allowedUsers ?? parseAllowedUsers(ANY_USER);
-    this.capabilities = { forms: true, privateReply: true, update: true, ...opts.capabilities };
+    this.capabilities = {
+      forms: true,
+      privateReply: true,
+      update: true,
+      streaming: true,
+      inlineConfirm: false,
+      ...opts.capabilities,
+    };
   }
 
   private guard(): void {
@@ -120,6 +128,43 @@ export class MemorySurface implements SurfaceSession {
 
   onFormSubmit(handler: (event: FormEvent) => Promise<void>): void {
     this.formHandler = handler;
+  }
+
+  onMessage(handler: (event: MessageEvent) => Promise<void>): void {
+    this.messageHandler = handler;
+  }
+
+  startStream(conversation: string, opts: { replyTo?: MessageRef; recipient?: string } = {}): StreamHandle {
+    this.requires(this.capabilities.streaming, 'cannot stream a reply');
+    const entry = { conversation, text: '', ended: false, replyTo: opts.replyTo ?? null };
+    this.streams.push(entry);
+    return {
+      append: (delta) => {
+        entry.text += delta;
+      },
+      end: async () => {
+        entry.ended = true;
+        return this.postText(conversation, entry.text, { replyTo: opts.replyTo });
+      },
+    };
+  }
+
+  /**
+   * A human writes to the assistant. Mentioned by default, in the default conversation, with no
+   * attachments; `over` overrides any field. This is how every host test starts a turn.
+   */
+  async say(userId: string, text: string, over: Partial<MessageEvent> = {}): Promise<void> {
+    if (!this.messageHandler) throw new SurfaceError(`${this.name}: no message handler is registered`);
+    await this.messageHandler({
+      surface: this.name,
+      userId,
+      conversation: this.defaultConversation,
+      text,
+      attachments: [],
+      message: null,
+      mentioned: true,
+      ...over,
+    });
   }
 
   async start(): Promise<void> {

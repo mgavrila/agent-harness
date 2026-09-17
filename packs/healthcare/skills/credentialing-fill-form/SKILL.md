@@ -3,9 +3,6 @@ name: credentialing-fill-form
 description: Fill a payer or licensing form for one provider and get a human to approve sending it.
 version: 1.0.0
 metadata:
-  hermes:
-    tags: [credentialing, healthcare, forms]
-    category: healthcare
   harness:
     owner: demo-practice
     parent_version: null

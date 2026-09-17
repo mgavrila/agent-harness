@@ -9,24 +9,22 @@
   },
   "scripts": {
     "test": "vitest run",
-    "typecheck": "tsc --noEmit",
-    "start": "tsx src/app/main.ts"
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@harness/core-tools": "workspace:*",
     "@harness/db": "workspace:*",
+    "@harness/identity-api": "workspace:*",
     "@harness/shared": "workspace:*",
     "@harness/surface-api": "workspace:*",
     "@harness/surface-slack": "workspace:*",
     "@modelcontextprotocol/client": "^2.0.0",
-    "dotenv": "^17.4.2",
     "drizzle-orm": "^0.45.2",
     "zod": "^4.6.5"
   },
   "devDependencies": {
     "@harness/surface-memory": "workspace:*",
     "@types/node": "^26.5.1",
-    "tsx": "^4.23.13",
     "typescript": "^7.0.2",
     "vitest": "^5.0.0"
   }

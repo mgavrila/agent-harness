@@ -6,63 +6,6 @@ networks:
     internal: true
     name: agent-harness_files
 services:
-  approvals:
-    build:
-      context: ../..
-      dockerfile: harness/compose/node.Dockerfile
-    depends_on:
-      files:
-        condition: service_healthy
-        required: true
-      postgres:
-        condition: service_healthy
-        required: true
-    environment:
-      APPROVALS_HEALTH_BIND: ${APPROVALS_HEALTH_BIND:-0.0.0.0}
-      APPROVALS_HEALTH_PORT: "8787"
-      APPROVALS_POLL_SECONDS: ${APPROVALS_POLL_SECONDS:-5}
-      APPROVALS_SLACK_APP_TOKEN: ${APPROVALS_SLACK_APP_TOKEN:-}
-      APPROVALS_SLACK_BOT_TOKEN: ${APPROVALS_SLACK_BOT_TOKEN:-}
-      DATABASE_URL: postgres://harness:harness@postgres:5432/harness
-      EFFECTS_DISPATCH_SECONDS: ${EFFECTS_DISPATCH_SECONDS:-5}
-      HARNESS_CLIENT: ${HARNESS_CLIENT:-demo-practice}
-      HARNESS_ENCRYPTION_KEY: ${HARNESS_ENCRYPTION_KEY:-}
-      HARNESS_FILES_URL: http://files:8790
-      HARNESS_GATEWAY_URL: http://litellm:4000
-      HARNESS_PACKS: ${HARNESS_PACKS:-@harness/pack-healthcare}
-      HARNESS_POLICY_FILE: /srv/agent-harness/clients/${HARNESS_CLIENT:?set HARNESS_CLIENT in .env}/policy.yaml
-      HARNESS_STORAGE_DIR: /srv/harness-storage
-      HARNESS_SURFACES: ${HARNESS_SURFACES:-@harness/surface-slack}
-      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?set LITELLM_MASTER_KEY in .env}
-      RECONCILE_SECONDS: ${RECONCILE_SECONDS:-300}
-      SLACK_ALLOWED_USERS: ${SLACK_ALLOWED_USERS:-}
-      SLACK_APPROVALS_CHANNEL: ${SLACK_APPROVALS_CHANNEL:-}
-    image: harness-approvals
-    networks:
-      default: null
-      files: null
-    ports:
-      - 127.0.0.1:${APPROVALS_HEALTH_HOST_PORT:-8787}:8787
-    profiles:
-      - demo
-    restart: unless-stopped
-    volumes:
-      - source: storage
-        target: /srv/harness-storage
-        type: volume
-        volume: {}
-      - bind:
-          create_host_path: true
-        read_only: true
-        source: ../../packs
-        target: /srv/agent-harness/packs
-        type: bind
-      - bind:
-          create_host_path: true
-        read_only: true
-        source: ../../clients
-        target: /srv/agent-harness/clients
-        type: bind
   core-tools:
     build:
       context: ../..
@@ -117,19 +60,13 @@ services:
         target: /srv/harness-storage
         type: volume
         volume: {}
-  hermes:
+  host:
     build:
       context: ../..
-      dockerfile: harness/compose/hermes.Dockerfile
-    command:
-      - gateway
-      - run
+      dockerfile: harness/compose/node.Dockerfile
     depends_on:
       files:
         condition: service_healthy
-        required: true
-      hermes-init:
-        condition: service_completed_successfully
         required: true
       litellm:
         condition: service_healthy
@@ -137,42 +74,46 @@ services:
       postgres:
         condition: service_healthy
         required: true
-    env_file:
-      - path: ../../.env
-        required: true
     environment:
-      APPROVALS_SLACK_APP_TOKEN: ""
-      APPROVALS_SLACK_BOT_TOKEN: ""
+      APPROVALS_HEALTH_BIND: ${APPROVALS_HEALTH_BIND:-0.0.0.0}
+      APPROVALS_HEALTH_PORT: "8787"
+      APPROVALS_POLL_SECONDS: ${APPROVALS_POLL_SECONDS:-5}
       DATABASE_URL: postgres://harness:harness@postgres:5432/harness
+      EFFECTS_DISPATCH_SECONDS: ${EFFECTS_DISPATCH_SECONDS:-5}
+      HARNESS_CLIENT: ${HARNESS_CLIENT:-demo-practice}
+      HARNESS_ENCRYPTION_KEY: ${HARNESS_ENCRYPTION_KEY:-}
       HARNESS_FILES_URL: http://files:8790
       HARNESS_GATEWAY_URL: http://litellm:4000
+      HARNESS_HISTORY_MAX_MESSAGES: ${HARNESS_HISTORY_MAX_MESSAGES:-40}
+      HARNESS_HOST_PRINCIPAL: ${HARNESS_HOST_PRINCIPAL:-svc-host}
+      HARNESS_IDENTITY: ${HARNESS_IDENTITY:-@harness/identity-static}
       HARNESS_PACKS: ${HARNESS_PACKS:-@harness/pack-healthcare}
       HARNESS_POLICY_FILE: /srv/agent-harness/clients/${HARNESS_CLIENT:?set HARNESS_CLIENT in .env}/policy.yaml
+      HARNESS_RUN_MAX_MODEL_CALLS: ${HARNESS_RUN_MAX_MODEL_CALLS:-30}
+      HARNESS_RUN_MAX_TOOL_CALLS: ${HARNESS_RUN_MAX_TOOL_CALLS:-60}
+      HARNESS_RUN_TIMEOUT_S: ${HARNESS_RUN_TIMEOUT_S:-600}
+      HARNESS_RUNTIME: ${HARNESS_RUNTIME:-@harness/runtime-deepagents}
       HARNESS_STORAGE_DIR: /srv/harness-storage
-      HERMES_GID: ${HERMES_GID:-1000}
-      HERMES_UID: ${HERMES_UID:-1000}
+      HARNESS_SURFACES: ${HARNESS_SURFACES:-@harness/surface-slack}
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?set LITELLM_MASTER_KEY in .env}
-    image: harness-hermes
+      RECONCILE_SECONDS: ${RECONCILE_SECONDS:-300}
+      SLACK_APP_TOKEN: ${SLACK_APP_TOKEN:-}
+      SLACK_APPROVALS_CHANNEL: ${SLACK_APPROVALS_CHANNEL:-}
+      SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN:-}
+    image: harness-host
     networks:
       default: null
       files: null
+    ports:
+      - 127.0.0.1:${APPROVALS_HEALTH_HOST_PORT:-8787}:8787
     profiles:
       - demo
     restart: unless-stopped
     volumes:
-      - source: hermesdata
-        target: /opt/data
-        type: volume
-        volume: {}
       - source: storage
         target: /srv/harness-storage
         type: volume
         volume: {}
-      - source: storage
-        target: /opt/data/cache/documents
-        type: volume
-        volume:
-          subpath: incoming
       - bind:
           create_host_path: true
         read_only: true
@@ -184,87 +125,6 @@ services:
         read_only: true
         source: ../../clients
         target: /srv/agent-harness/clients
-        type: bind
-  hermes-init:
-    command:
-      - sh
-      - -c
-      - |
-        set -eu
-        mkdir -p /data/cron /data/scripts
-        cp /srv/client/SOUL.md /data/SOUL.md
-        cp /srv/client/hermes.config.yaml /data/config.yaml
-        cp /srv/client/cron/playbooks.sh /data/cron/playbooks.sh
-        cp /srv/client/scripts/*.sh /data/scripts/
-        chmod +x /data/cron/playbooks.sh /data/scripts/*.sh
-        # Hermes reads secrets from $$HERMES_HOME/.env; the process environment
-        # carries them too, and whichever it prefers, both agree. The
-        # approver's Slack app tokens are filtered out here for the same
-        # reason the hermes service blanks them: they belong to a different
-        # Slack app, and only the approvals container should hold them.
-        # sed, not `grep -v`: grep exits 1 when it prints nothing, which
-        # would abort this script under `set -e`.
-        sed '/^APPROVALS_SLACK_/d' /srv/env/.env > /data/.env
-        # Hermes interpolates the core-tools child's env block from this file,
-        # not from the process environment, so the three host-side addresses
-        # in the operator's .env must be rewritten to their compose-network
-        # forms here or the child cannot reach the database or the gateway.
-        sed -i \
-          -e 's#^DATABASE_URL=.*#DATABASE_URL=postgres://harness:harness@postgres:5432/harness#' \
-          -e 's#^HARNESS_GATEWAY_URL=.*#HARNESS_GATEWAY_URL=http://litellm:4000#' \
-          -e 's#^HARNESS_FILES_URL=.*#HARNESS_FILES_URL=http://files:8790#' \
-          /data/.env
-        # An operator's .env may lack a trailing newline; append on a fresh line.
-        [ -z "$$(tail -c1 /data/.env)" ] || echo >> /data/.env
-        grep -q '^HARNESS_GATEWAY_URL=' /data/.env || echo 'HARNESS_GATEWAY_URL=http://litellm:4000' >> /data/.env
-        grep -q '^HARNESS_FILES_URL=' /data/.env || echo 'HARNESS_FILES_URL=http://files:8790' >> /data/.env
-        chmod 600 /data/.env
-        # jobs.json is deliberately NOT seeded: its record shape is not
-        # documented, and Hermes creates it on the first `hermes cron create`.
-        # $$-escaped: these must reach the container's own shell unexpanded,
-        # not be interpolated by Compose itself when it parses this file (that
-        # would use the host/.env value instead of this service's own
-        # environment: block below, and blank out to "chown -R \":\"" when
-        # HERMES_UID/HERMES_GID are not set on the host).
-        chown -R "$${HERMES_UID}:$${HERMES_GID}" /data
-        # The shared store, same $$-escaping rule. `out/` is created here
-        # rather than left to the first forms_fill, because that mkdir runs as
-        # HERMES_UID inside the hermes container and the fresh volume root is
-        # owned by root. The approvals container reads this tree as its own
-        # uid-1000 `node` user, which matches the default HERMES_UID.
-        # `incoming/` is where Hermes drops files a human attaches in chat (see
-        # the hermes service's mount of the same subpath), so `documents_ingest`
-        # can read them as `incoming/<file name>` under the storage root.
-        mkdir -p /srv/harness-storage/out /srv/harness-storage/incoming
-        chown -R "$${HERMES_UID}:$${HERMES_GID}" /srv/harness-storage
-        echo "hermes-init: seeded SOUL.md, config.yaml, cron/playbooks.sh, scripts/ and the storage root"
-    environment:
-      HERMES_GID: ${HERMES_GID:-1000}
-      HERMES_UID: ${HERMES_UID:-1000}
-    image: busybox:1.37
-    networks:
-      default: null
-    profiles:
-      - demo
-    user: "0:0"
-    volumes:
-      - source: hermesdata
-        target: /data
-        type: volume
-        volume: {}
-      - source: storage
-        target: /srv/harness-storage
-        type: volume
-        volume: {}
-      - read_only: true
-        source: ../../clients/${HARNESS_CLIENT:?set HARNESS_CLIENT in .env}
-        target: /srv/client
-        type: bind
-      - bind:
-          create_host_path: true
-        read_only: true
-        source: ../../.env
-        target: /srv/env/.env
         type: bind
   litellm:
     command:
@@ -340,8 +200,6 @@ services:
         target: /docker-entrypoint-initdb.d/01-init.sql
         type: bind
 volumes:
-  hermesdata:
-    name: agent-harness_hermesdata
   pgdata:
     name: agent-harness_pgdata
   storage:

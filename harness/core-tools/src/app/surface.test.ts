@@ -18,8 +18,8 @@ const architecture = path.join(repoRoot, ARCHITECTURE_DIR);
 
 /**
  * Names that must appear in the environment scan. They are here to catch the scan breaking
- * silently: DATABASE_URL is a bare `process.env.X`, APPROVALS_POLL_SECONDS is only reachable
- * through the `seconds()` wrapper, and VERIFY_NPPES_ENABLED only through `booleanFromEnv`.
+ * silently: DATABASE_URL is a bare `process.env.X`, APPROVAL_TTL_HOURS is only reachable
+ * through the `numberFromEnv` wrapper, and VERIFY_NPPES_ENABLED only through `booleanFromEnv`.
  * If a refactor moves a read out of reach of every pattern, this fails instead of the whole
  * check quietly passing on an empty list.
  */
@@ -28,7 +28,7 @@ const SCAN_ANCHORS = [
   'LITELLM_MASTER_KEY',
   'HARNESS_STORAGE_DIR',
   'VERIFY_NPPES_ENABLED',
-  'APPROVALS_POLL_SECONDS',
+  'APPROVAL_TTL_HOURS',
   'SLACK_APPROVALS_CHANNEL',
 ];
 
@@ -155,9 +155,9 @@ describe('the files worker boundary', () => {
     expect(services.files.ports).toBeUndefined();
   });
 
-  it('is reached by the two services that spawn a core-tools child, which tell the child where it is', async () => {
+  it('is reached by the host, which tells core-tools where the worker is', async () => {
     const { services } = await rendered();
-    for (const name of ['hermes', 'approvals']) {
+    for (const name of ['host']) {
       expect(Object.keys(services[name].networks ?? {}).sort(), name).toEqual(['default', 'files']);
       expect(services[name].environment?.HARNESS_FILES_URL, name).toBe('http://files:8790');
     }
@@ -184,5 +184,32 @@ describe('the Compose stack names no client and mounts no socket', () => {
 
   it('pins no forms directory', async () => {
     expect(await rendered()).not.toContain('HARNESS_FORMS_DIR');
+  });
+
+  it('runs the host, not an approvals process, and gives it the three plug-in names', async () => {
+    const { services } = parseYaml(await rendered()) as {
+      services: Record<string, { environment?: Record<string, string>; image?: string }>;
+    };
+    expect(services.approvals).toBeUndefined();
+    expect(services.host.image).toBe('harness-host');
+    for (const name of ['HARNESS_SURFACES', 'HARNESS_IDENTITY', 'HARNESS_RUNTIME', 'HARNESS_HOST_PRINCIPAL']) {
+      expect(services.host.environment?.[name], name).toBeDefined();
+    }
+    expect(services.host.environment?.SLACK_ALLOWED_USERS).toBeUndefined();
+  });
+
+  it('runs exactly the five services of the kernel design, and no Hermes', async () => {
+    const { services } = parseYaml(await rendered()) as { services: Record<string, unknown> };
+    expect(Object.keys(services).sort()).toEqual(['core-tools', 'files', 'host', 'litellm', 'postgres']);
+    expect(await rendered()).not.toMatch(/hermes/i);
+  });
+
+  it('gives the host the one Slack app and no second one', async () => {
+    const { services } = parseYaml(await rendered()) as {
+      services: Record<string, { environment?: Record<string, string> }>;
+    };
+    expect(services.host.environment?.SLACK_BOT_TOKEN).toBeDefined();
+    expect(services.host.environment?.SLACK_APP_TOKEN).toBeDefined();
+    expect(Object.keys(services.host.environment ?? {}).filter((k) => k.startsWith('APPROVALS_SLACK'))).toEqual([]);
   });
 });

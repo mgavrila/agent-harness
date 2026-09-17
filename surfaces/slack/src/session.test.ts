@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { SurfaceAcceptedError, SurfaceError } from '@harness/shared';
-import type { ActionEvent, Card, Form, FormEvent } from '@harness/surface-api';
+import type { ActionEvent, Card, Form, FormEvent, MessageEvent } from '@harness/surface-api';
 import { fakeSlackSession } from './testing.js';
 
 const card: Card = {
@@ -36,7 +36,13 @@ describe('the Slack session', () => {
   it('names itself, and reports what Slack can do', () => {
     const { session } = fakeSlackSession();
     expect(session.name).toBe('slack');
-    expect(session.capabilities).toEqual({ forms: true, privateReply: true, update: true });
+    expect(session.capabilities).toEqual({
+      forms: true,
+      privateReply: true,
+      update: true,
+      streaming: true,
+      inlineConfirm: false,
+    });
     expect(session.defaultConversation).toBe('C0DEMO');
     expect(session.mention('U012')).toBe('<@U012>');
   });
@@ -255,5 +261,49 @@ describe('the Slack session', () => {
     await session.stop();
     expect(events.started).toBe(true);
     expect(events.stopped).toBe(true);
+  });
+
+  it('streams a reply as one message edited in the thread it was asked to reply in', async () => {
+    const { session, api } = fakeSlackSession();
+    const replyTo = { surface: 'slack', conversation: 'C0DEMO', id: '1700000000.000100' };
+    const stream = session.startStream('C0DEMO', { replyTo });
+    stream.append('Hel');
+    stream.append('lo');
+    const ref = await stream.end();
+    expect(api.posts).toHaveLength(1);
+    expect(api.posts[0]).toMatchObject({ channel: 'C0DEMO', thread_ts: '1700000000.000100', text: 'Hel' });
+    expect(api.updates).toHaveLength(1);
+    expect(api.updates[0]).toMatchObject({ channel: 'C0DEMO', text: 'Hello' });
+    expect(ref).toEqual({ surface: 'slack', conversation: 'C0DEMO', id: api.updates[0].ts });
+  });
+});
+
+describe('inbound messages', () => {
+  it('delivers a mention as a MessageEvent that names the surface and the message', async () => {
+    const { session, events } = fakeSlackSession();
+    const seen: MessageEvent[] = [];
+    session.onMessage(async (e) => {
+      seen.push(e);
+    });
+    await events.emitMessage({
+      userId: 'U012',
+      channel: 'C0DEMO',
+      text: 'file these',
+      ts: '1789000000.000001',
+      threadTs: null,
+      mentioned: true,
+      files: [{ name: 'w9.pdf', path: '1789000000-000001-w9.pdf' }],
+    });
+    expect(seen).toEqual([
+      {
+        surface: 'slack',
+        userId: 'U012',
+        conversation: 'C0DEMO',
+        text: 'file these',
+        attachments: [{ name: 'w9.pdf', path: '1789000000-000001-w9.pdf' }],
+        message: { surface: 'slack', conversation: 'C0DEMO', id: '1789000000.000001' },
+        mentioned: true,
+      },
+    ]);
   });
 });

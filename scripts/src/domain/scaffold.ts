@@ -3,11 +3,11 @@
  *
  *   pnpm new-client --pack healthcare --name river-clinic
  *
- * A client is content and configuration, never code: this copies
- * `clients/demo-practice` and rewrites the client slug and display name. It
+ * A client is content and configuration, never code: four files and an env example.
+ * This copies `clients/demo-practice` and rewrites the client slug and display name. It
  * deliberately does not touch `.env`, because secrets are the operator's job.
  */
-import { access, chmod, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -21,22 +21,10 @@ const DEFAULT_TEMPLATE = 'demo-practice';
 const TEMPLATE_DISPLAY_NAME = 'Demo Practice';
 
 /**
- * Files copied from the template. `routing.yaml` belongs to the model-gateway
- * plan; when it is not there yet, the new client simply does not get one and
- * the result says so.
+ * Files copied from the template: the four files a client is made of, plus its env example.
+ * A template missing one of them simply does not get it and the result says so.
  */
-const TEMPLATE_FILES = [
-  'SOUL.md',
-  'hermes.config.yaml',
-  'policy.yaml',
-  'identity.yaml',
-  '.env.example',
-  'routing.yaml',
-  'cron/playbooks.sh',
-] as const;
-
-/** Every `.sh` under this directory is copied too, so watchdogs travel with the client. */
-const SCRIPT_DIR = 'scripts';
+const TEMPLATE_FILES = ['SOUL.md', 'identity.yaml', 'policy.yaml', 'routing.yaml', '.env.example'] as const;
 
 export interface NewClientOptions {
   pack: string;
@@ -85,9 +73,6 @@ async function copyTextFile(from: string, to: string, templateSlug: string, name
   const text = await readFile(from, 'utf8');
   await mkdir(path.dirname(to), { recursive: true });
   await writeFile(to, substitute(text, templateSlug, name));
-  // Preserve the executable bit: a copied playbook installer must still run.
-  const mode = (await stat(from)).mode;
-  if (mode & 0o111) await chmod(to, mode & 0o777);
 }
 
 export async function newClient(opts: NewClientOptions): Promise<NewClientResult> {
@@ -124,16 +109,6 @@ export async function newClient(opts: NewClientOptions): Promise<NewClientResult
       }
       await copyTextFile(from, path.join(dir, relative), templateSlug, name);
       files.push(relative);
-    }
-
-    const scriptsFrom = path.join(templateDir, SCRIPT_DIR);
-    if (await exists(scriptsFrom)) {
-      for (const entry of await readdir(scriptsFrom)) {
-        if (!entry.endsWith('.sh')) continue;
-        const relative = `${SCRIPT_DIR}/${entry}`;
-        await copyTextFile(path.join(scriptsFrom, entry), path.join(dir, relative), templateSlug, name);
-        files.push(relative);
-      }
     }
   } catch (err) {
     // Never leave a half-written client directory behind: a retry should

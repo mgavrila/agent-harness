@@ -49,12 +49,22 @@ harness/identity-api the Identity contract and defineIdentityProvider(): Princip
 harness/files       the parsing worker: pdftotext, pdftoppm and tesseract behind one HTTP route,
                     in a process with no key, no database and no route out. Depends on
                     @harness/shared only.
+harness/runtime-api the Runtime contract and defineRuntime(): RunRequest, RunEvent,
+                    RuntimeSession; the ScriptedRuntime, the fake OpenAI-wire gateway and the
+                    conformance kit under its testing subpath. Depends on @harness/shared, zod
+                    and the MCP client type.
 harness/core-tools  the MCP server: the pack-agnostic kernel, every domain, every kernel tool.
-harness/approvals   the approvals host: cards, decisions, the effects dispatcher, the health
-                    endpoint. Loads its messaging adapters from HARNESS_SURFACES.
+harness/approvals   a library the host composes: cards, decisions, the poller, the sinks, the
+                    runner, health, the in-process core-tools client. Loads its messaging
+                    adapters from HARNESS_SURFACES.
+harness/host        the one process per client: loads the runtime, the surfaces and the
+                    identity plug-in by name, runs one conversation turn per message, and
+                    resumes a thread when an approval is decided.
 surfaces/slack      the Slack adapter: Block Kit, Bolt in Socket Mode, the Web API slice.
 surfaces/memory     the in-process adapter: no transport, used by the suite and for local runs.
 identities/static   the identity plug-in that reads clients/<name>/identity.yaml.
+runtimes/deepagents the Deep Agents JS runtime, behind the runtime contract: the only place
+                    deepagents, langchain and langgraph may be spelled.
 evals               the eval runner, scorers, judge and report.
 packs/healthcare    a pack: the provider record kind, credential attachment kinds, form
                     templates, skills, the synthetic corpus, and eighteen tools
@@ -66,15 +76,20 @@ The dependency graph in one line per layer, with every arrow pointing at somethi
 
 ```
 shared  <-  pack-api  <-  { core-tools, packs/* }
-shared  <-  surface-api  <-  { approvals, surfaces/* }
-shared  <-  identity-api  <-  { core-tools, identities/* }
+shared  <-  surface-api  <-  { approvals, host, surfaces/* }
+shared  <-  identity-api  <-  { core-tools, host, identities/* }
+shared  <-  runtime-api  <-  { host, runtimes/* }
 shared  <-  files
-shared  <-  db        <-  core-tools  <-  { approvals, evals }
+shared  <-  db        <-  core-tools  <-  { approvals, host, evals }
 gateway   <-  core-tools      (gateway is the one package with no edge to shared: it needs none)
+{ core-tools, approvals, runtime-api, identity-api, surface-api }  <-  host
 core-tools  ..>  packs/*        (runtime only: dynamic import, never a static one)
 evals       ..>  packs/*        (runtime only: HARNESS_PACKS, --pack; no static import)
 approvals   ..>  surfaces/*     (runtime only: HARNESS_SURFACES, never a static import)
 core-tools  ..>  identities/*   (runtime only: HARNESS_IDENTITY, never a static import)
+host        ..>  { surfaces/*, identities/*, runtimes/* }   (runtime only: HARNESS_SURFACES,
+                                                              HARNESS_IDENTITY, HARNESS_RUNTIME;
+                                                              never a static import)
 ```
 
 `scripts` is a leaf. There are no cycles.
@@ -229,27 +244,33 @@ only. A pack's policy is carried, not merged, unchanged from Plan 4's ruling.
 ## Surfaces
 
 A **surface** is a place a human is talked to: Slack today, Microsoft Teams or Telegram next.
-`@harness/approvals` is the _host_ — it decides what to say and when — and it holds no transport
-at all. `@harness/surface-api` is the contract between them, and it is the same shape as the pack
-contract for the same reasons: a leaf package depending on `@harness/shared` and zod, so an
-adapter never has to depend on the host, so the host can load it by name at runtime.
+`@harness/host` is the _host_ now — it decides what to say and when, for both a conversation and
+an approval card — and it holds no transport at all. `@harness/surface-api` is the contract
+between them, and it is the same shape as the pack contract for the same reasons: a leaf package
+depending on `@harness/shared` and zod, so an adapter never has to depend on the host, so the
+host can load it by name at runtime.
 
 ```ts
 export const surface = defineSurface({
   name, // lowercase; stored in approvals.surface
   version,
-  secrets, // env names that must never reach the core-tools child
+  secrets, // env names that are credentials
   connect, // (deps: SurfaceDeps) => Promise<SurfaceSession>
 });
 ```
 
 A `SurfaceSession` posts and updates a card, posts text (optionally as a reply to a message),
-sends a private note, uploads a file, opens a form where it can, and delivers actions and form
-submissions back. Everything it takes is neutral: a `Card` is a title, a subtitle, body lines and
-actions; a `NotePart` is text, a code span, a timestamp, a mention or an outcome icon. Which of
-those becomes a Block Kit `context` block, an Adaptive Card `TextBlock` or a line of HTML is the
-adapter's business, and `harness/approvals/src/host-vocabulary.test.ts` fails the build if the
-host learns the difference.
+sends a private note, uploads a file, opens a form where it can, delivers actions and form
+submissions back, and — as of Plan 8 — delivers an inbound human message: `onMessage` registers
+the one handler for a `MessageEvent`, `startStream` begins a streamed reply (throwing
+`SurfaceError` when the surface cannot stream), and `typing`, where the surface supports it, shows
+that a reply is coming. `SurfaceCapabilities` gained two flags for this: `streaming` and
+`inlineConfirm` (a card's buttons in the conversation the question was asked in — unused until a
+surface has it). Everything a session takes is neutral: a `Card` is a title, a subtitle, body
+lines and actions; a `NotePart` is text, a code span, a timestamp, a mention or an outcome icon.
+Which of those becomes a Block Kit `context` block, an Adaptive Card `TextBlock` or a line of HTML
+is the adapter's business, and `harness/approvals/src/host-vocabulary.test.ts` fails the build if
+the host learns the difference.
 
 **The primary surface** is the first entry of `HARNESS_SURFACES`. Approval cards are posted there
 and only there: one approval, one card, one place to answer it. Every loaded surface is still
@@ -260,11 +281,11 @@ records, and a staged effect may name any loaded surface in its payload.
 send a private reply and edit a message. The host reads them: a surface without forms gets an
 approval card with two buttons instead of three, rather than an Edit button that fails.
 
-**Allowlists are per surface.** A `SurfaceSession` carries its own `allowedUsers`, parsed from its
-own variable, and the host authorises a decision against the set of the surface it arrived on. A
-Teams identity and a Slack identity are different people until something says otherwise. An empty
-set is a misconfiguration and refuses everyone; the single member `*` (`ANY_USER`, read through
-`allowsUser`) means everyone and is for a surface with no transport only.
+**Who may decide is the identity plug-in's answer.** A decision is accepted only from a principal
+of `kind: 'user'` at level `lead` or above, resolved from the surface user id on the surface the
+card was posted on; a service principal cannot approve. There is no allowlist and no bypass. A
+Teams identity and a Slack identity are different people until the identity plug-in says
+otherwise, because `resolve({ surface, userId })` takes the surface name as part of the lookup.
 
 **Addressing.** `approvals` carries `surface`, `conversation_id` and `message_ref` (migration
 0009); `conversation_id` doubles as the poller's claim marker. An effect carries `surface` and
@@ -286,10 +307,6 @@ already in the conversation and the next tick would put a second one beside it; 
 stale sweep recovers the row instead. A plain `SurfaceError` from `postCard` means the opposite —
 nothing was sent — and does release the claim.
 
-**Secrets.** An adapter declares the environment variables it reads that are credentials, and the
-host subtracts the union of them from the environment of the core-tools child it spawns. The
-allowlist in `app/child-env.ts` therefore names no surface.
-
 `CONTRIBUTING.md`, "Adding a surface", is the worked how-to, with `surfaces/memory` as the example.
 
 ## Identity
@@ -297,16 +314,19 @@ allowlist in `app/child-env.ts` therefore names no surface.
 A **principal** is who a run acts as: a person, or a service identity for a scheduled job. It
 is resolved by an **identity plug-in** loaded by name from `HARNESS_IDENTITY` — the same shape
 as a pack and a surface, for the same reasons — and bound to the run by whoever opens it: the
-stdio server from `HARNESS_PRINCIPAL` at startup, a host per turn from Plan 8. A tool reads
-`deps.principal`. Nothing a model sends can set it; there is no tool to, and
-`harness/core-tools/src/tools/harness.test.ts` asserts that no published input schema mentions
-one.
+stdio server from `HARNESS_PRINCIPAL` at startup, the host once per turn — `handleMessage`
+resolves `{ surface, userId }` before anything else runs, and an unresolved sender gets one
+refusal and one audit row, never a run. A tool reads `deps.principal`. Nothing a model sends can
+set it; there is no tool to, and `harness/core-tools/src/tools/harness.test.ts` asserts that no
+published input schema mentions one.
 
 `@harness/identity-api` is the contract. `Principal { id, kind, level, displayName, surfaces,
 attributes }`; `IdentitySession.resolve({ surface, userId })` answers a principal or null, and
 null means "not authorised", never a guest. The five levels — `member`, `practitioner`, `lead`,
 `admin`, `service` — are declared in `@harness/shared` because `@harness/pack-api`'s policy
-matrix is keyed by them too and the two contracts may not import each other.
+matrix is keyed by them too and the two contracts may not import each other. `approvals.decided_by`
+is a principal id too, the same shape as `requested_by`; the card and the thread reply show the
+deciding principal's display name, never the bare id.
 
 **Policy is a matrix.** `Policy { classes, levels }`: `classes` is the row every level starts
 from and `levels.<level>.<class>` is where a level differs; `decide(actionClass, level, policy)`
@@ -333,6 +353,104 @@ of that run carries. `buildKernelConfig()` does the startup-only work once; `dep
 duplicate id, a user without a `u-` id or a service without `svc-`, a user at level `service`,
 and two principals claiming one surface user id. `CONTRIBUTING.md`, "Adding an identity
 provider", is the worked how-to.
+
+## The host and the runtime
+
+`@harness/host` is the one long-running process per client. It holds no transport and no agent
+framework of its own: it loads three plug-ins by name and drives them together, one conversation
+turn at a time.
+
+| Plug-in  | Variable           | Default                                                |
+| -------- | ------------------ | ------------------------------------------------------ |
+| Surfaces | `HARNESS_SURFACES` | none — required, `@harness/approvals`'s `loadSurfaces` |
+| Identity | `HARNESS_IDENTITY` | `@harness/identity-static`                             |
+| Runtime  | `HARNESS_RUNTIME`  | none — required                                        |
+
+`HARNESS_RUNTIME` has no code default, the same shape and the same reason as `HARNESS_SURFACES`:
+a default here would be one runtime plug-in's package name written into host source, which is
+exactly the coupling naming a plug-in by variable exists to remove. Compose's `host` service sets
+it for the demo. `pnpm arch` forbids a static edge from `harness/host/src` into `surfaces/*`,
+`identities/*` or `runtimes/*` — all three are `import(specifier)`, never a top-level import.
+
+**One message, end to end.** `attachMessageHandlers` wires `handleMessage` to every loaded
+surface's `onMessage`. For each `MessageEvent`:
+
+1. **Resolve.** The identity plug-in answers a `Principal` for `{ surface, userId }`, or `null`
+   — an unresolved sender gets one refusal and one audit row, never a run (invariant 1).
+2. **Thread.** `findOrCreateThread` gets the `threads` row for `(client, surface, conversation,
+principal)`; two people in one channel get two threads (decision 11).
+3. **Run.** `openKernel` opens a `runs` row and builds one `ToolDeps` for it.
+4. **Kernel, in-process.** An MCP client connects in-process to a `createCoreToolsServer` built
+   on that run's `ToolDeps` — no stdio, no child process (decision 2 of this plan; spec decision
+   2). The runtime never touches Postgres or the kernel directly.
+5. **Runtime.** `runtime.run(request)` streams `RunEvent`s back.
+6. **Events → surface.** Text deltas are streamed when `capabilities.streaming` is set, else
+   posted once at `done`; a `pending` tool result reaches the human through the model's own words
+   (SOUL rule 5), never through a post of the host's (decision 16 of this plan).
+7. **`messages` rows.** The inbound turn and the assistant's answer are both appended, subject to
+   the redaction guard (invariant 10, decision 20 of this plan).
+8. **Close.** The run is closed `done`, `error` or `cancelled` (invariant 12).
+
+**The contract.** `@harness/runtime-api` declares `RunRequest`, `RunEvent` and `RuntimeSession`;
+every runtime plug-in implements it and the conformance kit (`runtimeConformance`, decision 23)
+tests every package against the same six rules: call tools only through `request.tools`; never
+read `process.env`; emit exactly one `done` or `error`, last; stop within one model call of
+`request.signal` aborting; emit `skill_activated` before the first tool call that skill's body
+causes; send `request.model.user` on every model request. A run is a stream of seven events:
+`text`, `tool_call` (a name and an args hash, never the arguments), `tool_result` (`ok` |
+`pending` | `error`), `skill_activated`, `usage`, and exactly one of `done` or `error` — whose
+message is always safe to post, never a payload value.
+
+**`runtimes/deepagents`** is the first runtime, and the only place `deepagents`, `langchain` and
+`langgraph` may be spelled (decision 20 of this plan; `kernel-vocabulary.test.ts` scans it as it
+scans the kernel). One `createDeepAgent` is built per run — the model, the tools, the system
+prompt are all per-run values, so nothing is shared but the checkpointer, keyed by thread id
+(decision 7). `domain/bridge.ts` is the only place a kernel tool is invoked: it lists the tools
+off the run's MCP client, wraps each as a framework tool, emits `tool_call`/`tool_result`, and
+counts the call against `budget.maxToolCalls` (decision 3). The model reaches no filesystem: the
+built-in filesystem middleware is cut to `read_file`, `ls`, `glob`, `grep`, every write denied
+over `/**` (invariant 9); a skill's body is seeded at `/skills/<name>/SKILL.md` and the curated
+memory snapshot at `/memories/MEMORY.md` — read-only, re-seeded every turn (decision 5). The
+framework's own `memory` option is deliberately unused: it would let the model call `edit_file`
+to save what it learns, which this run neither offers nor permits; the kernel's own rules tell
+the model to `read_file` `/memories/MEMORY.md` instead, and memory _writes_ go through kernel
+tools starting Plan 9. `skill_activated` is a `read_file` under `/skills/`, which precedes the
+tool call the skill's body causes (decision 6); the host has no `ToolDeps` at that point, so it
+stamps `deps.context.skill`/`skillVersion` on the run's own bag for the audit rows that follow
+(decision 6, Plan 7 deferral c). The fallback route is the framework's own model-fallback
+middleware, not a `RunnableWithFallbacks` (decision 4); the `task` tool is stripped, because this
+run declares no subagents. The checkpointer is `PostgresSaver` on schema `langgraph` — kernel
+code never references those tables (spec decision 9). `usage.costUsd` on a `RunEvent` is always
+`0`: the gateway owns spend attribution per principal through `model_calls`, not the runtime.
+
+**The budget and cancel.** The host hands every run a ceiling —
+`HARNESS_RUN_MAX_MODEL_CALLS` (30), `HARNESS_RUN_MAX_TOOL_CALLS` (60), `HARNESS_RUN_TIMEOUT_S`
+(600) — and a run past any of them ends in `error: 'the run exceeded its budget'`. `Host.active`
+maps a run id to its `AbortController`; `cancelRun` aborts it, the runtime stops within one model
+call (invariant 12; decision 9 of this plan) and reports `error: 'cancelled'`, which the host
+maps to `runs.status = 'cancelled'` only when its own controller fired it — any other failure
+closes the run `error` with a fixed message the runtime chose, never the framework's or the
+gateway's own text (decision 9 of this plan).
+
+**Resuming after a decision.** `@harness/approvals`'s `decideApproval` calls `onDecided` once a
+decision is recorded, executed and shown; the host's `resumeOnDecision` looks the approval's
+`thread_id` up (null for one parked outside a thread — the stdio server, the eval runner — and
+nothing to resume) and runs one more turn on that thread, as the thread's own principal, with a
+`role: 'host'` message reporting what already happened (decision 15 of this plan). The card's own
+reply on the approvals surface is unchanged; the resume is what makes the _conversation_
+continue.
+
+**`threads` and `messages`** are the kernel's own record of every exchange, independent of
+whatever a runtime checkpoints for itself (spec decision 9). `threads` keys on `(client, surface,
+conversation, principal_id)` with a `kind` (`chat` | `playbook`, decision 11); `messages` carries
+`role` (`user` | `assistant` | `host`), `principal_id`, `content`, and a generated `tsv` column
+with a GIN index for Plan 9's episodic search. The redaction guard runs before every insert
+(invariant 10, decision 20 of this plan).
+
+**The group-chat rule is `mentioned`.** An adapter sets `MessageEvent.mentioned` true when the
+bot is addressed in a channel and for every direct message; the host's whole rule is to return
+without running when it is false (decision 12 of this plan). Each turn still runs under the
+principal of whoever wrote it, never the principal who started the thread.
 
 ## The path of one tool call
 
@@ -363,7 +481,7 @@ An agent calls `documents_extract`. Every module named here is under
    hash, the action class, the session context and the record ids the tool reported.
 7. **Effects.** Anything that leaves the process is staged, never sent: `stageEffect`
    (`domain/effects/outbox.ts`) writes an encrypted row to `tool_effects` in the handler's
-   transaction, and the approvals app's dispatcher sends it later, exactly once per
+   transaction, and `@harness/approvals`'s dispatcher sends it later, exactly once per
    idempotency key.
 8. **Error masking.** Only a `ToolError`'s message reaches the caller. Anything else becomes
    "internal error; see audit log" in `domain/tooling/execution.ts`, because a raw message can
@@ -471,22 +589,25 @@ uses none of the seven; the dependency is added when it needs one, not in advanc
 `@harness/core-tools` re-exports all seven, so a module already importing them from there is
 not wrong, only indirect.
 
-| Concern                | Module                                    | Exports                                                         |
-| ---------------------- | ----------------------------------------- | --------------------------------------------------------------- |
-| environment parsing    | `@harness/shared` `env.ts`                | `numberFromEnv`, `booleanFromEnv`, `requiredEnv`, `optionalEnv` |
-| errors                 | `@harness/shared` `errors.ts`             | `ToolError`, `ModelOutputError`, `ConfigError`, `describeError` |
-| path containment       | `@harness/shared` `paths.ts`              | `realOrNearestAncestor`, `assertInsideRoot`                     |
-| logging                | `@harness/shared` `log.ts`                | `createLogger`                                                  |
-| bounded subprocesses   | `@harness/shared` `subprocess.ts`         | `runBounded`                                                    |
-| JSONL                  | `@harness/shared` `jsonl.ts`              | `readJsonl`, `writeJsonl`                                       |
-| CSV quoting            | `@harness/shared` `csv.ts`                | `csvCell`                                                       |
-| restricted patterns    | core-tools `shared/redaction/patterns.ts` | `containsRestrictedPattern`, `isValidDea`                       |
-| restricted field names | core-tools `shared/redaction/names.ts`    | `isRestrictedName`, `MASKED`                                    |
-| redaction              | core-tools `shared/redaction/text.ts`     | `redactPages`, `assertRedacted`, `fieldNameFor`                 |
+| Concern                       | Module                                                                                                   | Exports                                                         |
+| ----------------------------- | -------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
+| environment parsing           | `@harness/shared` `env.ts`                                                                               | `numberFromEnv`, `booleanFromEnv`, `requiredEnv`, `optionalEnv` |
+| errors                        | `@harness/shared` `errors.ts`                                                                            | `ToolError`, `ModelOutputError`, `ConfigError`, `describeError` |
+| path containment              | `@harness/shared` `paths.ts`                                                                             | `realOrNearestAncestor`, `assertInsideRoot`                     |
+| logging                       | `@harness/shared` `log.ts`                                                                               | `createLogger`                                                  |
+| bounded subprocesses          | `@harness/shared` `subprocess.ts`                                                                        | `runBounded`                                                    |
+| JSONL                         | `@harness/shared` `jsonl.ts`                                                                             | `readJsonl`, `writeJsonl`                                       |
+| CSV quoting                   | `@harness/shared` `csv.ts`                                                                               | `csvCell`                                                       |
+| restricted patterns           | core-tools `shared/redaction/patterns.ts`                                                                | `containsRestrictedPattern`, `isValidDea`                       |
+| restricted field names        | core-tools `shared/redaction/names.ts`                                                                   | `isRestrictedName`, `MASKED`                                    |
+| redaction                     | core-tools `shared/redaction/text.ts`                                                                    | `redactPages`, `assertRedacted`, `fieldNameFor`                 |
+| who may talk to the assistant | `@harness/host` `domain/conversation.ts`                                                                 | `handleMessage`, `attachMessageHandlers`                        |
+| the loop                      | the runtime plug-in (`HARNESS_RUNTIME`)                                                                  | `RuntimeSession.run`                                            |
+| the conversation record       | `threads`/`messages` (`@harness/db`), read and written by `@harness/host` `domain/threads/repository.ts` | `findOrCreateThread`, `appendMessage`, `recentHistory`          |
 
 The three redaction modules stay in core-tools on purpose: deciding which field names are
 restricted and which SSN allocations are real is domain knowledge, and `@harness/shared` holds
-none. They are reachable on their own as `@harness/core-tools/redaction`, so the approvals app
+none. They are reachable on their own as `@harness/core-tools/redaction`, so `@harness/approvals`
 can take the guard without inheriting the kernel.
 
 ## Deciding where new code goes

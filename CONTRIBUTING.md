@@ -212,19 +212,13 @@ complete one; read it alongside this.
    the runner today. `pnpm evals -- --pack <name>` measures it.
 
 10. **Name it where a deployment is configured.** Add the package to `@harness/core-tools`'s
-    `dependencies` so pnpm can resolve the dynamic import, then name it in both places or
-    half the deployment stays on the old pack:
+    `dependencies` so pnpm can resolve the dynamic import, then set
+    `HARNESS_PACKS=@harness/pack-healthcare,@harness/pack-stories` in the client's `.env`.
+    `HARNESS_PACKS` in `.env` is the whole answer: `@harness/host` runs core-tools in-process,
+    with no child process and no separate env block of its own to keep in step, so naming the
+    variable once is enough.
 
-    - the client's `.env`, which Compose interpolates into both services:
-      `HARNESS_PACKS=@harness/pack-healthcare,@harness/pack-stories`;
-    - `clients/<name>/hermes.config.yaml`, in the `mcp_servers.core-tools.env` block. That block
-      is an allowlist — a variable core-tools reads has to be named there or the child never
-      sees it — so `HARNESS_PACKS` is written as `'${HARNESS_PACKS}'` and must stay
-      interpolated, never pinned to a pack name. The approvals app forwards the real value to
-      its own child already (`harness/approvals/src/app/child-env.ts`).
-
-    Every scaffolded client inherits both, because `pnpm new-client` copies
-    `clients/demo-practice/`.
+    Every scaffolded client inherits it, because `pnpm new-client` copies `clients/demo-practice/`.
 
 11. **Run the gates.** `pnpm -r typecheck && pnpm lint && pnpm arch && pnpm test`. If your pack
     changes the published tool list for the default deployment, run `pnpm surface:record` and
@@ -254,8 +248,8 @@ levels:
 
 ## Adding a surface
 
-A surface is a place a human is talked to — Slack, Microsoft Teams, Telegram — that the approvals
-host loads through a contract instead of importing by name. `surfaces/memory` is the smallest
+A surface is a place a human is talked to — Slack, Microsoft Teams, Telegram — that the host
+loads through a contract instead of importing by name. `surfaces/memory` is the smallest
 complete one; read it alongside this, and read `surfaces/slack` for the real thing.
 
 1. **Create the package.** `mkdir -p surfaces/<name>/src` and a `package.json` named
@@ -277,9 +271,9 @@ complete one; read it alongside this, and read `surfaces/slack` for the real thi
    ```
 
    `name` is lowercase and stable: it is stored in `approvals.surface` and named in an effect
-   payload. `secrets` lists the environment variables you read that are credentials; the host
-   subtracts them from the core-tools child's environment, so leaving one out is a credential
-   travelling where it should not.
+   payload. `secrets` lists the environment variables you read that are credentials, so an
+   operator wiring a client's Compose environment knows which ones to keep off any container
+   that does not need this adapter.
 
 3. **Read configuration from `deps.env`, never from `process.env`.** Use `@harness/shared`'s env
    helpers with `deps.env` as their last argument, so your variables are validated and worded like
@@ -291,18 +285,35 @@ complete one; read it alongside this, and read `surfaces/slack` for the real thi
    documented by hand.
 
 4. **Implement `SurfaceSession`.** Post and update a card, post text with an optional reply
-   target, send a private note, upload a file, open a form, deliver actions and submissions, start
-   and stop. Declare honestly what you cannot do:
+   target, send a private note, upload a file, open a form, deliver actions and submissions,
+   start and stop — and deliver an inbound human message. `onMessage` registers the one handler
+   for a `MessageEvent`, whose `mentioned` flag is your adapter's answer to the group-chat rule:
+   true for a direct message and for a channel message that addresses the bot by name, false for
+   every other channel message — the host's whole rule is to return without running when it is
+   false. `surfaces/slack`'s `classifyMessage` (`src/transport/bolt.ts`) is the worked example: it
+   takes Slack's `message` and `app_mention` events, drops the one that double-reports a mention
+   the bot already saw as `app_mention`, and sets `mentioned` true for a direct message.
 
-   | Surface            | forms                  | privateReply                    | update |
-   | ------------------ | ---------------------- | ------------------------------- | ------ |
-   | `slack`            | yes (a modal)          | yes (ephemeral)                 | yes    |
-   | `memory`           | yes                    | yes                             | yes    |
-   | Teams (planned)    | yes (a task module)    | no — post in the thread instead | yes    |
-   | Telegram (planned) | no — there is no modal | no                              | yes    |
+   `startStream` begins a streamed reply and throws `SurfaceError` when `capabilities.streaming`
+   is false, so a transport with no streaming API declares `streaming: false` and implements
+   `startStream` as exactly that throw; `typing`, where the transport has one, shows that a reply
+   is coming and is optional. `surfaces/slack`'s `createEditStream` (`src/stream.ts`) is the
+   worked example for a transport with no native streaming call: it posts the first delta as a
+   message, folds every later delta into an edit of that message no sooner than
+   `STREAM_EDIT_INTERVAL_MS` apart, and edits once more with the whole text when the run ends.
+   Declare honestly what you cannot do:
+
+   | Surface            | forms                  | privateReply                    | update | streaming | inlineConfirm |
+   | ------------------ | ---------------------- | ------------------------------- | ------ | --------- | ------------- |
+   | `slack`            | yes (a modal)          | yes (ephemeral)                 | yes    | yes       | no            |
+   | `memory`           | yes                    | yes                             | yes    | yes       | no            |
+   | Teams (planned)    | yes (a task module)    | no — post in the thread instead | yes    | yes       | no            |
+   | Telegram (planned) | no — there is no modal | no                              | yes    | no        | no            |
 
    The host reads those flags rather than trying and catching: a surface without `forms` gets an
-   approval card with no Edit button, which is honest and needs no fallback protocol.
+   approval card with no Edit button, and one without `streaming` gets the whole reply posted
+   once at `done` instead of appended as it arrives — both honest, and both needing no fallback
+   protocol.
 
 5. **Render the neutral models.** A `Card` has a title, an optional subtitle, body lines and
    actions; a `CardLine` is plain text, a labelled value, a preformatted block or a `note` of rich
@@ -326,8 +337,8 @@ complete one; read it alongside this, and read `surfaces/slack` for the real thi
    `surfaces/slack/src/transport/` does, and export a wired-to-fakes session from a `./testing`
    subpath. No test makes a real network call.
 
-8. **Load it.** Add the package to `@harness/approvals`' dependencies and put its name in
-   `HARNESS_SURFACES`. Nothing in the host changes.
+8. **Load it.** Add the package to `@harness/host`'s dependencies and put its name in
+   `HARNESS_SURFACES`. Nothing in the host's own code changes.
 
 ## Adding an identity provider
 
@@ -370,8 +381,73 @@ user id. `identities/static` is the smallest complete one; read it alongside thi
 5. **Test it against a fake directory.** No test reaches a real tenant. `StaticIdentity` from
    `@harness/identity-api/testing` is what to compare against.
 
-6. **Load it.** Add the package to `@harness/core-tools`' dependencies and set
-   `HARNESS_IDENTITY=@harness/identity-<name>`. Nothing in the kernel changes.
+6. **Load it.** Add the package to `@harness/core-tools`'s dependencies (the stdio server
+   resolves its own principal from it) and to `@harness/host`'s (the host resolves every
+   message's sender from it), and set `HARNESS_IDENTITY=@harness/identity-<name>`. Nothing in
+   the kernel or the host's own code changes.
+
+## Adding a runtime
+
+A runtime is the agent loop itself — what turns a `RunRequest` into a stream of `RunEvent`s —
+loaded by the host through `@harness/runtime-api` instead of imported by name.
+`runtimes/deepagents` is the only one that exists; read its README for the shape a real one
+takes, and read `@harness/runtime-api`'s README for the contract it implements.
+
+1. **Create the package.** `mkdir -p runtimes/<name>/src` and a `package.json` named
+   `@harness/runtime-<name>`, with `"." : "./src/index.ts"` in `exports` and
+   `@harness/runtime-api` and `@harness/shared` in `dependencies`, plus whatever third-party
+   packages the loop itself needs. **Never** depend on `@harness/core-tools`, `@harness/db`, a
+   pack, a surface, an identity plug-in or the host; `pnpm arch` fails the build on any of them,
+   tests included — the runtime reaches its tools only through the MCP client on the request,
+   never through the kernel directly, and reaches no filesystem of its own (invariant 9). Add one
+   `PACKAGES` row and one `WORKSPACE_DIRS` entry in `.dependency-cruiser.cjs`, and nothing else.
+
+2. **Declare it, and export it as `runtime`.**
+
+   ```ts
+   export const runtime = defineRuntime({
+     name: 'sandboxed',
+     version: '0.1.0',
+     secrets: ['SANDBOX_API_KEY'],
+     connect: async (deps) => createSandboxedSession(deps),
+   });
+   ```
+
+   `defineRuntime` checks the name is lowercase letters, digits and hyphens, that `version` is
+   not empty, and that `secrets` are environment-variable-shaped and each named once — a typo
+   here is a startup failure, not a silent no-op.
+
+3. **Implement `RuntimeSession.run(request)` against the six rules of spec 4.2.** Call tools
+   only through `request.tools`; never read `process.env` — a runtime's own configuration is
+   `RuntimeDeps.env`, handed to `connect`, and never the ambient environment; emit exactly one
+   `done` or `error`, as the last event, with a message that is always safe to post because it
+   is never the framework's or a vendor's own text; stop within one model call of
+   `request.signal` aborting, with a single `error: 'cancelled'`; emit `skill_activated` before
+   the first tool call a skill's body causes; send `request.model.user` on every request to the
+   model, because that is what the gateway attributes spend to.
+
+4. **Run the conformance kit against your own harness.**
+
+   ```ts
+   import { runtimeConformance } from '@harness/runtime-api/testing';
+   runtimeConformance('sandboxed', {
+     connect: () => runtime.connect(deps),
+     script: (step) => fakeGateway.setResponder(() => ({ toolCalls: [step.toolCall], content: step.finalText })),
+     hang: () => fakeGateway.setResponder(() => new Promise(() => {})),
+   });
+   ```
+
+   The kit owns the tool server, the `process.env` proxy and the event assertions; your harness
+   only has to say how to make _this_ runtime call one tool and answer, how to make it hang, and
+   — optionally — what model requests it made. `ScriptedRuntime` (`@harness/runtime-api/testing`)
+   is the model-free runtime the kit's own suite and every host test run against; a model-backed
+   runtime scripts the fake gateway (`startFakeGateway`, same subpath) instead of a trajectory.
+
+5. **Load it.** Add the package to `@harness/host`'s dependencies and set
+   `HARNESS_RUNTIME=@harness/runtime-<name>`. The variable is required and has no default:
+   naming a plug-in is a deployment's decision, the same as `HARNESS_SURFACES`, and a default
+   here would be exactly the coupling the variable exists to avoid. Nothing in the host's own
+   code changes.
 
 ## Adding a client
 

@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { approvals } from '@harness/db';
-import { parseAllowedUsers } from '@harness/surface-api';
+import { StaticIdentity } from '@harness/identity-api/testing';
+import type { IdentitySession, Principal } from '@harness/identity-api';
 import { MemorySurface } from '@harness/surface-api/testing';
 import { FakeCoreToolsClient, pendingApproval, useTestDb } from '../testing.js';
 import { APPROVE_ACTION_ID, DECLINE_ACTION_ID, EDIT_ACTION_ID, EDIT_FORM_ID, EDIT_NOTE_FIELD_ID } from './cards.js';
@@ -11,6 +12,31 @@ import { surfacesOf } from './surfaces/registry.js';
 const db = useTestDb();
 const now = () => new Date('2026-09-15T12:00:00Z');
 
+const LEAD: Principal = {
+  id: 'u-coordinator',
+  kind: 'user',
+  level: 'lead',
+  displayName: 'Coordinator',
+  surfaces: { memory: 'U012' },
+  attributes: {},
+};
+const MEMBER: Principal = {
+  id: 'u-member',
+  kind: 'user',
+  level: 'member',
+  displayName: 'Member',
+  surfaces: { memory: 'U345' },
+  attributes: {},
+};
+const SERVICE: Principal = {
+  id: 'svc-bot',
+  kind: 'service',
+  level: 'service',
+  displayName: 'Bot',
+  surfaces: { memory: 'UBOT' },
+  attributes: {},
+};
+
 async function seed() {
   const [row] = await db
     .insert(approvals)
@@ -19,10 +45,18 @@ async function seed() {
   return row;
 }
 
-function wire(allowed = 'U012', capabilities: Partial<MemorySurface['capabilities']> = {}) {
-  const surface = new MemorySurface({ allowedUsers: parseAllowedUsers(allowed), capabilities });
+function wire(capabilities: Partial<MemorySurface['capabilities']> = {}) {
+  const surface = new MemorySurface({ capabilities });
   const core = new FakeCoreToolsClient();
-  registerApprovalHandlers(surface, { db, surfaces: surfacesOf([surface]), core, client: 'demo-practice', now });
+  const identity = new StaticIdentity([LEAD, MEMBER, SERVICE]);
+  registerApprovalHandlers(surface, {
+    db,
+    surfaces: surfacesOf([surface]),
+    core,
+    identity,
+    client: 'demo-practice',
+    now,
+  });
   return { surface, core };
 }
 
@@ -32,8 +66,9 @@ describe('approval handlers', () => {
     const { surface, core } = wire();
     await surface.press(APPROVE_ACTION_ID, row.id, 'U012');
     expect(core.executed).toEqual([row.id]);
+    expect(core.executedBy).toEqual(['u-coordinator']);
     const [after] = await db.select().from(approvals).where(eq(approvals.id, row.id));
-    expect(after.status).toBe('approved');
+    expect(after).toMatchObject({ status: 'approved', decidedBy: 'u-coordinator' });
   });
 
   it('declines with no note when Decline is pressed', async () => {
@@ -77,12 +112,12 @@ describe('approval handlers', () => {
 
   it('trusts the conversation carried in the form metadata', async () => {
     const row = await seed();
-    const { surface } = wire('');
-    await surface.submit(EDIT_FORM_ID, { [EDIT_NOTE_FIELD_ID]: '' }, 'U012', {
+    const { surface } = wire();
+    await surface.submit(EDIT_FORM_ID, { [EDIT_NOTE_FIELD_ID]: '' }, 'U999', {
       metadata: JSON.stringify({ approval_id: row.id, conversation: 'elsewhere' }),
     });
     expect(surface.privates).toHaveLength(1);
-    expect(surface.privates[0]).toMatchObject({ conversation: 'elsewhere', userId: 'U012' });
+    expect(surface.privates[0]).toMatchObject({ conversation: 'elsewhere', userId: 'U999' });
   });
 
   it('tells the user when the form metadata cannot be read', async () => {
@@ -113,24 +148,68 @@ describe('approval handlers', () => {
     expect(surface.cards).toHaveLength(0);
   });
 
-  it("refuses a user who is not on this surface's allowlist, and tells them so", async () => {
+  it('refuses someone the identity plug-in does not know, privately, and learns nothing about the approval', async () => {
     const row = await seed();
-    const { surface, core } = wire('U012');
+    const { surface, core } = wire();
     await surface.press(APPROVE_ACTION_ID, row.id, 'U999');
     expect(core.executed).toEqual([]);
-    const [after] = await db.select().from(approvals).where(eq(approvals.id, row.id));
-    expect(after.status).toBe('pending');
-    expect(surface.privates[0]).toMatchObject({ userId: 'U999', text: 'You are not an approver for this workspace.' });
+    expect(surface.privates).toEqual([
+      { conversation: 'memory', userId: 'U999', text: 'You are not an approver for this workspace.' },
+    ]);
   });
 
-  it('fails closed when the allowlist is empty, refusing even a would-be approver', async () => {
+  it('refuses a principal below lead with the same message', async () => {
     const row = await seed();
-    const { surface, core } = wire('');
+    const { surface, core } = wire();
+    await surface.press(APPROVE_ACTION_ID, row.id, 'U345');
+    expect(core.executed).toEqual([]);
+    expect(surface.privates[0].text).toBe('You are not an approver for this workspace.');
+  });
+
+  it('refuses a service principal whatever its level', async () => {
+    const row = await seed();
+    const { surface, core } = wire();
+    await surface.press(APPROVE_ACTION_ID, row.id, 'UBOT');
+    expect(core.executed).toEqual([]);
+    expect(surface.privates[0].text).toBe('You are not an approver for this workspace.');
+  });
+
+  it('fails closed with the same refusal when the identity plug-in itself rejects', async () => {
+    const row = await seed();
+    const surface = new MemorySurface();
+    const core = new FakeCoreToolsClient();
+    const identity: IdentitySession = {
+      name: 'broken',
+      resolve: () => Promise.reject(new Error('identity backend unreachable')),
+      get: async () => null,
+      list: async () => [],
+      stop: async () => {},
+    };
+    registerApprovalHandlers(surface, {
+      db,
+      surfaces: surfacesOf([surface]),
+      core,
+      identity,
+      client: 'demo-practice',
+      now,
+    });
     await surface.press(APPROVE_ACTION_ID, row.id, 'U012');
     expect(core.executed).toEqual([]);
     const [after] = await db.select().from(approvals).where(eq(approvals.id, row.id));
     expect(after.status).toBe('pending');
-    expect(surface.privates[0].text).toBe('You are not an approver for this workspace.');
+    expect(surface.privates[0]).toMatchObject({
+      userId: 'U012',
+      text: 'You are not an approver for this workspace.',
+    });
+  });
+
+  it('leaves the row pending when the presser is refused, whatever the reason', async () => {
+    const row = await seed();
+    const { surface, core } = wire();
+    await surface.press(APPROVE_ACTION_ID, row.id, 'U999');
+    expect(core.executed).toEqual([]);
+    const [after] = await db.select().from(approvals).where(eq(approvals.id, row.id));
+    expect(after.status).toBe('pending');
   });
 
   it('rejects a malformed approval id without throwing', async () => {
@@ -142,7 +221,7 @@ describe('approval handlers', () => {
 
   it('logs rather than throwing when the surface cannot take a private reply', async () => {
     const row = await seed();
-    const { surface, core } = wire('U012', { privateReply: false });
+    const { surface, core } = wire({ privateReply: false });
     await expect(surface.press(APPROVE_ACTION_ID, row.id, 'U999')).resolves.toBeUndefined();
     expect(core.executed).toEqual([]);
     expect(surface.privates).toHaveLength(0);

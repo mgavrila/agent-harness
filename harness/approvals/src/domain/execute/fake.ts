@@ -1,8 +1,11 @@
+import type { Principal } from '@harness/identity-api';
 import type { CoreToolsClient, ExecuteOutcome } from './types.js';
 
 /** A core-tools client that records calls instead of spawning an MCP server. */
 export class FakeCoreToolsClient implements CoreToolsClient {
   executed: string[] = [];
+  /** The id of the principal `execute` ran as, one entry per call, in order. */
+  executedBy: string[] = [];
   reconciled: number[] = [];
   /** When set, `execute` reports this failure instead of succeeding. */
   failExecuteWith?: string;
@@ -12,9 +15,10 @@ export class FakeCoreToolsClient implements CoreToolsClient {
   executedTool = 'forms_release';
   closed = false;
 
-  async execute(approvalId: string): Promise<ExecuteOutcome> {
+  async execute(approvalId: string, principal: Principal): Promise<ExecuteOutcome> {
     if (this.failExecuteWith) return { status: 'failed', error: this.failExecuteWith };
     this.executed.push(approvalId);
+    this.executedBy.push(principal.id);
     return { status: 'executed', tool: this.executedTool };
   }
 

@@ -48,6 +48,7 @@ export async function createOrReuseApproval(
       requestedBy: deps.principal.id,
       expiresAt,
       idempotencyKey,
+      threadId: deps.context.threadId,
     })
     .onConflictDoNothing({ target: approvals.idempotencyKey, where: sql`status = 'pending'` });
   const row = await db.query.approvals.findFirst({ where: pendingRow });

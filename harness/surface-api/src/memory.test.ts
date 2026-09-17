@@ -1,14 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { SurfaceError } from '@harness/shared';
-import { ANY_USER, allowsUser } from './surface.js';
 import { MemorySurface } from './testing.js';
-import type { ActionEvent, Card, Form, FormEvent } from './types.js';
+import type { ActionEvent, Card, Form, FormEvent, MessageEvent } from './types.js';
 
 const card = (over: Partial<Card> = {}): Card => ({
   id: 'demo_card',
   title: 'Approval needed',
-  subtitle: 'forms_release (external) requested by hermes',
-  notice: 'Approval needed: forms_release (external) requested by hermes',
+  subtitle: 'forms_release (external) requested by u-coordinator',
+  notice: 'Approval needed: forms_release (external) requested by u-coordinator',
   body: [{ code: '{ "a": 1 }' }],
   actions: [{ id: 'demo_approve', label: 'Approve', style: 'primary', value: 'a1' }],
   footer: [{ text: 'Approval ' }, { code: 'a1' }],
@@ -153,16 +152,58 @@ describe('MemorySurface', () => {
     expect(surface.stopped).toBe(true);
   });
 
-  it('allows everybody by default, because it has no transport to protect', () => {
+  it('declares streaming and no inline confirm, and reports both flags', () => {
     const surface = new MemorySurface();
-    expect([...surface.allowedUsers]).toEqual([ANY_USER]);
-    expect(allowsUser(surface.allowedUsers, 'anyone-at-all')).toBe(true);
+    expect(surface.capabilities).toEqual({
+      forms: true,
+      privateReply: true,
+      update: true,
+      streaming: true,
+      inlineConfirm: false,
+    });
   });
 
-  it('takes an allowlist that names names, and then fails closed for everyone else', () => {
-    const surface = new MemorySurface({ allowedUsers: new Set(['U012']) });
-    expect(allowsUser(surface.allowedUsers, 'U012')).toBe(true);
-    expect(allowsUser(surface.allowedUsers, 'U999')).toBe(false);
+  it('delivers a said message to the registered handler, mentioned by default', async () => {
+    const surface = new MemorySurface();
+    const seen: MessageEvent[] = [];
+    surface.onMessage(async (event) => {
+      seen.push(event);
+    });
+    await surface.say('U012', 'hello');
+    expect(seen).toEqual([
+      {
+        surface: 'memory',
+        userId: 'U012',
+        conversation: 'memory',
+        text: 'hello',
+        attachments: [],
+        message: null,
+        mentioned: true,
+      },
+    ]);
+    await surface.say('U012', 'in a channel', { mentioned: false, conversation: 'C1' });
+    expect(seen[1]).toMatchObject({ mentioned: false, conversation: 'C1' });
+  });
+
+  it('refuses to say anything before a handler is registered', async () => {
+    await expect(new MemorySurface().say('U012', 'x')).rejects.toThrow(/no message handler/);
+  });
+
+  it('streams: appends accumulate, end records the text as a posted message and hands back its reference', async () => {
+    const surface = new MemorySurface();
+    const stream = surface.startStream('memory');
+    stream.append('Hel');
+    stream.append('lo');
+    expect(surface.streams).toEqual([{ conversation: 'memory', text: 'Hello', ended: false, replyTo: null }]);
+    const ref = await stream.end();
+    expect(surface.streams[0].ended).toBe(true);
+    expect(surface.texts).toEqual([{ conversation: 'memory', text: 'Hello', replyTo: null }]);
+    expect(ref).toEqual({ surface: 'memory', conversation: 'memory', id: 'm1' });
+  });
+
+  it('refuses a stream when the capability is off', () => {
+    const surface = new MemorySurface({ capabilities: { streaming: false } });
+    expect(() => surface.startStream('memory')).toThrow(SurfaceError);
   });
 
   it('fails every call while failWith is set, the way an unreachable transport does', async () => {

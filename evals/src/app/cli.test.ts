@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { startFakeGateway, type FakeGateway } from '@harness/core-tools/fake-gateway';
+import { startFakeGateway, type FakeGateway } from '@harness/runtime-api/testing';
 import { EVALS_DATABASE_URL, EXTRACTION, VERDICTS, writeEvalCorpus } from '../corpus.test-helpers.js';
 import type { Report } from '../domain/report/types.js';
 import { flagFrom, packNames, parseLimitFlag, parsePackFlag, parseUpdateBaselineFlag } from './cli.js';

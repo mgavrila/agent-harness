@@ -12,6 +12,7 @@ import type {
 import type { SlackConfig } from './config.js';
 import { cardBlocks } from './render/blocks.js';
 import { formView, valuesOf } from './render/modal.js';
+import { createEditStream } from './stream.js';
 import type { SlackTransport } from './transport/types.js';
 
 const NAME = 'slack';
@@ -63,8 +64,7 @@ export function createSlackSession(transport: SlackTransport, config: SlackConfi
 
   return {
     name: NAME,
-    capabilities: { forms: true, privateReply: true, update: true },
-    allowedUsers: config.allowedUsers,
+    capabilities: { forms: true, privateReply: true, update: true, streaming: true, inlineConfirm: false },
     defaultConversation: config.defaultConversation,
 
     mention: (userId) => `<@${userId}>`,
@@ -167,6 +167,26 @@ export function createSlackSession(transport: SlackTransport, config: SlackConfi
           values: valuesOf(view.state),
         });
       });
+    },
+
+    onMessage(handler) {
+      events.onMessage(async (message) => {
+        await handler({
+          surface: NAME,
+          userId: message.userId,
+          conversation: message.channel,
+          text: message.text,
+          // Already downloaded into <storageDir>/incoming by the transport.
+          attachments: message.files.map((f) => ({ name: f.name, path: f.path })),
+          message: ref(message.channel, message.ts),
+          mentioned: message.mentioned,
+        });
+      });
+    },
+
+    startStream(conversation, opts = {}) {
+      assertConversation(conversation);
+      return createEditStream({ api, conversation, threadTs: opts.replyTo?.id });
     },
 
     start: () => events.start(),

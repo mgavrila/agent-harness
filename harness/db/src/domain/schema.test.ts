@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import { eq, sql } from 'drizzle-orm';
 import { TEST_DATABASE_URL, resetDatabase } from '../testing.js';
 import { createDb, type Db } from './client.js';
-import { records, auditLog, toolEffects } from './schema.js';
+import { records, auditLog, toolEffects, messages, runs, threads } from './schema.js';
 
 let db: Db;
 let close: () => Promise<void>;
@@ -140,5 +140,50 @@ describe('schema', () => {
       .returning();
     expect(row.derivedFrom).toEqual([effect.id]);
     expect(row.skill).toBe('credentialing-intake');
+  });
+});
+
+describe('threads and messages', () => {
+  async function thread() {
+    const [row] = await db
+      .insert(threads)
+      .values({ client: 'test', surface: 'memory', conversation: 'memory', principalId: 'u-1', kind: 'chat' })
+      .returning();
+    return row;
+  }
+
+  it('keys a thread by client, surface, conversation and principal', async () => {
+    await thread();
+    // Through `rejectionMessage`, as for `records_client_kind_external_id_uq` above: drizzle's
+    // own message is only "Failed query: …" and the constraint name is on the Postgres error it
+    // carries as `.cause`.
+    const duplicate = db
+      .insert(threads)
+      .values({ client: 'test', surface: 'memory', conversation: 'memory', principalId: 'u-1', kind: 'chat' });
+    await expect(rejectionMessage(duplicate)).resolves.toMatch(/threads_client_surface_conversation_principal_uq/);
+    const [other] = await db
+      .insert(threads)
+      .values({ client: 'test', surface: 'memory', conversation: 'memory', principalId: 'u-2', kind: 'chat' })
+      .returning();
+    expect(other.id).toBeTruthy();
+  });
+
+  it('indexes message content for full-text search through the generated tsv column', async () => {
+    const t = await thread();
+    await db.insert(messages).values([
+      { threadId: t.id, role: 'user', principalId: 'u-1', content: 'When does the licence for Dr Reyes expire?' },
+      { threadId: t.id, role: 'assistant', principalId: 'u-1', content: 'It expires on 2027-03-31.' },
+    ]);
+    const hits = await db
+      .select({ content: messages.content })
+      .from(messages)
+      .where(sql`${messages.tsv} @@ plainto_tsquery('english', 'licence expire')`);
+    expect(hits.map((h) => h.content)).toEqual(['When does the licence for Dr Reyes expire?']);
+  });
+
+  it('starts a run as running and has no caller column', async () => {
+    const [run] = await db.insert(runs).values({ client: 'test', principalId: 'u-1' }).returning();
+    expect(run.status).toBe('running');
+    expect('caller' in run).toBe(false);
   });
 });

@@ -1,0 +1,32 @@
+{
+  "name": "@harness/runtime-deepagents",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@harness/runtime-api": "workspace:*",
+    "@harness/shared": "workspace:*",
+    "@langchain/core": "1.2.11",
+    "@langchain/langgraph": "1.4.15",
+    "@langchain/langgraph-checkpoint-postgres": "1.0.5",
+    "@langchain/openai": "1.5.13",
+    "@modelcontextprotocol/client": "^2.0.0",
+    "deepagents": "1.13.4",
+    "langchain": "1.5.11"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/server": "^2.0.0",
+    "@types/node": "^26.5.1",
+    "@types/pg": "^8.15.6",
+    "pg": "^8.23.0",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.0"
+  }
+}

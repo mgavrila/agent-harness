@@ -1,18 +1,12 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createDb, loadKey } from '@harness/db';
+import { createDb } from '@harness/db';
 import type { Principal } from '@harness/identity-api';
-import { ConfigError, booleanFromEnv, createLogger, envOrDefault, numberFromEnv, optionalEnv } from '@harness/shared';
-import { localParser, remoteParser } from '../domain/documents/parser.js';
-import type { DocumentParser } from '../domain/documents/types.js';
+import { ConfigError, createLogger, envOrDefault } from '@harness/shared';
 import { loadIdentity } from '../domain/identity/registry.js';
+import { buildKernelConfig } from '../domain/tooling/config.js';
 import { depsForRun, type KernelConfig } from '../domain/tooling/deps.js';
-import { loadPolicy } from '../domain/tooling/policy.js';
-import { DEFAULT_CONFIDENCE_THRESHOLD, type ToolDeps } from '../domain/tooling/types.js';
-import { gatewayFromEnv } from '../domain/models/gateway.js';
-import { storageRoot } from '../domain/storage/layout.js';
-import { loadPacks } from '../domain/packs/registry.js';
-import type { PackRegistry } from '../domain/packs/types.js';
+import type { ToolDeps } from '../domain/tooling/types.js';
 import { openRun } from '../domain/session/repository.js';
 
 const log = createLogger('core-tools');
@@ -20,75 +14,9 @@ const log = createLogger('core-tools');
 // src/app -> src -> core-tools -> harness -> <repo>. The same resolution main.ts uses for .env.
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../..');
 
-/**
- * Where the form templates live.
- *
- * The pack owns them, so `packs.formsDir()` — the first pack named in `HARNESS_PACKS` — is the
- * answer for every deployment that has not said otherwise, and swapping the pack swaps the
- * templates with it. `HARNESS_FORMS_DIR` is an explicit override for a deployment that keeps
- * its templates somewhere else; set, it wins and is resolved against the process working
- * directory, exactly as it did before the registry existed.
- */
-export function formsDirFrom(
-  packs: Pick<PackRegistry, 'formsDir'>,
-  raw: string | undefined = optionalEnv('HARNESS_FORMS_DIR'),
-): string {
-  return raw ? path.resolve(raw) : packs.formsDir();
-}
-
-/**
- * Which packs this process serves, comma-separated package names. Defaults to the only pack
- * that exists today, so a deployment that sets nothing behaves exactly as it did.
- */
-function packNames(): string[] {
-  return (optionalEnv('HARNESS_PACKS') ?? '@harness/pack-healthcare')
-    .split(',')
-    .map((name) => name.trim())
-    .filter((name) => name !== '');
-}
-
 /** `clients/<name>/` under the repository root: `/srv/agent-harness/clients/<name>` in a container. */
 export function clientDirFor(client: string, repoRoot: string = REPO_ROOT): string {
   return path.join(repoRoot, 'clients', client);
-}
-
-/**
- * Where documents are parsed. In Compose, `HARNESS_FILES_URL` names the files worker and the
- * bytes never enter this process; unset, the subprocesses run here, which is what a test and a
- * bare-metal developer want.
- */
-export function parserFromEnv(
-  storageDir: string,
-  filesUrl: string | undefined = optionalEnv('HARNESS_FILES_URL'),
-): DocumentParser {
-  return filesUrl ? remoteParser(filesUrl, storageDir) : localParser(storageDir);
-}
-
-/**
- * Everything every run shares, read and loaded once per process. Nothing here is per run:
- * the database handle, the principal and the run context arrive through `depsForRun`.
- */
-export async function buildKernelConfig(): Promise<KernelConfig> {
-  const packs = await loadPacks(packNames());
-  // One root for the whole file store, required and with no default (see storageRoot).
-  const storageDir = storageRoot();
-  return {
-    client: envOrDefault('HARNESS_CLIENT', 'default'),
-    policy: await loadPolicy(),
-    encryptionKey: loadKey(),
-    now: () => new Date(),
-    approvalTtlHours: numberFromEnv('APPROVAL_TTL_HOURS', 24, { min: 1, max: 720 }),
-    confidenceThreshold: numberFromEnv('CONFIDENCE_THRESHOLD', DEFAULT_CONFIDENCE_THRESHOLD, { min: 0, max: 1 }),
-    gateway: gatewayFromEnv(),
-    storageDir,
-    parser: parserFromEnv(storageDir),
-    formsDir: formsDirFrom(packs),
-    restrictedToModel: booleanFromEnv('HARNESS_RESTRICTED_TO_MODEL'),
-    packs,
-    // The deployment's own environment, and the only bag that hands one over. A pack reads its
-    // variables from here; see `ToolDeps.env`.
-    env: process.env,
-  };
 }
 
 /**
@@ -122,7 +50,7 @@ export async function resolvePrincipal(config: Pick<KernelConfig, 'client' | 'en
  */
 export async function buildDepsFromEnv(): Promise<{ deps: ToolDeps; close: () => Promise<void> }> {
   const { db, close } = createDb();
-  const config = await buildKernelConfig();
+  const config = await buildKernelConfig(process.env);
   const principal = await resolvePrincipal(config);
   const context = await openRun(db, { client: config.client, principal });
   return { deps: depsForRun(config, { db, principal, context }), close };

@@ -92,9 +92,9 @@ export function optionalEnv(name: string, env: EnvSource = process.env): string 
 /**
  * A variable with a default, where an empty value is a mistake rather than a request for that
  * default. `optionalEnv` reads an empty string as absent, so a half-filled `.env` would leave a
- * process serving the `default` client, auditing every call as `hermes`, or pointing a registry
- * lookup at a live endpoint, every one of them silently. Unset keeps the default; set-but-empty
- * fails startup naming the variable.
+ * process serving the `default` client, auditing every call as `svc-host`, or pointing a
+ * registry lookup at a live endpoint, every one of them silently. Unset keeps the default;
+ * set-but-empty fails startup naming the variable.
  */
 export function envOrDefault(name: string, fallback: string, env: EnvSource = process.env): string {
   const raw = env[name];

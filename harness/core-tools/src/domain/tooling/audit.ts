@@ -1,8 +1,11 @@
-import { createHash } from 'node:crypto';
 import { auditLog, type Db } from '@harness/db';
+import { hashArgs } from '@harness/shared';
 import type { ActionClass } from './policy.js';
 
-export type Decision = 'auto' | 'approval' | 'blocked' | 'error';
+export { hashArgs };
+
+/** `unauthorised` is the host's own decision (spec 3.2): a message from nobody the identity plug-in knows. */
+export type Decision = 'auto' | 'approval' | 'blocked' | 'error' | 'unauthorised';
 
 export interface AuditEntry {
   client: string;
@@ -21,28 +24,6 @@ export interface AuditEntry {
   inputTokens?: number | null;
   outputTokens?: number | null;
   costUsd?: number | null;
-}
-
-/** Recursively sort object keys so the hash does not depend on key order. */
-function canonicalize(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(canonicalize);
-  if (value === null || typeof value !== 'object') return value;
-  const source = value as Record<string, unknown>;
-  const sorted: Record<string, unknown> = {};
-  for (const key of Object.keys(source).sort()) {
-    sorted[key] = canonicalize(source[key]);
-  }
-  return sorted;
-}
-
-/**
- * Stable fingerprint of a tool's arguments. Key order is normalized so that two
- * semantically identical calls share an approval idempotency key.
- */
-export function hashArgs(args: unknown): string {
-  return createHash('sha256')
-    .update(JSON.stringify(canonicalize(args ?? null)))
-    .digest('hex');
 }
 
 export async function writeAudit(db: Db, entry: AuditEntry): Promise<void> {

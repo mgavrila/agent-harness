@@ -14,14 +14,13 @@ import { boltTransport } from './transport/bolt.js';
 export const surface: Surface = defineSurface({
   name: 'slack',
   version: '0.1.0',
-  // Stripped from the environment of the core-tools child the host spawns. `SLACK_BOT_TOKEN` and
-  // `SLACK_APP_TOKEN` are Hermes's, not this adapter's, and are listed because a process holding
-  // an approver's credentials must not hand any Slack credential to a child either.
-  secrets: ['APPROVALS_SLACK_BOT_TOKEN', 'APPROVALS_SLACK_APP_TOKEN', 'SLACK_BOT_TOKEN', 'SLACK_APP_TOKEN'],
+  // The one app's two tokens: chat and approvals share them, so there is nothing left to strip
+  // that a second Slack app's credentials used to be.
+  secrets: ['SLACK_BOT_TOKEN', 'SLACK_APP_TOKEN'],
   // Not `async`: building the transport opens nothing, so there is nothing here to await. The
   // socket is opened by `start()`, which the host calls once it is ready to take a button press.
   connect: (deps) => {
     const config = slackConfig(deps.env);
-    return Promise.resolve(createSlackSession(boltTransport(config, deps.log), config));
+    return Promise.resolve(createSlackSession(boltTransport(config, deps.log, deps.storageDir), config));
   },
 });

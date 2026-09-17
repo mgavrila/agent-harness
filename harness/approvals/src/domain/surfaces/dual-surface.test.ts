@@ -3,7 +3,8 @@ import { describe, expect, it } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { approvals, encrypt, toolEffects } from '@harness/db';
 import { dispatchStagedEffects } from '@harness/core-tools/effects';
-import { parseAllowedUsers } from '@harness/surface-api';
+import { StaticIdentity } from '@harness/identity-api/testing';
+import type { Principal } from '@harness/identity-api';
 import { MemorySurface } from '@harness/surface-api/testing';
 import { surface as slackSurface } from '@harness/surface-slack';
 import { fakeSlackSession } from '@harness/surface-slack/testing';
@@ -21,6 +22,15 @@ const db = useTestDb();
 const key = randomBytes(32);
 const now = () => new Date('2026-09-15T12:00:00Z');
 
+const LEAD: Principal = {
+  id: 'u-coordinator',
+  kind: 'user',
+  level: 'lead',
+  displayName: 'Coordinator',
+  surfaces: { slack: 'U012', memory: 'U012', stub: 'U012' },
+  attributes: {},
+};
+
 /**
  * Three surfaces at once: Slack, through the real adapter on a fake transport, the memory adapter
  * beside it, and a credential-declaring stub third. This is the suite that proves the host is not
@@ -31,8 +41,8 @@ const now = () => new Date('2026-09-15T12:00:00Z');
  * without a third adapter the union below is Slack's own list and asserts nothing.
  */
 function wire() {
-  const slack = fakeSlackSession({ allowedUsers: parseAllowedUsers('U012') });
-  const memory = new MemorySurface({ allowedUsers: parseAllowedUsers('U012') });
+  const slack = fakeSlackSession();
+  const memory = new MemorySurface();
   const stub = stubSession();
   // The secrets come off the three adapters' own `Surface.secrets`, the way `loadSurfaces` builds
   // them, rather than out of an array written here. Otherwise the last case below proves only
@@ -40,8 +50,9 @@ function wire() {
   const declared = [...new Set([slackSurface, memorySurface, stubSurface].flatMap((s) => [...s.secrets]))];
   const surfaces = surfacesOf([slack.session, memory, stub], declared);
   const core = new FakeCoreToolsClient();
+  const identity = new StaticIdentity([LEAD]);
   for (const session of surfaces.all) {
-    registerApprovalHandlers(session, { db, surfaces, core, client: 'demo-practice', now });
+    registerApprovalHandlers(session, { db, surfaces, core, identity, client: 'demo-practice', now });
   }
   return { slack, memory, stub, surfaces, core };
 }
@@ -66,7 +77,7 @@ describe('a host with several surfaces loaded', () => {
     await postPendingApprovals({ db, surface: surfaces.primary, client: 'demo-practice', now });
     const blocks = slack.api.posts[0].blocks as { type: string }[];
     expect(blocks.map((b) => b.type)).toEqual(['section', 'context', 'section', 'actions', 'context']);
-    expect(slack.api.posts[0].text).toBe('Approval needed: forms_release (external) requested by hermes');
+    expect(slack.api.posts[0].text).toBe('Approval needed: forms_release (external) requested by u-coordinator');
   });
 
   it('accepts the decision on the surface that posted the card, and edits it there', async () => {
@@ -86,7 +97,7 @@ describe('a host with several surfaces loaded', () => {
     expect(slack.api.updates).toHaveLength(1);
     // The reply goes under the card, which on Slack is a thread.
     expect(slack.api.posts[1].thread_ts).toBe(row.messageRef);
-    expect(slack.api.posts[1].text).toContain('<@U012>');
+    expect(slack.api.posts[1].text).toContain('Coordinator');
   });
 
   it('refuses the same decision when it arrives on the other surface', async () => {
@@ -95,8 +106,8 @@ describe('a host with several surfaces loaded', () => {
     await postPendingApprovals({ db, surface: surfaces.primary, client: 'demo-practice', now });
     const [row] = await db.select().from(approvals);
     const result = await decideApproval(
-      { db, surfaces, core, client: 'demo-practice', now },
-      { approvalId: row.id, decision: 'approved', decidedBy: 'U012', surface: 'memory' },
+      { db, surfaces, core, identity: new StaticIdentity([LEAD]), client: 'demo-practice', now },
+      { approvalId: row.id, decision: 'approved', decidedBy: LEAD, surface: 'memory' },
     );
     expect(result).toEqual({ outcome: 'wrong_surface' });
     expect(core.executed).toEqual([]);
@@ -132,9 +143,10 @@ describe('a host with several surfaces loaded', () => {
   });
 
   /**
-   * What the host hands the child-process allowlist. `child-env.test.ts` proves the stripping
-   * itself; that assertion lives beside `app/child-env.ts`, because a test under `domain/` may
-   * not reach into `app/`.
+   * What a host running this domain in a separate process from the kernel would strip from a
+   * child's environment. Since Plan 8's host runs the kernel in-process, nothing here spawns a
+   * child any more, but the union of every loaded adapter's declared credentials is still what a
+   * deployment needs if it ever does.
    */
   it('collects the credentials of every loaded adapter, from the adapters themselves', () => {
     const { surfaces } = wire();

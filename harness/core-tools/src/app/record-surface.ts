@@ -165,9 +165,12 @@ export const ENV_READING_HELPERS = [
  * own variables, and a scan that did not walk it would let them go undocumented — including the
  * primary adapter's conversation variable, which `surface.test.ts` anchors on. `identities/` is
  * there for the same reason `surfaces/` is: a plug-in reads its own variables off `deps.env`
- * through the shared helpers, and `HARNESS_IDENTITY_FILE` is one of them.
+ * through the shared helpers, and `HARNESS_IDENTITY_FILE` is one of them. `runtimes/` is there
+ * for the same reason again: a runtime plug-in reads its configuration off `RuntimeDeps.env`
+ * rather than the ambient environment, and the scan walks it so that a variable it reads is
+ * documented like every other one.
  */
-const SOURCE_ROOTS = ['harness', 'packs', 'surfaces', 'identities', 'evals', 'scripts'];
+const SOURCE_ROOTS = ['harness', 'packs', 'surfaces', 'identities', 'runtimes', 'evals', 'scripts'];
 const DIRECT_ENV = /process\.env\.([A-Z][A-Z0-9_]*)/g;
 const INDEXED_ENV = /process\.env\[\s*'([A-Z][A-Z0-9_]*)'\s*\]/g;
 const HELPER_ENV = new RegExp(

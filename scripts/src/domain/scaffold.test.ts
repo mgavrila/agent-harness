@@ -6,28 +6,22 @@ import { newClient, titleCase } from './scaffold.js';
 
 let root: string;
 
-/** A repository skeleton with just the parts new-client reads. */
+/** A repository skeleton with just the parts new-client reads: the four files plus .env.example. */
 async function scaffold(): Promise<void> {
   await mkdir(path.join(root, 'packs', 'healthcare'), { recursive: true });
   const template = path.join(root, 'clients', 'demo-practice');
-  await mkdir(path.join(template, 'cron'), { recursive: true });
-  await mkdir(path.join(template, 'scripts'), { recursive: true });
+  await mkdir(template, { recursive: true });
   await writeFile(
     path.join(template, 'SOUL.md'),
     '# Demo Practice credentialing assistant\nYou work for Demo Practice.\n',
   );
-  await writeFile(
-    path.join(template, 'hermes.config.yaml'),
-    'mcp_servers:\n  core-tools:\n    env:\n      HARNESS_CLIENT: "demo-practice"\n      HARNESS_POLICY_FILE: "/srv/agent-harness/clients/demo-practice/policy.yaml"\n',
-  );
   await writeFile(path.join(template, 'policy.yaml'), 'classes:\n  external: approval\n');
   await writeFile(
     path.join(template, 'identity.yaml'),
-    'principals:\n  - id: svc-local\n    kind: service\n    level: service\n    displayName: Local operator\n',
+    'principals:\n  - id: svc-local\n    kind: service\n    level: service\n    displayName: Demo Practice\n',
   );
+  await writeFile(path.join(template, 'routing.yaml'), 'routes:\n  chat: demo-practice-chat\n');
   await writeFile(path.join(template, '.env.example'), 'HARNESS_CLIENT=demo-practice\n');
-  await writeFile(path.join(template, 'cron', 'playbooks.sh'), '#!/usr/bin/env bash\n# demo-practice playbooks\n');
-  await writeFile(path.join(template, 'scripts', 'harness-outbox-watchdog.sh'), '#!/usr/bin/env bash\nexit 0\n');
 }
 
 beforeEach(async () => {
@@ -50,45 +44,27 @@ describe('newClient', () => {
     const out = await newClient({ pack: 'healthcare', name: 'river-clinic', root });
     expect(out.dir).toBe(path.join(root, 'clients', 'river-clinic'));
     expect(out.files.sort()).toEqual(
-      [
-        '.env.example',
-        'SOUL.md',
-        'cron/playbooks.sh',
-        'hermes.config.yaml',
-        'identity.yaml',
-        'policy.yaml',
-        'scripts/harness-outbox-watchdog.sh',
-      ].sort(),
+      ['.env.example', 'SOUL.md', 'identity.yaml', 'policy.yaml', 'routing.yaml'].sort(),
     );
+    expect(out.skipped).toEqual([]);
 
     const soul = await readFile(path.join(out.dir, 'SOUL.md'), 'utf8');
     expect(soul).toContain('River Clinic');
     expect(soul).not.toContain('Demo Practice');
 
-    const config = await readFile(path.join(out.dir, 'hermes.config.yaml'), 'utf8');
-    expect(config).toContain('HARNESS_CLIENT: "river-clinic"');
-    expect(config).toContain('/srv/agent-harness/clients/river-clinic/policy.yaml');
-    expect(config).not.toContain('demo-practice');
+    const identity = await readFile(path.join(out.dir, 'identity.yaml'), 'utf8');
+    expect(identity).toContain('displayName: River Clinic');
+    expect(identity).not.toContain('Demo Practice');
 
     const env = await readFile(path.join(out.dir, '.env.example'), 'utf8');
     expect(env).toContain('HARNESS_CLIENT=river-clinic');
   });
 
-  it('reports routing.yaml as skipped when the gateway plan has not landed', async () => {
+  it('reports a template file that is missing as skipped', async () => {
+    await rm(path.join(root, 'clients', 'demo-practice', 'routing.yaml'));
     const out = await newClient({ pack: 'healthcare', name: 'river-clinic', root });
-    expect(out.skipped).toContain('routing.yaml');
-  });
-
-  it('copies routing.yaml when it exists', async () => {
-    await writeFile(
-      path.join(root, 'clients', 'demo-practice', 'routing.yaml'),
-      'routes:\n  chat: demo-practice-chat\n',
-    );
-    const out = await newClient({ pack: 'healthcare', name: 'river-clinic', root });
-    expect(out.files).toContain('routing.yaml');
-    expect(out.skipped).not.toContain('routing.yaml');
-    const routing = await readFile(path.join(out.dir, 'routing.yaml'), 'utf8');
-    expect(routing).toContain('river-clinic-chat');
+    expect(out.skipped).toEqual(['routing.yaml']);
+    expect(out.files.sort()).toEqual(['.env.example', 'SOUL.md', 'identity.yaml', 'policy.yaml'].sort());
   });
 
   it('refuses a slug that is not a safe directory name', async () => {
@@ -106,14 +82,6 @@ describe('newClient', () => {
   it('refuses to overwrite an existing client', async () => {
     await newClient({ pack: 'healthcare', name: 'river-clinic', root });
     await expect(newClient({ pack: 'healthcare', name: 'river-clinic', root })).rejects.toThrow(/already exists/);
-  });
-
-  it('keeps the executable bit on a copied script', async () => {
-    const { chmod, stat } = await import('node:fs/promises');
-    await chmod(path.join(root, 'clients', 'demo-practice', 'cron', 'playbooks.sh'), 0o755);
-    const out = await newClient({ pack: 'healthcare', name: 'river-clinic', root });
-    const mode = (await stat(path.join(out.dir, 'cron', 'playbooks.sh'))).mode;
-    expect(mode & 0o111).toBeGreaterThan(0);
   });
 
   // chmod 000 does not block reads for root (root bypasses file permission

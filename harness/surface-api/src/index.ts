@@ -7,7 +7,7 @@
  * which is what lets the host load an adapter by name at runtime instead of importing it at
  * build time. See ARCHITECTURE.md, "Surfaces".
  */
-export { ANY_USER, allowsUser, defineSurface, parseAllowedUsers } from './surface.js';
+export { defineSurface } from './surface.js';
 export {
   CONVERSATION_ID_PATTERN,
   SURFACE_NAME_PATTERN,
@@ -26,8 +26,10 @@ export type {
   Form,
   FormEvent,
   FormField,
+  MessageEvent,
   MessageRef,
   NotePart,
+  StreamHandle,
   Surface,
   SurfaceCapabilities,
   SurfaceDeps,

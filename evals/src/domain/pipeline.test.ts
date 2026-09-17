@@ -7,7 +7,7 @@ import { DEFAULT_POLICY, MASKED, registryOf } from '@harness/core-tools';
 import { definePack, parseExtractionManifest } from '@harness/pack-api';
 import { pack as healthcarePack } from '@harness/pack-healthcare';
 import { generate as generateStories } from '@harness/pack-stories/generate';
-import { startFakeGateway, type FakeGateway } from '@harness/core-tools/fake-gateway';
+import { startFakeGateway, type FakeGateway } from '@harness/runtime-api/testing';
 import { EVALS_DATABASE_URL } from '../corpus.test-helpers.js';
 import { loadExtractionCases, type ExtractionCase, type InjectionCase } from './cases.js';
 import { scoreInjection, type CaseOutcome, type StoredField } from './score.js';

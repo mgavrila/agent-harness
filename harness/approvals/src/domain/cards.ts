@@ -112,8 +112,11 @@ export function approvalCard(row: ApprovalRow, capabilities: { forms: boolean })
 }
 
 /** The same card after a human answered it: no buttons, and what happened underneath. */
-export function decidedCard(row: ApprovalRow, outcome: { executed: boolean; tool?: string; error?: string }): Card {
-  const who: NotePart = row.decidedBy ? { user: row.decidedBy } : { text: 'someone' };
+export function decidedCard(
+  row: ApprovalRow,
+  outcome: { executed: boolean; tool?: string; error?: string; decidedByName?: string },
+): Card {
+  const who: NotePart = row.decidedBy ? { text: outcome.decidedByName ?? row.decidedBy } : { text: 'someone' };
   const when: NotePart[] = row.decidedAt ? [{ text: ' at ' }, { at: row.decidedAt }] : [];
   const parts: NotePart[] = [];
   if (row.status === 'approved') {
