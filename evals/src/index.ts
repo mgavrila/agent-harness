@@ -5,6 +5,12 @@
  * repository root, which is composition-root work. Run it through `pnpm evals`.
  */
 export { injectionCasesFor, runEvals, selectCases, type RunOptions } from './domain/orchestrate.js';
+/**
+ * Re-exported, not redeclared: `RunOptions` and `resolvePipelineTools` are both written against
+ * the pack contract's own type, and a caller reading a pack's `evals.readback` should not have to
+ * reach past this package for the shape of what it just read.
+ */
+export { type EvalReadback } from '@harness/pack-api';
 export {
   declaredToolsOf,
   loadExtractionCases,

@@ -36,6 +36,33 @@ function flag(name: string): string | undefined {
   return flagFrom(process.argv, name);
 }
 
+type PackFlagResult = { ok: true; pack: string | undefined } | { ok: false; error: string };
+
+/**
+ * `--pack=<name>` or `--pack <name>`, both spellings, or `undefined` when neither is given.
+ *
+ * The spec writes the flag space-separated and the first implementation read only the `=` form,
+ * so `--pack stories` silently measured the first pack `HARNESS_PACKS` named and wrote a report
+ * headed with the wrong pack's name. A missing value is a usage error for the same reason: a
+ * bare `--pack`, or one followed by another flag, is somebody asking for a pack they did not
+ * manage to name, and falling back to the first one answers a question they did not ask.
+ *
+ * An unknown name is a usage error too, but not here: only the loaded registry knows which names
+ * exist, so the entry point below turns `byName`'s `ConfigError` into the same exit 2.
+ */
+export function parsePackFlag(argv: readonly string[]): PackFlagResult {
+  const missing = { ok: false, error: '--pack needs the name of a loaded pack, e.g. --pack=stories' } as const;
+  const joined = flagFrom(argv, 'pack');
+  if (joined !== undefined) return joined.trim() === '' ? missing : { ok: true, pack: joined.trim() };
+  const at = argv.indexOf('--pack');
+  if (at === -1) return { ok: true, pack: undefined };
+  const next = argv[at + 1];
+  // A pack name is lowercase letters, digits and hyphens and never opens with one, so a leading
+  // dash is the next flag, not this flag's value.
+  if (next === undefined || next.startsWith('-') || next.trim() === '') return missing;
+  return { ok: true, pack: next.trim() };
+}
+
 type LimitFlagResult = { ok: true; limit: number | undefined } | { ok: false; error: string };
 
 /**
@@ -78,8 +105,10 @@ export function parseUpdateBaselineFlag(argv: readonly string[]): UpdateBaseline
 /**
  * CLI usage: `pnpm --filter @harness/evals start -- [flags]`
  *
- *   --pack=<name>       Which loaded pack to measure, by Pack.name. Defaults to the first one
- *                        HARNESS_PACKS names. Every path below defaults to that pack's evals block.
+ *   --pack=<name>       Which loaded pack to measure, by Pack.name. `--pack <name>` is accepted
+ *                        too. Defaults to the first one HARNESS_PACKS names; a bare --pack, or a
+ *                        name no loaded pack answers to, is a usage error: exit 2, nothing run.
+ *                        Every path below defaults to that pack's evals block.
  *   --corpus=<dir>      Corpus root. Defaults to the pack's `evals.corpusDir`.
  *   --cases=<file>      Extraction cases file. Defaults to the pack's `evals.casesFile`.
  *   --injection=<file>  Injection cases file. Defaults to the pack's declared
@@ -111,6 +140,11 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     process.stderr.write(`${updateBaselineFlag.error}\n`);
     process.exit(2);
   }
+  const packFlag = parsePackFlag(process.argv);
+  if (!packFlag.ok) {
+    process.stderr.write(`${packFlag.error}\n`);
+    process.exit(2);
+  }
 
   // CLI only, like `@harness/db`'s migrate: a test that imports `runEvals` must
   // not pick up the developer's repository-root .env.
@@ -121,7 +155,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   // pack-agnostic: it imports none, and `HARNESS_PACKS` names what it loads.
   const names = packNames(optionalEnv('HARNESS_PACKS'));
   const registry = await loadPacks(names);
-  const wanted = flag('pack');
+  const wanted = packFlag.pack;
   let measured: Pack;
   try {
     measured = wanted === undefined ? registry.all[0] : registry.byName(wanted);

@@ -35,11 +35,12 @@ src/index.ts              the public API
 
 ## Public API
 
-`@harness/evals` is `src/index.ts` and has no subpath exports. It publishes five groups:
+`@harness/evals` is `src/index.ts` and has no subpath exports. It publishes six groups:
 
 | Group     | Exports                                                                                                                                                                                                                                                                              |
 | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | running   | `runEvals`, `selectCases`, `injectionCasesFor`, `type RunOptions`                                                                                                                                                                                                                    |
+| contract  | `type EvalReadback` (re-exported from `@harness/pack-api`, the shape of a pack's `evals.readback`)                                                                                                                                                                                   |
 | cases     | `loadExtractionCases`, `loadInjectionCases`, `loadJsonl`, `declaredToolsOf`, `type ExtractionCase`, `type InjectionCase`, `type ExpectedAttachment`                                                                                                                                  |
 | pipeline  | `openPipeline`, `runCase`, `normalizeMasking`, `resolvePipelineTools`, `KERNEL_PIPELINE_TOOLS`, `type PipelineHandle`, `type OpenPipelineOptions`, `type PipelineTools`                                                                                                              |
 | scoring   | `scoreExtraction`, `scoreCalibration`, `scoreInjection`, `normalizeValue`, `judgeFreeText`, `type Tally`, `type CalibrationScore`, `type CaseOutcome`, `type StoredField`, `type StoredAttachment`, `type CalibrationRow`, `type JudgeItem`, `type JudgeResult`, `type JudgeVerdict` |

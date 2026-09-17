@@ -8,7 +8,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { startFakeGateway, type FakeGateway } from '@harness/core-tools/fake-gateway';
 import { EVALS_DATABASE_URL, EXTRACTION, VERDICTS, writeEvalCorpus } from '../corpus.test-helpers.js';
 import type { Report } from '../domain/report/types.js';
-import { flagFrom, packNames, parseLimitFlag, parseUpdateBaselineFlag } from './cli.js';
+import { flagFrom, packNames, parseLimitFlag, parsePackFlag, parseUpdateBaselineFlag } from './cli.js';
 
 const execFileAsync = promisify(execFile);
 const evalsDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -40,6 +40,34 @@ describe('--pack', () => {
     expect(flagFrom(['node', 'cli.ts', '--pack=stories'], 'pack')).toBe('stories');
     expect(flagFrom(['node', 'cli.ts', '--pack=healthcare', '--limit=3'], 'pack')).toBe('healthcare');
   });
+});
+
+describe('parsePackFlag', () => {
+  it('reads both spellings, and no flag still means the first loaded pack', () => {
+    expect(parsePackFlag(['node', 'cli.ts'])).toEqual({ ok: true, pack: undefined });
+    expect(parsePackFlag(['node', 'cli.ts', '--pack=stories'])).toEqual({ ok: true, pack: 'stories' });
+    // The spec writes the flag this way, and reading only the `=` form measured the first pack
+    // and headed the report with its name.
+    expect(parsePackFlag(['node', 'cli.ts', '--pack', 'stories'])).toEqual({ ok: true, pack: 'stories' });
+    expect(parsePackFlag(['node', 'cli.ts', '--pack', 'stories', '--limit=3'])).toEqual({
+      ok: true,
+      pack: 'stories',
+    });
+    expect(parsePackFlag(['node', 'cli.ts', '--limit=3', '--pack=healthcare'])).toEqual({
+      ok: true,
+      pack: 'healthcare',
+    });
+  });
+
+  // Falling back to the first loaded pack here answers a question the operator did not ask, and
+  // the report it writes names a pack they did not choose.
+  for (const argv of [['--pack'], ['--pack', '--limit=3'], ['--pack='], ['--pack', '  ']]) {
+    it(`rejects ${JSON.stringify(argv)} as a --pack with no name`, () => {
+      const result = parsePackFlag(['node', 'cli.ts', ...argv]);
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error).toContain('--pack needs the name of a loaded pack');
+    });
+  }
 });
 
 describe('packNames', () => {
@@ -134,6 +162,24 @@ describe('CLI', () => {
         env: { ...process.env, LITELLM_MASTER_KEY: '', HARNESS_GATEWAY_URL: '', EVALS_DATABASE_URL },
       }),
     ).rejects.toMatchObject({ code: 2, stderr: expect.stringContaining('--pack') });
+  }, 60_000);
+
+  it('exits 2 when --pack is given no name, before the gateway or the database is touched', async () => {
+    await expect(
+      execFileAsync(tsxBin, [runScript, '--pack', `--out=${path.join(dir, 'cli-nameless-pack-out')}`], {
+        cwd: evalsDir,
+        env: { ...process.env, LITELLM_MASTER_KEY: '', HARNESS_GATEWAY_URL: '', EVALS_DATABASE_URL },
+      }),
+    ).rejects.toMatchObject({ code: 2, stderr: expect.stringContaining('--pack needs the name of a loaded pack') });
+  }, 60_000);
+
+  it('exits 2 naming the flag when the space-separated --pack does not match a loaded pack', async () => {
+    await expect(
+      execFileAsync(tsxBin, [runScript, '--pack', 'no-such-pack', `--out=${path.join(dir, 'cli-bad-pack2-out')}`], {
+        cwd: evalsDir,
+        env: { ...process.env, LITELLM_MASTER_KEY: '', HARNESS_GATEWAY_URL: '', EVALS_DATABASE_URL },
+      }),
+    ).rejects.toMatchObject({ code: 2, stderr: expect.stringContaining('no pack named "no-such-pack"') });
   }, 60_000);
 
   it('writes the new baseline to the --baseline path when --update-baseline is given bare', async () => {
