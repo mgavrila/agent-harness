@@ -71,7 +71,7 @@ it is the only place a domain word appears.
 
 `harness/core-tools/src/kernel-vocabulary.test.ts` is what makes that a fact rather than an
 intention: it greps the kernel's own source, and `evals/src`, for `provider`, `credential`,
-`licence`, `npi`, `nppes`, `malpractice`, `dea_number`, `payer` and `roster`. Tests are
+`licence` or `license`, `npi`, `nppes`, `malpractice`, `dea_number`, `payer` and `roster`. Tests are
 excluded, because a test names what it tests, and so is `shared/redaction/`, whose
 `RESTRICTED_NAME_KEYS` is a list of identifier stems the kernel keeps on purpose. **Its
 allowlist is empty.** A word that has to appear belongs in a pack.
