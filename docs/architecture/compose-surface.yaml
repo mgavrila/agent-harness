@@ -256,9 +256,7 @@ services:
         target: /srv/harness-storage
         type: volume
         volume: {}
-      - bind:
-          create_host_path: true
-        read_only: true
+      - read_only: true
         source: ../../clients/${HARNESS_CLIENT:?set HARNESS_CLIENT in .env}
         target: /srv/client
         type: bind

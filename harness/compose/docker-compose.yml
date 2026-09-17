@@ -132,7 +132,15 @@ services:
       # first forms_fill fails with EACCES: the writer is the core-tools child
       # inside the hermes container, which runs as HERMES_UID, not root.
       - storage:/srv/harness-storage
-      - ../../clients/${HARNESS_CLIENT:?set HARNESS_CLIENT in .env}:/srv/client:ro
+      # Long syntax: the short form's unexpanded ${HARNESS_CLIENT:?...} has a
+      # colon inside the default/error clause, and some Compose versions split
+      # a short-syntax bind on every colon when interpolation is disabled
+      # (as `docker compose config --no-interpolate` does), so it must never
+      # be written as a single `source:target:mode` string.
+      - type: bind
+        source: ../../clients/${HARNESS_CLIENT:?set HARNESS_CLIENT in .env}
+        target: /srv/client
+        read_only: true
       - ../../.env:/srv/env/.env:ro
     environment:
       HERMES_UID: '${HERMES_UID:-1000}'
