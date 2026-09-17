@@ -105,6 +105,33 @@ describe('upsertRecord', () => {
       'no loaded pack declares attachment kind "epic_link"',
     );
   });
+
+  it('refuses a property key that names a restricted identifier, and writes no attachment row', async () => {
+    // `properties` is plaintext jsonb with no per-entry restricted flag and no masked read-back,
+    // so the only way to keep "restricted values live only in bytea" is to refuse the key.
+    const deps = makeTestDeps(db);
+    const restricted = provider({
+      attachments: [{ kind: 'license', issuer: 'TX Medical Board', properties: { 'DEA-Number': 'BX1234563' } }],
+    });
+    await expect(upsertRecord(deps, restricted)).rejects.toThrow(ToolError);
+    await expect(upsertRecord(deps, restricted)).rejects.toThrow(
+      'attachment property "DEA-Number" names a restricted identifier',
+    );
+    const rows = await deps.db.select().from(attachments);
+    expect(rows.filter((r) => JSON.stringify(r.properties).includes('BX1234563'))).toEqual([]);
+  });
+
+  it('keeps a property key the restricted-name rule does not recognise', async () => {
+    // The guard is a name rule, not a ban on properties: `npi` and `deadline` are not restricted
+    // and an attachment kind's declared bag has to keep working.
+    const deps = makeTestDeps(db);
+    const { record_id } = await upsertRecord(
+      deps,
+      provider({ attachments: [{ kind: 'license', issuer: 'TX Medical Board', properties: { npi: '1234567890' } }] }),
+    );
+    const rows = await deps.db.select().from(attachments).where(eq(attachments.recordId, record_id));
+    expect(rows[0]?.properties).toEqual({ npi: '1234567890' });
+  });
 });
 
 describe('readRecord, searchRecords and listPendingFields', () => {

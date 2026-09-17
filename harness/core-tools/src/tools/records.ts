@@ -70,6 +70,19 @@ function pinnedKind(kind: z.ZodEnum<Record<string, string>>) {
   return kind.optional().describe('Refuse the read when the record is not of this kind');
 }
 
+/**
+ * Defence in depth for the parked-approval payload. `upsertAttachment` refuses a restricted
+ * property key outright, so after that guard none of these can reach the store — but `redact`
+ * runs before any handler does, and what it returns is written to plaintext jsonb. Masking by
+ * the same rule here means the two cannot drift: whichever one is reached first, a restricted
+ * value never lands in plaintext. Keys stay as they are; only the values go.
+ */
+function maskRestrictedProperties(properties: Record<string, string>): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(properties).map(([key, value]) => [key, isRestrictedName(key) ? MASKED : value]),
+  );
+}
+
 export function recordTools(packs: PackRegistry): AnyToolDef[] {
   const kind = kindEnum(packs);
 
@@ -95,13 +108,17 @@ export function recordTools(packs: PackRegistry): AnyToolDef[] {
     }),
     handler: async (args, deps) => upsertRecord(deps, args),
     recordIds: (_args, result) => [result.record_id],
-    // A parked approval stores its payload as plaintext jsonb, so restricted field values and
-    // attachment numbers are masked out of it here. The full arguments remain available,
-    // encrypted, in approvals.payload_encrypted.
+    // A parked approval stores its payload as plaintext jsonb, so restricted field values,
+    // attachment numbers and any restricted attachment property are masked out of it here. The
+    // full arguments remain available, encrypted, in approvals.payload_encrypted.
     redact: (args) => ({
       ...args,
       fields: args.fields.map((f) => (f.restricted === true || isRestrictedName(f.name) ? { ...f, value: MASKED } : f)),
-      attachments: args.attachments.map((a) => (a.number === undefined ? a : { ...a, number: MASKED })),
+      attachments: args.attachments.map((a) => ({
+        ...a,
+        ...(a.number === undefined ? {} : { number: MASKED }),
+        ...(a.properties === undefined ? {} : { properties: maskRestrictedProperties(a.properties) }),
+      })),
     }),
   });
 

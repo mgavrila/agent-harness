@@ -105,8 +105,27 @@ async function upsertField(deps: ToolDeps, recordId: string, f: FieldInput) {
   return status;
 }
 
+/**
+ * `attachments.properties` is plaintext jsonb, the same as `fields.value` before
+ * `fieldValueColumns` splits it — but a property bag has no per-entry `restricted` flag, no
+ * `bytea` column to divert a value into, and `maskAttachment` returns it verbatim. There is
+ * therefore no way to accept a restricted value here and still honour "restricted values live
+ * only in bytea", so the write is refused instead. The message names the key and says where the
+ * value does belong: `number`, which is encrypted and read back as the mask.
+ */
+function assertPropertiesUnrestricted(properties: Record<string, string> | undefined): void {
+  for (const key of Object.keys(properties ?? {})) {
+    if (isRestrictedName(key)) {
+      throw new ToolError(
+        `attachment property "${key}" names a restricted identifier; properties are stored in plaintext, so a restricted value belongs in the attachment's "number", which is encrypted`,
+      );
+    }
+  }
+}
+
 async function upsertAttachment(deps: ToolDeps, recordId: string, a: AttachmentInput) {
   assertAttachmentKind(deps, a.kind);
+  assertPropertiesUnrestricted(a.properties);
   // A record can hold one attachment of a kind per state (two permits in two states), so the
   // state — null included — is part of the match.
   const existing = await deps.db.query.attachments.findFirst({

@@ -50,6 +50,28 @@ describe('records_* over a declared kind', () => {
     expect(found.records.map((r) => r.record_id)).toEqual([upserted.record_id]);
   });
 
+  it('masks a restricted attachment property out of the plaintext approval payload', () => {
+    // `upsertAttachment` refuses such a key outright, so nothing should ever reach here — but
+    // `redact` runs before the handler and what it returns is written to plaintext jsonb, so it
+    // masks by the same rule rather than relying on the order the two run in.
+    const packs = registryOf([generic]);
+    const upsert = recordTools(packs).find((t) => t.name === 'records_upsert');
+    const redacted = upsert?.redact?.({
+      kind: 'provider',
+      name: 'Ada Reyes',
+      fields: [{ name: 'ssn', value: '123-45-6789' }],
+      attachments: [
+        { kind: 'license', number: 'A-9912', properties: { dea_number: 'BX1234563', issuer_city: 'Austin' } },
+      ],
+    }) as { fields: { value: string }[]; attachments: { number: string; properties: Record<string, string> }[] };
+
+    expect(redacted.fields[0]?.value).toBe('[restricted]');
+    expect(redacted.attachments[0]?.number).toBe('[restricted]');
+    // The key stays so an operator can still see what was parked; only the value goes.
+    expect(redacted.attachments[0]?.properties).toEqual({ dea_number: '[restricted]', issuer_city: 'Austin' });
+    expect(JSON.stringify(redacted)).not.toContain('BX1234563');
+  });
+
   it('refuses a kind the loaded packs do not declare, at the schema, before any handler runs', async () => {
     const packs = registryOf([generic]);
     const deps = makeTestDeps(db, { packs });

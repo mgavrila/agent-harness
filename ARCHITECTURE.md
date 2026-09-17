@@ -115,7 +115,10 @@ row nothing reads back.
 Restricted values live in `bytea` and nowhere else. `records.name`, `records.external_id`,
 `fields.value` and `attachments.properties` are plaintext, and `defineRecordKind` refuses a
 record kind whose name field or external id is a restricted field, so the rule is checked at
-startup rather than discovered in a leak.
+startup rather than discovered in a leak. `fields.value` is diverted into `value_encrypted` when
+its name is restricted; `attachments.properties` has no such column and no masked read-back, so
+`upsertAttachment` refuses a property key the restricted-name rule recognises and says the value
+belongs in the attachment's encrypted `number` instead.
 
 ### What a pack declares
 
