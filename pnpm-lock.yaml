@@ -102,15 +102,15 @@ importers:
       '@harness/shared':
         specifier: workspace:*
         version: link:../shared
+      '@harness/surface-api':
+        specifier: workspace:*
+        version: link:../surface-api
+      '@harness/surface-slack':
+        specifier: workspace:*
+        version: link:../../surfaces/slack
       '@modelcontextprotocol/client':
         specifier: ^2.0.0
         version: 2.0.0
-      '@slack/bolt':
-        specifier: ^5.1.0
-        version: 5.1.0(@types/express@5.0.6)(undici@7.29.1)
-      '@slack/web-api':
-        specifier: ^8.1.1
-        version: 8.1.1
       dotenv:
         specifier: ^17.4.2
         version: 17.4.2
@@ -121,6 +121,9 @@ importers:
         specifier: ^4.6.5
         version: 4.6.5
     devDependencies:
+      '@harness/surface-memory':
+        specifier: workspace:*
+        version: link:../../surfaces/memory
       '@types/node':
         specifier: ^26.5.1
         version: 26.5.1
