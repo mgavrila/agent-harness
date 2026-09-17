@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import type { ToolDeps } from '@harness/core-tools';
+import { pack as healthcarePack } from '@harness/pack-healthcare';
 import { startFakeGateway, type FakeGateway } from '@harness/core-tools/fake-gateway';
 import { EVALS_DATABASE_URL, EXTRACTION, VERDICTS, writeEvalCorpus } from '../corpus.test-helpers.js';
 import { openJudgeDeps } from '../judge-deps.test-helpers.js';
@@ -37,7 +38,7 @@ beforeAll(async () => {
         injection: false,
         expected: {
           fields: { first_name: 'Ada', last_name: 'Lovelace', practice_name: 'Medical Group of San Francisco' },
-          credentials: [],
+          attachments: [],
           restricted: [],
         },
       }),
@@ -47,7 +48,7 @@ beforeAll(async () => {
         split: 'scan',
         path: 'text/a.pdf',
         injection: false,
-        expected: { fields: { first_name: 'Grace', last_name: 'Lovelace' }, credentials: [], restricted: [] },
+        expected: { fields: { first_name: 'Grace', last_name: 'Lovelace' }, attachments: [], restricted: [] },
       }),
     ].join('\n'),
     'utf8',
@@ -76,6 +77,12 @@ function options(overrides: Partial<Parameters<typeof runEvals>[0]> = {}) {
     judgeDeps,
     servingModel: { extract: 'fake/extract', judge: 'fake/judge' },
     evalSetVersion: 'test-1',
+    // What the CLI reads off the loaded pack. A test names a pack; the runner never does.
+    packs: ['@harness/pack-healthcare'],
+    packName: healthcarePack.name,
+    recordKinds: healthcarePack.records.map((r) => r.kind),
+    judgedFields: healthcarePack.evals!.judgedFields,
+    intakeSkillFile: healthcarePack.evals!.intakeSkill,
     ...overrides,
   };
 }
@@ -93,6 +100,9 @@ describe('runEvals', () => {
 
     const onDisk = JSON.parse(await readFile(path.join(dir, 'results', 'report.json'), 'utf8')) as Report;
     expect(onDisk.eval_set_version).toBe('test-1');
+    // A number from one pack means nothing to another, so the report says which one it measured.
+    expect(onDisk.pack).toBe('healthcare');
+    expect(onDisk.record_kinds).toEqual(healthcarePack.records.map((r) => r.kind));
     expect(await readFile(path.join(dir, 'results', 'report.md'), 'utf8')).toContain('# Eval report');
   }, 180_000);
 
@@ -228,7 +238,7 @@ describe('selectCases', () => {
     split,
     path: `${id}.pdf`,
     injection,
-    expected: { fields: {}, credentials: [], restricted: [] },
+    expected: { fields: {}, attachments: [], restricted: [] },
   });
 
   const corpusOrder: ExtractionCase[] = [
@@ -272,7 +282,7 @@ describe('injectionCasesFor', () => {
     split: 'text_layer',
     path: p,
     injection: true,
-    expected: { fields: {}, credentials: [], restricted: [] },
+    expected: { fields: {}, attachments: [], restricted: [] },
   });
   const row = (id: string, p?: string): InjectionCase => ({
     id,

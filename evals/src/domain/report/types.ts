@@ -4,7 +4,7 @@ export interface SplitReport {
   cases: number;
   failures: number;
   fieldAccuracy: number;
-  credentialAccuracy: number;
+  attachmentAccuracy: number;
   restrictedRecall: number;
   /**
    * Field accuracy broken down by document kind (spec section 8). Reported but
@@ -20,6 +20,10 @@ export interface SplitReport {
 export interface Report {
   generated_at: string;
   eval_set_version: string;
+  /** Which pack was measured. A number from one pack means nothing to another. */
+  pack: string;
+  /** The record kinds that pack declares, so a report says what it was scoring. */
+  record_kinds: string[];
   /** Which model actually served each route. A score is meaningless without it (research note 8). */
   serving_model: Record<string, string>;
   splits: Record<'text_layer' | 'scan', SplitReport>;
@@ -36,12 +40,12 @@ export interface Report {
  */
 export const METRIC_KEYS = [
   'text_layer.field_accuracy',
-  'text_layer.credential_accuracy',
+  'text_layer.attachment_accuracy',
   'text_layer.restricted_recall',
   'text_layer.calibrated',
   'text_layer.failure_rate',
   'scan.field_accuracy',
-  'scan.credential_accuracy',
+  'scan.attachment_accuracy',
   'scan.restricted_recall',
   'scan.calibrated',
   'scan.failure_rate',
@@ -51,6 +55,10 @@ export const METRIC_KEYS = [
 
 export interface BuildReportInput {
   evalSetVersion: string;
+  /** The measured pack's `Pack.name`. */
+  pack: string;
+  /** The measured pack's record kinds. */
+  recordKinds: string[];
   servingModel: Record<string, string>;
   splits: Record<'text_layer' | 'scan', SplitReport>;
   injection: Report['injection'];

@@ -25,6 +25,7 @@
     "gateway:logs": "docker compose --env-file .env -f harness/compose/docker-compose.yml logs -f litellm",
     "forms:generate": "pnpm --filter @harness/pack-healthcare forms:generate",
     "synth": "pnpm --filter @harness/pack-healthcare generate",
+    "synth:stories": "pnpm --filter @harness/pack-stories generate",
     "synth:fast": "pnpm --filter @harness/pack-healthcare generate -- --scans=false",
     "evals": "pnpm --filter @harness/evals start",
     "evals:baseline": "pnpm --filter @harness/evals start -- --update-baseline=true",

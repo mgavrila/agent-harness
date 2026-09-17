@@ -41,10 +41,12 @@ harness/pack-api    the Pack contract and definePack(). Depends on @harness/shar
                     only, so a pack never has to depend on core-tools.
 harness/db          schema, migrations, the pool, the encryption primitives.
 harness/gateway     the routing schema and the LiteLLM config renderer.
-harness/core-tools  the MCP server: the tooling kernel, every domain, every tool.
+harness/core-tools  the MCP server: the pack-agnostic kernel, every domain, every kernel tool.
 harness/approvals   the Slack app: cards, decisions, the effects dispatcher, the health endpoint.
 evals               the eval runner, scorers, judge and report.
-packs/healthcare    a pack: the provider schema, form templates, skills, the synthetic corpus.
+packs/healthcare    a pack: the provider record kind, credential attachment kinds, form
+                    templates, skills, the synthetic corpus, and eighteen tools
+packs/stories       the proof pack: one record kind, one document kind, one skill, no tools
 scripts             the client scaffolder.
 ```
 
@@ -55,38 +57,157 @@ shared  <-  pack-api  <-  { core-tools, packs/* }
 shared  <-  db        <-  core-tools  <-  { approvals, evals }
 gateway   <-  core-tools      (gateway is the one package with no edge to shared: it needs none)
 core-tools  ..>  packs/*        (runtime only: dynamic import, never a static one)
-evals       ->   packs/healthcare  (static: the eval corpus, cases and skill list are the healthcare pack's; making evals pack-agnostic is a follow-up)
+evals       ..>  packs/*        (runtime only: HARNESS_PACKS, --pack; no static import)
 ```
 
 `scripts` is a leaf. There are no cycles.
 
-## Packs
+## The kernel and a pack
 
-An area of the product — healthcare credentialing today, document scanning tomorrow — is a
-pack, and core loads one rather than importing it. `@harness/pack-api` holds the contract:
-`Pack`, `definePack()`, and the types a pack declares against (`ProviderManifest`, `Policy`,
-`ToolDef`, `CREDENTIAL_KINDS`). It depends on `@harness/shared` and zod, and on nothing else.
-core-tools re-exports `definePack` and the shared types, so an existing importer keeps working.
+`@harness/core-tools` is a kernel. It knows about documents, records, attachments, deadlines,
+approvals, audit and effects, and it knows nothing about medicine. A **pack** is an area of the
+product — healthcare credentialing today, document scanning that produces epics tomorrow — and
+it is the only place a domain word appears.
+
+`harness/core-tools/src/kernel-vocabulary.test.ts` is what makes that a fact rather than an
+intention: it greps the kernel's own source, and `evals/src`, for `provider`, `credential`,
+`licence` or `license`, `npi`, `nppes`, `malpractice`, `dea_number`, `payer` and `roster`. Tests are
+excluded, because a test names what it tests, and so is `shared/redaction/`, whose
+`RESTRICTED_NAME_KEYS` is a list of identifier stems the kernel keeps on purpose. **Its
+allowlist is empty.** A word that has to appear belongs in a pack.
 
 At startup `app/server.ts` reads `HARNESS_PACKS` — comma-separated package names, default
-`@harness/pack-healthcare` — and `loadPacks` imports each one dynamically into a
-`PackRegistry` on `ToolDeps`. Document kinds, the extraction manifest, the forms directory and
-the skills directories all come from `deps.packs`. No shipping module under
+`@harness/pack-healthcare` — and `loadPacks` (`domain/packs/registry.ts`) imports each one
+dynamically into a `PackRegistry` on `ToolDeps`. No shipping module under
 `harness/core-tools/src/` names a pack: `pnpm arch` fails the build on a static
 `@harness/pack-*` import, with `src/testing.ts` and `*.test.ts` exempt because they need a
-registry synchronously. Those two exemptions are the only reason the module graph shows an
-arrow from core-tools to the pack at all; remove the tests and the arrow goes with them.
+registry synchronously. `evals/src` is held to the same rule, exempting `*.test.ts` and
+`*.test-helpers.ts`, and the runner reaches a pack only through `HARNESS_PACKS` and `--pack`.
+
+Those exemptions are the only reason the module graph shows an arrow from core-tools, or from
+evals, to a pack at all — the graph collapses each package's layers to one node, tests included.
+Remove the tests and both arrows go with them.
+
+### The record model
+
+One set of tables carries every pack's data, and `harness/db/src/domain/schema.ts` is where
+they are declared.
+
+| Table         | What it holds                                                                                        |
+| ------------- | ---------------------------------------------------------------------------------------------------- |
+| `records`     | `pack`, `kind`, `name`, `external_id`, `status`, client-scoped. A provider, an epic.                 |
+| `fields`      | one name/value per record, plaintext `value` or `value_encrypted`, with a confidence and a status    |
+| `attachments` | `kind`, `issuer`, `state`, dates, `number_encrypted`, `properties jsonb`. A licence, a link.         |
+| `deadlines`   | keyed on an attachment: one `expiration` row and, when the kind has a lead time, one `renewal_start` |
+| `documents`   | unchanged, attached to a record rather than to a provider                                            |
+
+`deadlines` keeps the columns it has always had, `window_days` and `notified_at`. The lead time
+is not a column at all: it is `AttachmentKindSpec.leadDays`, which a pack declares and
+`computeDeadlines` (`domain/deadlines/compute.ts`) reads at compute time. **Zero lead days means
+no renewal deadline**, and an attachment with no `expires_at` gets no deadline of either kind —
+the honest answers for a link to a ticket, which is what the stories pack's `source_link` is.
+
+A pack declares what may go in these tables — `RecordKindSpec` and `AttachmentKindSpec` in
+`@harness/pack-api` — and ships no migration. `records_upsert` takes its `kind` as an enum built
+from the loaded registry, so a kind no loaded pack declares is refused before it can become a
+row nothing reads back.
+
+Restricted values live in `bytea` and nowhere else. `records.name`, `records.external_id`,
+`fields.value` and `attachments.properties` are plaintext, and `defineRecordKind` refuses a
+record kind whose name field or external id is a restricted field, so the rule is checked at
+startup rather than discovered in a leak. `fields.value` is diverted into `value_encrypted` when
+its name is restricted; `attachments.properties` has no such column and no masked read-back, so
+`upsertAttachment` refuses a property key the restricted-name rule recognises and says the value
+belongs in the attachment's encrypted `number` instead.
+
+### What a pack declares
+
+`Pack` is in `harness/pack-api/src/types.ts`, the leaf module that holds every declaration on
+the contract's own reference cycle.
+
+```ts
+export const pack = definePack({
+  name,
+  version,
+  records, // RawRecordKind[]: kinds, their field manifests, their name fields
+  attachments, // RawAttachmentKind[]: kinds and their lead days
+  documentKinds, // what documents_classify may return
+  extraction, // per document kind → target record kind, plus the prose the model reads
+  formsDir, // optional
+  skillsDir,
+  policy, // Partial<Policy>: carried, not merged. See below.
+  replaces, // kernel tool names this pack's own tools supersede
+  tools, // (deps: PackToolDeps) => AnyToolDef[]
+  evals, // PackEvals: corpus, cases, intake skill, judged fields, readback
+});
+```
+
+The record and attachment kinds are handed over **unparsed**. The registry parses each one once,
+at construction, against _this build's_ restricted-name rules, because those rules decide what
+gets encrypted and so belong to whoever does the encrypting.
+
+### Which pack receives a document
+
+`PackRegistry.targetFor` resolves a classified document to one extraction target, in this order:
+an exact claim on the document's kind; then a declared `"*"` catch-all, if any loaded pack has
+one; then, **for a document with no kind at all**, the primary pack's first target. A kind that
+was declared and claimed by nobody is a `ToolError` from `documents_extract` naming the kind,
+not a document quietly written as the wrong record kind.
+
+The **primary pack** is the first entry of `HARNESS_PACKS`. It answers `manifest()`,
+`formsDir()` and that unclassified-document target, and nothing else depends on load order:
+`registryOf` refuses two loaded packs that claim the same document kind, with `"*"` counted as a
+kind, so at most one exact claim and at most one catch-all can exist. No pack declares a
+catch-all today; healthcare claims its five kinds by name.
+
+### How the catalogue is built
+
+`createCoreToolsServer` builds two lists, and the difference between them is the whole design.
+
+- **`deps.kernelTools`** — every tool the kernel defines, by its kernel name, filled before any
+  replacement. A pack's wrapper calls the handler it wraps through this map.
+- **`deps.tools`** — what is published to MCP, which is also what `approvals_execute` replays a
+  parked action from.
+
+Four rules turn the first into the second, and `domain/packs/publication.ts` is where each of
+them fails loudly. The generic `records_*` tools are published only when at least one loaded
+record kind leaves `genericTools` true. A kernel tool named in a loaded pack's `replaces` is
+dropped, and a name that is not a kernel tool is a `ConfigError` rather than a silent no-op. Two
+sources may not publish, or replace, the same name. And a source that replaces a name must
+publish it: a name listed in `replaces` and missing from the catalogue the pack returns would
+otherwise delete the kernel's tool and leave nothing behind it.
+
+The kernel defines seventeen tools. A healthcare-only deployment therefore publishes five of
+them and eighteen of the pack's: twelve of those eighteen are wrappers that reproduce the
+pre-Plan-5 names and schemas byte for byte, and `docs/architecture/tool-surface.json` is what
+proves it. Load the stories pack beside it and the catalogue grows to twenty-eight, by the five
+`records_*` tools, because the `epic` kind wants them.
+
+A wrapper that reshapes a result builds its **output schema from `deps`**. `replaces` is
+process-wide, so healthcare's `documents_get`, `documents_list` and `documents_extract` also see
+another pack's documents; each publishes the narrow pre-Plan-5 schema when no foreign document
+kind is loaded and a widened one when there is, and passes a foreign document through in the
+kernel's words rather than renaming an epic into a provider.
+
+### What a pack cannot do
+
+It cannot import `@harness/core-tools` or `@harness/db`; `pnpm arch` fails the build on either.
+It has no database handle and no SQL. Everything it reads and writes goes through a kernel tool,
+which is what keeps client scoping, the confidence threshold, the verified-field rule and the
+encryption decision in one place. The kernel operations that are **not** tools — writing a
+generated file into the out tree, staging a release, and the two redaction primitives
+`isRestrictedName` and `MASKED` — arrive on `deps.kernel`, whose one implementation is
+`PACK_KERNEL` in `domain/packs/kernel.ts`.
+
+A pack reads configuration from `deps.env`, never from `process.env`; the ESLint rule enforces
+it. Whoever builds the dependency bag decides what a pack sees, which is why an eval run on a
+developer's filled-in `.env` cannot switch an outbound lookup on.
 
 `Pack.policy` is part of the contract but `loadPolicy` (`domain/tooling/policy.ts`) does not
 read it yet: `deps.policy` is `DEFAULT_POLICY` merged with the client's `HARNESS_POLICY_FILE`
-only. A pack's policy is carried, not merged, until something changes that — unobservable
-today because the healthcare pack's `policy.yaml` matches `DEFAULT_POLICY`.
+only. A pack's policy is carried, not merged, unchanged from Plan 4's ruling.
 
-A pack is therefore a leaf that depends on the contract, never on core. The graph is
-`shared <- pack-api <- { core-tools, packs }` and `shared <- db <- core-tools <- { approvals,
-evals }`, with the core-tools-to-pack edge existing only at runtime.
-
-`CONTRIBUTING.md` has the six steps for adding one.
+`CONTRIBUTING.md`, "Adding a pack", is the worked how-to, with `packs/stories` as the example.
 
 ## The path of one tool call
 
@@ -126,17 +247,17 @@ An agent calls `documents_extract`. Every module named here is under
 contract: a handler reaches for nothing outside it, which is what keeps `process.env` out of
 the domain and what makes every tool testable against `makeTestDeps`.
 
-Three of its fields — `gateway`, `storageDir` and `verify` — are **configuration**, not
-constructed objects. A URL, a directory and four flags, not a `ModelGateway`, a `Storage` and a
-`VerifyRegistry`. That is deliberate, and it is the shape a reviewer should expect to argue
-with, so here is the reasoning.
+Two of its fields — `gateway` and `storageDir` — are **configuration**, not constructed objects.
+A URL and a directory, not a `ModelGateway` and a `Storage`. That is deliberate, and it is the
+shape a reviewer should expect to argue with, so here is the reasoning. (There used to be a
+third, `verify`. It is gone: the four `VERIFY_*` variables are the healthcare pack's now, read
+in `packs/healthcare/src/config.ts` out of `deps.env`.)
 
 - **The adapter is built in the domain, from the configuration.** `httpGateway(deps.gateway)`
-  inside `callModel` and `nppesRegistry(deps.verify)` inside `verify_nppes` are the two on the
-  live path; `fileStorage(root)` is declared beside the same interface but has no caller yet,
-  because every storage call still goes through the free functions with `deps.storageDir`
-  threaded in. The interface exists either way, so a second implementation is a new function
-  beside the old one and not a change to this type.
+  inside `callModel` is the one on the live path; `fileStorage(root)` is declared beside the
+  same interface but has no caller yet, because every storage call still goes through the free
+  functions with `deps.storageDir` threaded in. The interface exists either way, so a second
+  implementation is a new function beside the old one and not a change to this type.
 - **The fake lives beside the interface, not in the deps bag.** `FakeGateway`
   (`domain/models/fake.ts`) is a loopback HTTP server with a scripted responder, kept next to
   the interface and reachable from `./testing`. A test that wants a scripted model points
@@ -148,17 +269,30 @@ with, so here is the reasoning.
   `ToolDeps` would make each of those tests construct an adapter to say nothing about it.
 
 The cost is real: the domain builds its own adapters, so a caller cannot substitute one without
-going through the module that builds it. Wiring the three interfaces through `ToolDeps` is the
+going through the module that builds it. Wiring the two interfaces through `ToolDeps` is the
 fix, and it was deferred on purpose — it touches every handler signature and every test's deps
 literal, which is a behaviour-risk refactor and not the file moves this revamp was for.
+
+Three members exist for the **packs** rather than for the kernel, and a kernel handler should
+never reach for them:
+
+- **`kernelTools`** — every kernel tool by its kernel name, filled before any replacement, so a
+  pack's wrapper can call the handler behind the name it took over. A lookup in `deps.tools`
+  would find the wrapper itself and recurse.
+- **`kernel`** — the operations that are not tools: `writeOutFile`, `stageRelease`,
+  `isRestrictedName` and `MASKED`. A pack cannot import them, so the kernel hands them over.
+- **`env`** — the environment a pack's `tools(deps)` reads its own configuration from. Core's
+  own configuration is read in `app/` and arrives on this bag already parsed.
 
 ## The three invariants
 
 Break any of these and the harness is not safe to run against real data.
 
 1. **Every query is scoped to `deps.client`.** A tool that reads or writes a row without a
-   client predicate is a tenant leak. `requireProvider` and `requireDocument` exist so that
-   no handler has to remember.
+   client predicate is a tenant leak. `requireRecord` and `requireDocument` exist so that
+   no handler has to remember. `requireRecord` also takes an optional kind, so a pack's own
+   renamed read refuses another pack's record rather than returning it through the wrong
+   vocabulary.
 2. **Restricted identifiers are redacted before a model sees them.** `redactPages` runs over
    the text, `assertRedacted` runs over the exact messages about to be serialised, and both
    use the same patterns. The defence repeats on the way out: masked on read, checked again
@@ -223,11 +357,12 @@ can take the guard without inheriting the kernel.
 
 Ask, in order:
 
-1. Does it know anything about providers, documents, approvals or models? If not, it is a
+1. Does it know anything about records, documents, approvals or models? If not, it is a
    generic helper and it belongs in `@harness/shared`, where every package can reach it.
-2. Is it content that makes the harness specific to one area — document kinds, an extraction
-   manifest, forms, skills, policy defaults? Then it belongs in a pack, behind the
-   `@harness/pack-api` contract, and core reaches it through the registry.
+2. Is it content that makes the harness specific to one area — record and attachment kinds,
+   document kinds, an extraction manifest, forms, skills, policy defaults, a tool that names
+   any of them? Then it belongs in a pack, behind the `@harness/pack-api` contract, and core
+   reaches it through the registry. `src/kernel-vocabulary.test.ts` is the second opinion.
 3. Is it an agent-callable action? Then its _definition_ is a file in `tools/` and its
    _logic_ is a function in `domain/`. A `defineTool` block longer than about forty lines
    is logic that has not moved yet.
@@ -252,6 +387,12 @@ ESLint's type-aware rules run against TypeScript **6**, installed at the workspa
 because typescript-eslint refuses to load against TypeScript 7. Every package still compiles
 with TypeScript 7 through its own `tsc --noEmit`. That duplication is deliberate; delete it
 when typescript-eslint supports 7.
+
+dependency-cruiser cannot tell a type-only import from a value one under the TypeScript 6 it
+resolves with, so `no-circular` sees both alike and a contract whose declarations refer to each
+other cannot be split into one module per concept. The cycle is broken structurally instead:
+`harness/pack-api/src/types.ts` is a leaf holding every declaration on the cycle, and
+`pack.ts`, `kernel.ts` and `tool.ts` re-export from it.
 
 Every architecture rule is an error. `pnpm arch` exits 1 on a layer violation and `pnpm test`
 runs it first, so a crossed layer cannot reach a review. ESLint's three project rules
@@ -281,12 +422,24 @@ the same commit, or this test fails on it — that is how `HARNESS_PACKS` arrive
 The recorder behind it is `harness/core-tools/src/app/record-surface.ts`, which is both the
 library the test imports and the CLI `pnpm surface:record` runs.
 
+Two more suites guard the boundary the tool surface cannot see, because a kernel can keep every
+schema byte and still know about one area of the product:
+
+| Suite                                              | What it fails on                                                                                                                                                                           |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `harness/core-tools/src/kernel-vocabulary.test.ts` | a credentialing word in `harness/core-tools/src` or `evals/src`, tests and `shared/redaction/` aside. The allowlist is empty, and one case asserts the regex still catches what it claims. |
+| `harness/core-tools/src/app/dual-pack.test.ts`     | two packs loaded at once whose catalogues collide, whose documents route to the wrong target, or whose records reach each other's reads. It is the suite `packs/stories` exists for.       |
+
+And `harness/db/src/domain/migration-0008.test.ts` replays the shipped migration file over a
+fixture of the pre-0008 schema, so the one hand-written data section in the tree is checked
+rather than trusted. See the runbook, "Migration 0008 and the record model".
+
 ## One deliberate duplication
 
 `shared/redaction/patterns.ts` carries **two** pattern sets, and a reviewer will want to merge
 them. Do not. The strict-shape set behind `containsRestrictedPattern` guards text on its way to
 a human channel and over-reports on purpose; the OCR-tolerant, validity-gated set behind
-`redactPages` decides what gets encrypted onto a provider record, where a false positive
+`redactPages` decides what gets encrypted onto a record, where a false positive
 fabricates an identifier that was never on the page. Merging them changes behaviour in both
 directions: a shape-only `AB1234567` would stop tripping the Slack guard, and an OCR-noisy
 `O12-34-5678` would start tripping it.

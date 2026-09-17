@@ -10,7 +10,7 @@
  * see ARCHITECTURE.md.
  */
 export interface WriteFileInput {
-  /** Subdirectory under `out/`, e.g. `forms` or `roster`. */
+  /** Subdirectory under `out/`, e.g. `forms` or `exports`. A pack names it; the kernel only creates it. */
   dir: string;
   name: string;
   ext: string;

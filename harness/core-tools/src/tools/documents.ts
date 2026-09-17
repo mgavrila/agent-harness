@@ -13,7 +13,7 @@ import {
 
 const DocumentView = z.object({
   id: z.string(),
-  provider_id: z.string().nullable(),
+  record_id: z.string().nullable(),
   kind: z.string().nullable(),
   storage_path: z.string(),
   sha256: z.string(),
@@ -38,8 +38,8 @@ function documentsIngestFor(packs: PackRegistry) {
       'Does not read the text; call documents_extract for that.',
     actionClass: 'write.internal',
     input: z.object({
-      path: z.string().min(1).describe('Path relative to the harness storage directory, e.g. incoming/license.pdf'),
-      provider_id: z.string().uuid().optional(),
+      path: z.string().min(1).describe('Path relative to the harness storage directory, e.g. incoming/scan.pdf'),
+      record_id: z.string().uuid().optional(),
       kind: z
         .enum(packs.documentKinds() as [string, ...string[]])
         .optional()
@@ -70,19 +70,19 @@ const documentsGet = defineTool({
 const documentsList = defineTool({
   name: 'documents_list',
   description:
-    'List the documents on file for this client, newest first. Pass provider_id to scope to one provider; ' +
-    'omit it to list every document ingested by this client, including ones not yet attached to a provider.',
+    'List the documents on file for this client, newest first. Pass record_id to scope to one record; ' +
+    'omit it to list every document ingested by this client, including ones not yet attached to a record.',
   actionClass: 'read',
-  input: z.object({ provider_id: z.string().uuid().optional() }),
+  input: z.object({ record_id: z.string().uuid().optional() }),
   output: z.object({ documents: z.array(DocumentView) }),
-  handler: async ({ provider_id }, deps) => ({ documents: await listDocuments(deps, provider_id) }),
-  recordIds: ({ provider_id }) => (provider_id ? [provider_id] : []),
+  handler: async ({ record_id }, deps) => ({ documents: await listDocuments(deps, record_id) }),
+  recordIds: ({ record_id }) => (record_id ? [record_id] : []),
 });
 
 const documentsClassify = defineTool({
   name: 'documents_classify',
   description:
-    'Decide what kind of credentialing document this is (state licence, DEA certificate, malpractice certificate, W-9 or other) and record it, ' +
+    'Decide what kind of document this is, from the kinds the loaded packs declare, and record it, ' +
     'unless a kind is already on file: a kind declared at ingest, or set by an earlier classification, is authoritative and is never overwritten ' +
     "by a disagreeing model reply — the model's own answer is still returned as model_kind so a human can see the disagreement. " +
     'Reads the document text, redacting restricted identifiers first.',
@@ -103,31 +103,27 @@ const documentsClassify = defineTool({
 const documentsExtract = defineTool({
   name: 'documents_extract',
   description:
-    'Read a document end to end: text layer or OCR, redact SSN/EIN/DEA, ask the extract route for the provider fields and credentials, ' +
-    'then write them to the provider record. Fields below the confidence threshold are stored as pending for a human to confirm. ' +
+    'Read a document end to end: text layer or OCR, redact SSN/EIN/DEA, ask the extract route for the fields and attachments its extraction target declares, ' +
+    "then write them to a record of that target's kind. Fields below the confidence threshold are stored as pending for a human to confirm. " +
     'Restricted identifiers are stored encrypted straight from the redaction pass and are never sent to a model.',
   actionClass: 'write.internal',
   input: z.object({
     document_id: z.string().uuid(),
-    provider_id: z
-      .string()
-      .uuid()
-      .optional()
-      .describe('Attach to this provider instead of matching on the extracted name'),
+    record_id: z.string().uuid().optional().describe('Attach to this record instead of matching on the extracted name'),
   }),
   output: z.object({
     document_id: z.string(),
-    provider_id: z.string(),
+    record_id: z.string(),
     document_kind: z.string(),
     ocr_used: z.boolean(),
     pages: z.number(),
     fields_pending: z.number(),
     fields_extracted: z.number(),
-    credentials: z.number(),
-    restricted_fields: z.array(z.string()).describe('Names only. The values are encrypted on the provider record.'),
+    attachments: z.number(),
+    restricted_fields: z.array(z.string()).describe('Names only. The values are encrypted on the record.'),
   }),
   handler: async (args, deps) => extractDocument(deps, args),
-  recordIds: (args, result) => [args.document_id, result.provider_id],
+  recordIds: (args, result) => [args.document_id, result.record_id],
 });
 
 export function documentTools(packs: PackRegistry): AnyToolDef[] {

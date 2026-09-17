@@ -110,7 +110,10 @@ describe('generate', () => {
     expect(gt.documents).toHaveLength(truth.documents.length);
     const lines = (await readFile(path.join(outDir, 'cases.jsonl'), 'utf8')).trim().split('\n');
     expect(lines).toHaveLength(truth.documents.length);
-    expect(JSON.parse(lines[0])).toHaveProperty('expected');
+    // The case format belongs to @harness/evals, which reads `expected.attachments`; the ground
+    // truth above still calls the same list `credentials`, which is this pack's word for it.
+    const row = JSON.parse(lines[0]) as { expected: Record<string, unknown> };
+    expect(Object.keys(row.expected).sort()).toEqual(['attachments', 'fields', 'restricted']);
   });
 });
 

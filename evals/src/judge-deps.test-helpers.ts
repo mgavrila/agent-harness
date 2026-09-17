@@ -13,10 +13,11 @@
  * the "no test imported by production" architecture rule matches on the name.
  */
 import { randomBytes } from 'node:crypto';
-import { DEFAULT_POLICY, registryOf, type ToolDeps } from '@harness/core-tools';
+import { DEFAULT_POLICY, PACK_KERNEL, registryOf, type ToolDeps } from '@harness/core-tools';
 import { createDb } from '@harness/db';
 import { pack as healthcarePack } from '@harness/pack-healthcare';
 import { EVALS_DATABASE_URL } from './corpus.test-helpers.js';
+import { evalPackEnv } from './domain/pipeline.js';
 
 const packs = registryOf([healthcarePack]);
 
@@ -48,18 +49,16 @@ export function openJudgeDeps(opts: { gatewayUrl: string; storageDir: string }):
       confidenceThreshold: 0.85,
       gateway: { baseUrl: opts.gatewayUrl, apiKey: 'sk-eval', timeoutMs: 10_000, maxCallsPerRun: 100 },
       storageDir: opts.storageDir,
-      formsDir: packs.formsDir(),
+      formsDir: packs.all[0].formsDir ?? opts.storageDir,
       restrictedToModel: false,
-      verify: {
-        nppesEnabled: false,
-        nppesBaseUrl: 'http://127.0.0.1:1/api/',
-        stateLicenseEnabled: false,
-        timeoutMs: 5_000,
-      },
       sinks: {},
       context: {},
       tools: new Map(),
+      kernelTools: new Map(),
+      kernel: PACK_KERNEL,
       packs,
+      // The pipeline's pins, resolved the same way rather than copied: every loaded pack's own.
+      env: evalPackEnv(packs),
     },
   };
 }

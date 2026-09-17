@@ -1,10 +1,10 @@
 import type * as z from 'zod/v4';
 import type { Db } from '@harness/db';
-import type { AnyToolDef as PackAnyToolDef, ToolDef as PackToolDef } from '@harness/pack-api';
+import type { AnyToolDef as PackAnyToolDef, PackKernel, ToolDef as PackToolDef } from '@harness/pack-api';
+import type { EnvSource } from '@harness/shared';
 import type { SinkRegistry } from '../effects/types.js';
 import type { GatewayConfig } from '../models/types.js';
 import type { PackRegistry } from '../packs/types.js';
-import type { VerifyConfig } from '../verify/types.js';
 import type { Policy } from './policy.js';
 import type { AuditEntry } from './audit.js';
 
@@ -35,15 +35,14 @@ export const DEFAULT_CONFIDENCE_THRESHOLD = 0.85;
  * reaches for nothing outside it, which is what makes every tool testable against
  * `makeTestDeps` and what keeps `process.env` out of the domain.
  *
- * Note what this carries and what it does not. `gateway`, `storageDir` and `verify` are
- * *configuration*, not constructed objects: a test overrides a URL or a directory rather than
- * assembling an interface. See ARCHITECTURE.md for why.
+ * Note what this carries and what it does not. `gateway` and `storageDir` are *configuration*,
+ * not constructed objects: a test overrides a URL or a directory rather than assembling an
+ * interface. See ARCHITECTURE.md for why.
  *
- * Two of the three adapters are built by the domain from that configuration and are on the
- * live path today: `httpGateway(deps.gateway)` inside `callModel`, and
- * `nppesRegistry(deps.verify)` inside `verify_nppes`. The third, `fileStorage(root)`, is a
- * declared seam with no caller yet: every storage call still goes through the free functions
- * with `deps.storageDir` threaded in. Wiring it is a later task, not a behaviour change here.
+ * One adapter is built by the domain from that configuration and is on the live path today:
+ * `httpGateway(deps.gateway)` inside `callModel`. The other, `fileStorage(root)`, is a declared
+ * seam with no caller yet: every storage call still goes through the free functions with
+ * `deps.storageDir` threaded in. Wiring it is a later task, not a behaviour change here.
  */
 export interface ToolDeps {
   /** Drizzle database handle; every handler runs inside a transaction opened on it. */
@@ -67,7 +66,7 @@ export interface ToolDeps {
   /**
    * Absolute root of the file store, from `storageRoot()`: required, with no
    * default, so a deployment that has not said where files live fails at
-   * startup instead of scattering provider documents into the working
+   * startup instead of scattering ingested documents into the working
    * directory. One root serves both halves and they do not collide: ingested
    * documents sit where the caller puts them under it (`incoming/`, and their
    * `.redacted.txt` sidecars beside them), and everything a tool generates for
@@ -81,11 +80,9 @@ export interface ToolDeps {
   /**
    * Whether restricted identifiers (SSN, EIN, DEA) may be sent to a model.
    * False for every client by default. Turning it on is a documented decision
-   * that requires a BAA with the model provider (spec section 4.4).
+   * that requires a BAA with the model vendor (spec section 4.4).
    */
   restrictedToModel: boolean;
-  /** External registry lookups: which are enabled, and where they live. */
-  verify: VerifyConfig;
   /** External-effect senders keyed by sink name (e.g. 'slack'). Empty in Plan 1.1; Plan 3 registers real ones. */
   sinks: SinkRegistry;
   /** Per-process session context (run, skill, tool) stamped on audit rows; see `context.ts`. */
@@ -93,11 +90,31 @@ export interface ToolDeps {
   /** Every registered tool, keyed by name, so a parked action can be replayed by name. Filled by `registerTools`. */
   tools: Map<string, AnyToolDef>;
   /**
+   * Every **kernel** tool, keyed by its kernel name, filled by `createCoreToolsServer` before any
+   * pack's replacement is applied. This is what a pack's wrapper calls: `deps.tools` is the
+   * published catalogue and after a replacement holds the pack's own tool under the kernel's
+   * name, so a wrapper that looked itself up there would recurse until the stack ran out.
+   */
+  kernelTools: Map<string, AnyToolDef>;
+  /** The kernel operations a pack may call that are not tools. Always `PACK_KERNEL`. */
+  kernel: PackKernel;
+  /**
    * The packs this process loaded, from `HARNESS_PACKS`. Document kinds, the extraction
    * manifest and the forms directory all come from here rather than from an import, which is
-   * what lets one build serve credentialing today and a different area tomorrow.
+   * what lets one build serve one area of the product today and a different one tomorrow.
    */
   packs: PackRegistry;
+  /**
+   * The environment a pack's `tools(deps)` reads its own configuration from, and the one member
+   * here that exists for the packs rather than for the kernel: core's own configuration is read
+   * in `app/` and arrives on this bag already parsed.
+   *
+   * Whoever builds the bag decides what a pack can see. `buildDepsFromEnv` hands over
+   * `process.env`, which is the deployment's answer. `makeTestDeps`, `surfaceDeps` and the eval
+   * pipeline hand over a small pinned map instead, so no suite can reach a live registry
+   * because the machine running it has a filled-in `.env`.
+   */
+  env: EnvSource;
 }
 
 /** A core-tools tool: the contract's `ToolDef` with this package's dependency bag filled in. */

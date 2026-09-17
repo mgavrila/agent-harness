@@ -45,7 +45,7 @@ interface ChatCompletionResponse {
 
 /**
  * A gateway failure reported to the caller carries the route and the HTTP
- * status and nothing else. Provider error bodies routinely quote the prompt
+ * status and nothing else. Model vendor error bodies routinely quote the prompt
  * back, and this message reaches `audit_log.error` and the agent.
  */
 function gatewayError(route: Route, status: number, body: string): ToolError {
@@ -156,7 +156,7 @@ export async function callModel(deps: ToolDeps, opts: ModelCallOptions): Promise
   return result;
 }
 
-/** Some providers wrap JSON in a markdown fence even under a response schema. */
+/** Some model vendors wrap JSON in a markdown fence even under a response schema. */
 function stripFence(text: string): string {
   const fenced = /^\s*```(?:json)?\s*\n([\s\S]*?)\n?```\s*$/.exec(text);
   return fenced ? fenced[1] : text;

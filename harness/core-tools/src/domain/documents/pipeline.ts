@@ -3,24 +3,32 @@ import { and, eq } from 'drizzle-orm';
 import * as z from 'zod/v4';
 import { documents } from '@harness/db';
 import { ToolError } from '@harness/shared';
+import type {
+  DocumentRecordView,
+  DocumentsClassifyResult,
+  DocumentsExtractResult,
+  DocumentsIngestResult,
+  RecordKindSpec,
+} from '@harness/pack-api';
 import type { ToolDeps } from '../tooling/types.js';
 import { assertRedacted, redactPages } from '../../shared/redaction/text.js';
 import { documentTextPath, toStorageRelative } from '../storage/layout.js';
 import { readDocumentBytes, resolveStoragePath, sha256File } from '../storage/file-store.js';
 import { callModelJson } from '../models/gateway.js';
 import type { ModelMessage } from '../models/types.js';
-import { requireProvider, upsertProviderRecord } from '../providers/repository.js';
-import type { CredentialInput, FieldInput } from '../providers/types.js';
+import { requireRecord, upsertRecord } from '../records/repository.js';
+import type { AttachmentInput, FieldInput } from '../records/types.js';
 import { extractDocumentText, pdfPageCount } from './text.js';
 import { buildClassificationSchema, buildExtractionSchema } from './schema.js';
 import { buildClassificationMessages, buildExtractionMessages } from './prompts.js';
 import { parseExtraction } from './parse.js';
+import type { ExtractedField } from './types.js';
 
 /** One document as the `documents_*` tools report it. */
-export function documentView(row: typeof documents.$inferSelect) {
+export function documentView(row: typeof documents.$inferSelect): DocumentRecordView {
   return {
     id: row.id,
-    provider_id: row.providerId,
+    record_id: row.recordId,
     kind: row.kind,
     storage_path: row.storagePath,
     sha256: row.sha256,
@@ -34,24 +42,24 @@ export function documentView(row: typeof documents.$inferSelect) {
 
 /**
  * Load a document, scoped directly to `deps.client` — including one not yet
- * attached to a provider, which has no other owner to check against — and, if
- * it is attached, also refusing one whose provider belongs to another client.
+ * attached to a record, which has no other owner to check against — and, if
+ * it is attached, also refusing one whose record belongs to another client.
  */
 export async function requireDocument(deps: ToolDeps, documentId: string) {
   const row = await deps.db.query.documents.findFirst({
     where: and(eq(documents.id, documentId), eq(documents.client, deps.client)),
   });
   if (!row) throw new ToolError(`document ${documentId} not found`);
-  if (row.providerId) await requireProvider(deps, row.providerId);
+  if (row.recordId) await requireRecord(deps, row.recordId);
   return row;
 }
 
-/** `documents_list`: this client's documents, newest first, optionally scoped to one provider. */
-export async function listDocuments(deps: ToolDeps, providerId?: string) {
+/** `documents_list`: this client's documents, newest first, optionally scoped to one record. */
+export async function listDocuments(deps: ToolDeps, recordId?: string): Promise<DocumentRecordView[]> {
   const conditions = [eq(documents.client, deps.client)];
-  if (providerId) {
-    await requireProvider(deps, providerId);
-    conditions.push(eq(documents.providerId, providerId));
+  if (recordId) {
+    await requireRecord(deps, recordId);
+    conditions.push(eq(documents.recordId, recordId));
   }
   const rows = await deps.db
     .select()
@@ -74,18 +82,34 @@ const ClassificationReply = z.object({
 });
 
 /**
- * Reply shape from the extraction route. Deliberately loose on the *contents*
- * of `fields` and `credentials` — `parseExtraction` is what clamps confidence,
- * drops empty values, and drops anything the manifest does not allow (a
- * restricted field the model volunteers included) — but this still requires
- * an object with all three top-level parts, so a reply that is not shaped
- * like an extraction at all throws here rather than deeper in the pipeline.
+ * The extraction reply's top-level shape. Deliberately loose on the contents — `parseExtraction`
+ * clamps confidence, drops empty values and drops anything the target does not allow — but it
+ * still requires an object with all three parts, so a reply that is not shaped like an
+ * extraction at all throws here rather than deeper in the pipeline. The attachment key is the
+ * target's, because that is the property the model was asked for.
  */
-const ExtractionReply = z.object({
-  document_kind: z.string(),
-  fields: z.record(z.string(), z.unknown()),
-  credentials: z.array(z.unknown()),
-});
+function extractionReplyFor(attachmentsKey: string) {
+  return z.object({
+    document_kind: z.string(),
+    fields: z.record(z.string(), z.unknown()),
+    [attachmentsKey]: z.array(z.unknown()),
+  });
+}
+
+/**
+ * The record's stable outside identifier, read out of the extraction the way its kind says: an
+ * identifier declared as ten digits is ten digits however the page printed it, and a value that
+ * does not normalise to the declared length is dropped rather than stored as a near miss.
+ */
+function externalIdFrom(kind: RecordKindSpec, byName: Map<string, ExtractedField>): string | undefined {
+  if (!kind.externalId) return undefined;
+  const raw = byName.get(kind.externalId.field)?.value;
+  if (raw === undefined) return undefined;
+  const value = kind.externalId.digitsOnly ? raw.replace(/\D/g, '') : raw.trim();
+  if (value === '') return undefined;
+  if (kind.externalId.length !== undefined && value.length !== kind.externalId.length) return undefined;
+  return value;
+}
 
 /**
  * Read a document's text once: layer or OCR, then redaction. Returns both the
@@ -118,9 +142,12 @@ function assertPromptRedacted(deps: ToolDeps, messages: ModelMessage[]): void {
 }
 
 /** `documents_ingest`: hash the file, count its pages and record it, idempotent by content hash. */
-export async function ingestDocument(deps: ToolDeps, args: { path: string; provider_id?: string; kind?: string }) {
-  const { path: requested, provider_id, kind } = args;
-  if (provider_id) await requireProvider(deps, provider_id);
+export async function ingestDocument(
+  deps: ToolDeps,
+  args: { path: string; record_id?: string; kind?: string },
+): Promise<DocumentsIngestResult> {
+  const { path: requested, record_id, kind } = args;
+  if (record_id) await requireRecord(deps, record_id);
   const abs = await resolveStoragePath(deps.storageDir, requested);
   const relative = toStorageRelative(deps.storageDir, abs);
   const sha256 = await sha256File(abs);
@@ -131,9 +158,9 @@ export async function ingestDocument(deps: ToolDeps, args: { path: string; provi
     where: and(eq(documents.sha256, sha256), eq(documents.client, deps.client)),
   });
   if (existing) {
-    // A second ingest may supply the provider or kind the first one lacked.
+    // A second ingest may supply the record or kind the first one lacked.
     const patch: Partial<typeof documents.$inferInsert> = {};
-    if (provider_id && !existing.providerId) patch.providerId = provider_id;
+    if (record_id && !existing.recordId) patch.recordId = record_id;
     if (kind && !existing.kind) patch.kind = kind;
     if (Object.keys(patch).length > 0) {
       await deps.db.update(documents).set(patch).where(eq(documents.id, existing.id));
@@ -152,7 +179,7 @@ export async function ingestDocument(deps: ToolDeps, args: { path: string; provi
     .insert(documents)
     .values({
       client: deps.client,
-      providerId: provider_id ?? null,
+      recordId: record_id ?? null,
       kind: kind ?? null,
       storagePath: relative,
       sha256,
@@ -163,20 +190,21 @@ export async function ingestDocument(deps: ToolDeps, args: { path: string; provi
 }
 
 /** `documents_classify`: ask the model what kind this is; a kind already on file is authoritative. */
-export async function classifyDocument(deps: ToolDeps, documentId: string) {
+export async function classifyDocument(deps: ToolDeps, documentId: string): Promise<DocumentsClassifyResult> {
   const row = await requireDocument(deps, documentId);
-  const manifest = deps.packs.manifest();
+  const kinds = deps.packs.documentKinds();
   const { promptPages } = await readForModel(deps, row);
-  const messages = buildClassificationMessages(promptPages);
+  const manifest = deps.packs.manifest();
+  const messages = buildClassificationMessages(promptPages, manifest.role, manifest.injection_examples);
   assertPromptRedacted(deps, messages);
   const { json } = await callModelJson(deps, {
     route: 'extract',
     messages,
-    jsonSchema: buildClassificationSchema(manifest),
+    jsonSchema: buildClassificationSchema(kinds),
     validate: ClassificationReply,
     temperature: 0,
   });
-  const modelKind = manifest.document_kinds.includes(json.document_kind) ? json.document_kind : 'other';
+  const modelKind = kinds.includes(json.document_kind) ? json.document_kind : 'other';
   const confidence = Math.min(1, Math.max(0, json.confidence));
   // A kind already on file is authoritative, the same rule documents_ingest
   // applies to a declared kind and documents_extract applies by preferring
@@ -189,52 +217,97 @@ export async function classifyDocument(deps: ToolDeps, documentId: string) {
   return { document_id: documentId, document_kind: modelKind, model_kind: modelKind, confidence };
 }
 
-/** `documents_extract`: read the document end to end and write the provider record. */
-export async function extractDocument(deps: ToolDeps, args: { document_id: string; provider_id?: string }) {
-  const { document_id, provider_id } = args;
+/** `documents_extract`: read the document end to end and write the target's record. */
+export async function extractDocument(
+  deps: ToolDeps,
+  args: { document_id: string; record_id?: string },
+): Promise<DocumentsExtractResult> {
+  const { document_id, record_id } = args;
   const row = await requireDocument(deps, document_id);
-  // Already client-scoped by requireProvider. When given, this is the write
-  // target: no name/NPI re-matching, so the extraction cannot silently
-  // attach to, rename, or duplicate a different provider of this client.
-  const named = provider_id ? await requireProvider(deps, provider_id) : undefined;
-  const manifest = deps.packs.manifest();
+  // Already client-scoped by requireRecord. When given, this is the write target: no name or
+  // external-id re-matching, so the extraction cannot silently attach to, rename, or duplicate a
+  // different record of this client.
+  const named = record_id ? await requireRecord(deps, record_id) : undefined;
+  // The kind already on file decides which target this document feeds. A record kind is never
+  // offered to `targetFor`: the two namespaces are unrelated, and passing a record kind to a
+  // function that answers about document kinds only ever worked because one pack declared a
+  // catch-all. When the document is unclassified but its destination record is named, the record
+  // kind resolves the target through the accessor that takes one.
+  const target =
+    row.kind !== null
+      ? deps.packs.targetFor(row.kind)
+      : named
+        ? deps.packs.targetForRecordKind(named.kind)
+        : deps.packs.targetFor(undefined);
+  // A document of one pack's kind may not be written into another pack's record. Without this the
+  // extraction would run against the target's field list and then upsert under the target's kind,
+  // quietly creating a second record rather than filling the one the caller named.
+  if (named && named.kind !== target.recordKind.kind) {
+    throw new ToolError(
+      `document ${document_id} extracts into a "${target.recordKind.kind}" record, but ${record_id} is a "${named.kind}" record`,
+    );
+  }
   const { abs, promptPages, redacted, hits, ocrUsed } = await readForModel(deps, row);
 
-  const messages = buildExtractionMessages(promptPages, manifest);
+  const modelFields = target.recordKind.fields;
+  const messages = buildExtractionMessages(promptPages, modelFields, {
+    role: target.role,
+    instruction: target.target.instruction,
+    attachmentInstruction: target.target.attachment_instruction,
+    injectionExamples: target.injectionExamples,
+  });
   assertPromptRedacted(deps, messages);
   const { json } = await callModelJson(deps, {
     route: 'extract',
     messages,
-    jsonSchema: buildExtractionSchema(manifest),
-    validate: ExtractionReply,
+    jsonSchema: buildExtractionSchema({
+      schemaName: target.target.schema_name,
+      // The owning pack's kinds, not every loaded pack's. `targetFor` has already decided who
+      // owns this extraction and `parseExtraction` discards a `document_kind` the owner does not
+      // declare, so offering another pack's kinds could only ever produce an answer thrown away
+      // as `'other'`. With one pack loaded the two lists are the same, which is why the surface
+      // and prompt byte tests do not move.
+      documentKinds: target.pack.documentKinds,
+      fields: modelFields,
+      attachmentKinds: target.attachmentKinds,
+      attachmentsKey: target.target.attachments_key,
+      // The schema's string, not the prompt's: these are two different fields on the target
+      // and today's healthcare pipeline puts different text in each place.
+      attachmentsDescription: target.target.attachment_schema_description,
+      attachmentDescriptions: target.target.attachment_descriptions,
+    }),
+    validate: extractionReplyFor(target.target.attachments_key),
     temperature: 0,
   });
-  const parsed = parseExtraction(json, manifest);
+  const parsed = parseExtraction(json, target);
 
   const byName = new Map(parsed.fields.map((f) => [f.name, f]));
+  // The record's display name is its kind's nameFields, joined and with the empties dropped —
+  // `first_name middle_name last_name` for a person, `title` for an epic.
   const name =
     named?.name ??
-    [byName.get('first_name')?.value, byName.get('middle_name')?.value, byName.get('last_name')?.value]
+    target.recordKind.nameFields
+      .map((field) => byName.get(field)?.value)
       .filter((part) => part !== undefined && part !== '')
       .join(' ');
   if (!name) {
     throw new ToolError(
-      'extraction found no provider name; pass provider_id to attach this document to a known provider',
+      target.recordKind.missingNameError ??
+        `extraction found no name for a ${target.recordKind.kind} record; pass record_id to attach this document to a known record`,
     );
   }
-  const npiValue = byName.get('npi')?.value?.replace(/\D/g, '');
-  const npi = named?.npi ?? (npiValue && npiValue.length === 10 ? npiValue : undefined);
+  const externalId = named?.externalId ?? externalIdFrom(target.recordKind, byName);
 
-  const modelFields: FieldInput[] = parsed.fields.map((f) => ({
+  const fieldInputs: FieldInput[] = parsed.fields.map((f) => ({
     name: f.name,
     value: f.value,
     confidence: f.confidence,
     source_doc_id: document_id,
     source_page: f.source_page,
   }));
-  // Restricted values come from the regex pass, not the model, and carry
-  // full confidence: a regex match is not a guess. `restricted: true` is
-  // belt and braces; the names also satisfy isRestrictedName.
+  // Restricted values come from the regex pass, not the model, and carry full confidence: a
+  // regex match is not a guess. `restricted: true` is belt and braces; the names also satisfy
+  // isRestrictedName.
   const restrictedFields: FieldInput[] = hits.map((h) => ({
     name: h.fieldName,
     value: h.value,
@@ -243,28 +316,29 @@ export async function extractDocument(deps: ToolDeps, args: { document_id: strin
     source_doc_id: document_id,
     source_page: h.page,
   }));
-  const credentialInputs: CredentialInput[] = parsed.credentials.map((c) => ({
-    kind: c.kind,
-    issuer: c.issuer,
-    state: c.state,
-    issued_at: c.issued_at,
-    expires_at: c.expires_at,
+  const attachmentInputs: AttachmentInput[] = parsed.attachments.map((a) => ({
+    kind: a.kind,
+    issuer: a.issuer,
+    state: a.state,
+    issued_at: a.issued_at,
+    expires_at: a.expires_at,
     source_doc_id: document_id,
   }));
 
-  const upserted = await upsertProviderRecord(deps, {
+  const upserted = await upsertRecord(deps, {
+    kind: target.recordKind.kind,
     name,
-    npi,
-    providerId: named?.id,
-    fields: [...modelFields, ...restrictedFields],
-    credentials: credentialInputs,
+    external_id: externalId,
+    recordId: named?.id,
+    fields: [...fieldInputs, ...restrictedFields],
+    attachments: attachmentInputs,
   });
 
   const textAbs = documentTextPath(abs);
   await deps.db
     .update(documents)
     .set({
-      providerId: upserted.provider_id,
+      recordId: upserted.record_id,
       kind: row.kind ?? parsed.documentKind,
       ocrUsed,
       textPath: toStorageRelative(deps.storageDir, textAbs),
@@ -292,13 +366,13 @@ export async function extractDocument(deps: ToolDeps, args: { document_id: strin
 
   return {
     document_id,
-    provider_id: upserted.provider_id,
+    record_id: upserted.record_id,
     document_kind: row.kind ?? parsed.documentKind,
     ocr_used: ocrUsed,
     pages: promptPages.length,
     fields_pending: upserted.fields_pending,
     fields_extracted: upserted.fields_extracted,
-    credentials: upserted.credentials,
+    attachments: upserted.attachments,
     restricted_fields: hits.map((h) => h.fieldName),
   };
 }

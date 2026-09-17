@@ -1,12 +1,23 @@
 import { describe, it, expect } from 'vitest';
 import { pack as healthcarePack } from '@harness/pack-healthcare';
-import { parseManifest } from './manifest.js';
+import { parseAttachmentKindSpec, parseRecordKindSpec } from './manifest.js';
 import { buildClassificationSchema, buildExtractionSchema } from './schema.js';
 
-const manifest = parseManifest(healthcarePack.extraction);
+const manifest = healthcarePack.extraction;
+const provider = parseRecordKindSpec(healthcarePack.records[0]);
+const attachments = (healthcarePack.attachments ?? []).map((a) => parseAttachmentKindSpec(a));
+const [target] = manifest.targets;
 
 describe('buildExtractionSchema', () => {
-  const { name, schema } = buildExtractionSchema(manifest);
+  const { name, schema } = buildExtractionSchema({
+    schemaName: target.schema_name,
+    documentKinds: manifest.document_kinds,
+    fields: provider.fields,
+    attachmentKinds: attachments,
+    attachmentsKey: target.attachments_key,
+    attachmentsDescription: target.attachment_schema_description,
+    attachmentDescriptions: target.attachment_descriptions,
+  });
   const props = schema.properties as Record<string, Record<string, unknown>>;
   const fieldProps = props.fields.properties as Record<string, unknown>;
 
@@ -61,6 +72,33 @@ describe('buildExtractionSchema', () => {
     ]);
   });
 
+  /**
+   * A pack that describes no attachment slot still gets a working schema, and what the model
+   * reads in that case is the kernel's own wording. The kernel does not know what hangs off a
+   * record — "credential" is this pack's noun for it, "link" would be another's — so its floor
+   * has to say nothing about any one area of the product, and this is the assertion that keeps
+   * it that way.
+   */
+  it('falls back to its own colourless wording for a target that describes no slot', () => {
+    const { schema: bare } = buildExtractionSchema({
+      schemaName: target.schema_name,
+      documentKinds: manifest.document_kinds,
+      fields: provider.fields,
+      attachmentKinds: attachments,
+      attachmentsKey: target.attachments_key,
+      attachmentsDescription: target.attachment_schema_description,
+    });
+    const bareProps = bare.properties as Record<string, { items: { properties: Record<string, unknown> } }>;
+    const slots = bareProps[target.attachments_key].items.properties as Record<string, { description: string }>;
+    expect(slots.kind.description).toBe('Which kind of attachment this is.');
+    expect(slots.source_page.description).toBe('The 1-based page this attachment was read from.');
+    expect(slots.issuer.description).toBe('The issuing organisation as printed.');
+    // Every slot is described, and none of the wording borrows a word from this pack.
+    const wording = Object.values(slots).map((s) => s.description);
+    expect(wording.every((d) => typeof d === 'string' && d.length > 0)).toBe(true);
+    expect(wording.join(' ')).not.toMatch(/credential|licen[cs]e|provider|policy|carrier|board/i);
+  });
+
   it('inlines everything, so no provider has to resolve a $ref', () => {
     const text = JSON.stringify(schema);
     expect(text).not.toContain('$ref');
@@ -70,7 +108,7 @@ describe('buildExtractionSchema', () => {
 
 describe('buildClassificationSchema', () => {
   it('asks only for a kind and a confidence', () => {
-    const { name, schema } = buildClassificationSchema(manifest);
+    const { name, schema } = buildClassificationSchema(manifest.document_kinds);
     expect(name).toBe('document_classification');
     expect(schema.required).toEqual(['document_kind', 'confidence']);
     const props = schema.properties as Record<string, { enum?: string[] }>;

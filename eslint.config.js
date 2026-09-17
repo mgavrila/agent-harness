@@ -69,16 +69,16 @@ function asWarning(value) {
  * has no `src/shared/` directory for the glob below to match. That glob stays for `@harness/db`
  * and for any package that grows a local `shared/log.ts` later.
  *
- * `synthetic/cli.ts` is the pack's corpus-generator entrypoint, so it prints. The pack has no
- * `src/app/` for the glob above to match, so it is named outright, as is the form-template
- * builder next to it.
+ * `synthetic/cli.ts` is a pack's corpus-generator entrypoint, so it prints. A pack has no
+ * `src/app/` for the glob above to match, so the two entrypoints are matched by their own globs,
+ * which cover every pack rather than naming one.
  */
 const CONSOLE_IS_FINE = [
   'harness/shared/src/log.ts',
   '**/src/shared/log.ts',
   '**/src/app/**/*.ts',
-  'packs/healthcare/synthetic/cli.ts',
-  'packs/healthcare/forms/generate-templates.ts',
+  'packs/*/synthetic/cli.ts',
+  'packs/*/forms/generate-templates.ts',
 ];
 
 /**
@@ -90,6 +90,13 @@ const CONSOLE_IS_FINE = [
  * `process.env.DATABASE_URL` at the package root, outside `src/` and outside any package's
  * lint-scoped source tree — a drizzle-kit config file, not a domain module, so it is exempted
  * by name rather than folded into the `harness/db/src` entry.
+ *
+ * No pack is on this list, on purpose. A pack's tools are built inside whatever process loaded
+ * the pack, so a pack that read the ambient environment would be configured by that process's
+ * `.env` — and the shipped one switches outbound registry lookups on and points them at a live
+ * endpoint, which is not what an eval or a test suite should be doing. A pack reads the map it
+ * is handed on `deps.env` instead, through the same `env.ts` helpers, and this rule is what
+ * says so.
  */
 const PROCESS_ENV_IS_FINE = [
   'harness/shared/src/env.ts',

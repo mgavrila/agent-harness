@@ -24,24 +24,31 @@ wrong reason.
 
 ## Adding a tool
 
+First decide whether it is a kernel tool at all. A kernel tool is one that would make sense for
+any area of the product: it names records, attachments, documents, deadlines, approvals, audit
+or effects. Anything that names a provider, a licence or a payer is a **pack** tool — see
+"Adding a pack" below, and `harness/core-tools/src/kernel-vocabulary.test.ts`, whose allowlist
+is empty.
+
 1. Put the logic in a domain: a function in `src/domain/<name>/` that takes `ToolDeps` and
    plain arguments. Write its test beside it.
 2. Add the definition to `src/tools/<area>.ts`:
 
    ```ts
-   const providersArchive = defineTool({
-     name: 'providers_archive',
+   const recordsArchive = defineTool({
+     name: 'records_archive',
      description: 'One sentence an agent can act on, then the constraints.',
      actionClass: 'write.internal',
-     input: z.object({ provider_id: z.string().uuid() }),
-     output: z.object({ provider_id: z.string(), status: z.literal('archived') }),
-     handler: async ({ provider_id }, deps) => archiveProvider(deps, provider_id),
-     recordIds: ({ provider_id }) => [provider_id],
+     input: z.object({ record_id: z.string().uuid() }),
+     output: z.object({ record_id: z.string(), status: z.literal('archived') }),
+     handler: async ({ record_id }, deps) => archiveRecord(deps, record_id),
+     recordIds: ({ record_id }) => [record_id],
    });
    ```
 
-3. Add it to the exported array at the bottom of that file. `allTools(packs)` in
-   `src/tools/catalog.ts` already spreads that array into the catalog.
+3. Add it to the exported array at the bottom of that file. `kernelTools(packs)` in
+   `src/tools/catalog.ts` already spreads that array, and `publishedTools` decides what of it
+   reaches MCP once the loaded packs have had their say.
 4. Choose the action class honestly: `read`, `write.internal`, `external`, `financial`,
    `destructive`. `external` parks an approval; `financial` is blocked by default.
 5. Throw `ToolError` for anything the caller can fix. Never `throw new Error` in `tools/` —
@@ -61,68 +68,174 @@ production adapter and the fake beside it. If the domain needs only one module, 
 ## Adding a pack
 
 A pack is an area of the product — credentialing, document scanning, whatever comes next — that
-core loads through a contract instead of importing by name.
+core loads through a contract instead of importing by name. `packs/stories` is the smallest
+complete one; read it alongside this.
 
-1. `mkdir -p packs/<name>/src` and give it a `package.json` named `@harness/pack-<name>`, with
-   `"." : "./src/index.ts"` in `exports` and `@harness/pack-api` and `@harness/shared` in
-   `dependencies`. **Never** depend on `@harness/core-tools`; `pnpm arch` fails the build on it.
-2. Export `pack` from `src/index.ts`:
+1. **Create the package.** `mkdir -p packs/<name>/{src,schema,skills}` and a `package.json`
+   named `@harness/pack-<name>`, with `"." : "./src/index.ts"` in `exports` and
+   `@harness/pack-api` in `dependencies` (`@harness/shared` too, once you parse an environment
+   variable or throw a `ConfigError`). **Never** depend on `@harness/core-tools` or
+   `@harness/db`; `pnpm arch` fails the build on either.
 
-   ```ts
-   import path from 'node:path';
-   import { fileURLToPath } from 'node:url';
-   import { definePack } from '@harness/pack-api';
+2. **Declare what you store.** A record kind is a name, a label, a field manifest, and which of
+   those fields make the record's display name:
 
-   const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-
-   export const pack = definePack({
-     name: 'scanning',
-     version: '0.1.0',
-     documentKinds: extraction.document_kinds,
-     extraction, // the parsed schema/provider.json
-     formsDir: path.join(root, 'forms'),
-     skillsDir: path.join(root, 'skills'),
-     policy: { external: 'approval' },
-     evals: { injectionFile: path.join(root, 'evals', 'injection.jsonl') },
-   });
+   ```json
+   {
+     "kind": "epic",
+     "label": "Epic",
+     "nameFields": ["title"],
+     "fields": [
+       { "name": "title", "type": "string", "description": "The epic's title." },
+       { "name": "owner", "type": "string", "description": "The person accountable." }
+     ]
+   }
    ```
 
-   `formsDir` and `skillsDir` must be absolute and resolved from `import.meta.url`:
-   `definePack` refuses a relative one, because it would resolve against whatever directory the
-   harness process started in.
+   Add `"externalId": { "field": "npi", "digitsOnly": true, "length": 10 }` when the kind has a
+   stable outside identifier; the kernel normalises an extracted value the way you describe and
+   keeps it unique per client and kind. Add `"genericTools": false` only when your pack ships
+   tools of its own for the kind — healthcare does, so its deployment publishes `providers_*`
+   and not `records_*`.
 
-3. Write `schema/provider.json` — fields, credentials, `document_kinds`. Every field marked
-   `restricted` must be `source: 'redaction'` and must satisfy core's `isRestrictedName`, or
-   the value would be stored in plaintext; `loadPacks` validates this at startup and names the
-   field it rejected.
-4. Add the package to `@harness/core-tools`'s `dependencies` so pnpm can resolve the dynamic
-   import, then name it everywhere a core-tools process is started. There are three places and
-   missing one leaves half the deployment on the old pack:
+   A field marked `"restricted": true` must be `"source": "redaction"` and must satisfy the
+   kernel's `isRestrictedName`, or its value would be stored in plaintext. The registry checks
+   this when it parses your kinds at startup and names the field it rejected. A restricted field
+   may not be a `nameField` or the `externalId`: both columns are plaintext.
 
-   - the client's `.env`, which Compose interpolates into both services:
-     `HARNESS_PACKS=@harness/pack-healthcare,@harness/pack-scanning`;
-   - `clients/<name>/hermes.config.yaml`, in the `mcp_servers.core-tools.env` block. That block
-     is an allowlist — a variable core-tools reads has to be named there or the child never
-     sees it — so `HARNESS_PACKS` is written as `'${HARNESS_PACKS}'` and must stay
-     interpolated, never pinned to a pack name. The approvals app forwards the real value to
-     its own child already (`harness/approvals/src/app/child-env.ts`);
-   - `HARNESS_FORMS_DIR`, in that same `hermes.config.yaml` block and in both Compose services.
-     It is an **override**: unset, core-tools takes the forms directory from the first pack in
-     `HARNESS_PACKS`; set, it wins. Clear it, or repoint it, when the new pack owns the forms,
-     or the new pack's templates are never read.
+3. **Declare what hangs off a record.** An attachment kind is a name, a label, its lead time and
+   the properties it carries:
 
-   Every scaffolded client inherits all three, because `pnpm new-client` copies
-   `clients/demo-practice/`.
+   ```json
+   {
+     "kind": "source_link",
+     "label": "Source link",
+     "leadDays": 0,
+     "numberRestricted": false,
+     "properties": ["issuer"]
+   }
+   ```
 
-5. Pack-specific tools are optional: `tools: (deps) => [...]` on the `Pack`. They receive core's
-   dependency bag as `unknown`, because a pack cannot see `ToolDeps`. Core's own tool names win
-   a collision.
-6. Run `pnpm surface:record` if the pack changes the published tool list, and say so in the
-   commit.
+   `leadDays: 0` means the kind never needs renewing, and `deadlines_compute` writes no
+   `renewal_start` row for it. A licence with `leadDays: 90` gets one ninety days before it
+   expires. A kind that does not list `expires_at` among its properties gets no deadline at all,
+   which is what a link to a ticket wants.
 
-The first pack named in `HARNESS_PACKS` answers `deps.packs.manifest()` and
-`deps.packs.formsDir()`; `documentKinds()` unions them all. If a second pack needs its own
-manifest per document, that is a feature to design, not a line to change.
+4. **Declare what your documents become.** The extraction manifest maps document kinds to
+   targets, and a target names a record kind and the prose the model reads:
+
+   ```json
+   {
+     "version": "1.0.0",
+     "document_kinds": ["meeting_notes"],
+     "role": "You read product meeting notes and return structured data.",
+     "targets": [
+       {
+         "document_kinds": ["meeting_notes"],
+         "record_kind": "epic",
+         "schema_name": "epic_extraction",
+         "attachments_key": "links",
+         "instruction": "Extract the epic these notes describe.",
+         "attachment_instruction": "Also list every tracker or document the notes link to, with the system that issued it.",
+         "attachment_schema_description": "Trackers and documents these notes link to. Report the system that issued each one, not a URL."
+       }
+     ]
+   }
+   ```
+
+   `definePack` refuses a target naming a record kind you did not declare, and a document kind
+   no target reaches. The kernel supplies the injection-defence block under your `role` line and
+   you cannot replace it; `injection_examples` is where you put the imperatives your own
+   paperwork prints, which the kernel quotes back at the model as examples of what not to obey.
+
+   `attachment_instruction` and `attachment_schema_description` are two different strings on
+   purpose: the first is the sentence in the prompt's user turn, the second is the `description`
+   of the attachment array in the JSON Schema sent as `response_format`. Most packs will want
+   them to say much the same thing; they are separate because the healthcare pack's have always
+   differed and the surface of a model call is not something to change by accident.
+
+   **Claim your document kinds by name.** A target may claim `"*"`, which picks up every kind no
+   other target named, but do not reach for it unless your pack really does read anything: only
+   one loaded pack may declare a catch-all, and two packs claiming the same document kind —
+   `"*"` counted as a kind — is a `ConfigError` at startup naming both. No pack declares one
+   today. `targetFor` resolves an exact claim first, then a declared catch-all, and only for a
+   document with no kind at all does it fall back to the primary pack's first target; a
+   classified kind no loaded pack claims is a `ToolError` from `documents_extract` naming it.
+
+5. **Export `pack` from `src/index.ts`.** `formsDir` and `skillsDir` must be absolute and
+   resolved from `import.meta.url`: `definePack` refuses a relative one, because it would
+   resolve against whatever directory the harness process started in. `formsDir` is optional.
+
+6. **Ship tools only if you must.** A pack that leaves `genericTools` true gets `records_*`,
+   `documents_*`, `deadlines_*`, `approvals_execute`, `audit_query` and `harness_*` for free,
+   and the stories pack ships nothing else. When you do ship tools:
+
+   - `tools: (deps: PackToolDeps) => AnyToolDef[]`, built with `definePackTool`;
+   - reach a kernel handler through `deps.kernelTools.get('records_get')`, never
+     `deps.tools` — that is the published catalogue and after a replacement it holds your own
+     tool under the kernel's name, so a wrapper looking itself up there would recurse;
+   - reach the kernel operations that are not tools through `deps.kernel`: `writeOutFile`,
+     `stageRelease`, `isRestrictedName` and `MASKED`;
+   - read configuration from `deps.env`, never `process.env`. The ESLint rule enforces it, and
+     it is what stops an eval run on a filled-in `.env` making a real outbound call;
+   - list in `replaces` every kernel tool yours supersedes **under the same name**. A name that
+     is not a kernel tool is a startup failure, a name your own `tools(deps)` does not publish is
+     a startup failure, and two loaded packs may not replace the same one. A tool of yours under
+     a _different_ name is not a replacement and does not belong in the list: `replaces` is
+     process-wide, so a name you put there is gone for every other pack too. To keep the generic
+     `records_*` tools out of your own deployment, set
+     `genericTools: false` on your record kind instead — that is per kind, not per process, and
+     it is why the healthcare pack replaces seven names rather than twelve.
+
+   A wrapper that reshapes a result has to cope with another pack's rows reaching it, because
+   `replaces` is process-wide. Build the output schema from `deps` and pass a foreign row
+   through untouched, as `packs/healthcare/src/tools/aliases/documents.ts` does.
+
+7. **Write the skills.** One `<name>/SKILL.md` per skill under `skillsDir`, with
+   `metadata.harness.tools` naming only tools the loaded catalogue publishes;
+   `harness/core-tools/src/tools/skills-frontmatter.test.ts` fails the build on a name that is
+   not there.
+
+8. **Put the tests where they can run.** A contract-only test lives in the pack's own `src/`,
+   as `packs/stories/src/index.test.ts` does. A test that needs the real kernel and Postgres
+   cannot live there without a cycle, so it goes in core-tools under
+   `src/app/pack-<name>/` — that is where the healthcare tool suites are.
+
+9. **Declare the evals.** `Pack.evals` carries the cases file, the injection file, the corpus
+   directory, the intake skill, the judged free-text fields, any env values your tools must see
+   pinned under test (`testEnv`), and — only when your pack renames or replaces the pipeline's
+   tools — a `readback` block. No restricted field may be in `judgedFields`: its value never
+   leaves the database in plaintext, and a judge prompt carrying one would ship it to a
+   third-party model. `readback.classifyTool` is declared for completeness and is not driven by
+   the runner today. `pnpm evals -- --pack <name>` measures it.
+
+10. **Name it where a deployment is configured.** Add the package to `@harness/core-tools`'s
+    `dependencies` so pnpm can resolve the dynamic import, then name it in all three places or
+    half the deployment stays on the old pack:
+
+    - the client's `.env`, which Compose interpolates into both services:
+      `HARNESS_PACKS=@harness/pack-healthcare,@harness/pack-stories`;
+    - `clients/<name>/hermes.config.yaml`, in the `mcp_servers.core-tools.env` block. That block
+      is an allowlist — a variable core-tools reads has to be named there or the child never
+      sees it — so `HARNESS_PACKS` is written as `'${HARNESS_PACKS}'` and must stay
+      interpolated, never pinned to a pack name. The approvals app forwards the real value to
+      its own child already (`harness/approvals/src/app/child-env.ts`);
+    - `HARNESS_FORMS_DIR`, in that same block and in both Compose services. It is an
+      **override**: unset, core-tools takes the forms directory from the first pack in
+      `HARNESS_PACKS`; set, it wins.
+
+    Every scaffolded client inherits all three, because `pnpm new-client` copies
+    `clients/demo-practice/`.
+
+11. **Run the gates.** `pnpm -r typecheck && pnpm lint && pnpm arch && pnpm test`. If your pack
+    changes the published tool list for the default deployment, run `pnpm surface:record` and
+    say so in the commit; if it does not, the snapshot must not move.
+
+The first pack named in `HARNESS_PACKS` is the deployment's **primary** pack: it answers
+`deps.packs.manifest()`, `deps.packs.formsDir()` and the unclassified-document target.
+`documentKinds()`, `recordKinds()` and `attachmentKinds()` union them all. Nothing else depends
+on load order, because `registryOf` refuses two packs that claim the same document kind or
+declare the same record kind.
 
 `Pack.policy` is declared but not yet merged into `deps.policy`: a pack's policy is carried,
 not applied. Set the client's `HARNESS_POLICY_FILE` if you need a different action-class table
@@ -193,7 +306,7 @@ pnpm test
 
 `pnpm lint` must be at zero errors and `pnpm test` runs it first, so an error cannot reach a
 review. The type-aware warnings are the one thing no gate fails on: `pnpm lint:strict` is the
-same run with `--max-warnings=0` and is how you see that backlog. It is 33 warnings today,
+same run with `--max-warnings=0` and is how you see that backlog. It is 18 warnings today,
 almost all `no-unsafe-*` at JSON boundaries where narrowing `unknown` is the real fix. Do not
 silence one with an inline disable to make the count go down — either narrow the type or leave
 it in the backlog. `require-await` is off in tests, fakes and `testing.ts`, where an `async`

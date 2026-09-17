@@ -1,16 +1,23 @@
 # @harness/core-tools
 
-The MCP server every agent talks to: the tooling kernel that applies policy, opens the
-transaction and writes the audit row; the domains that hold the actual work; the 23 tools that
-expose them; and the shared helpers the packages above this one import instead of copying.
+The MCP server every agent talks to, and a **pack-agnostic kernel**: the tooling layer that
+applies policy, opens the transaction and writes the audit row; the domains that hold the
+actual work; the seventeen kernel tools that expose them; and the shared helpers the packages
+above this one import instead of copying.
+
+It knows about records, attachments, documents, deadlines, approvals, audit and effects, and
+nothing about any one area of the product. `src/kernel-vocabulary.test.ts` greps this package's
+own source for credentialing vocabulary and its allowlist is empty. The 23 tools a default
+deployment publishes are five of the seventeen plus the eighteen `@harness/pack-healthcare`
+contributes; ARCHITECTURE.md, "The kernel and a pack", is the why.
 
 ## Layout
 
 ```
 src/shared/redaction/  patterns, names, text — domain knowledge; the generic env, errors, paths,
                        log, subprocess, jsonl and csv helpers live in @harness/shared instead
-src/domain/        tooling, approvals, audit, deadlines, documents, effects, forms, models, packs, providers, session, storage, verify
-src/tools/         23 defineTool blocks in 8 files, plus catalog.ts
+src/domain/        tooling, approvals, audit, deadlines, documents, effects, files, models, packs, records, session, storage
+src/tools/         the seventeen kernel defineTool blocks in 6 files, plus catalog.ts
 src/app/           server.ts (deps from the environment), main.ts (stdio entrypoint), record-surface.ts
 src/index.ts       the public API
 src/testing.ts     ./testing: makeTestDeps, connectTools, resultOf, approvalIdOf, useTestDb, startFakeGateway
@@ -48,11 +55,16 @@ variable.
 `.env.example` documents every name; `src/app/surface.test.ts` fails if the code reads one that
 file does not list.
 
-`HARNESS_CLIENT`, `CORE_TOOLS_CALLER` and `NPPES_BASE_URL` have defaults, and for those three an
-empty value is a startup `ConfigError` naming the variable rather than a silent fall back to the
-default. Unset keeps the default. Blanking one of these lines in a `.env` is a half-filled file,
-not a choice: an empty caller would audit every call as `hermes`, and an empty registry URL would
-point NPI lookups at the live CMS endpoint.
+`HARNESS_CLIENT` and `CORE_TOOLS_CALLER` have defaults, and for both an empty value is a startup
+`ConfigError` naming the variable rather than a silent fall back to the default. Unset keeps the
+default. Blanking one of these lines in a `.env` is a half-filled file, not a choice: an empty
+caller would audit every call as `hermes`.
+
+The four `VERIFY_*` and `NPPES_*` variables are **not** read here any more. They are the
+healthcare pack's, read in `packs/healthcare/src/config.ts` out of `deps.env`, the environment
+whoever builds the dependency bag hands over. That file keeps the rule this one used to apply:
+`NPPES_BASE_URL` set but empty is a `ConfigError`, never a silent fall back that would point NPI
+lookups at the live CMS endpoint.
 
 Two smaller wordings changed with the shared helpers, and both are behaviour a `.env` can trip.
 `LITELLM_MASTER_KEY` set to whitespace is now rejected at startup exactly as an empty one is —
@@ -82,5 +94,17 @@ names and the rendered Compose config against `docs/architecture/`. Regenerate w
 ## Adding a tool
 
 See CONTRIBUTING.md. In one line: the logic goes in a domain, the `defineTool` block goes in
-`src/tools/<area>.ts` and into that file's exported array, and `allTools(packs)` in
+`src/tools/<area>.ts` and into that file's exported array, and `kernelTools(packs)` in
 `src/tools/catalog.ts` already spreads it.
+
+### A kernel tool or a pack tool?
+
+A kernel tool is one that would make sense for any area of the product: it names records,
+attachments, documents, deadlines, approvals, audit or effects. Anything that names a provider,
+a licence or a payer is a pack tool — `src/kernel-vocabulary.test.ts` will tell you so, and its
+allowlist is empty. See CONTRIBUTING.md, "Adding a pack", step 6.
+
+What reaches MCP is not this list. `publishedTools` drops a kernel tool a loaded pack replaced,
+and drops the five generic `records_*` tools when every loaded record kind sets
+`genericTools: false`; `deps.kernelTools` still holds all seventeen by their kernel names, which
+is how a pack's wrapper calls the handler it took over.

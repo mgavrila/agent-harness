@@ -109,14 +109,17 @@ export async function generate(options: GenerateOptions): Promise<GroundTruth> {
   const truth: GroundTruth = { seed, generated_at: new Date().toISOString(), providers, documents };
   await writeFile(path.join(outDir, 'ground-truth.json'), `${JSON.stringify(truth, null, 2)}\n`, 'utf8');
 
-  // One JSONL case per document, ready for @harness/evals.
+  // One JSONL case per document, ready for @harness/evals. The case format is the runner's, not
+  // this pack's: it calls the list `attachments`, because it loads a corpus from whichever pack
+  // `HARNESS_PACKS` names and "credential" is one pack's word for it. The ground truth above
+  // keeps the pack's own vocabulary.
   const cases = documents.map((d) => ({
     id: d.document_id,
     kind: d.kind,
     split: d.split,
     path: d.path,
     injection: d.document_id.startsWith('injection'),
-    expected: { fields: d.fields, credentials: d.credentials, restricted: Object.keys(d.restricted).sort() },
+    expected: { fields: d.fields, attachments: d.credentials, restricted: Object.keys(d.restricted).sort() },
   }));
   await writeJsonl(path.join(outDir, 'cases.jsonl'), cases);
 

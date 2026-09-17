@@ -38,6 +38,8 @@ const PACKAGES = [
   { name: 'core-tools', src: 'harness/core-tools/src', severity: 'error' },
   { name: 'approvals', src: 'harness/approvals/src', severity: 'error' },
   { name: 'evals', src: 'evals/src', severity: 'error' },
+  { name: 'pack-healthcare', src: 'packs/healthcare/src', severity: 'error' },
+  { name: 'pack-stories', src: 'packs/stories/src', severity: 'error' },
   { name: 'scripts', src: 'scripts/src', severity: 'error' },
 ];
 
@@ -96,6 +98,7 @@ const WORKSPACE_DIRS = [
   'harness/approvals',
   'evals',
   'packs/healthcare',
+  'packs/stories',
   'scripts',
 ];
 
@@ -155,6 +158,17 @@ const GLOBAL_RULES = [
     to: { path: '^packs/[^/]+/', dependencyTypesNot: ['dynamic-import'] },
   },
   {
+    name: 'evals-never-statically-imports-a-pack',
+    comment:
+      'The eval runner measures whichever pack HARNESS_PACKS names, loaded at runtime through loadPacks. A static import would wire it to one pack by name and put an opinion about what it measures back into the runner, which is the coupling this task removed. *.test.ts and *.test-helpers.ts are exempt: a test names a pack as a fixture because there is no other way to run against a real corpus, and neither is shipped.',
+    severity: 'error',
+    from: {
+      path: '^evals/src/',
+      pathNot: ['\\.test\\.ts$', '\\.test-helpers\\.ts$'],
+    },
+    to: { path: '^packs/[^/]+/', dependencyTypesNot: ['dynamic-import'] },
+  },
+  {
     name: 'no-unresolvable-workspace-import',
     comment:
       'An import the resolver cannot follow matches no other rule in this file, so a deep cross-package import written as a bare specifier (@harness/core-tools/src/domain/x.js) would pass every layer rule in silence. This catches it. Scoped to specifiers starting with `@harness/` or a relative `./` or `../`, deliberately: six third-party specifiers are unresolvable here for reasons that have nothing to do with the architecture (zod/v4, vitest and the @modelcontextprotocol subpaths resolve through export maps depcruise does not follow), and a rule that failed on those would have to be switched off rather than fixed. tsc --noEmit catches these too; this is the gate that says so at the architecture layer.',
@@ -190,9 +204,9 @@ const GLOBAL_RULES = [
   {
     name: 'a-pack-never-imports-core-tools',
     comment:
-      'A pack depends on @harness/pack-api and @harness/shared only. An edge back into core-tools would be a cycle and would make the pack unloadable by anything else.',
+      'A pack depends on @harness/pack-api and @harness/shared only. An edge back into core-tools or @harness/db would be a cycle and would make the pack unloadable by anything else. Its *tests* may reach @harness/core-tools/testing: a test that boots the real kernel against Postgres is not shipped and is not part of the cycle. No pack declares such a dependency today — the five kernel-side healthcare tests live in harness/core-tools/src/app/pack-healthcare — and this exemption is here so the next pack author is not blocked by a false error.',
     severity: 'error',
-    from: { path: '^packs/' },
+    from: { path: '^packs/', pathNot: ['\\.test\\.ts$', '\\.test-helpers\\.ts$'] },
     to: { path: '^(harness|evals|scripts)/', pathNot: ['^harness/pack-api/src/', '^harness/shared/src/'] },
   },
   {

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import { eq, sql } from 'drizzle-orm';
 import { TEST_DATABASE_URL, resetDatabase } from '../testing.js';
 import { createDb, type Db } from './client.js';
-import { providers, auditLog, toolEffects } from './schema.js';
+import { records, auditLog, toolEffects } from './schema.js';
 
 let db: Db;
 let close: () => Promise<void>;
@@ -36,19 +36,44 @@ async function rejectionMessage(query: PromiseLike<unknown>): Promise<string> {
 }
 
 describe('schema', () => {
-  it('inserts and reads a provider', async () => {
+  it('inserts and reads a record', async () => {
     const [row] = await db
-      .insert(providers)
-      .values({ client: 'test', name: 'Dr. Ada Lovelace', npi: '1234567890' })
+      .insert(records)
+      .values({
+        client: 'test',
+        pack: 'healthcare',
+        kind: 'provider',
+        name: 'Dr. Ada Lovelace',
+        externalId: '1234567890',
+      })
       .returning();
-    const found = await db.query.providers.findFirst({ where: eq(providers.id, row.id) });
+    const found = await db.query.records.findFirst({ where: eq(records.id, row.id) });
     expect(found?.name).toBe('Dr. Ada Lovelace');
     expect(found?.status).toBe('active');
   });
 
-  it('rejects a duplicate npi within a client', async () => {
-    await db.insert(providers).values({ client: 'test', name: 'A', npi: '1' });
-    await expect(db.insert(providers).values({ client: 'test', name: 'B', npi: '1' })).rejects.toThrow();
+  it('rejects a duplicate external id within a client', async () => {
+    await db
+      .insert(records)
+      .values({ client: 'test', pack: 'healthcare', kind: 'provider', name: 'A', externalId: '1' });
+    await expect(
+      db.insert(records).values({ client: 'test', pack: 'healthcare', kind: 'provider', name: 'B', externalId: '1' }),
+    ).rejects.toThrow();
+  });
+
+  it('scopes a record to a client and a pack-declared kind, and keeps external_id unique per kind', async () => {
+    await db
+      .insert(records)
+      .values({ client: 'a', pack: 'healthcare', kind: 'provider', name: 'Ada', externalId: '1234567890' });
+    await db
+      .insert(records)
+      .values({ client: 'b', pack: 'healthcare', kind: 'provider', name: 'Ada', externalId: '1234567890' });
+    // Through `rejectionMessage` because drizzle's own message is only "Failed query: …"; the
+    // index name the assertion is about is on the Postgres error it carries as `.cause`.
+    const duplicate = db
+      .insert(records)
+      .values({ client: 'a', pack: 'healthcare', kind: 'provider', name: 'Other', externalId: '1234567890' });
+    await expect(rejectionMessage(duplicate)).resolves.toMatch(/records_client_kind_external_id_uq/);
   });
 
   it('audit_log rejects UPDATE and DELETE', async () => {

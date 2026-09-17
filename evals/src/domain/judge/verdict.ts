@@ -40,8 +40,8 @@ export async function judgeFreeText(deps: ToolDeps, items: JudgeItem[]): Promise
     { role: 'user' as const, content: `Judge these ${safe.length} pairs.\n\n${listing}` },
   ];
   // The same last gate every other prompt builder on the branch runs, over the
-  // exact messages about to go out. Nothing here is expected to trip it —
-  // FREE_TEXT_FIELDS holds no restricted name, a masked value arrives as null,
+  // exact messages about to go out. Nothing here is expected to trip it — the
+  // pack's judged list holds no restricted name, a masked value arrives as null,
   // and isRestrictedName filtered the batch above — but the invariant is
   // stated unconditionally, so it is checked rather than reasoned about. It
   // throws a plain Error, not a ToolError: a hole in redaction is not

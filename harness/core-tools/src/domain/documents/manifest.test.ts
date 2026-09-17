@@ -1,19 +1,24 @@
 import { describe, it, expect } from 'vitest';
 import { pack as healthcarePack } from '@harness/pack-healthcare';
 import { isRestrictedName } from '../../shared/redaction/names.js';
-import { parseManifest } from './manifest.js';
+import { parseAttachmentKindSpec, parseRecordKindSpec } from './manifest.js';
 
-const manifest = parseManifest(healthcarePack.extraction);
+const provider = parseRecordKindSpec(healthcarePack.records[0]);
 
 describe('the healthcare pack manifest', () => {
   it('validates the shipped manifest', () => {
-    expect(manifest.version).toBe('1.0.0');
-    expect(manifest.fields.length).toBeGreaterThan(10);
-    expect(manifest.credentials.map((c) => c.kind)).toEqual(['license', 'dea', 'malpractice', 'board_cert']);
+    expect(healthcarePack.extraction.version).toBe('1.0.0');
+    expect(provider.fields.length).toBeGreaterThan(10);
+    expect((healthcarePack.attachments ?? []).map((c) => c.kind)).toEqual([
+      'license',
+      'dea',
+      'malpractice',
+      'board_cert',
+    ]);
   });
 
   it('marks exactly the redaction-sourced fields restricted', () => {
-    const redaction = manifest.fields.filter((f) => f.source === 'redaction').map((f) => f.name);
+    const redaction = provider.fields.filter((f) => f.source === 'redaction').map((f) => f.name);
     expect(redaction).toEqual(['ssn', 'ein', 'dea_number']);
     for (const name of redaction) {
       expect(isRestrictedName(name)).toBe(true);
@@ -21,26 +26,33 @@ describe('the healthcare pack manifest', () => {
   });
 });
 
-describe('parseManifest', () => {
+describe('parseRecordKindSpec', () => {
+  const kindWith = (field: Record<string, unknown>) => ({
+    kind: 'provider',
+    label: 'Provider',
+    nameFields: ['last_name'],
+    fields: [{ name: 'last_name', type: 'string', description: 'x' }, field],
+  });
+
   it('rejects a restricted field that is not redaction-sourced', () => {
     expect(() =>
-      parseManifest({
-        version: '1.0.0',
-        fields: [{ name: 'ssn', type: 'string', description: 'x', restricted: true, source: 'model' }],
-        credentials: [],
-        document_kinds: ['other'],
-      }),
+      parseRecordKindSpec(
+        kindWith({ name: 'ssn', type: 'string', description: 'x', restricted: true, source: 'model' }),
+      ),
     ).toThrow(/restricted/);
   });
 
   it('rejects a field whose name would not be treated as restricted downstream', () => {
     expect(() =>
-      parseManifest({
-        version: '1.0.0',
-        fields: [{ name: 'secret_code', type: 'string', description: 'x', restricted: true, source: 'redaction' }],
-        credentials: [],
-        document_kinds: ['other'],
-      }),
+      parseRecordKindSpec(
+        kindWith({ name: 'secret_code', type: 'string', description: 'x', restricted: true, source: 'redaction' }),
+      ),
     ).toThrow(/secret_code/);
+  });
+
+  it('accepts every attachment kind the pack ships', () => {
+    for (const raw of healthcarePack.attachments ?? []) {
+      expect(parseAttachmentKindSpec(raw).leadDays).toBeGreaterThan(0);
+    }
   });
 });

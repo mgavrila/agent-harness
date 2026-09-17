@@ -18,7 +18,8 @@
     "@harness/pack-api": "workspace:*",
     "@harness/shared": "workspace:*",
     "pdf-lib": "^1.17.1",
-    "yaml": "^2.9.1"
+    "yaml": "^2.9.1",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@types/node": "^26.5.1",

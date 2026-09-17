@@ -21,7 +21,7 @@ export function buildReport(input: BuildReportInput): Report {
   for (const name of ['text_layer', 'scan'] as const) {
     const s = input.splits[name];
     metrics[`${name}.field_accuracy`] = s.fieldAccuracy;
-    metrics[`${name}.credential_accuracy`] = s.credentialAccuracy;
+    metrics[`${name}.attachment_accuracy`] = s.attachmentAccuracy;
     metrics[`${name}.restricted_recall`] = s.restrictedRecall;
     metrics[`${name}.calibrated`] = s.calibration.calibrated ? 1 : 0;
     metrics[`${name}.failure_rate`] = s.cases === 0 ? 0 : s.failures / s.cases;
@@ -38,6 +38,8 @@ export function buildReport(input: BuildReportInput): Report {
   return {
     generated_at: new Date().toISOString(),
     eval_set_version: input.evalSetVersion,
+    pack: input.pack,
+    record_kinds: input.recordKinds,
     serving_model: input.servingModel,
     splits: input.splits,
     injection: input.injection,

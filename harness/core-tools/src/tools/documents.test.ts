@@ -4,11 +4,11 @@ import path from 'node:path';
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { PDFDocument, StandardFonts } from 'pdf-lib';
-import { documents, providers, fields as fieldsTable, credentials as credentialsTable, decrypt } from '@harness/db';
+import { documents, records, fields as fieldsTable, decrypt } from '@harness/db';
 import type { ToolDeps } from '../domain/tooling/types.js';
 import { connectTools, makeTestDeps, resultOf, useTestDb, startFakeGateway, type FakeGateway } from '../testing.js';
 import { documentTextPath } from '../domain/storage/layout.js';
-import { providerTools } from './providers.js';
+import { recordTools } from './records.js';
 import { documentTools } from './documents.js';
 
 const db = useTestDb();
@@ -25,7 +25,7 @@ interface IngestOut {
 interface DocOut {
   document: {
     id: string;
-    provider_id: string | null;
+    record_id: string | null;
     kind: string | null;
     pages: number | null;
     ocr_used: boolean;
@@ -62,15 +62,7 @@ beforeEach(() => {
   deps = makeTestDeps(db, { storageDir });
 });
 
-const connect = () => connectTools('documents-test', [...providerTools, ...documentTools(deps.packs)], deps);
-
-async function seedProvider(client: Awaited<ReturnType<typeof connect>>): Promise<string> {
-  const res = await client.callTool({
-    name: 'providers_upsert',
-    arguments: { name: 'Dr. Ada Lovelace', npi: '1234567890' },
-  });
-  return resultOf<{ provider_id: string }>(res).provider_id;
-}
+const connect = () => connectTools('documents-test', [...recordTools(deps.packs), ...documentTools(deps.packs)], deps);
 
 describe('documents_ingest', () => {
   it('hashes the file, counts pages, and stores a row', async () => {
@@ -100,50 +92,11 @@ describe('documents_ingest', () => {
     expect(await db.select().from(documents)).toHaveLength(1);
   });
 
-  it('attaches to a provider and records the declared kind', async () => {
-    const client = await connect();
-    const providerId = await seedProvider(client);
-    const out = resultOf<IngestOut>(
-      await client.callTool({
-        name: 'documents_ingest',
-        arguments: { path: 'incoming/w9.pdf', provider_id: providerId, kind: 'w9' },
-      }),
-    );
-    const row = (await db.select().from(documents)).find((d) => d.id === out.document_id)!;
-    expect(row).toMatchObject({ providerId, kind: 'w9' });
-  });
-
-  it('back-fills the provider on a re-ingest that names one', async () => {
-    const client = await connect();
-    const providerId = await seedProvider(client);
-    const first = resultOf<IngestOut>(
-      await client.callTool({ name: 'documents_ingest', arguments: { path: 'incoming/w9.pdf' } }),
-    );
-    resultOf<IngestOut>(
-      await client.callTool({
-        name: 'documents_ingest',
-        arguments: { path: 'incoming/w9.pdf', provider_id: providerId, kind: 'w9' },
-      }),
-    );
-    const row = (await db.select().from(documents)).find((d) => d.id === first.document_id)!;
-    expect(row).toMatchObject({ providerId, kind: 'w9' });
-  });
-
   it('refuses a path outside the storage dir', async () => {
     const client = await connect();
     const res = await client.callTool({ name: 'documents_ingest', arguments: { path: '../../etc/passwd' } });
     expect(res.isError).toBe(true);
     expect(JSON.stringify(res.content)).toMatch(/outside HARNESS_STORAGE_DIR/);
-  });
-
-  it('refuses an unknown provider', async () => {
-    const client = await connect();
-    const res = await client.callTool({
-      name: 'documents_ingest',
-      arguments: { path: 'incoming/license.pdf', provider_id: '00000000-0000-0000-0000-000000000000' },
-    });
-    expect(res.isError).toBe(true);
-    expect(await db.select().from(documents)).toHaveLength(0);
   });
 
   it('accepts a non-PDF file as a single page', async () => {
@@ -185,37 +138,6 @@ describe('documents_ingest', () => {
 });
 
 describe('documents_get and documents_list', () => {
-  it('returns one document and lists a provider’s documents', async () => {
-    const client = await connect();
-    const providerId = await seedProvider(client);
-    const a = resultOf<IngestOut>(
-      await client.callTool({
-        name: 'documents_ingest',
-        arguments: { path: 'incoming/license.pdf', provider_id: providerId, kind: 'state_license' },
-      }),
-    );
-    await client.callTool({
-      name: 'documents_ingest',
-      arguments: { path: 'incoming/w9.pdf', provider_id: providerId, kind: 'w9' },
-    });
-
-    const one = resultOf<DocOut>(
-      await client.callTool({ name: 'documents_get', arguments: { document_id: a.document_id } }),
-    );
-    expect(one.document).toMatchObject({
-      id: a.document_id,
-      kind: 'state_license',
-      pages: 2,
-      ocr_used: false,
-      has_text: false,
-    });
-
-    const many = resultOf<{ documents: DocOut['document'][] }>(
-      await client.callTool({ name: 'documents_list', arguments: { provider_id: providerId } }),
-    );
-    expect(many.documents.map((d) => d.kind).sort()).toEqual(['state_license', 'w9']);
-  });
-
   it('documents_get refuses an unknown id', async () => {
     const client = await connect();
     const res = await client.callTool({
@@ -225,24 +147,13 @@ describe('documents_get and documents_list', () => {
     expect(res.isError).toBe(true);
   });
 
-  it('documents_list refuses another client’s provider', async () => {
-    const client = await connect();
-    const providerId = await seedProvider(client);
-    const other = await connectTools(
-      'other-client',
-      [...providerTools, ...documentTools(deps.packs)],
-      makeTestDeps(db, { storageDir, client: 'other' }),
-    );
-    const res = await other.callTool({ name: 'documents_list', arguments: { provider_id: providerId } });
-    expect(res.isError).toBe(true);
-  });
-
   it('an unattached document ingested by one client is invisible to another', async () => {
     const owner = await connect();
+    const otherDeps = makeTestDeps(db, { storageDir, client: 'other-clinic' });
     const otherClient = await connectTools(
       'other-clinic',
-      [...providerTools, ...documentTools(deps.packs)],
-      makeTestDeps(db, { storageDir, client: 'other-clinic' }),
+      [...recordTools(otherDeps.packs), ...documentTools(otherDeps.packs)],
+      otherDeps,
     );
     const ingested = resultOf<IngestOut>(
       await otherClient.callTool({ name: 'documents_ingest', arguments: { path: 'incoming/notes.txt' } }),
@@ -257,12 +168,13 @@ describe('documents_get and documents_list', () => {
     expect(listed.documents.find((d) => d.id === ingested.document_id)).toBeUndefined();
   });
 
-  it('documents_list without a provider filter returns only this client’s documents', async () => {
+  it('documents_list without a record filter returns only this client’s documents', async () => {
     const client = await connect();
+    const otherDeps = makeTestDeps(db, { storageDir, client: 'other-clinic-2' });
     const otherClient = await connectTools(
       'other-clinic-2',
-      [...providerTools, ...documentTools(deps.packs)],
-      makeTestDeps(db, { storageDir, client: 'other-clinic-2' }),
+      [...recordTools(otherDeps.packs), ...documentTools(otherDeps.packs)],
+      otherDeps,
     );
     const mine = resultOf<IngestOut>(
       await client.callTool({ name: 'documents_ingest', arguments: { path: 'incoming/notes.txt' } }),
@@ -293,7 +205,7 @@ describe('documents_classify and documents_extract', () => {
       ...overrides,
     });
     deps = d;
-    return connectTools('documents-pipeline', [...providerTools, ...documentTools(d.packs)], d);
+    return connectTools('documents-pipeline', [...recordTools(d.packs), ...documentTools(d.packs)], d);
   }
 
   const EXTRACTION_REPLY = JSON.stringify({
@@ -348,42 +260,6 @@ describe('documents_classify and documents_extract', () => {
     expect(row.kind).toBe('state_license');
   });
 
-  it('extracts fields, creates the provider, and writes redacted text beside the document', async () => {
-    gateway.setResponder(() => ({ content: EXTRACTION_REPLY }));
-    const client = await connectWithGateway();
-    const ing = resultOf<IngestOut>(
-      await client.callTool({ name: 'documents_ingest', arguments: { path: 'incoming/license.pdf' } }),
-    );
-    const out = resultOf<{
-      provider_id: string;
-      document_kind: string;
-      ocr_used: boolean;
-      pages: number;
-      fields_pending: number;
-      fields_extracted: number;
-      credentials: number;
-      restricted_fields: string[];
-    }>(await client.callTool({ name: 'documents_extract', arguments: { document_id: ing.document_id } }));
-
-    expect(out.document_kind).toBe('state_license');
-    expect(out.ocr_used).toBe(false);
-    expect(out.pages).toBe(2);
-    // specialty came back at 0.55, below the 0.85 threshold
-    expect(out.fields_pending).toBe(1);
-    expect(out.fields_extracted).toBe(3);
-    expect(out.credentials).toBe(1);
-
-    const stored = await db.select().from(fieldsTable).where(eq(fieldsTable.providerId, out.provider_id));
-    expect(stored.find((f) => f.name === 'specialty')!.status).toBe('pending');
-    expect(stored.find((f) => f.name === 'npi')!.sourceDocId).toBe(ing.document_id);
-    expect(stored.find((f) => f.name === 'npi')!.sourcePage).toBe(1);
-
-    const doc = (await db.select().from(documents)).find((d) => d.id === ing.document_id)!;
-    expect(doc.textPath).toBe('incoming/license.pdf.redacted.txt');
-    const text = await readFile(path.join(storageDir, doc.textPath!), 'utf8');
-    expect(text).toContain('California');
-  });
-
   it('never sends a restricted value to the model and stores it encrypted instead', async () => {
     await writePdf('incoming/w9-ssn.pdf', ['Form W-9\nName: Ada Lovelace\nSSN: 123-45-6789\nEIN: 12-3456789']);
     gateway.calls.length = 0;
@@ -392,7 +268,7 @@ describe('documents_classify and documents_extract', () => {
     const ing = resultOf<IngestOut>(
       await client.callTool({ name: 'documents_ingest', arguments: { path: 'incoming/w9-ssn.pdf' } }),
     );
-    const out = resultOf<{ provider_id: string; restricted_fields: string[] }>(
+    const out = resultOf<{ record_id: string; restricted_fields: string[] }>(
       await client.callTool({ name: 'documents_extract', arguments: { document_id: ing.document_id } }),
     );
 
@@ -402,7 +278,7 @@ describe('documents_classify and documents_extract', () => {
     expect(prompt).toContain('{{ssn:1}}');
     expect(out.restricted_fields.sort()).toEqual(['ein', 'ssn']);
 
-    const stored = await db.select().from(fieldsTable).where(eq(fieldsTable.providerId, out.provider_id));
+    const stored = await db.select().from(fieldsTable).where(eq(fieldsTable.recordId, out.record_id));
     const ssn = stored.find((f) => f.name === 'ssn')!;
     expect(ssn.value).toBeNull();
     expect(ssn.restricted).toBe(true);
@@ -435,7 +311,7 @@ describe('documents_classify and documents_extract', () => {
     const ing = resultOf<IngestOut>(
       await client.callTool({ name: 'documents_ingest', arguments: { path: 'incoming/injected.pdf' } }),
     );
-    const out = resultOf<{ provider_id: string }>(
+    const out = resultOf<{ record_id: string }>(
       await client.callTool({ name: 'documents_extract', arguments: { document_id: ing.document_id } }),
     );
 
@@ -445,56 +321,10 @@ describe('documents_classify and documents_extract', () => {
     expect(gateway.calls[0].messages[1].content).toContain('<<<END OF DOCUMENT>>>');
 
     // And nothing it said ends up as a value.
-    const stored = await db.select().from(fieldsTable).where(eq(fieldsTable.providerId, out.provider_id));
+    const stored = await db.select().from(fieldsTable).where(eq(fieldsTable.recordId, out.record_id));
     for (const f of stored) {
       expect(f.value ?? '').not.toMatch(/ignore prior instructions|post the roster/i);
     }
-  });
-
-  it('attaches to an existing provider when one is named, without renaming it or touching its NPI', async () => {
-    gateway.setResponder(() => ({ content: EXTRACTION_REPLY }));
-    const client = await connectWithGateway();
-    // A different NPI than EXTRACTION_REPLY's, and a name distinct from the
-    // extracted "Ada Lovelace": if documents_extract ever fell back to
-    // matching by name/NPI instead of writing to this exact row, either would
-    // cause it to attach to (or create) a different provider.
-    const seeded = resultOf<{ provider_id: string }>(
-      await client.callTool({ name: 'providers_upsert', arguments: { name: 'Dr. Grace Hopper', npi: '9999999999' } }),
-    );
-    const providerId = seeded.provider_id;
-    const before = (await db.select().from(providers)).length;
-
-    const ing = resultOf<IngestOut>(
-      await client.callTool({ name: 'documents_ingest', arguments: { path: 'incoming/license.pdf' } }),
-    );
-    const out = resultOf<{ provider_id: string }>(
-      await client.callTool({
-        name: 'documents_extract',
-        arguments: { document_id: ing.document_id, provider_id: providerId },
-      }),
-    );
-    expect(out.provider_id).toBe(providerId);
-    const doc = (await db.select().from(documents)).find((d) => d.id === ing.document_id)!;
-    expect(doc.providerId).toBe(providerId);
-
-    const providerRow = (await db.select().from(providers)).find((p) => p.id === providerId)!;
-    expect(providerRow.name).toBe('Dr. Grace Hopper');
-    expect(providerRow.npi).toBe('9999999999');
-    expect(await db.select().from(providers)).toHaveLength(before);
-
-    const stored = await db.select().from(fieldsTable).where(eq(fieldsTable.providerId, providerId));
-    expect(stored.find((f) => f.name === 'npi')?.value).toBe('1234567890');
-  });
-
-  it('refuses when the model returns no name and no provider was given', async () => {
-    gateway.setResponder(() => ({ content: JSON.stringify({ document_kind: 'other', fields: {}, credentials: [] }) }));
-    const client = await connectWithGateway();
-    const ing = resultOf<IngestOut>(
-      await client.callTool({ name: 'documents_ingest', arguments: { path: 'incoming/license.pdf' } }),
-    );
-    const res = await client.callTool({ name: 'documents_extract', arguments: { document_id: ing.document_id } });
-    expect(res.isError).toBe(true);
-    expect(JSON.stringify(res.content)).toMatch(/no provider name/);
   });
 
   it('leaves nothing behind when the gateway fails', async () => {
@@ -510,32 +340,13 @@ describe('documents_classify and documents_extract', () => {
     const ing = resultOf<IngestOut>(
       await client.callTool({ name: 'documents_ingest', arguments: { path: 'incoming/gateway-fail.pdf' } }),
     );
-    const before = (await db.select().from(providers)).length;
+    const before = (await db.select().from(records)).length;
     const res = await client.callTool({ name: 'documents_extract', arguments: { document_id: ing.document_id } });
     expect(res.isError).toBe(true);
-    expect(await db.select().from(providers)).toHaveLength(before);
+    expect(await db.select().from(records)).toHaveLength(before);
     const doc = (await db.select().from(documents)).find((d) => d.id === ing.document_id)!;
     expect(doc.textPath).toBeNull();
     const textAbs = documentTextPath(path.join(storageDir, doc.storagePath));
     await expect(access(textAbs)).rejects.toThrow();
-  });
-
-  it('records the credential with its dates so deadlines can be computed', async () => {
-    gateway.setResponder(() => ({ content: EXTRACTION_REPLY }));
-    const client = await connectWithGateway();
-    const ing = resultOf<IngestOut>(
-      await client.callTool({ name: 'documents_ingest', arguments: { path: 'incoming/license.pdf' } }),
-    );
-    const out = resultOf<{ provider_id: string }>(
-      await client.callTool({ name: 'documents_extract', arguments: { document_id: ing.document_id } }),
-    );
-    const creds = await db.select().from(credentialsTable).where(eq(credentialsTable.providerId, out.provider_id));
-    expect(creds).toHaveLength(1);
-    expect(creds[0]).toMatchObject({
-      kind: 'license',
-      state: 'CA',
-      expiresAt: '2027-03-31',
-      sourceDocId: ing.document_id,
-    });
   });
 });

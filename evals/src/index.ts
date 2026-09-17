@@ -5,23 +5,32 @@
  * repository root, which is composition-root work. Run it through `pnpm evals`.
  */
 export { injectionCasesFor, runEvals, selectCases, type RunOptions } from './domain/orchestrate.js';
+/**
+ * Re-exported, not redeclared: `RunOptions` and `resolvePipelineTools` are both written against
+ * the pack contract's own type, and a caller reading a pack's `evals.readback` should not have to
+ * reach past this package for the shape of what it just read.
+ */
+export { type EvalReadback } from '@harness/pack-api';
 export {
-  INTAKE_DECLARED_TOOLS,
-  INTAKE_SKILL_FILE,
   declaredToolsOf,
   loadExtractionCases,
   loadInjectionCases,
   loadJsonl,
-  type ExpectedCredential,
+  type ExpectedAttachment,
   type ExtractionCase,
   type InjectionCase,
 } from './domain/cases.js';
 export {
+  KERNEL_EXTRACT_ID_KEY,
+  KERNEL_PIPELINE_TOOLS,
+  extractIdKeyFor,
   normalizeMasking,
   openPipeline,
+  resolvePipelineTools,
   runCase,
   type OpenPipelineOptions,
   type PipelineHandle,
+  type PipelineTools,
 } from './domain/pipeline.js';
 export {
   normalizeValue,
@@ -31,12 +40,12 @@ export {
   type CalibrationRow,
   type CalibrationScore,
   type CaseOutcome,
-  type StoredCredential,
+  type StoredAttachment,
   type StoredField,
   type Tally,
 } from './domain/score.js';
 export { judgeFreeText } from './domain/judge/verdict.js';
-export { FREE_TEXT_FIELDS, type JudgeItem, type JudgeResult, type JudgeVerdict } from './domain/judge/types.js';
+export { type JudgeItem, type JudgeResult, type JudgeVerdict } from './domain/judge/types.js';
 export { DEFAULT_TOLERANCE, buildReport, compareToBaseline } from './domain/report/build.js';
 export { renderMarkdown } from './domain/report/render.js';
 export {

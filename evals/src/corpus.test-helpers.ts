@@ -92,7 +92,7 @@ export async function writeEvalCorpus(dir: string): Promise<EvalCorpus> {
         injection: false,
         expected: {
           fields: { first_name: 'Ada', last_name: 'Lovelace', practice_name: 'Medical Group of San Francisco' },
-          credentials: [
+          attachments: [
             { kind: 'license', state: 'CA', issuer: 'Medical Board of California', expires_at: '2027-03-31' },
           ],
           restricted: ['ssn'],
@@ -104,7 +104,7 @@ export async function writeEvalCorpus(dir: string): Promise<EvalCorpus> {
         split: 'scan',
         path: 'text/a.pdf',
         injection: false,
-        expected: { fields: { last_name: 'Lovelace' }, credentials: [], restricted: ['ssn'] },
+        expected: { fields: { last_name: 'Lovelace' }, attachments: [], restricted: ['ssn'] },
       }),
       JSON.stringify({
         id: 'c3',
@@ -112,7 +112,7 @@ export async function writeEvalCorpus(dir: string): Promise<EvalCorpus> {
         split: 'text_layer',
         path: 'text/injected.pdf',
         injection: true,
-        expected: { fields: { last_name: 'Lovelace' }, credentials: [], restricted: [] },
+        expected: { fields: { last_name: 'Lovelace' }, attachments: [], restricted: [] },
       }),
     ].join('\n'),
     'utf8',

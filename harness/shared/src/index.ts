@@ -9,7 +9,15 @@
  * SSN allocations are real is domain knowledge.
  */
 export { ConfigError, ModelOutputError, ToolError, describeError } from './errors.js';
-export { booleanFromEnv, numberFromEnv, optionalEnv, requiredEnv, type NumberEnvOptions } from './env.js';
+export {
+  booleanFromEnv,
+  envOrDefault,
+  numberFromEnv,
+  optionalEnv,
+  requiredEnv,
+  type EnvSource,
+  type NumberEnvOptions,
+} from './env.js';
 export { assertInsideRoot, realOrNearestAncestor, type EscapeReason, type InsideRootOptions } from './paths.js';
 export { createLogger, type Logger } from './log.js';
 export { runBounded, type RunBoundedOptions, type RunBoundedOutcome } from './subprocess.js';

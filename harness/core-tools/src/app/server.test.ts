@@ -1,13 +1,14 @@
 import path from 'node:path';
 import { describe, it, expect } from 'vitest';
-import { ConfigError } from '@harness/shared';
-import { NPPES_DEFAULT_BASE_URL } from '../domain/verify/nppes.js';
-import { envOrDefault, formsDirFrom } from './server.js';
+import { ConfigError, envOrDefault } from '@harness/shared';
+import { formsDirFrom } from './server.js';
 
 /**
- * The three variables `buildDepsFromEnv` reads with a default. Each one used to go through
+ * The two variables `buildDepsFromEnv` reads with a default. Each one used to go through
  * `optionalEnv`, which reads an empty string as absent, so a half-filled `.env` changed the
- * client, the audited caller or the registry endpoint without saying so.
+ * client or the audited caller without saying so. The healthcare pack calls the same helper for
+ * `NPPES_BASE_URL`, which it reads itself now; `packs/healthcare/src/config.test.ts` is where
+ * that variable's version of this assertion lives.
  */
 describe('envOrDefault', () => {
   it('refuses an empty HARNESS_CLIENT rather than serving the default client', () => {
@@ -20,13 +21,6 @@ describe('envOrDefault', () => {
   it('refuses an empty CORE_TOOLS_CALLER rather than auditing every call as hermes', () => {
     expect(() => envOrDefault('CORE_TOOLS_CALLER', 'hermes', { CORE_TOOLS_CALLER: '' })).toThrow(/CORE_TOOLS_CALLER/);
     expect(envOrDefault('CORE_TOOLS_CALLER', 'hermes', {})).toBe('hermes');
-  });
-
-  it('refuses an empty NPPES_BASE_URL rather than falling back to the live CMS registry', () => {
-    expect(() => envOrDefault('NPPES_BASE_URL', NPPES_DEFAULT_BASE_URL, { NPPES_BASE_URL: '' })).toThrow(
-      /NPPES_BASE_URL/,
-    );
-    expect(envOrDefault('NPPES_BASE_URL', NPPES_DEFAULT_BASE_URL, {})).toBe(NPPES_DEFAULT_BASE_URL);
   });
 });
 
