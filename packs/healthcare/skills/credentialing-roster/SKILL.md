@@ -14,7 +14,6 @@ metadata:
       - roster.jsonl
     action_classes: [read, write.internal, external]
     tools:
-      - harness_set_context
       - providers_search
       - providers_get
       - forms_roster
@@ -29,11 +28,6 @@ metadata:
 
 Someone asks for a payer roster: "send Aetna our roster", "build the BCBS
 roster for the three new doctors".
-
-## First, always
-
-Call `harness_set_context` with `skill: "credentialing-roster"`,
-`skill_version: "1.0.0"`, and a fresh UUID as `run_id`.
 
 ## Procedure
 

@@ -80,7 +80,8 @@ describe('loaded pack skill frontmatter', () => {
 
     const tools = harness?.tools as string[];
     expect(Array.isArray(tools), `${name}: metadata.harness.tools must be an array`).toBe(true);
-    expect(tools, `${name}: must call harness_set_context first`).toContain('harness_set_context');
+    // The run is opened by whoever built the session, never by a tool a skill calls (Plan 7).
+    expect(tools, `${name}: harness_set_context no longer exists`).not.toContain('harness_set_context');
 
     for (const tool of tools) {
       expect(KNOWN_TOOL_NAMES.has(tool), `${name}: unknown tool "${tool}"`).toBe(true);

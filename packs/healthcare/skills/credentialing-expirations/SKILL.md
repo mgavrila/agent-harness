@@ -14,7 +14,6 @@ metadata:
       - deadlines.jsonl
     action_classes: [read, write.internal]
     tools:
-      - harness_set_context
       - deadlines_upcoming
       - audit_query
       - harness_notify
@@ -27,11 +26,6 @@ metadata:
 The nightly playbook runs this. A human may also ask "who expires in the next
 90 days" or "what is coming up" — answer them directly in that case and skip
 the notify step, because you are already in the conversation.
-
-## First, always
-
-Call `harness_set_context` with `skill: "credentialing-expirations"`,
-`skill_version: "1.0.0"`, and a fresh UUID as `run_id`.
 
 ## Procedure (scheduled run)
 

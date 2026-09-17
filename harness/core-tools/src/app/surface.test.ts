@@ -61,6 +61,9 @@ describe('public surface', () => {
  * Stated as four properties rather than as a diff against a second committed copy of the
  * snapshot: a copy is a file that has to be updated twice forever, and the first time someone
  * updates one of the two it stops being evidence of anything.
+ *
+ * Plan 7 removed one tool, `harness_set_context`, and nothing else: identity and the run are
+ * bound by whoever opens the session, so there is no tool to set them.
  */
 const RECORDED_TOOLS = [
   'approvals_execute',
@@ -78,7 +81,6 @@ const RECORDED_TOOLS = [
   'forms_roster',
   'harness_notify',
   'harness_reconcile',
-  'harness_set_context',
   'providers_confirm_field',
   'providers_get',
   'providers_list_pending',
@@ -94,7 +96,7 @@ describe('the four places Plan 6 moved the tool surface', () => {
   const recorded = async (): Promise<ToolSurfaceEntry[]> =>
     JSON.parse(await readFile(path.join(architecture, 'tool-surface.json'), 'utf8')) as ToolSurfaceEntry[];
 
-  it('publishes the same twenty-three tools it did before', async () => {
+  it('publishes the twenty-two tools of Plan 6 less harness_set_context, which Plan 7 deleted', async () => {
     expect((await recorded()).map((tool) => tool.name)).toEqual(RECORDED_TOOLS);
   });
 

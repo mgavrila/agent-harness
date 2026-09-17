@@ -14,7 +14,6 @@ metadata:
       - forms.jsonl
     action_classes: [read, write.internal, external]
     tools:
-      - harness_set_context
       - forms_list_templates
       - forms_fill
       - forms_release
@@ -31,11 +30,6 @@ metadata:
 
 Someone asks for a form for a provider: "fill the Aetna application for Dr.
 Reyes", "I need the TX renewal cover sheet".
-
-## First, always
-
-Call `harness_set_context` with `skill: "credentialing-fill-form"`,
-`skill_version: "1.0.0"`, and a fresh UUID as `run_id`.
 
 ## Procedure
 

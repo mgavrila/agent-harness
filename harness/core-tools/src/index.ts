@@ -12,7 +12,7 @@
 
 // --- The tooling kernel -------------------------------------------------------------------
 export { defineTool, registerTools } from './domain/tooling/registry.js';
-export { auditBaseFor, preservingContext, withCurrentTool } from './domain/tooling/context.js';
+export { auditBaseFor, withCurrentTool } from './domain/tooling/context.js';
 export { hashArgs, writeAudit, type AuditEntry, type Decision } from './domain/tooling/audit.js';
 export {
   ACTION_CLASSES,
