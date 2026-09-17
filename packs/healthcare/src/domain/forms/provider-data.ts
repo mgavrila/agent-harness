@@ -15,7 +15,10 @@ import type { ProviderData, RosterRow } from './types.js';
 export async function loadProviderData(deps: PackToolDeps, providerId: string): Promise<ProviderData> {
   const tool = deps.kernelTools.get('records_get');
   if (!tool) throw new ToolError('kernel tool "records_get" is not loaded');
-  const r = (await tool.handler({ record_id: providerId }, deps)) as RecordsGetResult;
+  // `kind: 'provider'` like every other read this pack makes: a form template describes a
+  // provider, so another pack's record reaching here is a `ToolError` naming both kinds rather
+  // than an epic filled into a credentialing PDF.
+  const r = (await tool.handler({ record_id: providerId, kind: 'provider' }, deps)) as RecordsGetResult;
   return {
     provider: { name: r.record.name, npi: r.record.external_id, status: r.record.status },
     fields: r.fields.map((f) => ({ name: f.name, value: f.value, restricted: f.restricted, status: f.status })),

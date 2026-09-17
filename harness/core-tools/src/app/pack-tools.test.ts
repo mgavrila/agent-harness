@@ -21,6 +21,10 @@ function packRecordingItsDeps(record: (deps: unknown) => void): Pack {
   return definePack({
     ...healthcarePack,
     name: 'pack-tools-fixture',
+    // No `replaces`: this fixture's `tools` returns one marker rather than the shipped pack's
+    // catalogue, and publication rule 4 refuses a source that replaces a kernel name it does not
+    // publish. What is under test here is the dependency bag, not the replacement rules.
+    replaces: undefined,
     tools: (deps: unknown) => {
       record(deps);
       return [

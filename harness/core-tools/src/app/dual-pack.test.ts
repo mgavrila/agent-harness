@@ -216,7 +216,14 @@ describe('two packs in one process', () => {
     expect(document.document).toMatchObject({ record_id: extracted.record_id, kind: 'meeting_notes' });
   });
 
-  /** One epic with one `source_link`, so the two deadline cases below differ in one argument. */
+  /**
+   * One epic with one `source_link`, so the two deadline cases below differ in one argument.
+   *
+   * The compute goes through the *kernel's* `deadlines_compute`, reached on `deps.kernelTools`
+   * because healthcare's wrapper holds that name in the published catalogue. That is the tool an
+   * epic belongs to: the wrapper now pins `record_kind: 'provider'` and refuses this id, which
+   * the case below asserts directly.
+   */
   async function deadlinesForLink(attachment: Record<string, string>): Promise<string[]> {
     const deps = makeTestDeps(db, { packs });
     const client = await connectTestClient(() => createCoreToolsServer(deps));
@@ -230,9 +237,11 @@ describe('two packs in one process', () => {
         },
       }),
     );
-    const computed = resultOf<{ deadlines: { kind: string }[] }>(
-      await client.callTool({ name: 'deadlines_compute', arguments: { provider_id: epic.record_id } }),
-    );
+    const compute = deps.kernelTools.get('deadlines_compute');
+    expect(compute).toBeDefined();
+    const computed = (await compute!.handler({ record_id: epic.record_id }, deps)) as {
+      deadlines: { kind: string }[];
+    };
     return computed.deadlines.map((d) => d.kind);
   }
 
@@ -248,6 +257,35 @@ describe('two packs in one process', () => {
     // due. A kernel that assumed everything hung off a record lapses would schedule against
     // `null` here, which is how an epic ended up in a renewals digest.
     expect(await deadlinesForLink({})).toEqual([]);
+  });
+
+  it("refuses an epic id through healthcare's deadlines_compute, naming both kinds", async () => {
+    // The published `deadlines_compute` is healthcare's wrapper and it answers in credentialing
+    // words — `credential_id` for every row. Recomputing an epic through it would report the
+    // epic's tracker link under that name, so the wrapper pins `record_kind: 'provider'` and the
+    // kernel refuses the id instead. The message names what the record is and what was expected.
+    const deps = makeTestDeps(db, { packs });
+    const client = await connectTestClient(() => createCoreToolsServer(deps));
+    const epic = resultOf<{ record_id: string }>(
+      await client.callTool({
+        name: 'records_upsert',
+        arguments: {
+          kind: 'epic',
+          name: 'Seat-based billing',
+          attachments: [{ kind: 'source_link', issuer: 'JIRA', expires_at: '2027-12-31' }],
+        },
+      }),
+    );
+    const res = await client.callTool({ name: 'deadlines_compute', arguments: { provider_id: epic.record_id } });
+    expect(res.isError).toBe(true);
+    expect(textOf(res)).toContain('is a "epic" record, not a "provider" record');
+
+    // And the epic's own deadlines are untouched by the refused call.
+    const compute = deps.kernelTools.get('deadlines_compute');
+    const computed = (await compute!.handler({ record_id: epic.record_id }, deps)) as {
+      deadlines: { kind: string }[];
+    };
+    expect(computed.deadlines.map((d) => d.kind)).toEqual(['expiration']);
   });
 
   it('gives every loaded pack an evals block whose judged fields hold no restricted name', () => {

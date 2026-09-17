@@ -9,11 +9,14 @@ const deadlinesCompute = defineTool({
   description:
     'Recompute expiration and renewal-start deadlines for a record from its attachments. Deterministic, no model call.',
   actionClass: 'write.internal',
-  input: z.object({ record_id: z.string().uuid() }),
+  input: z.object({
+    record_id: z.string().uuid(),
+    record_kind: z.string().min(1).optional().describe('Refuse the write when the record is not of this kind'),
+  }),
   output: z.object({
     deadlines: z.array(z.object({ attachment_id: z.string(), kind: z.string(), due_at: z.string() })),
   }),
-  handler: async ({ record_id }, deps) => recomputeDeadlines(deps, record_id),
+  handler: async ({ record_id, record_kind }, deps) => recomputeDeadlines(deps, record_id, record_kind),
   recordIds: ({ record_id }) => [record_id],
 });
 

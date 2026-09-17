@@ -482,7 +482,14 @@ export function aliasTools(deps: PackToolDeps): AnyToolDef[] {
       deadlines: z.array(z.object({ credential_id: z.string(), kind: z.string(), due_at: z.string() })),
     }),
     handler: async ({ provider_id }, deps) => {
-      const r = await callKernel<DeadlinesComputeResult>(deps, 'deadlines_compute', { record_id: provider_id });
+      // `record_kind: 'provider'` for the same reason `deadlines_upcoming` passes it: in a
+      // deployment that also loads another pack, an id of that pack's kind would otherwise be
+      // recomputed here and its attachments reported back as `credential_id`. The pin is on the
+      // kernel call only — this tool's own input is still `provider_id` alone.
+      const r = await callKernel<DeadlinesComputeResult>(deps, 'deadlines_compute', {
+        record_id: provider_id,
+        record_kind: 'provider',
+      });
       return {
         deadlines: r.deadlines.map((d) => ({ credential_id: d.attachment_id, kind: d.kind, due_at: d.due_at })),
       };

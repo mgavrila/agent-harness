@@ -21,9 +21,18 @@ interface UpcomingArgs {
  * `deadlines_compute`: recompute this record's deadlines from its attachments and reconcile the
  * stored rows with the result. The dates come from `computeDeadlines`; this function only reads
  * and writes them, and asks the registry how long each kind's lead time is.
+ *
+ * `recordKind` pins the write the way `requireRecord`'s does every read: a pack's renamed
+ * `deadlines_compute` passes its own kind so that a foreign record is a `ToolError` naming both
+ * kinds, rather than a recompute reported back through the wrong pack's vocabulary. Omitting it
+ * keeps the generic behaviour — any record of this client.
  */
-export async function recomputeDeadlines(deps: ToolDeps, recordId: string): Promise<DeadlinesComputeResult> {
-  await requireRecord(deps, recordId);
+export async function recomputeDeadlines(
+  deps: ToolDeps,
+  recordId: string,
+  recordKind?: string,
+): Promise<DeadlinesComputeResult> {
+  await requireRecord(deps, recordId, recordKind);
   const rows = await deps.db.select().from(attachments).where(eq(attachments.recordId, recordId));
   const computed = computeDeadlines(
     rows.map((a) => ({ id: a.id, kind: a.kind, expiresAt: a.expiresAt })),
