@@ -149,7 +149,10 @@ services:
         # HERMES_UID inside the hermes container and the fresh volume root is
         # owned by root. The approvals container reads this tree as its own
         # uid-1000 `node` user, which matches the default HERMES_UID.
-        mkdir -p /srv/harness-storage/out
+        # `incoming/` is where Hermes drops files a human attaches in chat (see
+        # the hermes service's mount of the same subpath), so `documents_ingest`
+        # can read them as `incoming/<file name>` under the storage root.
+        mkdir -p /srv/harness-storage/out /srv/harness-storage/incoming
         chown -R "$${HERMES_UID}:$${HERMES_GID}" /srv/harness-storage
         echo "hermes-init: seeded SOUL.md, config.yaml, cron/playbooks.sh, scripts/ and the storage root"
 
@@ -196,6 +199,15 @@ services:
     volumes:
       - hermesdata:/opt/data
       - storage:/srv/harness-storage
+      # Hermes saves chat attachments under $HERMES_HOME/cache/documents. Mount
+      # the store's `incoming/` there, so a file a human drops in Slack is
+      # already inside the storage root the core-tools child may read from,
+      # as `incoming/<file name>`; nothing outside that root is ever readable.
+      - type: volume
+        source: storage
+        target: /opt/data/cache/documents
+        volume:
+          subpath: incoming
       # Content is editable without a rebuild; code is not.
       - ../../packs:/srv/agent-harness/packs:ro
       - ../../clients:/srv/agent-harness/clients:ro

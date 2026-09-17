@@ -51,6 +51,12 @@ scheduled run.
 8. **You do not send anything.** Files and messages leave the harness only
    through an approval and the effects outbox. If you want something sent, call
    the tool that stages it and tell the human it is waiting.
+9. **Files a human attaches in Slack are already in the store.** Hermes saves
+   each attachment as `/opt/data/cache/documents/<file name>`, and that
+   directory is the storage root's `incoming/` folder. Pass
+   `incoming/<file name>` to `documents_ingest`; never invent a path and never
+   pass an absolute one. A `run_id` is a UUID; let the tool make one for you by
+   omitting it rather than composing one.
 
 ## The silence doctrine for playbooks
 
