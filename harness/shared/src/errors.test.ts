@@ -41,7 +41,7 @@ describe('describeError', () => {
 
 describe('SurfaceError', () => {
   it('is its own name, so a catch can tell it from a ToolError', () => {
-    const err = new SurfaceError('slack: "nope" is not a conversation id');
+    const err = new SurfaceError('slack: that is not a conversation id (4 characters)');
     expect(err.name).toBe('SurfaceError');
     expect(err).toBeInstanceOf(Error);
     expect(err).not.toBeInstanceOf(ToolError);

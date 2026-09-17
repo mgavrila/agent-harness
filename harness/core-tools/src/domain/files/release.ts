@@ -4,6 +4,7 @@ import { ToolError } from '@harness/shared';
 import type { ToolDeps } from '../tooling/types.js';
 import { resolveOutFile } from '../storage/file-store.js';
 import { stageEffect } from '../effects/outbox.js';
+import { assertNoRestrictedPattern } from '../../shared/redaction/patterns.js';
 
 /**
  * The smallest upload limit among the surfaces the harness supports, and a 25 MB generated file
@@ -47,6 +48,11 @@ export async function stageRelease(
   args: { file_id: string; channel?: string; surface?: string },
 ): Promise<StagedRelease> {
   const { file_id, channel, surface } = args;
+  // Both addressing arguments are agent-chosen and both are stored in plaintext, and their
+  // schemas validate a shape that a restricted identifier fits. Checked before anything is
+  // resolved or staged, the same way `harness_notify` checks its own.
+  assertNoRestrictedPattern(channel, 'conversation id');
+  assertNoRestrictedPattern(surface, 'surface name');
   const absolute = await resolveOutFile(file_id, deps.storageDir);
   let size: number;
   try {

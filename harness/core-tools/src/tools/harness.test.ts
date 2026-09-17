@@ -130,6 +130,30 @@ describe('session context and lineage', () => {
     expect(await db.select().from(toolEffects)).toHaveLength(0);
   });
 
+  it('refuses a conversation id that looks like a restricted identifier', async () => {
+    const client = await connectServer();
+    // `CONVERSATION_ID_PATTERN` admits this, because the kernel cannot know a surface's id
+    // format. Nothing downstream would catch it: the id is stored in plaintext, and the adapter
+    // that rejects it writes its complaint into the plaintext `tool_effects.last_error`.
+    const res = await client.callTool({
+      name: 'harness_notify',
+      arguments: { text: 'one item', idempotency_key: 'k-ssn-channel', channel: '123-45-6789' },
+    });
+    expect(res.isError).toBe(true);
+    expect(await db.select().from(toolEffects)).toHaveLength(0);
+  });
+
+  it('refuses a surface name that looks like a restricted identifier', async () => {
+    const client = await connectServer();
+    // A DEA registration is two letters and seven digits, which `SURFACE_NAME_PATTERN` accepts.
+    const res = await client.callTool({
+      name: 'harness_notify',
+      arguments: { text: 'one item', idempotency_key: 'k-dea-surface', surface: 'ab1234567' },
+    });
+    expect(res.isError).toBe(true);
+    expect(await db.select().from(toolEffects)).toHaveLength(0);
+  });
+
   it('records the lineage the caller declares', async () => {
     const client = await connectServer();
     const [earlier] = await db

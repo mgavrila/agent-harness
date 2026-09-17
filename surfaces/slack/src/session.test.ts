@@ -174,8 +174,15 @@ describe('the Slack session', () => {
 
   it('refuses a conversation id that is not a Slack one, before it calls Slack', async () => {
     const { session, api } = fakeSlackSession();
+    // An id the kernel's shape check admits and Slack's does not, spelling an SSN. The message
+    // is written into the plaintext `tool_effects.last_error`, so it says the shape and not the
+    // value: quoting the id would put a restricted identifier in a column operators paste around.
+    const restricted = '123-45-6789';
+    const err = await rejection(session.postCard(restricted, card));
+    expect(err.message).toBe('slack: that is not a Slack conversation id (11 characters)');
+    expect(err.message).not.toContain('123');
+    expect(err.message).not.toContain('6789');
     await expect(session.postCard('not-a-channel', card)).rejects.toThrow(SurfaceError);
-    await expect(session.postCard('not-a-channel', card)).rejects.toThrow(/slack: "not-a-channel"/);
     expect(api.posts).toHaveLength(0);
   });
 

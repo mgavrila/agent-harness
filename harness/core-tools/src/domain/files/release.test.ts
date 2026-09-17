@@ -58,3 +58,19 @@ describe('the release idempotency key', () => {
     expect(again.effect_id).toBe(first.effect_id);
   });
 });
+
+describe('a release addressed with a restricted-looking id', () => {
+  it('is refused before anything is staged, for the conversation and for the surface alike', async () => {
+    const deps = await depsWithOutFile();
+    // Both arguments reach a plaintext column: the id itself on the row, and the adapter's
+    // complaint about it in `tool_effects.last_error`. Their schemas check a shape, and an SSN
+    // and a DEA registration both fit one.
+    await expect(stageRelease(deps, { file_id: FILE_ID, channel: '123-45-6789' })).rejects.toThrow(
+      /restricted identifier/,
+    );
+    await expect(stageRelease(deps, { file_id: FILE_ID, surface: 'ab1234567' })).rejects.toThrow(
+      /restricted identifier/,
+    );
+    expect(await db.select().from(toolEffects)).toHaveLength(0);
+  });
+});

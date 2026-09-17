@@ -4,7 +4,7 @@ import { ToolError } from '@harness/shared';
 import type { ToolDeps } from '../tooling/types.js';
 import { reconcile, type ReconcileResult } from '../tooling/reconcile.js';
 import { stageEffect } from '../effects/outbox.js';
-import { containsRestrictedPattern } from '../../shared/redaction/patterns.js';
+import { assertNoRestrictedPattern } from '../../shared/redaction/patterns.js';
 
 interface SetContextArgs {
   run_id?: string | null;
@@ -73,11 +73,14 @@ export async function stageNotification(
   deps: ToolDeps,
   { text, idempotency_key, channel, surface }: NotifyArgs,
 ): Promise<{ effect_id: string; staged: boolean }> {
-  if (containsRestrictedPattern(text)) {
-    throw new ToolError(
-      'message refused: it looks like it contains a restricted identifier; restricted values never leave the harness',
-    );
-  }
+  assertNoRestrictedPattern(text, 'message');
+  // The addressing arguments are checked too, and for a different reason than
+  // the text: they are stored in plaintext, and an adapter that rejects an id
+  // it does not recognise writes its complaint into tool_effects.last_error,
+  // which is plaintext as well. Their schemas validate a shape only, and both
+  // shapes admit a restricted one.
+  assertNoRestrictedPattern(channel, 'conversation id');
+  assertNoRestrictedPattern(surface, 'surface name');
   // The text is the payload and is stored encrypted. The summary is a label
   // only: tool_effects.summary is plaintext and operators read it freely.
   return stageEffect(deps, {

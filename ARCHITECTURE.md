@@ -264,7 +264,10 @@ The kernel's `harness_notify` and the healthcare pack's `forms_release` keep the
 argument name, because skills use it, but validate it only as a conversation-id _shape_
 (`CONVERSATION_ID_PATTERN`, in `@harness/shared` so both contracts can reach it): the kernel
 cannot know a surface's id format, so the adapter checks at dispatch and a bad id fails that one
-effect, visible through `harness_reconcile`.
+effect, visible through `harness_reconcile`. A shape that loose admits an SSN, an EIN and a DEA
+registration, so both staging tools run the restricted-pattern guard over the conversation id and
+the surface name as well as over the text, and the adapter's complaint about an id it rejects
+never quotes the id: both the id and the complaint are stored in plaintext.
 
 **A card that was accepted is not a card that failed.** An adapter whose transport takes a card
 and answers with nothing to address it by rejects `postCard` with `SurfaceAcceptedError`. The

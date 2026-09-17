@@ -302,7 +302,9 @@ complete one; read it alongside this, and read `surfaces/slack` for the real thi
 6. **Throw `SurfaceError`, and watch what is in the message.** A bad conversation id, a missing
    capability, a transport that refused. The host writes that message into
    `tool_effects.last_error`, which is plaintext and which an operator pastes into a ticket, so
-   name the surface and the operation and never a path, a token or a payload value.
+   name the surface and the operation and never a path, a token or a payload value — not even the
+   conversation id you are rejecting, which is agent-chosen and validated only as a shape. Say
+   its length instead.
 
    One rejection is not a failure: when your transport **accepts** a card and answers with nothing
    to address it by, throw `SurfaceAcceptedError`, the `SurfaceError` subclass that says so. A

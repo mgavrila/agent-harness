@@ -25,9 +25,16 @@ const NAME = 'slack';
  */
 const SLACK_CONVERSATION = /^[CGD][A-Z0-9]{2,}$/;
 
+/**
+ * The rejected id is deliberately *not* in the message. It is an agent-chosen argument, the
+ * kernel admits any conversation-shaped string, and this message is written verbatim into
+ * `tool_effects.last_error`, which is plaintext — so an id that spelled an SSN or an EIN would
+ * land there. The length is enough for an operator to see which argument was wrong; the value
+ * itself is in the encrypted payload, where `harness_reconcile` reads it.
+ */
 function assertConversation(conversation: string): void {
   if (!SLACK_CONVERSATION.test(conversation)) {
-    throw new SurfaceError(`${NAME}: "${conversation}" is not a Slack conversation id`);
+    throw new SurfaceError(`${NAME}: that is not a Slack conversation id (${conversation.length} characters)`);
   }
 }
 
