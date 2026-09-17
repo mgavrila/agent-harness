@@ -81,7 +81,12 @@ At startup `app/server.ts` reads `HARNESS_PACKS` — comma-separated package nam
 dynamically into a `PackRegistry` on `ToolDeps`. No shipping module under
 `harness/core-tools/src/` names a pack: `pnpm arch` fails the build on a static
 `@harness/pack-*` import, with `src/testing.ts` and `*.test.ts` exempt because they need a
-registry synchronously. `evals/src` is held to the same rule.
+registry synchronously. `evals/src` is held to the same rule, exempting `*.test.ts` and
+`*.test-helpers.ts`, and the runner reaches a pack only through `HARNESS_PACKS` and `--pack`.
+
+Those exemptions are the only reason the module graph shows an arrow from core-tools, or from
+evals, to a pack at all — the graph collapses each package's layers to one node, tests included.
+Remove the tests and both arrows go with them.
 
 ### The record model
 
