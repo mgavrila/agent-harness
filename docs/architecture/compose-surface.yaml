@@ -28,10 +28,9 @@ services:
       HARNESS_CLIENT: ${HARNESS_CLIENT:-demo-practice}
       HARNESS_ENCRYPTION_KEY: ${HARNESS_ENCRYPTION_KEY:-}
       HARNESS_FILES_URL: http://files:8790
-      HARNESS_FORMS_DIR: /srv/agent-harness/packs/healthcare/forms
       HARNESS_GATEWAY_URL: http://litellm:4000
       HARNESS_PACKS: ${HARNESS_PACKS:-@harness/pack-healthcare}
-      HARNESS_POLICY_FILE: /srv/agent-harness/clients/demo-practice/policy.yaml
+      HARNESS_POLICY_FILE: /srv/agent-harness/clients/${HARNESS_CLIENT:?set HARNESS_CLIENT in .env}/policy.yaml
       HARNESS_STORAGE_DIR: /srv/harness-storage
       HARNESS_SURFACES: ${HARNESS_SURFACES:-@harness/surface-slack}
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?set LITELLM_MASTER_KEY in .env}
@@ -146,10 +145,9 @@ services:
       APPROVALS_SLACK_BOT_TOKEN: ""
       DATABASE_URL: postgres://harness:harness@postgres:5432/harness
       HARNESS_FILES_URL: http://files:8790
-      HARNESS_FORMS_DIR: /srv/agent-harness/packs/healthcare/forms
       HARNESS_GATEWAY_URL: http://litellm:4000
       HARNESS_PACKS: ${HARNESS_PACKS:-@harness/pack-healthcare}
-      HARNESS_POLICY_FILE: /srv/agent-harness/clients/demo-practice/policy.yaml
+      HARNESS_POLICY_FILE: /srv/agent-harness/clients/${HARNESS_CLIENT:?set HARNESS_CLIENT in .env}/policy.yaml
       HARNESS_STORAGE_DIR: /srv/harness-storage
       HERMES_GID: ${HERMES_GID:-1000}
       HERMES_UID: ${HERMES_UID:-1000}
@@ -186,11 +184,6 @@ services:
         read_only: true
         source: ../../clients
         target: /srv/agent-harness/clients
-        type: bind
-      - bind:
-          create_host_path: true
-        source: /var/run/docker.sock
-        target: /var/run/docker.sock
         type: bind
   hermes-init:
     command:
@@ -266,7 +259,7 @@ services:
       - bind:
           create_host_path: true
         read_only: true
-        source: ../../clients/demo-practice
+        source: ../../clients/${HARNESS_CLIENT:?set HARNESS_CLIENT in .env}
         target: /srv/client
         type: bind
       - bind:

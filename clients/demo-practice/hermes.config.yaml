@@ -24,14 +24,15 @@ fallback_providers:
     base_url: 'http://litellm:4000/v1'
 
 # --- Sandbox ----------------------------------------------------------------
+# `local` runs a shell in the agent's own container as HERMES_UID, with no Docker socket
+# mounted anywhere (spec invariant 6). The Slack toolset has no terminal at all — see
+# platform_toolsets — so only an operator on the CLI surface reaches this, and what they
+# reach is one container, not the host.
 terminal:
-  backend: 'docker'
+  backend: 'local'
   cwd: '/workspace'
   timeout: 180
   lifetime_seconds: 300
-  docker_image: 'nikolaik/python-nodejs:python3.11-nodejs20'
-  # Never mount the launch directory: the agent has no reason to reach the repo.
-  docker_mount_cwd_to_workspace: false
 
 # --- Self-improvement gates -------------------------------------------------
 # Both gates are on. Skill writes are staged under ~/.hermes/pending/skills/ and
@@ -94,11 +95,6 @@ mcp_servers:
       HARNESS_CLIENT: 'demo-practice'
       HARNESS_POLICY_FILE: '/srv/agent-harness/clients/demo-practice/policy.yaml'
       HARNESS_STORAGE_DIR: '/srv/harness-storage'
-      # Optional. Unset, core-tools takes the forms directory from the first
-      # pack in HARNESS_PACKS, so swapping the pack swaps the templates with
-      # it. Set, it overrides the pack — clear or repoint this line when the
-      # new pack owns the forms.
-      HARNESS_FORMS_DIR: '/srv/agent-harness/packs/healthcare/forms'
       # Interpolated, never hardcoded: the hermes container's own
       # HARNESS_PACKS has to reach this child, or this core-tools process
       # would serve a different pack set from the one the approvals app's

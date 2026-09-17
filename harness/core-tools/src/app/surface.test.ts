@@ -163,3 +163,26 @@ describe('the files worker boundary', () => {
     }
   });
 });
+
+/**
+ * Spec section 7, read off the recorded Compose config: no Docker socket anywhere, no client
+ * name outside a `${HARNESS_CLIENT…}` interpolation, and no forms directory pinned to a pack —
+ * core-tools takes it from the first pack `HARNESS_PACKS` names.
+ */
+describe('the Compose stack names no client and mounts no socket', () => {
+  const rendered = async (): Promise<string> => readFile(path.join(architecture, 'compose-surface.yaml'), 'utf8');
+
+  it('mounts no Docker socket anywhere', async () => {
+    expect(await rendered()).not.toContain('/var/run/docker.sock');
+  });
+
+  it('derives every client path from HARNESS_CLIENT', async () => {
+    // --no-interpolate keeps `${HARNESS_CLIENT:-demo-practice}` and `${HARNESS_CLIENT:?…}`
+    // verbatim; with those stripped, the client's name must not appear anywhere.
+    expect((await rendered()).replace(/\$\{HARNESS_CLIENT[^}]*\}/g, '')).not.toContain('demo-practice');
+  });
+
+  it('pins no forms directory', async () => {
+    expect(await rendered()).not.toContain('HARNESS_FORMS_DIR');
+  });
+});
