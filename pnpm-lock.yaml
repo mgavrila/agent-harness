@@ -328,6 +328,9 @@ importers:
         specifier: ^1.17.1
         version: 1.17.1
     devDependencies:
+      '@harness/shared':
+        specifier: workspace:*
+        version: link:../../harness/shared
       '@types/node':
         specifier: ^26.5.1
         version: 26.5.1

@@ -6,11 +6,13 @@ kernel's generic tools: it ships **no tools of its own, replaces no kernel tool,
 directory**. If a change to `harness/core-tools` makes this pack need a special case, the kernel
 has learned about an area of the product it should not know about.
 
-This package depends on `@harness/pack-api` and on nothing else in the workspace. A pack may also
-depend on `@harness/shared`, and healthcare does; this one needs nothing from it, because its
-corpus is three literal documents and its case and injection files are written by hand rather
-than generated. core-tools loads it by name from `HARNESS_PACKS` and never imports it, so an
-import of `@harness/core-tools` from here would be a cycle and `pnpm arch` fails the build on one.
+At run time this package depends on `@harness/pack-api` and on nothing else in the workspace; its
+tests also use `@harness/shared` to parse the two case files. Those are the only two workspace
+packages a pack may reach for. core-tools loads it by name from `HARNESS_PACKS` and never imports
+it, so an import of `@harness/core-tools` from here would be a cycle and `pnpm arch` fails the
+build on one — and an import of `@harness/evals` would invert the relationship this pack exists to
+demonstrate, which is why its case files are checked against the declaration here rather than
+through the eval runner's loader.
 
 ## Layout
 
