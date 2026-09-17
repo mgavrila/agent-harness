@@ -34,15 +34,15 @@ function statusOf(res: { isError?: boolean; structuredContent?: unknown }): 'ok'
 function sleepUntil(ms: number, signal: AbortSignal): Promise<'slept' | 'aborted'> {
   return new Promise((resolve) => {
     if (signal.aborted) return resolve('aborted');
-    const timer = setTimeout(() => resolve('slept'), ms);
-    signal.addEventListener(
-      'abort',
-      () => {
-        clearTimeout(timer);
-        resolve('aborted');
-      },
-      { once: true },
-    );
+    const onAbort = () => {
+      clearTimeout(timer);
+      resolve('aborted');
+    };
+    const timer = setTimeout(() => {
+      signal.removeEventListener('abort', onAbort);
+      resolve('slept');
+    }, ms);
+    signal.addEventListener('abort', onAbort, { once: true });
   });
 }
 
@@ -81,8 +81,17 @@ export class ScriptedRuntime implements RuntimeSession {
           yield { type: 'tool_call', name: step.tool, argsHash: hashArgs(step.args) };
           let status: 'ok' | 'pending' | 'error';
           try {
-            status = statusOf(await request.tools.callTool({ name: step.tool, arguments: step.args }));
+            status = statusOf(
+              await request.tools.callTool({ name: step.tool, arguments: step.args }, { signal: request.signal }),
+            );
           } catch {
+            // A rejection while the signal is aborted is the abort itself, not the tool's own
+            // failure: the run ends with `cancelled` and reports no result for this call, the
+            // same as an abort caught mid-sleep. Any other rejection is a genuine tool failure.
+            if (request.signal.aborted) {
+              yield { type: 'error', message: 'cancelled' };
+              return;
+            }
             status = 'error';
           }
           yield { type: 'tool_result', name: step.tool, status };

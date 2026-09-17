@@ -23,6 +23,12 @@ beforeEach(async () => {
       inputSchema: { type: 'object', properties: { file_id: { type: 'string' } } },
       handler: () => ({ status: 'pending', approval_id: '11111111-1111-4111-8111-111111111111' }),
     },
+    {
+      name: 'slow_search',
+      description: 'a tool call slow enough to abort mid-flight',
+      inputSchema: { type: 'object', properties: {} },
+      handler: () => new Promise((resolve) => setTimeout(() => resolve({ status: 'ok' }), 10_000)),
+    },
   ]);
 });
 afterEach(() => fixture.close());
@@ -71,6 +77,18 @@ describe('ScriptedRuntime', () => {
     const handle = runtime.run(fixtureRequest({ tools: fixture.client, signal: controller.signal }));
     setTimeout(() => controller.abort(), 10);
     expect(await collect(handle.events)).toEqual([{ type: 'error', message: 'cancelled' }]);
+  });
+
+  it('ends with error "cancelled" when the signal aborts during a tool call, with no tool_result', async () => {
+    const runtime = new ScriptedRuntime([{ tool: 'slow_search', args: {} }, { say: 'never' }]);
+    const controller = new AbortController();
+    const handle = runtime.run(fixtureRequest({ tools: fixture.client, signal: controller.signal }));
+    setTimeout(() => controller.abort(), 10);
+    const events = await collect(handle.events);
+    expect(events.filter((e) => e.type === 'tool_result')).toEqual([]);
+    const terminal = events.filter((e) => e.type === 'done' || e.type === 'error');
+    expect(terminal).toEqual([{ type: 'error', message: 'cancelled' }]);
+    expect(events.at(-1)).toBe(terminal[0]);
   });
 
   it('takes a trajectory chosen per request', async () => {
