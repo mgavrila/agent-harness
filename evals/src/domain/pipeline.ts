@@ -23,16 +23,18 @@ import type { CaseOutcome, StoredAttachment, StoredField } from './score.js';
  *
  * Empty, and that is the point. The runner has no opinion about which variables a pack's tools
  * read: it used to name one pack's four by hand, which is a measuring instrument knowing an area
- * of the product. A pack declares its own pins as `evals.testEnv` and `evalPackEnv` merges every
- * loaded pack's over this base.
- *
- * Exported so `judge-deps.test-helpers.ts` starts from the same base: the judge is a second
- * caller of the same tools, and giving it a looser environment than the pipeline would measure a
- * configuration nothing ships.
+ * of the product. Anything a future *kernel* variable needs under test goes here; a pack's
+ * variable never does.
  */
-export const EVAL_PACK_ENV: Readonly<Record<string, string>> = {};
+const EVAL_PACK_ENV: Readonly<Record<string, string>> = {};
 
-/** The base map plus every loaded pack's `evals.testEnv`, in load order. */
+/**
+ * The base map plus every loaded pack's `evals.testEnv`, in load order.
+ *
+ * `judge-deps.test-helpers.ts` calls this too, rather than assembling a map of its own: the
+ * judge is a second caller of the same tools, and giving it a looser environment than the
+ * pipeline would measure a configuration nothing ships.
+ */
 export function evalPackEnv(packs: PackRegistry): Readonly<Record<string, string>> {
   return Object.assign({}, EVAL_PACK_ENV, ...packs.all.map((p) => p.evals?.testEnv ?? {})) as Record<string, string>;
 }
