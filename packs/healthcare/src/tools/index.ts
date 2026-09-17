@@ -1,6 +1,6 @@
 import type { AnyToolDef, PackToolDeps } from '@harness/pack-api';
 import { verifyConfigFromEnv } from '../config.js';
-import { HEALTHCARE_REPLACES, aliasTools } from './aliases.js';
+import { HEALTHCARE_REPLACES, aliasTools } from './aliases/index.js';
 import { formTools } from './forms.js';
 import { verifyTools } from './verify.js';
 
