@@ -110,6 +110,50 @@ describe('the Slack session', () => {
     expect(api.uploads).toHaveLength(0);
   });
 
+  /**
+   * A transport failure has to arrive as a `SurfaceError`, because the contract says every method
+   * rejects with one and because the message is written into `tool_effects.last_error`, which is
+   * plaintext. The three cases below are the three that carry content the error must not repeat:
+   * a card's text, a thread reply's text, and a staged file's name and path.
+   */
+  const failing = (): ReturnType<typeof fakeSlackSession> => {
+    const wired = fakeSlackSession();
+    wired.api.failWith = 'channel_not_found';
+    return wired;
+  };
+
+  const rejection = async (run: Promise<unknown>): Promise<Error> => {
+    const caught: unknown = await run.then(() => null).catch((err: unknown) => err);
+    expect(caught).toBeInstanceOf(SurfaceError);
+    return caught as Error;
+  };
+
+  it('reports a failed card post as a SurfaceError naming the operation, without the card text', async () => {
+    const { session } = failing();
+    const err = await rejection(session.postCard('C0DEMO', card));
+    expect(err.message).toBe('slack: chat.postMessage failed: channel_not_found');
+    expect(err.message).not.toContain('a summary');
+    expect(err.message).not.toContain('Approval needed');
+  });
+
+  it('reports a failed reply as a SurfaceError naming the operation, without the text it carried', async () => {
+    const { session } = failing();
+    const err = await rejection(session.postText('C0DEMO', 'a roster was released', {}));
+    expect(err.message).toBe('slack: chat.postMessage failed: channel_not_found');
+    expect(err.message).not.toContain('roster');
+  });
+
+  it('reports a failed upload as a SurfaceError naming the operation, without the filename or path', async () => {
+    const { session } = failing();
+    const file = path.join(dir, 'aetna-roster.csv');
+    await writeFile(file, 'payer_id\naetna\n');
+    const err = await rejection(session.uploadFile('C0DEMO', { path: file, filename: 'aetna-roster.csv' }));
+    // Distinct from the unreadable-file message: that one fails before Slack is called at all.
+    expect(err.message).toBe('slack: files.uploadV2 failed: channel_not_found');
+    expect(err.message).not.toContain('aetna-roster.csv');
+    expect(err.message).not.toContain(dir);
+  });
+
   it('opens the form as a modal against the trigger it was handed', async () => {
     const { session, api } = fakeSlackSession();
     await session.openForm('T1', form);
@@ -163,9 +207,14 @@ describe('the Slack session', () => {
       privateMetadata: '{"approval_id":"a1"}',
       state: { harness_approval_note: { harness_approval_note_input: { value: 'Use the Q4 roster.' } } },
     });
-    expect(seen[0]).toMatchObject({
+    // `toEqual`, not `toMatchObject`: the empty conversation is the point of the assertion, and a
+    // partial match would pass in silence if the adapter started inventing one. Slack's view
+    // submission carries no conversation for a modal opened from a button, so the host recovers
+    // it from the metadata it put there.
+    expect(seen[0]).toEqual({
       surface: 'slack',
       userId: 'U012',
+      conversation: '',
       formId: 'harness_approval_edit_modal',
       metadata: '{"approval_id":"a1"}',
       values: { harness_approval_note: 'Use the Q4 roster.' },

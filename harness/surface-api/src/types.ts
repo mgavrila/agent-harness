@@ -124,7 +124,14 @@ export interface ActionEvent {
   trigger: string | null;
 }
 
-/** A human submitted a form. `values` is keyed by `FormField.id`. */
+/**
+ * A human submitted a form. `values` is keyed by `FormField.id`.
+ *
+ * `conversation` may be empty, and a host must cope with that rather than trust it: a surface
+ * that opens a form from a button on a card has no conversation of its own to report on the
+ * submission. The host recovers one from `metadata`, which is its own string and comes back
+ * untouched, which is why anything a host needs on the way back belongs in there.
+ */
 export interface FormEvent {
   surface: string;
   userId: string;

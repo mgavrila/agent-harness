@@ -1,5 +1,5 @@
 import { readFile } from 'node:fs/promises';
-import { SurfaceError } from '@harness/shared';
+import { describeError, SurfaceError } from '@harness/shared';
 import type {
   ActionEvent,
   Card,
@@ -31,6 +31,24 @@ function assertConversation(conversation: string): void {
   }
 }
 
+/**
+ * Run one Web API call and turn whatever it throws into a `SurfaceError`.
+ *
+ * Every method on the contract promises a `SurfaceError` whose message is safe to write into
+ * `tool_effects.last_error`, which is plaintext and which an operator pastes into a ticket. The
+ * SDK's own rejection is not that: it is a `WebAPIPlatformError` the kernel would mask, and an
+ * unwrapped network failure carries a stack. So the message is the surface, the operation, and
+ * the underlying message — `op` is the API method's name and never the arguments, so no card
+ * text, no note, no filename and no channel can travel in it.
+ */
+async function guarded<T>(op: string, call: () => Promise<T>): Promise<T> {
+  try {
+    return await call();
+  } catch (err) {
+    throw new SurfaceError(`${NAME}: ${op} failed: ${describeError(err)}`);
+  }
+}
+
 export function createSlackSession(transport: SlackTransport, config: SlackConfig): SurfaceSession {
   const { api, events } = transport;
 
@@ -50,35 +68,37 @@ export function createSlackSession(transport: SlackTransport, config: SlackConfi
 
     async postCard(conversation, card: Card) {
       assertConversation(conversation);
-      const res = await api.chat.postMessage({
-        channel: conversation,
-        text: card.notice,
-        blocks: cardBlocks(card),
-      });
+      const res = await guarded('chat.postMessage', () =>
+        api.chat.postMessage({ channel: conversation, text: card.notice, blocks: cardBlocks(card) }),
+      );
       if (!res.ts) throw new SurfaceError(`${NAME}: the message was accepted without a timestamp`);
       return ref(conversation, res.ts);
     },
 
     async updateCard(message, card: Card) {
       assertConversation(message.conversation);
-      await api.chat.update({
-        channel: message.conversation,
-        ts: message.id,
-        text: card.notice,
-        blocks: cardBlocks(card),
-      });
+      await guarded('chat.update', () =>
+        api.chat.update({
+          channel: message.conversation,
+          ts: message.id,
+          text: card.notice,
+          blocks: cardBlocks(card),
+        }),
+      );
     },
 
     async postText(conversation, text, opts = {}) {
       assertConversation(conversation);
-      const res = await api.chat.postMessage({ channel: conversation, text, thread_ts: opts.replyTo?.id });
+      const res = await guarded('chat.postMessage', () =>
+        api.chat.postMessage({ channel: conversation, text, thread_ts: opts.replyTo?.id }),
+      );
       if (!res.ts) throw new SurfaceError(`${NAME}: the message was accepted without a timestamp`);
       return ref(conversation, res.ts);
     },
 
     async postPrivate(conversation, userId, text) {
       assertConversation(conversation);
-      await api.chat.postEphemeral({ channel: conversation, user: userId, text });
+      await guarded('chat.postEphemeral', () => api.chat.postEphemeral({ channel: conversation, user: userId, text }));
     },
 
     async uploadFile(conversation, file: UploadRequest) {
@@ -91,18 +111,20 @@ export function createSlackSession(transport: SlackTransport, config: SlackConfi
         // `tool_effects.last_error`, which is plaintext.
         throw new SurfaceError(`${NAME}: the staged file could not be read`);
       }
-      await api.files.uploadV2({
-        channel_id: conversation,
-        file: bytes,
-        filename: file.filename,
-        initial_comment: file.comment,
-        thread_ts: file.replyTo?.id,
-      });
+      await guarded('files.uploadV2', () =>
+        api.files.uploadV2({
+          channel_id: conversation,
+          file: bytes,
+          filename: file.filename,
+          initial_comment: file.comment,
+          thread_ts: file.replyTo?.id,
+        }),
+      );
       return { filename: file.filename };
     },
 
     async openForm(trigger, form: Form) {
-      await api.views.open({ trigger_id: trigger, view: formView(form) });
+      await guarded('views.open', () => api.views.open({ trigger_id: trigger, view: formView(form) }));
     },
 
     onAction(handler: (event: ActionEvent) => Promise<void>) {
