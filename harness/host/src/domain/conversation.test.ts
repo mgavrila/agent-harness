@@ -1,8 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { approvals, auditLog, messages, runs, threads } from '@harness/db';
 import { COORDINATOR, hostFixture, useTestDb } from '../testing.js';
 import { UNAUTHORISED_TEXT, attachMessageHandlers, cancelRun } from './conversation.js';
+import * as threadsRepository from './threads/repository.js';
 
 const db = useTestDb();
 
@@ -58,6 +59,7 @@ describe('a message on a surface', () => {
     expect(await db.select().from(runs)).toHaveLength(0);
     const [audit] = await db.select().from(auditLog);
     expect(audit).toMatchObject({ decision: 'unauthorised', caller: 'memory:U999', tool: 'host_message' });
+    expect(audit.runId).toBeNull();
   });
 
   it('stays silent in a group conversation unless mentioned', async () => {
@@ -154,5 +156,38 @@ describe('a message on a surface', () => {
     expect(run.status).toBe('error');
     expect(f.surface.texts).toHaveLength(1);
     expect(f.surface.texts[0].text).toContain('cancelled');
+  });
+
+  it('closes the kernel and marks the run error, leaking neither the controller nor the run, when recording the reply fails', async () => {
+    const f = await hostFixture(db, { trajectory: [{ say: 'hi' }] });
+    attachMessageHandlers(f.host);
+    const original = threadsRepository.appendMessage;
+    const spy = vi.spyOn(threadsRepository, 'appendMessage').mockImplementation(async (dbArg, m) => {
+      if (m.role === 'assistant') throw new Error('simulated insert failure');
+      return original(dbArg, m);
+    });
+    try {
+      await f.surface.say('U012', 'go');
+    } finally {
+      spy.mockRestore();
+    }
+    const [run] = await db.select().from(runs);
+    expect(run.status).toBe('error');
+    expect(run.endedAt).not.toBeNull();
+    expect(f.host.active.size).toBe(0);
+  });
+
+  it('posts the stopped notice as a reply once a stream has already begun', async () => {
+    const f = await hostFixture(db, { trajectory: [{ say: 'Part one.' }, { sleep: 10_000 }], streaming: true });
+    f.host.budget.timeoutMs = 20;
+    attachMessageHandlers(f.host);
+    await f.surface.say('U012', 'go');
+    const [run] = await db.select().from(runs);
+    expect(run.status).toBe('error');
+    expect(f.surface.streams).toEqual([{ conversation: 'memory', text: 'Part one.', ended: true, replyTo: null }]);
+    expect(f.surface.texts).toHaveLength(2);
+    expect(f.surface.texts[0].text).toBe('Part one.');
+    expect(f.surface.texts[1].text).toContain('cancelled');
+    expect(f.surface.texts[1].replyTo).toEqual({ surface: 'memory', conversation: 'memory', id: 'm1' });
   });
 });

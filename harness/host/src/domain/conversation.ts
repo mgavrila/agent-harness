@@ -61,103 +61,127 @@ export async function runTurn(host: Host, turn: TurnInput): Promise<TurnResult> 
   host.active.set(runId, controller);
   const timer = setTimeout(() => controller.abort(), host.budget.timeoutMs);
 
-  await appendMessage(host.db, {
-    threadId: turn.thread.id,
-    runId,
-    role: turn.role,
-    principalId: turn.principal.id,
-    content: turn.text,
-  });
-  // Fetch one extra turn beyond the budget: the row just appended above is always the newest,
-  // so trimming to `maxHistoryMessages + 1` and dropping the last one always drops that row,
-  // leaving exactly `maxHistoryMessages` turns of real history (or fewer, when there is less).
-  const history = trimHistory(await recentHistory(host.db, turn.thread.id, host.budget.maxHistoryMessages + 1), {
-    maxMessages: host.budget.maxHistoryMessages + 1,
-    maxChars: HISTORY_MAX_CHARS,
-  }).slice(0, -1);
-
-  const request: RunRequest = {
-    runId,
-    threadId: turn.thread.id,
-    principal: turn.principal,
-    input: { text: turn.text, attachments: turn.attachments },
-    history,
-    persona: host.persona,
-    skills: host.skills,
-    memory: '',
-    tools: kernel.client,
-    model: { ...host.model, user: turn.principal.id },
-    budget: {
-      maxModelCalls: host.budget.maxModelCalls,
-      maxToolCalls: host.budget.maxToolCalls,
-      timeoutMs: host.budget.timeoutMs,
-    },
-    signal: controller.signal,
-  };
-
-  let status: RunStatus = 'done';
+  // `status` starts as the pessimistic outcome: a throw anywhere below, before the happy path
+  // (or the runtime's own error/cancel handling) gets to set it, still has to close the run and
+  // the kernel as `error` rather than leaving the row `running` forever. Everything that touches
+  // the database, the runtime or the surface from here on is inside the outer `try`, so the
+  // `finally` — closing the timer, `active` and the kernel — runs on every path out of this
+  // function: success, a caught runtime failure, or an uncaught throw alike. The inner `try`
+  // exists only to force `status` to `error` on an uncaught throw even after the happy path had
+  // already moved it on to `done` — a failure appending the reply is still a failed run, not a
+  // successful one that merely lost its own record.
+  let status: RunStatus = 'error';
   let text = '';
-  let stream: StreamHandle | null = null;
-  const recipient = turn.principal.surfaces[turn.thread.surface] ?? '';
   try {
-    for await (const event of host.runtime.run(request).events) {
-      switch (event.type) {
-        case 'text':
-          stream ??= replyTarget(surface, turn.thread.conversation, turn.replyTo, recipient);
-          stream?.append(event.delta);
-          break;
-        case 'skill_activated':
-          kernel.deps.context.skill = event.name;
-          kernel.deps.context.skillVersion = event.version;
-          break;
-        case 'done':
-          text = event.text;
-          break;
-        case 'error': {
-          // A cancel deletes the controller from `active` before it aborts; a timeout does not.
-          // That difference is how the same "cancelled" message from the runtime is told apart
-          // here: still active means the host's own timeout fired, not `cancelRun`.
-          const cancelled = event.message === 'cancelled' && host.active.get(runId) === undefined;
-          status = cancelled ? 'cancelled' : 'error';
-          text = cancelled ? '' : `The run stopped: ${event.message}.`;
-          break;
+    try {
+      await appendMessage(host.db, {
+        threadId: turn.thread.id,
+        runId,
+        role: turn.role,
+        principalId: turn.principal.id,
+        content: turn.text,
+      });
+      // Fetch one extra turn beyond the budget: the row just appended above is always the
+      // newest, so trimming to `maxHistoryMessages + 1` and dropping the last one always drops
+      // that row, leaving exactly `maxHistoryMessages` turns of real history (or fewer, when
+      // there is less).
+      const history = trimHistory(await recentHistory(host.db, turn.thread.id, host.budget.maxHistoryMessages + 1), {
+        maxMessages: host.budget.maxHistoryMessages + 1,
+        maxChars: HISTORY_MAX_CHARS,
+      }).slice(0, -1);
+
+      const request: RunRequest = {
+        runId,
+        threadId: turn.thread.id,
+        principal: turn.principal,
+        input: { text: turn.text, attachments: turn.attachments },
+        history,
+        persona: host.persona,
+        skills: host.skills,
+        memory: '',
+        tools: kernel.client,
+        model: { ...host.model, user: turn.principal.id },
+        budget: {
+          maxModelCalls: host.budget.maxModelCalls,
+          maxToolCalls: host.budget.maxToolCalls,
+          timeoutMs: host.budget.timeoutMs,
+        },
+        signal: controller.signal,
+      };
+
+      status = 'done';
+      let stream: StreamHandle | null = null;
+      const recipient = turn.principal.surfaces[turn.thread.surface] ?? '';
+      try {
+        for await (const event of host.runtime.run(request).events) {
+          switch (event.type) {
+            case 'text':
+              stream ??= replyTarget(surface, turn.thread.conversation, turn.replyTo, recipient);
+              stream?.append(event.delta);
+              break;
+            case 'skill_activated':
+              kernel.deps.context.skill = event.name;
+              kernel.deps.context.skillVersion = event.version;
+              break;
+            case 'done':
+              text = event.text;
+              break;
+            case 'error': {
+              // A cancel deletes the controller from `active` before it aborts; a timeout does
+              // not. That difference is how the same "cancelled" message from the runtime is
+              // told apart here: still active means the host's own timeout fired, not `cancelRun`.
+              const cancelled = event.message === 'cancelled' && host.active.get(runId) === undefined;
+              status = cancelled ? 'cancelled' : 'error';
+              text = cancelled ? '' : `The run stopped: ${event.message}.`;
+              break;
+            }
+            default:
+              break;
+          }
         }
-        default:
-          break;
+      } catch (err) {
+        host.log.error(`run ${runId} failed while reading the runtime`, err);
+        status = 'error';
+        text = 'The run stopped: the runtime failed; see the host log.';
       }
+
+      // Invariant 10 on the final post: a reply that trips the check is withheld, not sent.
+      const safeText = containsRestrictedPattern(text) ? WITHHELD : text;
+      try {
+        if (stream) {
+          if (safeText === WITHHELD) stream.append(`\n${WITHHELD}`);
+          const streamedRef = await stream.end();
+          // The deltas already streamed cannot carry a notice that only shows up once the
+          // runtime is done; a stream that ends in error still owes the human that notice, as a
+          // reply to what was already sent rather than silence next to the partial answer.
+          if (status === 'error') {
+            await surface.postText(turn.thread.conversation, safeText, { replyTo: streamedRef });
+          }
+        } else if (safeText !== '') {
+          await surface.postText(turn.thread.conversation, safeText, { replyTo: turn.replyTo ?? undefined });
+        }
+      } catch (err) {
+        host.log.error(`run ${runId}: could not post the reply`, err);
+      }
+      if (status !== 'cancelled' && text !== '') {
+        await appendMessage(host.db, {
+          threadId: turn.thread.id,
+          runId,
+          role: 'assistant',
+          principalId: turn.principal.id,
+          content: text,
+        });
+      }
+      return { runId, status, text: safeText };
+    } catch (err) {
+      status = 'error';
+      throw err;
     }
-  } catch (err) {
-    host.log.error(`run ${runId} failed while reading the runtime`, err);
-    status = 'error';
-    text = 'The run stopped: the runtime failed; see the host log.';
   } finally {
     clearTimeout(timer);
     host.active.delete(runId);
+    await kernel.close(status);
   }
-
-  // Invariant 10 on the final post: a reply that trips the check is withheld, not sent.
-  const safeText = containsRestrictedPattern(text) ? WITHHELD : text;
-  try {
-    if (stream) {
-      if (safeText === WITHHELD) stream.append(`\n${WITHHELD}`);
-      await stream.end();
-    } else if (safeText !== '') {
-      await surface.postText(turn.thread.conversation, safeText, { replyTo: turn.replyTo ?? undefined });
-    }
-  } catch (err) {
-    host.log.error(`run ${runId}: could not post the reply`, err);
-  }
-  if (status !== 'cancelled' && text !== '') {
-    await appendMessage(host.db, {
-      threadId: turn.thread.id,
-      runId,
-      role: 'assistant',
-      principalId: turn.principal.id,
-      content: text,
-    });
-  }
-  await kernel.close(status);
-  return { runId, status, text: safeText };
 }
 
 /**
@@ -168,7 +192,10 @@ export async function runTurn(host: Host, turn: TurnInput): Promise<TurnResult> 
 export async function handleMessage(host: Host, event: MessageEvent): Promise<void> {
   if (!event.mentioned) return;
   const surface = host.surfaces.find(event.surface);
-  if (!surface) return;
+  if (!surface) {
+    host.log.warn(`message from surface "${event.surface}", which is not loaded`);
+    return;
+  }
   const principal = await host.identity.resolve({ surface: event.surface, userId: event.userId });
   if (!principal) {
     await writeAudit(host.db, {
