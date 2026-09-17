@@ -18,6 +18,7 @@ RUN corepack enable && corepack prepare pnpm@11.4.0 --activate
 WORKDIR /app
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml tsconfig.base.json ./
 COPY harness ./harness
+COPY identities ./identities
 COPY packs ./packs
 COPY evals ./evals
 RUN pnpm install --frozen-lockfile

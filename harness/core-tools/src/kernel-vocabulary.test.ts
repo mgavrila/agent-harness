@@ -123,6 +123,13 @@ const SCANNED = [
     minFiles: 5,
     skip: [/\.test\.ts$/],
   },
+  {
+    what: 'framework and vendor vocabulary',
+    root: 'identities/static/src',
+    forbidden: FRAMEWORK_FORBIDDEN,
+    minFiles: 1,
+    skip: [/\.test\.ts$/],
+  },
 ];
 
 /**

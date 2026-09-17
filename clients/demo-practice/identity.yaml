@@ -1,0 +1,38 @@
+# Who may act through this deployment, and as what. Read by @harness/identity-static — the
+# plug-in HARNESS_IDENTITY names — from this folder. A principal's id is what every audit row,
+# approval and run carries, so an id is stable and is never reused for someone else.
+#
+#   kind   user | service
+#   level  member < practitioner < lead < admin for a person; service for a scheduled job's
+#          or a process's own identity. A service is never "at least" a user level.
+#
+# The Slack member ids below are placeholders: nothing resolves a Slack user to a principal
+# until Plan 8's host does. Replace them with the two humans' real ids then.
+principals:
+  - id: u-practice-manager
+    kind: user
+    level: admin
+    displayName: Practice manager
+    surfaces:
+      slack: U0123ABCD
+  - id: u-coordinator
+    kind: user
+    level: lead
+    displayName: Credentialing coordinator
+    surfaces:
+      slack: U0456EFGH
+  # The core-tools child the chat runtime launches (HARNESS_PRINCIPAL in hermes.config.yaml).
+  - id: svc-hermes
+    kind: service
+    level: service
+    displayName: Chat runtime
+  # The core-tools child the approvals host launches (harness/approvals/src/app/child-env.ts).
+  - id: svc-approvals
+    kind: service
+    level: service
+    displayName: Approvals host
+  # The stdio server's default: the MCP inspector and the eval runner on an operator's machine.
+  - id: svc-local
+    kind: service
+    level: service
+    displayName: Local operator

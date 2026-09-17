@@ -103,6 +103,8 @@ export { definePack, type Pack } from '@harness/pack-api';
 
 // --- The identity contract ------------------------------------------------------------------
 export { type Principal } from '@harness/identity-api';
+export { loadIdentity } from './domain/identity/registry.js';
+export { type IdentityDeps, type IdentitySession } from '@harness/identity-api';
 
 // --- Shared helpers, for the packages above this one ---------------------------------------
 export { ConfigError, ModelOutputError, ToolError, describeError } from '@harness/shared';
