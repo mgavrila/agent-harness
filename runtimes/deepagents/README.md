@@ -62,7 +62,18 @@ built-in filesystem middleware is cut to four tools — `read_file`, `ls`, `glob
 every write is denied by a permission rule over `/**`. The `task` tool is stripped from every
 model request by `KernelToolFilter`, because this run has no subagents.
 
+The framework's own `memory` option is deliberately not used: it inlines the file into the system
+prompt and tells the model to save what it learns with `edit_file`, a tool this run neither offers
+nor permits. `KERNEL_RULES` tells the model to open `/memories/MEMORY.md` with `read_file` instead.
+
 A `read_file` of a path under `/skills/<name>/` is what `skill_activated` means here.
+
+## What reaches the surface as text
+
+Only the agent's own model node. Every model call inside the graph streams through the `messages`
+mode, the summarization middleware's included, so `modelTurnChunk` checks each payload's
+`langgraph_node` before a delta becomes a `text` event or a `usage` event. Without it a long thread
+would show the human a summary of their own conversation in place of an answer.
 
 ## The checkpointer
 

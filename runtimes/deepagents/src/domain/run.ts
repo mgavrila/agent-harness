@@ -21,6 +21,28 @@ const FAILED_MESSAGE = 'the run failed; see the host log';
 /** A skill activation is a `read_file` under `/skills/<name>/`; the version is the host's. */
 const SKILL_PATH = /^\/skills\/([^/]+)\//;
 
+/**
+ * The graph node the agent's own model call runs in, and the only one whose output is the
+ * assistant talking to the human. It is the same key the `updates` mapping below counts turns on.
+ */
+const MODEL_NODE = 'model_request';
+
+/**
+ * The assistant chunk of one `messages` payload, when the agent's own model node produced it.
+ *
+ * Every model call inside the graph streams through here, not just the agent's: `createDeepAgent`
+ * always installs a summarization middleware, whose call runs in its own node and whose output is
+ * an `AIMessageChunk` like any other. Streaming that to a surface would show the human a summary
+ * of their own thread in place of an answer, and fold it into `done.text`. The node name is the
+ * only thing in the payload that tells them apart.
+ */
+export function modelTurnChunk(payload: unknown): AIMessageChunk | AIMessage | null {
+  if (!Array.isArray(payload)) return null;
+  const [chunk, meta] = payload as [unknown, { langgraph_node?: unknown } | undefined];
+  if (meta?.langgraph_node !== MODEL_NODE) return null;
+  return chunk instanceof AIMessageChunk || chunk instanceof AIMessage ? chunk : null;
+}
+
 function contentText(content: unknown): string {
   if (typeof content === 'string') return content;
   if (!Array.isArray(content)) return '';
@@ -76,7 +98,11 @@ export async function runDeepAgent(request: RunRequest, ctx: RunContext, queue: 
       // The permissions go on this middleware, not only on `createDeepAgent`: a custom middleware
       // named `FilesystemMiddleware` REPLACES the default one, and the agent's own `permissions`
       // are an argument to the default it just replaced. Passed in both places, the denial holds
-      // for this agent and for the subagent specs the framework builds behind it.
+      // for this agent and for the subagent specs the framework builds behind it. For the same
+      // reason no `backend` is passed here: the replacement takes the framework's default
+      // `StateBackend`, so a custom `backend` on `createDeepAgent` would reach the skills and
+      // memory middleware but not the file tools. This runtime passes none and wants none — the
+      // model reads seeded state and no filesystem.
       createFilesystemMiddleware({ tools: READ_ONLY_FS_TOOLS, permissions: DENY_ALL_WRITES }),
       kernelToolFilter(),
       ...(request.model.fallbackRoute
@@ -88,7 +114,10 @@ export async function runDeepAgent(request: RunRequest, ctx: RunContext, queue: 
       tools,
       systemPrompt: systemPrompt(request.persona),
       skills: ['/skills/'],
-      memory: ['/memories/MEMORY.md'],
+      // `memory` is deliberately not passed. It inlines the file into the system prompt along with
+      // guidance telling the model to save what it learns with `edit_file` — a tool this run does
+      // not offer and a write every permission rule denies. `/memories/MEMORY.md` is seeded as a
+      // state file instead, and KERNEL_RULES tells the model to read it.
       checkpointer: ctx.checkpointer,
       permissions: DENY_ALL_WRITES,
       middleware,
@@ -111,8 +140,8 @@ export async function runDeepAgent(request: RunRequest, ctx: RunContext, queue: 
 
     for await (const [mode, payload] of stream) {
       if (mode === 'messages') {
-        const [chunk] = payload as [BaseMessage, unknown];
-        if (!(chunk instanceof AIMessageChunk || chunk instanceof AIMessage)) continue;
+        const chunk = modelTurnChunk(payload);
+        if (chunk === null) continue;
         const delta = contentText(chunk.content);
         if (delta !== '') {
           if (turns.length === 0) turns.push([]);
@@ -121,6 +150,9 @@ export async function runDeepAgent(request: RunRequest, ctx: RunContext, queue: 
         }
         const usage = chunk.usage_metadata;
         if (usage) {
+          // Always 0: the gateway reports the price of a call in an `x-litellm-response-cost`
+          // response header, and the model SDK surfaces no header to its caller. Cost attribution
+          // per principal is the host's, off its own record of the call, not the runtime's.
           queue.push({
             type: 'usage',
             inputTokens: usage.input_tokens,
@@ -131,11 +163,11 @@ export async function runDeepAgent(request: RunRequest, ctx: RunContext, queue: 
         continue;
       }
       const update = payload as Record<string, { messages?: BaseMessage[] } | undefined>;
-      if (!('model_request' in update)) continue;
+      if (!(MODEL_NODE in update)) continue;
       modelCalls += 1;
       turns.push([]);
       if (modelCalls > request.budget.maxModelCalls) exceed();
-      for (const message of update.model_request?.messages ?? []) {
+      for (const message of update[MODEL_NODE]?.messages ?? []) {
         if (!(message instanceof AIMessage || message instanceof AIMessageChunk)) continue;
         for (const call of message.tool_calls ?? []) {
           if (call.name !== 'read_file') continue;
@@ -147,6 +179,12 @@ export async function runDeepAgent(request: RunRequest, ctx: RunContext, queue: 
           queue.push({ type: 'skill_activated', name: skill.name, version: skill.version });
         }
       }
+    }
+    // An abort does not always surface as a throw: the graph can finish its current step and end
+    // the stream cleanly. A cancelled run still ends `cancelled`, never `done`.
+    if (request.signal.aborted) {
+      queue.push({ type: 'error', message: 'cancelled' });
+      return;
     }
     if (exceeded) {
       queue.push({ type: 'error', message: BUDGET_MESSAGE });

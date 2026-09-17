@@ -17,12 +17,11 @@
     "@langchain/langgraph": "1.4.15",
     "@langchain/langgraph-checkpoint-postgres": "1.0.5",
     "@langchain/openai": "1.5.13",
+    "@modelcontextprotocol/client": "^2.0.0",
     "deepagents": "1.13.4",
-    "langchain": "1.5.11",
-    "zod": "^4.6.5"
+    "langchain": "1.5.11"
   },
   "devDependencies": {
-    "@modelcontextprotocol/client": "^2.0.0",
     "@modelcontextprotocol/server": "^2.0.0",
     "@types/node": "^26.5.1",
     "@types/pg": "^8.15.6",

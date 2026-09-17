@@ -13,8 +13,9 @@ import {
   type FakeReply,
   type ToolServerFixture,
 } from '@harness/runtime-api/testing';
+import { AIMessage, AIMessageChunk, ToolMessage } from '@langchain/core/messages';
 import { EventQueue } from './events.js';
-import { runDeepAgent } from './run.js';
+import { modelTurnChunk, runDeepAgent } from './run.js';
 
 let gateway: FakeGateway;
 let fixture: ToolServerFixture;
@@ -199,10 +200,77 @@ describe('runDeepAgent', () => {
     expect(logged.length).toBeGreaterThan(0);
   });
 
+  it('never tells the model to write its memory, and serves the file when it reads it', async () => {
+    script([
+      { toolCalls: [{ name: 'read_file', arguments: { file_path: '/memories/MEMORY.md' } }] },
+      { content: 'noted' },
+    ]);
+    const events = await run(request({ memory: '# Memory\n- prefers short answers' }));
+    expect(events.at(-1)).toEqual({ type: 'done', text: 'noted' });
+    // Nothing in the system prompt offers a way to save a memory: the framework's memory option
+    // would have inlined the file and asked for `edit_file`, which is not on offer here.
+    const system = textOf(gateway.calls[0].messages.find((m) => m.role === 'system'));
+    expect(system).not.toContain('edit_file');
+    expect(system).toContain('read_file');
+    expect(system).toContain('/memories/MEMORY.md');
+    // And the seeded file is really there to be read.
+    const toolReply = gateway.calls[1].messages.filter((m) => m.role === 'tool').map(textOf);
+    expect(toolReply.join('\n')).toContain('prefers short answers');
+  });
+
+  it('falls back to the second route when the first one fails, and still finishes with done', async () => {
+    gateway.setResponder((call) =>
+      call.model === 'chat' ? { status: 500 } : { content: 'answered on the spare route' },
+    );
+    const events = await run(
+      request({
+        model: {
+          baseUrl: gateway.url,
+          apiKey: 'sk-test',
+          route: 'chat',
+          fallbackRoute: 'spare',
+          user: 'u-coordinator',
+        },
+      }),
+    );
+    expect(gateway.calls.map((c) => c.model)).toEqual(['chat', 'spare']);
+    expect(events.at(-1)).toEqual({ type: 'done', text: 'answered on the spare route' });
+    // The principal rides on the fallback request too; it is the same run and the same spender.
+    for (const call of gateway.calls) expect(call.user).toBe('u-coordinator');
+  });
+
   it('lists an attachment in the human message', async () => {
     script([{ content: 'ok' }]);
     await run(request({ input: { text: 'File this.', attachments: [{ name: 'w9.pdf', path: 'w9.pdf' }] } }));
     const human = gateway.calls[0].messages.find((m) => m.role === 'user');
     expect(textOf(human)).toContain('incoming/w9.pdf');
+  });
+});
+
+describe('modelTurnChunk', () => {
+  const meta = (node: string) => ({ langgraph_node: node, langgraph_step: 1 });
+
+  it('takes an assistant chunk from the model node the agent itself runs in', () => {
+    const chunk = new AIMessageChunk('hello');
+    expect(modelTurnChunk([chunk, meta('model_request')])).toBe(chunk);
+    const whole = new AIMessage('hello');
+    expect(modelTurnChunk([whole, meta('model_request')])).toBe(whole);
+  });
+
+  it('ignores an assistant chunk produced by any other node', () => {
+    // `createDeepAgent` always installs a summarization middleware, and its model call runs inside
+    // the graph like any other. Its summary is an AIMessageChunk too, so without this check a long
+    // thread would stream the summary to the surface as the assistant's answer and fold it into
+    // `done.text`.
+    expect(modelTurnChunk([new AIMessageChunk('a summary of the thread so far'), meta('summarization')])).toBe(null);
+    expect(modelTurnChunk([new AIMessageChunk('x'), meta('tools')])).toBe(null);
+    expect(modelTurnChunk([new AIMessageChunk('x'), {}])).toBe(null);
+    expect(modelTurnChunk([new AIMessageChunk('x'), undefined])).toBe(null);
+  });
+
+  it('ignores anything that is not an assistant message, and anything malformed', () => {
+    expect(modelTurnChunk([new ToolMessage({ content: 'r', tool_call_id: 'c1' }), meta('model_request')])).toBe(null);
+    expect(modelTurnChunk('not a pair')).toBe(null);
+    expect(modelTurnChunk(undefined)).toBe(null);
   });
 });

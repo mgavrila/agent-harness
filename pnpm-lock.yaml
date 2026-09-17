@@ -486,19 +486,16 @@ importers:
       '@langchain/openai':
         specifier: 1.5.13
         version: 1.5.13(@langchain/core@1.2.11(openai@7.15.0(undici@7.29.1)(zod@4.6.5)))(undici@7.29.1)
+      '@modelcontextprotocol/client':
+        specifier: ^2.0.0
+        version: 2.0.0
       deepagents:
         specifier: 1.13.4
         version: 1.13.4(@langchain/core@1.2.11(openai@7.15.0(undici@7.29.1)(zod@4.6.5)))(@langchain/langgraph-checkpoint@1.1.5(@langchain/core@1.2.11(openai@7.15.0(undici@7.29.1)(zod@4.6.5))))(@langchain/langgraph-sdk@1.11.0(@langchain/core@1.2.11(openai@7.15.0(undici@7.29.1)(zod@4.6.5))))(@langchain/langgraph@1.4.15(@langchain/core@1.2.11(openai@7.15.0(undici@7.29.1)(zod@4.6.5)))(zod@4.6.5))(langchain@1.5.11(@langchain/core@1.2.11(openai@7.15.0(undici@7.29.1)(zod@4.6.5)))(openai@7.15.0(undici@7.29.1)(zod@4.6.5)))(langsmith@0.10.4(openai@7.15.0(undici@7.29.1)(zod@4.6.5)))
       langchain:
         specifier: 1.5.11
         version: 1.5.11(@langchain/core@1.2.11(openai@7.15.0(undici@7.29.1)(zod@4.6.5)))(openai@7.15.0(undici@7.29.1)(zod@4.6.5))
-      zod:
-        specifier: ^4.6.5
-        version: 4.6.5
     devDependencies:
-      '@modelcontextprotocol/client':
-        specifier: ^2.0.0
-        version: 2.0.0
       '@modelcontextprotocol/server':
         specifier: ^2.0.0
         version: 2.0.0
