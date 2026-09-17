@@ -1,12 +1,10 @@
-import { optionalEnv, requiredEnv, type EnvSource } from '@harness/shared';
-import { parseAllowedUsers } from '@harness/surface-api';
+import { requiredEnv, type EnvSource } from '@harness/shared';
 
 export interface SlackConfig {
   botToken: string;
   appToken: string;
   /** Where approval cards go when nobody names a conversation: a channel id. */
   defaultConversation: string;
-  allowedUsers: ReadonlySet<string>;
 }
 
 /** Appended to the two token errors, because a missing one is almost always the same mistake. */
@@ -25,6 +23,5 @@ export function slackConfig(env: EnvSource): SlackConfig {
     botToken: requiredEnv('APPROVALS_SLACK_BOT_TOKEN', TWO_APPS, env),
     appToken: requiredEnv('APPROVALS_SLACK_APP_TOKEN', TWO_APPS, env),
     defaultConversation: requiredEnv('SLACK_APPROVALS_CHANNEL', '', env),
-    allowedUsers: parseAllowedUsers(optionalEnv('SLACK_ALLOWED_USERS', env)),
   };
 }

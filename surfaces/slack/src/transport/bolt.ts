@@ -1,7 +1,7 @@
 import { App, LogLevel } from '@slack/bolt';
 import type { Logger } from '@harness/shared';
 import type { SlackConfig } from '../config.js';
-import type { SlackAction, SlackEvents, SlackTransport, SlackView } from './types.js';
+import type { SlackAction, SlackEvents, SlackInbound, SlackTransport, SlackView } from './types.js';
 import { webClientApi } from './web-client.js';
 
 /**
@@ -32,6 +32,11 @@ export function boltTransport(config: SlackConfig, log: Logger): SlackTransport 
 
   let actionHandler: ((action: SlackAction) => Promise<void>) | null = null;
   let viewHandler: ((view: SlackView) => Promise<void>) | null = null;
+  // Nothing feeds this yet: the Bolt message listener lands in Plan 8b. Declared now so the
+  // session can register `onMessage` against a real transport slot rather than a stub. Prefixed
+  // because nothing reads it until that listener exists, which the unused-vars rule would
+  // otherwise flag.
+  let _messageHandler: ((message: SlackInbound) => Promise<void>) | null = null;
 
   /** Slack drops an interaction that is not acknowledged within three seconds. */
   const ackFirst = async (ack: () => Promise<unknown>): Promise<void> => {
@@ -79,6 +84,9 @@ export function boltTransport(config: SlackConfig, log: Logger): SlackTransport 
     },
     onView(handler) {
       viewHandler = handler;
+    },
+    onMessage(handler) {
+      _messageHandler = handler;
     },
     start: () => bolt.start().then(() => undefined),
     stop: () => bolt.stop().then(() => undefined),

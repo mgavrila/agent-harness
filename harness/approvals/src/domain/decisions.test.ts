@@ -1,13 +1,24 @@
 import { describe, it, expect } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { approvals } from '@harness/db';
+import { StaticIdentity } from '@harness/identity-api/testing';
+import type { Principal } from '@harness/identity-api';
 import { FakeCoreToolsClient, MemorySurface, pendingApproval, useTestDb } from '../testing.js';
 import type { ApprovalRow } from './cards.js';
-import { decideApproval, threadReplyText } from './decisions.js';
+import { decideApproval, threadReplyText, type DecidedOutcome } from './decisions.js';
 import { surfacesOf } from './surfaces/registry.js';
 
 const db = useTestDb();
 const now = () => new Date('2026-09-15T12:00:00Z');
+
+const LEAD: Principal = {
+  id: 'u-coordinator',
+  kind: 'user',
+  level: 'lead',
+  displayName: 'Coordinator',
+  surfaces: { memory: 'U012' },
+  attributes: {},
+};
 
 /** One posted, pending approval on file, with `over` applied last. */
 async function seed(over: Record<string, unknown> = {}): Promise<ApprovalRow> {
@@ -19,7 +30,14 @@ async function seed(over: Record<string, unknown> = {}): Promise<ApprovalRow> {
 }
 
 function deps(surface: MemorySurface, core: FakeCoreToolsClient) {
-  return { db, surfaces: surfacesOf([surface]), core, client: 'demo-practice', now };
+  return {
+    db,
+    surfaces: surfacesOf([surface]),
+    core,
+    identity: new StaticIdentity([LEAD]),
+    client: 'demo-practice',
+    now,
+  };
 }
 
 /**
@@ -46,13 +64,13 @@ describe('decideApproval', () => {
     const res = await decideApproval(deps(surface, core), {
       approvalId: row.id,
       decision: 'approved',
-      decidedBy: 'U012',
+      decidedBy: LEAD,
       surface: 'memory',
     });
     expect(res).toMatchObject({ outcome: 'decided', status: 'approved' });
     expect(core.executed).toEqual([row.id]);
     const [after] = await db.select().from(approvals).where(eq(approvals.id, row.id));
-    expect(after).toMatchObject({ status: 'approved', decidedBy: 'U012' });
+    expect(after).toMatchObject({ status: 'approved', decidedBy: 'u-coordinator' });
     expect(after.decidedAt).not.toBeNull();
     expect(surface.cards).toHaveLength(1);
     expect(surface.cards[0].card.actions).toEqual([]);
@@ -68,7 +86,7 @@ describe('decideApproval', () => {
     await decideApproval(deps(surface, core), {
       approvalId: row.id,
       decision: 'declined',
-      decidedBy: 'U012',
+      decidedBy: LEAD,
       surface: 'memory',
       note: 'Use the Q4 roster, not Q3.',
     });
@@ -86,7 +104,7 @@ describe('decideApproval', () => {
     const res = await decideApproval(deps(surface, core), {
       approvalId: row.id,
       decision: 'approved',
-      decidedBy: 'U012',
+      decidedBy: LEAD,
       surface: 'memory',
     });
     expect(res).toEqual({ outcome: 'not_actionable' });
@@ -99,7 +117,7 @@ describe('decideApproval', () => {
     const res = await decideApproval(deps(new MemorySurface(), new FakeCoreToolsClient()), {
       approvalId: row.id,
       decision: 'approved',
-      decidedBy: 'U012',
+      decidedBy: LEAD,
       surface: 'memory',
     });
     expect(res).toEqual({ outcome: 'not_actionable' });
@@ -110,7 +128,7 @@ describe('decideApproval', () => {
     const res = await decideApproval(deps(new MemorySurface(), new FakeCoreToolsClient()), {
       approvalId: row.id,
       decision: 'approved',
-      decidedBy: 'U012',
+      decidedBy: LEAD,
       surface: 'memory',
     });
     expect(res).toEqual({ outcome: 'not_actionable' });
@@ -122,8 +140,8 @@ describe('decideApproval', () => {
     const surfaces = surfacesOf([new MemorySurface(), elsewhere]);
     const core = new FakeCoreToolsClient();
     const res = await decideApproval(
-      { db, surfaces, core, client: 'demo-practice', now },
-      { approvalId: row.id, decision: 'approved', decidedBy: 'U012', surface: 'other' },
+      { db, surfaces, core, identity: new StaticIdentity([LEAD]), client: 'demo-practice', now },
+      { approvalId: row.id, decision: 'approved', decidedBy: LEAD, surface: 'other' },
     );
     expect(res).toEqual({ outcome: 'wrong_surface' });
     expect(core.executed).toEqual([]);
@@ -139,7 +157,7 @@ describe('decideApproval', () => {
     const res = await decideApproval(deps(surface, core), {
       approvalId: row.id,
       decision: 'approved',
-      decidedBy: 'U012',
+      decidedBy: LEAD,
       surface: 'memory',
     });
     expect(res).toMatchObject({ outcome: 'decided', execution: { status: 'failed' } });
@@ -154,19 +172,50 @@ describe('decideApproval', () => {
     const res = await decideApproval(deps(surface, new FakeCoreToolsClient()), {
       approvalId: row.id,
       decision: 'declined',
-      decidedBy: 'U012',
+      decidedBy: LEAD,
       surface: 'memory',
     });
     expect(res).toMatchObject({ outcome: 'decided', status: 'declined' });
     const [after] = await db.select().from(approvals).where(eq(approvals.id, row.id));
     expect(after.status).toBe('declined');
   });
+
+  it('calls onDecided with the row, the principal and the execution after the card is updated', async () => {
+    const row = await seed();
+    const surface = await postedSurface();
+    const core = new FakeCoreToolsClient();
+    const seen: DecidedOutcome[] = [];
+    await decideApproval(
+      {
+        ...deps(surface, core),
+        onDecided: async (o) => {
+          seen.push(o);
+        },
+      },
+      { approvalId: row.id, decision: 'approved', decidedBy: LEAD, surface: 'memory' },
+    );
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toMatchObject({ decidedBy: LEAD, execution: { status: 'executed', tool: 'forms_release' } });
+    expect(seen[0].row.status).toBe('approved');
+  });
+
+  it('says who decided by display name in the thread reply', async () => {
+    const row = await seed();
+    const surface = await postedSurface();
+    await decideApproval(deps(surface, new FakeCoreToolsClient()), {
+      approvalId: row.id,
+      decision: 'declined',
+      decidedBy: LEAD,
+      surface: 'memory',
+    });
+    expect(surface.texts[0].text).toContain('declined by Coordinator');
+  });
 });
 
 describe('threadReplyText', () => {
   it('withholds a note that fails the redaction check', async () => {
-    const row = await seed({ status: 'declined', decidedBy: 'U012', decisionNote: 'bad ssn 123-45-6789' });
-    const text = threadReplyText(row, (id) => `@${id}`);
+    const row = await seed({ status: 'declined', decidedBy: 'u-coordinator', decisionNote: 'bad ssn 123-45-6789' });
+    const text = threadReplyText(row, 'Coordinator');
     expect(text).not.toContain('123-45-6789');
     expect(text).toContain('withheld');
   });

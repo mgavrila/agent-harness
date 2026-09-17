@@ -1,6 +1,7 @@
 import { and, eq, gt, isNull, or } from 'drizzle-orm';
 import { approvals, type Db } from '@harness/db';
 import { createLogger, describeError } from '@harness/shared';
+import type { IdentitySession, Principal } from '@harness/identity-api';
 import type { MessageRef } from '@harness/surface-api';
 import type { CoreToolsClient, ExecuteOutcome } from './execute/types.js';
 import { decidedCard, orWithheld, type ApprovalRow } from './cards.js';
@@ -8,18 +9,27 @@ import type { LoadedSurfaces } from './surfaces/registry.js';
 
 const log = createLogger('approvals');
 
+export interface DecidedOutcome {
+  row: ApprovalRow;
+  decidedBy: Principal;
+  execution?: ExecuteOutcome;
+}
+
 export interface DecisionDeps {
   db: Db;
   surfaces: LoadedSurfaces;
   core: CoreToolsClient;
+  identity: IdentitySession;
   client: string;
   now: () => Date;
+  /** Called after the decision is recorded, executed and shown: the host resumes the thread here. */
+  onDecided?: (outcome: DecidedOutcome) => Promise<void>;
 }
 
 export interface DecisionInput {
   approvalId: string;
   decision: 'approved' | 'declined';
-  decidedBy: string;
+  decidedBy: Principal;
   /** The surface the decision arrived on. It has to be the one the card was posted to. */
   surface: string;
   note?: string;
@@ -36,15 +46,9 @@ const WITHHELD = '(withheld: it did not pass the redaction check)';
 /**
  * The reply Hermes reads as a new turn. It reports what already happened — the host executes
  * before replying — so the agent never has to guess, and never says an action succeeded while it
- * is still pending. `mention` comes from the surface it will be posted on: only that surface
- * knows how it spells one.
+ * is still pending. `who` is the deciding principal's display name.
  */
-export function threadReplyText(
-  row: ApprovalRow,
-  mention: (userId: string) => string,
-  execution?: ExecuteOutcome,
-): string {
-  const who = mention(row.decidedBy ?? 'unknown');
+export function threadReplyText(row: ApprovalRow, who: string, execution?: ExecuteOutcome): string {
   if (row.status === 'approved') {
     if (execution?.status === 'executed') {
       return `Approval ${row.id} approved by ${who}. Executed \`${execution.tool}\`; delivery is queued in the effects outbox.`;
@@ -58,7 +62,12 @@ export function threadReplyText(
 }
 
 /** Telling a human is best effort: a decision that is recorded must not be lost to a failed post. */
-async function tellSurface(deps: DecisionDeps, row: ApprovalRow, execution: ExecuteOutcome | undefined): Promise<void> {
+async function tellSurface(
+  deps: DecisionDeps,
+  row: ApprovalRow,
+  decidedByName: string,
+  execution: ExecuteOutcome | undefined,
+): Promise<void> {
   if (!row.surface || !row.conversationId || !row.messageRef) {
     log.warn(`${row.id} has no card to update; the decision is recorded but not shown to a human`);
     return;
@@ -76,19 +85,15 @@ async function tellSurface(deps: DecisionDeps, row: ApprovalRow, execution: Exec
   };
   if (session.capabilities.update) {
     try {
-      await session.updateCard(ref, decidedCard(row, outcome));
+      await session.updateCard(ref, decidedCard(row, { ...outcome, decidedByName }));
     } catch (err) {
       log.error(`could not edit the card for ${row.id}`, err);
     }
   }
   try {
-    await session.postText(
-      row.conversationId,
-      threadReplyText(row, (id) => session.mention(id), execution),
-      {
-        replyTo: ref,
-      },
-    );
+    await session.postText(row.conversationId, threadReplyText(row, decidedByName, execution), {
+      replyTo: ref,
+    });
   } catch (err) {
     log.error(`could not post the reply for ${row.id}`, err);
   }
@@ -120,7 +125,7 @@ export async function decideApproval(deps: DecisionDeps, input: DecisionInput): 
     .update(approvals)
     .set({
       status: input.decision,
-      decidedBy: input.decidedBy,
+      decidedBy: input.decidedBy.id,
       decidedAt: now,
       decisionNote: input.note ?? null,
     })
@@ -139,12 +144,19 @@ export async function decideApproval(deps: DecisionDeps, input: DecisionInput): 
   let execution: ExecuteOutcome | undefined;
   if (input.decision === 'approved') {
     try {
-      execution = await deps.core.execute(row.id);
+      execution = await deps.core.execute(row.id, input.decidedBy);
     } catch (err) {
       execution = { status: 'failed', error: describeError(err) };
     }
   }
 
-  await tellSurface(deps, row, execution);
+  await tellSurface(deps, row, input.decidedBy.displayName, execution);
+  if (deps.onDecided) {
+    try {
+      await deps.onDecided({ row, decidedBy: input.decidedBy, execution });
+    } catch (err) {
+      log.error(`the onDecided hook failed for ${row.id}`, err);
+    }
+  }
   return { outcome: 'decided', status: input.decision, execution };
 }

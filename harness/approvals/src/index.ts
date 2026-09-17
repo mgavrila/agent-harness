@@ -18,11 +18,12 @@ export {
 } from './domain/cards.js';
 /** The one restricted-value guard, from the package that owns the patterns. */
 export { containsRestrictedPattern } from '@harness/core-tools/redaction';
-export { createMcpCoreToolsClient } from './domain/execute/mcp-client.js';
-export type { CoreToolsClient, ExecuteOutcome, McpLauncher } from './domain/execute/types.js';
+export { createInProcessCoreToolsClient, type InProcessCoreToolsOptions } from './domain/execute/in-process.js';
+export type { CoreToolsClient, ExecuteOutcome } from './domain/execute/types.js';
 export {
   decideApproval,
   threadReplyText,
+  type DecidedOutcome,
   type DecisionDeps,
   type DecisionInput,
   type DecisionResult,

@@ -18,8 +18,8 @@ const architecture = path.join(repoRoot, ARCHITECTURE_DIR);
 
 /**
  * Names that must appear in the environment scan. They are here to catch the scan breaking
- * silently: DATABASE_URL is a bare `process.env.X`, APPROVALS_POLL_SECONDS is only reachable
- * through the `seconds()` wrapper, and VERIFY_NPPES_ENABLED only through `booleanFromEnv`.
+ * silently: DATABASE_URL is a bare `process.env.X`, APPROVAL_TTL_HOURS is only reachable
+ * through the `numberFromEnv` wrapper, and VERIFY_NPPES_ENABLED only through `booleanFromEnv`.
  * If a refactor moves a read out of reach of every pattern, this fails instead of the whole
  * check quietly passing on an empty list.
  */
@@ -28,7 +28,7 @@ const SCAN_ANCHORS = [
   'LITELLM_MASTER_KEY',
   'HARNESS_STORAGE_DIR',
   'VERIFY_NPPES_ENABLED',
-  'APPROVALS_POLL_SECONDS',
+  'APPROVAL_TTL_HOURS',
   'SLACK_APPROVALS_CHANNEL',
 ];
 

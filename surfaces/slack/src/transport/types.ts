@@ -79,13 +79,27 @@ export interface SlackView {
   state: Record<string, Record<string, { value?: string | null }>>;
 }
 
+/** One inbound message, narrowed off Bolt's payload in Plan 8b. Declared now so the session can register for it. */
+export interface SlackInbound {
+  userId: string;
+  channel: string;
+  text: string;
+  ts: string;
+  threadTs: string | null;
+  /** True for a direct message or a message that mentions the bot. */
+  mentioned: boolean;
+  files: { name: string; url: string }[];
+}
+
 /**
- * The inbound half of a Slack connection. One handler for every action and one for every view:
- * the surface contract registers a single handler apiece and dispatches on the id itself.
+ * The inbound half of a Slack connection. One handler for every action, one for every view, and
+ * one for every message: the surface contract registers a single handler apiece and dispatches
+ * on the id itself.
  */
 export interface SlackEvents {
   onAction(handler: (action: SlackAction) => Promise<void>): void;
   onView(handler: (view: SlackView) => Promise<void>): void;
+  onMessage(handler: (message: SlackInbound) => Promise<void>): void;
   start(): Promise<void>;
   stop(): Promise<void>;
 }

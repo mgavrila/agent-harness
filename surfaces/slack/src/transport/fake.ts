@@ -3,6 +3,7 @@ import type {
   SlackApi,
   SlackEphemeralArgs,
   SlackEvents,
+  SlackInbound,
   SlackPostMessageArgs,
   SlackPostResult,
   SlackUpdateArgs,
@@ -82,6 +83,7 @@ export class FakeSlackEvents implements SlackEvents {
   stopped = false;
   private actionHandler: ((action: SlackAction) => Promise<void>) | null = null;
   private viewHandler: ((view: SlackView) => Promise<void>) | null = null;
+  private messageHandler: ((message: SlackInbound) => Promise<void>) | null = null;
 
   onAction(handler: (action: SlackAction) => Promise<void>): void {
     this.actionHandler = handler;
@@ -89,6 +91,10 @@ export class FakeSlackEvents implements SlackEvents {
 
   onView(handler: (view: SlackView) => Promise<void>): void {
     this.viewHandler = handler;
+  }
+
+  onMessage(handler: (message: SlackInbound) => Promise<void>): void {
+    this.messageHandler = handler;
   }
 
   async start(): Promise<void> {
@@ -107,5 +113,10 @@ export class FakeSlackEvents implements SlackEvents {
   async emitView(view: SlackView): Promise<void> {
     if (!this.viewHandler) throw new Error('no view handler is registered');
     await this.viewHandler(view);
+  }
+
+  async emitMessage(message: SlackInbound): Promise<void> {
+    if (!this.messageHandler) throw new Error('no message handler is registered');
+    await this.messageHandler(message);
   }
 }

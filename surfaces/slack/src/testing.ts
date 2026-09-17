@@ -1,5 +1,5 @@
 /** What a test of this adapter, or of the host, reaches for: the two fakes and a wired session. */
-import { parseAllowedUsers, type SurfaceSession } from '@harness/surface-api';
+import type { SurfaceSession } from '@harness/surface-api';
 import type { SlackConfig } from './config.js';
 import { createSlackSession } from './session.js';
 import { FakeSlack, FakeSlackEvents } from './transport/fake.js';
@@ -22,7 +22,6 @@ export function fakeSlackSession(over: Partial<SlackConfig> = {}): {
     botToken: 'xoxb-test',
     appToken: 'xapp-test',
     defaultConversation: 'C0DEMO',
-    allowedUsers: parseAllowedUsers('U012'),
     ...over,
   };
   return { session: createSlackSession({ api, events }, config), api, events };

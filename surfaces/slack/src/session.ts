@@ -63,8 +63,7 @@ export function createSlackSession(transport: SlackTransport, config: SlackConfi
 
   return {
     name: NAME,
-    capabilities: { forms: true, privateReply: true, update: true },
-    allowedUsers: config.allowedUsers,
+    capabilities: { forms: true, privateReply: true, update: true, streaming: false, inlineConfirm: false },
     defaultConversation: config.defaultConversation,
 
     mention: (userId) => `<@${userId}>`,
@@ -167,6 +166,25 @@ export function createSlackSession(transport: SlackTransport, config: SlackConfi
           values: valuesOf(view.state),
         });
       });
+    },
+
+    onMessage(handler) {
+      events.onMessage(async (message) => {
+        await handler({
+          surface: NAME,
+          userId: message.userId,
+          conversation: message.channel,
+          text: message.text,
+          // Downloaded into <storageDir>/incoming by Plan 8b's transport; until then, none.
+          attachments: message.files.map((f) => ({ name: f.name, path: f.name })),
+          message: ref(message.channel, message.ts),
+          mentioned: message.mentioned,
+        });
+      });
+    },
+
+    startStream() {
+      throw new SurfaceError(`${NAME}: cannot stream a reply`);
     },
 
     start: () => events.start(),

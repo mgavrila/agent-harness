@@ -102,6 +102,9 @@ importers:
       '@harness/db':
         specifier: workspace:*
         version: link:../db
+      '@harness/identity-api':
+        specifier: workspace:*
+        version: link:../identity-api
       '@harness/shared':
         specifier: workspace:*
         version: link:../shared

@@ -77,17 +77,17 @@ describe('approvalCard', () => {
 });
 
 describe('decidedCard', () => {
-  const approved = row({ status: 'approved', decidedBy: 'U012', decidedAt: new Date('2026-09-15T12:05:00Z') });
+  const approved = row({ status: 'approved', decidedBy: 'u-coordinator', decidedAt: new Date('2026-09-15T12:05:00Z') });
 
-  it('replaces the buttons with the decision and says who decided it', () => {
-    const card = decidedCard(approved, { executed: true, tool: 'forms_release' });
+  it('replaces the buttons with the decision and says who decided it, by display name', () => {
+    const card = decidedCard(approved, { executed: true, tool: 'forms_release', decidedByName: 'Coordinator' });
     expect(card.actions).toEqual([]);
     expect(card.notice).toBe(`Approval ${row().id} approved`);
     expect(card.body.at(-1)).toEqual({
       note: [
         { icon: 'approved' },
         { text: ' Approved by ' },
-        { user: 'U012' },
+        { text: 'Coordinator' },
         { text: ' at ' },
         { at: new Date('2026-09-15T12:05:00Z') },
         { text: '.' },
@@ -98,10 +98,16 @@ describe('decidedCard', () => {
     });
   });
 
+  it('falls back to the raw decidedBy id when no display name is given', () => {
+    const card = decidedCard(approved, { executed: true, tool: 'forms_release' });
+    expect(card.body.at(-1)).toMatchObject({ note: expect.arrayContaining([{ text: 'u-coordinator' }]) });
+  });
+
   it('withholds a decline note that fails the redaction check', () => {
-    const card = decidedCard(row({ status: 'declined', decidedBy: 'U012', decisionNote: 'wrong ssn 123-45-6789' }), {
-      executed: false,
-    });
+    const card = decidedCard(
+      row({ status: 'declined', decidedBy: 'u-coordinator', decisionNote: 'wrong ssn 123-45-6789' }),
+      { executed: false, decidedByName: 'Coordinator' },
+    );
     expect(JSON.stringify(card)).not.toContain('123-45-6789');
     expect(JSON.stringify(card)).toContain('note withheld');
   });

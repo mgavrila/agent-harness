@@ -9,12 +9,12 @@
   },
   "scripts": {
     "test": "vitest run",
-    "typecheck": "tsc --noEmit",
-    "start": "tsx src/app/main.ts"
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@harness/core-tools": "workspace:*",
     "@harness/db": "workspace:*",
+    "@harness/identity-api": "workspace:*",
     "@harness/shared": "workspace:*",
     "@harness/surface-api": "workspace:*",
     "@harness/surface-slack": "workspace:*",

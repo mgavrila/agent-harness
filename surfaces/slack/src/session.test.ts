@@ -36,7 +36,13 @@ describe('the Slack session', () => {
   it('names itself, and reports what Slack can do', () => {
     const { session } = fakeSlackSession();
     expect(session.name).toBe('slack');
-    expect(session.capabilities).toEqual({ forms: true, privateReply: true, update: true });
+    expect(session.capabilities).toEqual({
+      forms: true,
+      privateReply: true,
+      update: true,
+      streaming: false,
+      inlineConfirm: false,
+    });
     expect(session.defaultConversation).toBe('C0DEMO');
     expect(session.mention('U012')).toBe('<@U012>');
   });

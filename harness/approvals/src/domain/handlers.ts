@@ -1,5 +1,6 @@
 import { createLogger } from '@harness/shared';
-import { allowsUser, type ActionEvent, type FormEvent, type SurfaceSession } from '@harness/surface-api';
+import { levelAtLeast, type Principal } from '@harness/identity-api';
+import type { ActionEvent, FormEvent, SurfaceSession } from '@harness/surface-api';
 import { decideApproval, type DecisionDeps } from './decisions.js';
 import {
   APPROVE_ACTION_ID,
@@ -32,30 +33,30 @@ async function tellUser(session: SurfaceSession, conversation: string, userId: s
 }
 
 /**
- * True when this person may act on this approval, which is two questions in a fixed order.
- *
- * Authorisation comes first and the id is not looked at until it passes, so someone unauthorised
- * learns nothing about whether the approval exists. Allowlists are per surface: an identity on one
- * surface and an identity on another are different people until something says otherwise. Then the
- * id itself, because a value that is not a well-formed uuid can never name a row.
+ * Who may act on an approval, in a fixed order: the identity plug-in has to know this surface user,
+ * they have to be a person rather than a service (spec invariant 2), and their level has to clear
+ * `lead` (invariant 3). Every refusal says the same thing, so an outsider learns nothing about
+ * whether the approval exists; then the id itself, because a malformed uuid can name no row.
  */
 async function mayAct(
   session: SurfaceSession,
+  deps: DecisionDeps,
   conversation: string,
   userId: string,
   approvalId: string,
-): Promise<boolean> {
-  if (!allowsUser(session.allowedUsers, userId)) {
-    log.warn(`user ${userId} is not an approver on surface "${session.name}"; refused action on ${approvalId}`);
+): Promise<Principal | null> {
+  const principal = await deps.identity.resolve({ surface: session.name, userId });
+  if (!principal || principal.kind !== 'user' || !levelAtLeast(principal.level, 'lead')) {
+    log.warn(`user ${userId} on surface "${session.name}" may not decide approvals; refused action on ${approvalId}`);
     await tellUser(session, conversation, userId, UNAUTHORIZED_TEXT);
-    return false;
+    return null;
   }
   if (!UUID_RE.test(approvalId)) {
-    log.warn(`rejected a malformed approval id from ${userId}`);
+    log.warn(`rejected a malformed approval id from ${principal.id}`);
     await tellUser(session, conversation, userId, NOT_FOUND_TEXT);
-    return false;
+    return null;
   }
-  return true;
+  return principal;
 }
 
 /**
@@ -72,11 +73,12 @@ async function decide(
   decision: 'approved' | 'declined',
   note?: string,
 ): Promise<void> {
-  if (!(await mayAct(session, event.conversation, event.userId, event.value))) return;
+  const principal = await mayAct(session, deps, event.conversation, event.userId, event.value);
+  if (!principal) return;
   const result = await decideApproval(deps, {
     approvalId: event.value,
     decision,
-    decidedBy: event.userId,
+    decidedBy: principal,
     surface: session.name,
     note,
   });
@@ -91,8 +93,8 @@ async function decide(
 }
 
 /** Edit never releases anything: it opens a note box, and submitting it declines with that note. */
-async function openEdit(session: SurfaceSession, event: ActionEvent): Promise<void> {
-  if (!(await mayAct(session, event.conversation, event.userId, event.value))) return;
+async function openEdit(session: SurfaceSession, deps: DecisionDeps, event: ActionEvent): Promise<void> {
+  if (!(await mayAct(session, deps, event.conversation, event.userId, event.value))) return;
   if (!event.trigger) {
     log.warn(`Edit on ${event.value} arrived with no trigger; cannot open the form`);
     return;
@@ -111,15 +113,11 @@ async function openEdit(session: SurfaceSession, event: ActionEvent): Promise<vo
  * so every loaded surface is wired, not only the primary one.
  */
 export function registerApprovalHandlers(session: SurfaceSession, deps: DecisionDeps): void {
-  if (session.allowedUsers.size === 0) {
-    log.warn(`surface "${session.name}" has an empty allowlist; every decision there is refused`);
-  }
-
   session.onAction(async (event: ActionEvent) => {
     try {
       if (event.actionId === APPROVE_ACTION_ID) await decide(session, deps, event, 'approved');
       else if (event.actionId === DECLINE_ACTION_ID) await decide(session, deps, event, 'declined');
-      else if (event.actionId === EDIT_ACTION_ID) await openEdit(session, event);
+      else if (event.actionId === EDIT_ACTION_ID) await openEdit(session, deps, event);
       // Anything else belongs to a card this host did not post.
     } catch (err) {
       log.error(`the ${event.actionId} handler failed`, err);
