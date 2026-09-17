@@ -6,11 +6,18 @@ import { onTestFinished } from 'vitest';
 import type { Client } from '@modelcontextprotocol/client';
 import { McpServer } from '@modelcontextprotocol/server';
 import type { Db } from '@harness/db';
+import type { Principal } from '@harness/identity-api';
 import { pack as healthcarePack } from '@harness/pack-healthcare';
+import { localParser } from './domain/documents/parser.js';
 import { connectInProcess } from './domain/tooling/in-process.js';
 import { registerTools } from './domain/tooling/registry.js';
-import { DEFAULT_POLICY } from './domain/tooling/policy.js';
-import { DEFAULT_CONFIDENCE_THRESHOLD, type AnyToolDef, type ToolDeps } from './domain/tooling/types.js';
+import { DEFAULT_POLICY, mergePolicy } from './domain/tooling/policy.js';
+import {
+  DEFAULT_CONFIDENCE_THRESHOLD,
+  type AnyToolDef,
+  type RunContext,
+  type ToolDeps,
+} from './domain/tooling/types.js';
 import { registryOf } from './domain/packs/registry.js';
 import type { PackRegistry } from './domain/packs/types.js';
 import { PACK_KERNEL } from './domain/packs/kernel.js';
@@ -31,6 +38,21 @@ const TEST_PACKS = registryOf([healthcarePack]);
 export const TEST_PACK_ENV: Readonly<Record<string, string>> = {};
 
 /**
+ * The principal every test runs as unless it says otherwise. A practitioner, because that row of
+ * `DEFAULT_POLICY` is exactly the flat table the kernel shipped before levels existed: `read`
+ * auto, `write.internal` auto, `external` approval, `financial` blocked, `destructive` approval.
+ * A test about levels passes its own principal with a different `level`.
+ */
+export const TEST_PRINCIPAL: Principal = {
+  id: 'u-test',
+  kind: 'user',
+  level: 'practitioner',
+  displayName: 'Test user',
+  surfaces: {},
+  attributes: {},
+};
+
+/**
  * The base map plus every loaded pack's `evals.testEnv`, in load order.
  *
  * A pack later in `HARNESS_PACKS` wins a collision, which matches how a registry answers
@@ -41,25 +63,34 @@ export function testPackEnv(packs: PackRegistry): Readonly<Record<string, string
   return Object.assign({}, TEST_PACK_ENV, ...packs.all.map((p) => p.evals?.testEnv ?? {})) as Record<string, string>;
 }
 
-export function makeTestDeps(db: Db, overrides: Partial<ToolDeps> = {}): ToolDeps {
+/** No run opened. A test that asserts on `run_id` opens one with `openRun` and passes it as `context`. */
+export const TEST_CONTEXT: RunContext = { runId: null, threadId: null, surface: null, conversation: null };
+
+/** `Partial<ToolDeps>`, except that a partial context is merged over `TEST_CONTEXT` rather than replacing it. */
+export type TestDepsOverrides = Partial<Omit<ToolDeps, 'context'>> & { context?: Partial<RunContext> };
+
+export function makeTestDeps(db: Db, overrides: TestDepsOverrides = {}): ToolDeps {
+  const { context, ...rest } = overrides;
   const packs = overrides.packs ?? TEST_PACKS;
+  // A throwaway directory per call, so a test that forgets to override it
+  // still cannot write into the repository.
+  const storageDir = rest.storageDir ?? mkdtempSync(path.join(tmpdir(), 'harness-test-storage-'));
   const deps: ToolDeps = {
     db,
     client: 'test',
-    caller: 'test-caller',
-    policy: { ...DEFAULT_POLICY },
+    principal: TEST_PRINCIPAL,
+    policy: mergePolicy(DEFAULT_POLICY, {}),
     encryptionKey: randomBytes(32),
     now: () => new Date('2026-09-15T12:00:00Z'),
     approvalTtlHours: 24,
     confidenceThreshold: DEFAULT_CONFIDENCE_THRESHOLD,
     gateway: { baseUrl: 'http://127.0.0.1:1', apiKey: 'sk-test', timeoutMs: 5_000, maxCallsPerRun: 100 },
-    // A throwaway directory per call, so a test that forgets to override it
-    // still cannot write into the repository.
-    storageDir: mkdtempSync(path.join(tmpdir(), 'harness-test-storage-')),
+    storageDir,
+    parser: localParser(storageDir),
     formsDir: TEST_PACKS.formsDir(),
     restrictedToModel: false,
     sinks: {},
-    context: {},
+    context: { ...TEST_CONTEXT, ...context },
     tools: new Map(),
     kernelTools: new Map(),
     kernel: PACK_KERNEL,
@@ -67,7 +98,7 @@ export function makeTestDeps(db: Db, overrides: Partial<ToolDeps> = {}): ToolDep
     // Resolved from `packs` above, not from `TEST_PACKS`, so a test that loads a second pack
     // gets that pack's pins too rather than only the shipped one's.
     env: testPackEnv(packs),
-    ...overrides,
+    ...rest,
   };
   // After the spread: a test that passes its own `packs` gets that registry's kernel tools, and
   // one that passes its own `kernelTools` keeps them. `createCoreToolsServer` fills the same map

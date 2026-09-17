@@ -1,9 +1,9 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import type * as z from 'zod/v4';
-import type { EnvSource } from '@harness/shared';
+import type { EnvSource, Level } from '@harness/shared';
 import type { PackEvals } from './evals.js';
 import type { ExtractionManifest } from './extraction.js';
-import type { ActionClass, Policy } from './policy.js';
+import type { ActionClass, PolicyOverrides } from './policy.js';
 import type { AttachmentKindSpec, RawAttachmentKind, RawRecordKind, RecordKindSpec } from './records.js';
 
 /**
@@ -98,6 +98,18 @@ export interface PackKernel {
 }
 
 /**
+ * Who is calling, as a pack sees it: the four members a pack tool may need to name a person
+ * or gate on a level. The kernel's `Principal` (from `@harness/identity-api`) is assignable to
+ * it; a pack never imports that contract.
+ */
+export interface PrincipalView {
+  readonly id: string;
+  readonly kind: 'user' | 'service';
+  readonly level: Level;
+  readonly displayName: string;
+}
+
+/**
  * What a pack's tool handler is given.
  *
  * This is a **structural view** of core-tools' `ToolDeps`: every member below is a member of
@@ -110,7 +122,8 @@ export interface PackKernel {
 export interface PackToolDeps {
   /** The client this process serves. Every kernel call is scoped by it. */
   readonly client: string;
-  readonly caller: string;
+  /** The principal this run acts as. Bound before the model ran; nothing a model sends can change it. */
+  readonly principal: PrincipalView;
   readonly now: () => Date;
   readonly storageDir: string;
   /** The directory holding this deployment's `templates.json` and its PDFs. */
@@ -201,8 +214,8 @@ export interface Pack {
   formsDir?: string;
   /** Absolute path to the directory of `<skill>/SKILL.md` folders. */
   skillsDir: string;
-  /** Action-class defaults this pack ships. A client's `policy.yaml` still wins. */
-  policy: Partial<Policy>;
+  /** Action-class defaults this pack ships, in the shape a policy.yaml parses to. A client's file still wins. */
+  policy: PolicyOverrides;
   /**
    * Kernel tool names this pack's own tools supersede. A name listed here is not published; the
    * pack's tool of that name takes its place. Two loaded packs may not replace the same name,

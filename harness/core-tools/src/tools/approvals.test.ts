@@ -1,11 +1,20 @@
 import { describe, it, expect } from 'vitest';
 import * as z from 'zod/v4';
 import { eq } from 'drizzle-orm';
-import { approvals, auditLog, records } from '@harness/db';
+import { approvals, auditLog, encrypt, records } from '@harness/db';
 import { ToolError } from '@harness/shared';
 import { defineTool } from '../domain/tooling/registry.js';
-import { approvalIdOf, connectTools, makeTestDeps, resultOf, useTestDb, type TestClient } from '../testing.js';
-import { DEFAULT_POLICY } from '../domain/tooling/policy.js';
+import {
+  approvalIdOf,
+  connectTools,
+  makeTestDeps,
+  resultOf,
+  textOf,
+  useTestDb,
+  TEST_PRINCIPAL,
+  type TestClient,
+} from '../testing.js';
+import { DEFAULT_POLICY, mergePolicy } from '../domain/tooling/policy.js';
 import { approvalTools } from './approvals.js';
 
 const db = useTestDb();
@@ -28,7 +37,16 @@ const createProviderExternal = defineTool({
   recordIds: (_a, r) => [r.provider_id],
 });
 
-const replayableTools = [createProviderExternal, ...approvalTools];
+const purgeDestructive = defineTool({
+  name: 'purge_destructive',
+  description: 'Delete beyond repair; destructive class so a practitioner needs approval',
+  actionClass: 'destructive',
+  input: z.object({}),
+  output: z.object({ purged: z.boolean() }),
+  handler: async () => ({ purged: true }),
+});
+
+const replayableTools = [createProviderExternal, purgeDestructive, ...approvalTools];
 
 const connectApprovals = () => connectTools('approvals-test', replayableTools, deps);
 
@@ -132,7 +150,7 @@ describe('approvals_execute', () => {
     // Same key as the parking deps, so the stored payload still decrypts and
     // the policy re-check is the only thing that can stop the replay.
     const strictDeps = makeTestDeps(db, {
-      policy: { ...DEFAULT_POLICY, external: 'blocked' },
+      policy: mergePolicy(DEFAULT_POLICY, { classes: { external: 'blocked' } }),
       encryptionKey: deps.encryptionKey,
     });
     const strictClient = await connectTools('approvals-test-blocked', replayableTools, strictDeps);
@@ -150,5 +168,60 @@ describe('approvals_execute', () => {
     await db.update(approvals).set({ status: 'approved', client: 'other-clinic' }).where(eq(approvals.id, id));
     const res = await client.callTool({ name: 'approvals_execute', arguments: { approval_id: id } });
     expect(res.isError).toBe(true);
+  });
+
+  it("replays a destructive approval at the level it was parked under, not the replaying service principal's level", async () => {
+    const client = await connectApprovals();
+    const res = await client.callTool({ name: 'purge_destructive', arguments: {} });
+    const id = approvalIdOf(res);
+    await db
+      .update(approvals)
+      .set({ status: 'approved', decidedBy: 'U1', decidedAt: deps.now() })
+      .where(eq(approvals.id, id));
+
+    // The approvals host always replays as a service principal, for which `destructive` is
+    // blocked outright. The approval must still execute: it was parked under a practitioner,
+    // for whom `destructive` only needs approval, and that is the level the re-check uses.
+    const asService = makeTestDeps(db, {
+      principal: { ...TEST_PRINCIPAL, id: 'svc-test', kind: 'service', level: 'service' },
+      encryptionKey: deps.encryptionKey,
+    });
+    const serviceClient = await connectTools('approvals-test-service', replayableTools, asService);
+    const executed = await serviceClient.callTool({ name: 'approvals_execute', arguments: { approval_id: id } });
+    const out = resultOf<{ status: string; result: { purged: boolean } }>(executed);
+    expect(out.status).toBe('executed');
+    expect(out.result.purged).toBe(true);
+  });
+
+  it("falls back to the replaying principal's level for a row parked before levels were recorded", async () => {
+    const asService = makeTestDeps(db, {
+      principal: { ...TEST_PRINCIPAL, id: 'svc-test', kind: 'service', level: 'service' },
+      encryptionKey: deps.encryptionKey,
+    });
+    // Simulate a pre-change row: the encrypted payload has no `level`, exactly what
+    // `createOrReuseApproval` wrote before this fix.
+    const [row] = await db
+      .insert(approvals)
+      .values({
+        client: asService.client,
+        action: 'purge_destructive',
+        payload: { tool: 'purge_destructive', args: {} },
+        payloadEncrypted: encrypt(JSON.stringify({ tool: 'purge_destructive', args: {} }), asService.encryptionKey),
+        summary: 'purge_destructive requested by u-test',
+        requestedBy: 'u-test',
+        status: 'approved',
+        decidedBy: 'U1',
+        decidedAt: asService.now(),
+        expiresAt: new Date(asService.now().getTime() + 24 * 3600 * 1000),
+        idempotencyKey: 'test:purge_destructive:pre-level',
+      })
+      .returning();
+
+    const serviceClient = await connectTools('approvals-test-service-fallback', replayableTools, asService);
+    const res = await serviceClient.callTool({ name: 'approvals_execute', arguments: { approval_id: row.id } });
+    expect(res.isError).toBe(true);
+    expect(textOf(res)).toContain('blocked by policy');
+    const [after] = await db.select().from(approvals).where(eq(approvals.id, row.id));
+    expect(after.status).toBe('approved');
   });
 });

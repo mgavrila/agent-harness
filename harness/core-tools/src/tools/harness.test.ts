@@ -2,7 +2,8 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { auditLog, runs, toolEffects } from '@harness/db';
 import { type ToolDeps } from '../domain/tooling/types.js';
-import { connectTestClient, makeTestDeps, resultOf, useTestDb } from '../testing.js';
+import { openRun } from '../domain/session/repository.js';
+import { TEST_PRINCIPAL, connectTestClient, makeTestDeps, resultOf, useTestDb } from '../testing.js';
 import { createCoreToolsServer } from './catalog.js';
 
 const db = useTestDb();
@@ -15,43 +16,25 @@ beforeEach(() => {
 
 const connectServer = () => connectTestClient(() => createCoreToolsServer(deps));
 
-describe('session context and lineage', () => {
-  it('stamps run, skill, and version on later audit rows and creates the run row', async () => {
-    const client = await connectServer();
-    const runId = '11111111-1111-4111-8111-111111111111';
-    await client.callTool({
-      name: 'harness_set_context',
-      arguments: { run_id: runId, skill: 'credentialing-intake', skill_version: '1.0.0' },
-    });
-    await client.callTool({ name: 'providers_search', arguments: { query: 'nobody' } });
-    const rows = await db.select().from(auditLog);
-    const search = rows.find((r) => r.tool === 'providers_search')!;
-    expect(search).toMatchObject({ runId, skill: 'credentialing-intake', skillVersion: '1.0.0' });
-    expect(await db.select().from(runs)).toHaveLength(1);
-  });
-
-  it('clears a field when null is passed', async () => {
-    const client = await connectServer();
-    await client.callTool({ name: 'harness_set_context', arguments: { skill: 'x', skill_version: '1' } });
-    await client.callTool({ name: 'harness_set_context', arguments: { skill: null } });
+describe('run context and lineage', () => {
+  it('stamps the run every audit row belongs to, from the context the run was opened with', async () => {
+    const context = await openRun(db, { client: 'test', principal: TEST_PRINCIPAL });
+    const withRun = makeTestDeps(db, { context });
+    const client = await connectTestClient(() => createCoreToolsServer(withRun));
     await client.callTool({ name: 'providers_search', arguments: { query: 'nobody' } });
     const search = (await db.select().from(auditLog)).find((r) => r.tool === 'providers_search')!;
-    expect(search.skill).toBeNull();
-    expect(search.skillVersion).toBe('1');
+    expect(search.runId).toBe(context.runId);
+    expect(search.caller).toBe('u-test');
+    const [run] = await db.select().from(runs);
+    expect(run).toMatchObject({ id: context.runId, principalId: 'u-test' });
   });
 
-  it('refuses to adopt a run that belongs to another client and leaves the context untouched', async () => {
+  it('publishes no tool that could set the run, the skill or the principal', async () => {
     const client = await connectServer();
-    const runId = '22222222-2222-4222-8222-222222222222';
-    await db.insert(runs).values({ id: runId, client: 'other-clinic', caller: 'their-caller' });
-
-    const res = await client.callTool({ name: 'harness_set_context', arguments: { run_id: runId } });
-    expect(res.isError).toBe(true);
-    expect(deps.context.runId).toBeUndefined();
-
-    await client.callTool({ name: 'providers_search', arguments: { query: 'nobody' } });
-    const search = (await db.select().from(auditLog)).find((r) => r.tool === 'providers_search')!;
-    expect(search.runId).toBeNull();
+    const { tools } = await client.listTools();
+    expect(tools.map((t) => t.name)).not.toContain('harness_set_context');
+    // Invariant 1: identity comes only from whoever opened the run, never from an argument.
+    for (const tool of tools) expect(JSON.stringify(tool.inputSchema), tool.name).not.toMatch(/principal|run_id/);
   });
 
   it('stores derived_from on the audit row and strips it from handler args', async () => {

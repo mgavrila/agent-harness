@@ -15,13 +15,15 @@ export const pack = definePack({ … });
 - **what a document turns into** — `ExtractionManifest` in `extraction.ts`, one
   `ExtractionTarget` per family of document kinds, carrying the prose the model reads and the
   key the attachment list travels under;
-- **what a pack's tools are handed** — `PackToolDeps`, `PackKernel` and `CoreToolView` in
-  `kernel.ts`, the structural view of core's `ToolDeps` a pack can name without importing
-  core-tools;
+- **what a pack's tools are handed** — `PackToolDeps`, `PrincipalView`, `PackKernel` and
+  `CoreToolView` in `kernel.ts`, the structural view of core's `ToolDeps` a pack can name
+  without importing core-tools;
 - **how a pack is evaluated** — `PackEvals` in `evals.ts`: the corpus, the cases, the intake
   skill, the judged fields, the env values a test must see pinned, and the `EvalReadback` block
   naming which tools one case drives and which keys their results carry;
-- **what its actions default to** — `Policy` in `policy.ts`.
+- **what its actions default to** — `PolicyOverrides` in `policy.ts`, over the eight action
+  classes and the five levels the kernel's matrix is keyed by; `Policy` is the merged matrix a
+  kernel decides with.
 
 `tool.ts` carries `definePackTool`, and `types.ts` is the leaf holding every declaration on the
 contract's own reference cycle: a `Pack` declares tools handed a `PackToolDeps`, and a

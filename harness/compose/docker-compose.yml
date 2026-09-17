@@ -3,8 +3,10 @@
 # `postgres` and `litellm` have no profile, so they start with a bare
 # `docker compose up`: the database and the model gateway are what everything
 # else needs. `core-tools` is build-only (Hermes launches it over stdio, not as
-# a service). The rest is in the `demo` profile, and `pnpm demo:up` brings up
-# the whole client instance.
+# a service). Every client path is derived from `HARNESS_CLIENT`; onboarding a
+# client is a folder and a `.env`, never an edit here. No service mounts the
+# Docker socket. The rest is in the `demo` profile, and `pnpm demo:up` brings
+# up the whole client instance.
 #
 # Every variable below is interpolated from the repository-root `.env`, so run
 # these through the `pnpm` scripts, which pass `--env-file .env`. Compose's own
@@ -63,6 +65,36 @@ services:
       retries: 12
       start_period: 30s
 
+  # Untrusted document parsing, in a process that holds no key and no database URL and cannot
+  # reach the network. core-tools sends it a path under the storage root and gets pages back;
+  # see harness/files/README.md. No env_file: its whole environment is the three lines below.
+  files:
+    build:
+      context: ../..
+      dockerfile: harness/compose/files.Dockerfile
+    image: harness-files
+    profiles: ['demo']
+    restart: unless-stopped
+    networks:
+      - files
+    environment:
+      HARNESS_STORAGE_DIR: '/srv/harness-storage'
+      HARNESS_FILES_PORT: '8790'
+      # Every interface inside the container: the internal network is the boundary, and a
+      # container-loopback listener would answer neither of the services that call it.
+      HARNESS_FILES_BIND: '0.0.0.0'
+    volumes:
+      - storage:/srv/harness-storage
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'node -e "fetch(''http://127.0.0.1:8790/healthz'').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"',
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+
   # Built, not started: Hermes launches core-tools over stdio in Plan 3.
   # `docker compose build core-tools` proves the image still builds.
   core-tools:
@@ -100,7 +132,15 @@ services:
       # first forms_fill fails with EACCES: the writer is the core-tools child
       # inside the hermes container, which runs as HERMES_UID, not root.
       - storage:/srv/harness-storage
-      - ../../clients/demo-practice:/srv/client:ro
+      # Long syntax: the short form's unexpanded ${HARNESS_CLIENT:?...} has a
+      # colon inside the default/error clause, and some Compose versions split
+      # a short-syntax bind on every colon when interpolation is disabled
+      # (as `docker compose config --no-interpolate` does), so it must never
+      # be written as a single `source:target:mode` string.
+      - type: bind
+        source: ../../clients/${HARNESS_CLIENT:?set HARNESS_CLIENT in .env}
+        target: /srv/client
+        read_only: true
       - ../../.env:/srv/env/.env:ro
     environment:
       HERMES_UID: '${HERMES_UID:-1000}'
@@ -124,6 +164,19 @@ services:
         # sed, not `grep -v`: grep exits 1 when it prints nothing, which
         # would abort this script under `set -e`.
         sed '/^APPROVALS_SLACK_/d' /srv/env/.env > /data/.env
+        # Hermes interpolates the core-tools child's env block from this file,
+        # not from the process environment, so the three host-side addresses
+        # in the operator's .env must be rewritten to their compose-network
+        # forms here or the child cannot reach the database or the gateway.
+        sed -i \
+          -e 's#^DATABASE_URL=.*#DATABASE_URL=postgres://harness:harness@postgres:5432/harness#' \
+          -e 's#^HARNESS_GATEWAY_URL=.*#HARNESS_GATEWAY_URL=http://litellm:4000#' \
+          -e 's#^HARNESS_FILES_URL=.*#HARNESS_FILES_URL=http://files:8790#' \
+          /data/.env
+        # An operator's .env may lack a trailing newline; append on a fresh line.
+        [ -z "$$(tail -c1 /data/.env)" ] || echo >> /data/.env
+        grep -q '^HARNESS_GATEWAY_URL=' /data/.env || echo 'HARNESS_GATEWAY_URL=http://litellm:4000' >> /data/.env
+        grep -q '^HARNESS_FILES_URL=' /data/.env || echo 'HARNESS_FILES_URL=http://files:8790' >> /data/.env
         chmod 600 /data/.env
         # jobs.json is deliberately NOT seeded: its record shape is not
         # documented, and Hermes creates it on the first `hermes cron create`.
@@ -138,7 +191,10 @@ services:
         # HERMES_UID inside the hermes container and the fresh volume root is
         # owned by root. The approvals container reads this tree as its own
         # uid-1000 `node` user, which matches the default HERMES_UID.
-        mkdir -p /srv/harness-storage/out
+        # `incoming/` is where Hermes drops files a human attaches in chat (see
+        # the hermes service's mount of the same subpath), so `documents_ingest`
+        # can read them as `incoming/<file name>` under the storage root.
+        mkdir -p /srv/harness-storage/out /srv/harness-storage/incoming
         chown -R "$${HERMES_UID}:$${HERMES_GID}" /srv/harness-storage
         echo "hermes-init: seeded SOUL.md, config.yaml, cron/playbooks.sh, scripts/ and the storage root"
 
@@ -149,6 +205,9 @@ services:
     image: harness-hermes
     profiles: ['demo']
     restart: unless-stopped
+    networks:
+      - default
+      - files
     depends_on:
       postgres:
         condition: service_healthy
@@ -156,6 +215,8 @@ services:
         condition: service_healthy
       hermes-init:
         condition: service_completed_successfully
+      files:
+        condition: service_healthy
     env_file:
       - ../../.env
     environment:
@@ -169,34 +230,31 @@ services:
       HERMES_GID: '${HERMES_GID:-1000}'
       DATABASE_URL: 'postgres://harness:harness@postgres:5432/harness'
       HARNESS_STORAGE_DIR: '/srv/harness-storage'
-      # An override, not a requirement: unset, core-tools takes the forms
-      # directory from the first pack in HARNESS_PACKS. It is pinned here
-      # because the demo mounts the pack read-only at this path. Clear it, or
-      # repoint it, when a different pack owns the forms.
-      HARNESS_FORMS_DIR: '/srv/agent-harness/packs/healthcare/forms'
       HARNESS_PACKS: '${HARNESS_PACKS:-@harness/pack-healthcare}'
-      HARNESS_POLICY_FILE: '/srv/agent-harness/clients/demo-practice/policy.yaml'
+      HARNESS_POLICY_FILE: '/srv/agent-harness/clients/${HARNESS_CLIENT:?set HARNESS_CLIENT in .env}/policy.yaml'
       # The core-tools child Hermes launches reaches the proxy on the compose
       # network, not on the host loopback the .env value names. The master key
       # comes from .env: it is the only credential this container needs for
       # models, because the provider keys never leave the proxy.
       HARNESS_GATEWAY_URL: 'http://litellm:4000'
+      # The core-tools child parses documents in the files worker, on the internal network.
+      HARNESS_FILES_URL: 'http://files:8790'
       LITELLM_MASTER_KEY: '${LITELLM_MASTER_KEY:?set LITELLM_MASTER_KEY in .env}'
     volumes:
       - hermesdata:/opt/data
       - storage:/srv/harness-storage
+      # Hermes saves chat attachments under $HERMES_HOME/cache/documents. Mount
+      # the store's `incoming/` there, so a file a human drops in Slack is
+      # already inside the storage root the core-tools child may read from,
+      # as `incoming/<file name>`; nothing outside that root is ever readable.
+      - type: volume
+        source: storage
+        target: /opt/data/cache/documents
+        volume:
+          subpath: incoming
       # Content is editable without a rebuild; code is not.
       - ../../packs:/srv/agent-harness/packs:ro
       - ../../clients:/srv/agent-harness/clients:ro
-      # terminal.backend is docker, so Hermes needs a Docker endpoint. This is
-      # root-equivalent access to the host: the Slack toolset has no terminal
-      # (see platform_toolsets in hermes.config.yaml), so only an operator on
-      # the CLI surface can reach it. Remove this mount and set
-      # terminal.backend to "local" if that trade is not acceptable. The
-      # container's image-level user is root because the s6 entrypoint needs
-      # it, but the process that could use this socket runs as HERMES_UID —
-      # see hermes.Dockerfile.
-      - /var/run/docker.sock:/var/run/docker.sock
     command: ['gateway', 'run']
 
   approvals:
@@ -206,8 +264,13 @@ services:
     image: harness-approvals
     profiles: ['demo']
     restart: unless-stopped
+    networks:
+      - default
+      - files
     depends_on:
       postgres:
+        condition: service_healthy
+      files:
         condition: service_healthy
     # No env_file here, deliberately. This service gets an explicit allowlist
     # interpolated from ../../.env, so Hermes's Slack tokens never enter the
@@ -218,20 +281,18 @@ services:
       HARNESS_ENCRYPTION_KEY: '${HARNESS_ENCRYPTION_KEY:-}'
       HARNESS_CLIENT: '${HARNESS_CLIENT:-demo-practice}'
       HARNESS_STORAGE_DIR: '/srv/harness-storage'
-      # Same override as the hermes service: unset, the core-tools child takes
-      # the forms directory from the first pack in HARNESS_PACKS. Pinned here
-      # only because the demo mounts the pack read-only at this path.
-      HARNESS_FORMS_DIR: '/srv/agent-harness/packs/healthcare/forms'
       HARNESS_PACKS: '${HARNESS_PACKS:-@harness/pack-healthcare}'
       # Which messaging surfaces this host serves, first one primary. Same shape
       # as HARNESS_PACKS: the adapter is loaded by name at startup, so switching
       # the demo to another surface is this line plus that adapter's variables.
       HARNESS_SURFACES: '${HARNESS_SURFACES:-@harness/surface-slack}'
-      HARNESS_POLICY_FILE: '/srv/agent-harness/clients/demo-practice/policy.yaml'
+      HARNESS_POLICY_FILE: '/srv/agent-harness/clients/${HARNESS_CLIENT:?set HARNESS_CLIENT in .env}/policy.yaml'
       # Passed to the core-tools child this app spawns, which refuses to start
       # without a gateway key. Same proxy as Hermes, reached on the compose
       # network rather than the host loopback the .env value names.
       HARNESS_GATEWAY_URL: 'http://litellm:4000'
+      # Same worker, same network: the child this app spawns parses documents there.
+      HARNESS_FILES_URL: 'http://files:8790'
       LITELLM_MASTER_KEY: '${LITELLM_MASTER_KEY:?set LITELLM_MASTER_KEY in .env}'
       # The approver's own Slack app — a second app, not Hermes's. One app
       # token cannot serve two Socket Mode connections: Slack delivers each
@@ -257,6 +318,13 @@ services:
       - storage:/srv/harness-storage
       - ../../packs:/srv/agent-harness/packs:ro
       - ../../clients:/srv/agent-harness/clients:ro
+
+networks:
+  # The files worker's network. `internal: true` means no route out of it: the worker reaches
+  # nothing — not the gateway, not the database, not the internet — and only the services
+  # listed on it reach the worker (spec decision 3, invariant 6).
+  files:
+    internal: true
 
 volumes:
   pgdata: {}

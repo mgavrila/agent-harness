@@ -1,0 +1,71 @@
+# The four gates and the image builds, on every pull request and every push to main.
+#
+# The gates job is `pnpm -r typecheck`, `pnpm lint`, `pnpm arch`, `pnpm format:check` and
+# `pnpm test`, exactly as CONTRIBUTING.md's "Before you push" lists them, against a Postgres
+# service with the same three extra databases the Compose stack's init.sql creates. The image
+# job builds every service Compose defines, with placeholder values from .env.ci.
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  gates:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        # The image Plan 10 will need for pgvector; a plain Postgres 16 until then.
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: harness
+          POSTGRES_PASSWORD: harness
+          POSTGRES_DB: harness
+        ports:
+          - 15432:5432
+        options: >-
+          --health-cmd "pg_isready -U harness -d harness"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://harness:harness@localhost:15432/harness
+      TEST_DATABASE_URL: postgres://harness:harness@localhost:15432/harness_test
+      EVALS_DATABASE_URL: postgres://harness:harness@localhost:15432/harness_evals
+      # A gateway key the spawned core-tools servers refuse to start without; no model is
+      # ever called in the suite.
+      LITELLM_MASTER_KEY: sk-ci-placeholder
+    steps:
+      - uses: actions/checkout@v4
+      # No `version` input: the root package.json pins `packageManager: pnpm@11.4.0`, which is
+      # what the action reads, and v4 refuses to be told the version twice.
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Install the parsing binaries and psql
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-eng poppler-utils postgresql-client
+      - run: pnpm install --frozen-lockfile
+      - name: Create the test and evals databases, with the init.sql Compose uses
+        run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f harness/compose/postgres/init.sql
+      - run: pnpm db:migrate
+      - run: pnpm -r typecheck
+      - run: pnpm lint
+      - run: pnpm arch
+      - run: pnpm format:check
+      - run: pnpm test
+
+  images:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # The hermes service declares `env_file: ../../.env`. A build does not read it, but the
+      # placeholder file is put there so that a Compose release that validates it at load time
+      # cannot fail the job.
+      - run: cp .env.ci .env
+      - name: Build every image the Compose stack defines
+        run: docker compose --env-file .env.ci -f harness/compose/docker-compose.yml --profile demo --profile build-only build

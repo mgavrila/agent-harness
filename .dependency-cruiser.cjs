@@ -34,15 +34,18 @@ const PACKAGES = [
   { name: 'shared', src: 'harness/shared/src', severity: 'error' },
   { name: 'pack-api', src: 'harness/pack-api/src', severity: 'error' },
   { name: 'surface-api', src: 'harness/surface-api/src', severity: 'error' },
+  { name: 'identity-api', src: 'harness/identity-api/src', severity: 'error' },
   { name: 'db', src: 'harness/db/src', severity: 'error' },
   { name: 'gateway', src: 'harness/gateway/src', severity: 'error' },
   { name: 'core-tools', src: 'harness/core-tools/src', severity: 'error' },
   { name: 'approvals', src: 'harness/approvals/src', severity: 'error' },
+  { name: 'files', src: 'harness/files/src', severity: 'error' },
   { name: 'evals', src: 'evals/src', severity: 'error' },
   { name: 'pack-healthcare', src: 'packs/healthcare/src', severity: 'error' },
   { name: 'pack-stories', src: 'packs/stories/src', severity: 'error' },
   { name: 'surface-slack', src: 'surfaces/slack/src', severity: 'error' },
   { name: 'surface-memory', src: 'surfaces/memory/src', severity: 'error' },
+  { name: 'identity-static', src: 'identities/static/src', severity: 'error' },
   { name: 'scripts', src: 'scripts/src', severity: 'error' },
 ];
 
@@ -96,15 +99,18 @@ const WORKSPACE_DIRS = [
   'harness/shared',
   'harness/pack-api',
   'harness/surface-api',
+  'harness/identity-api',
   'harness/db',
   'harness/gateway',
   'harness/core-tools',
   'harness/approvals',
+  'harness/files',
   'evals',
   'packs/healthcare',
   'packs/stories',
   'surfaces/slack',
   'surfaces/memory',
+  'identities/static',
   'scripts',
 ];
 
@@ -164,6 +170,17 @@ const GLOBAL_RULES = [
     to: { path: '^packs/[^/]+/', dependencyTypesNot: ['dynamic-import'] },
   },
   {
+    name: 'core-tools-never-statically-imports-an-identity-plugin',
+    comment:
+      'Identity plug-ins are loaded at runtime from HARNESS_IDENTITY through a dynamic import in domain/identity/registry.ts. A static import would wire the kernel to one way of knowing who is asking, which is the coupling the identity contract exists to remove. src/testing.ts and *.test.ts are exempt for the same reason they are for packs.',
+    severity: 'error',
+    from: {
+      path: '^harness/core-tools/src/',
+      pathNot: ['\\.test\\.ts$', '^harness/core-tools/src/testing\\.ts$'],
+    },
+    to: { path: '^identities/[^/]+/', dependencyTypesNot: ['dynamic-import'] },
+  },
+  {
     name: 'evals-never-statically-imports-a-pack',
     comment:
       'The eval runner measures whichever pack HARNESS_PACKS names, loaded at runtime through loadPacks. A static import would wire it to one pack by name and put an opinion about what it measures back into the runner, which is the coupling this task removed. *.test.ts and *.test-helpers.ts are exempt: a test names a pack as a fixture because there is no other way to run against a real corpus, and neither is shipped.',
@@ -217,7 +234,7 @@ const GLOBAL_RULES = [
     severity: 'error',
     from: { path: '^harness/pack-api/src/' },
     to: {
-      path: '^(harness|packs|surfaces|evals|scripts)/',
+      path: '^(harness|packs|surfaces|identities|evals|scripts)/',
       pathNot: ['^harness/pack-api/src/', '^harness/shared/src/'],
     },
   },
@@ -228,8 +245,30 @@ const GLOBAL_RULES = [
     severity: 'error',
     from: { path: '^harness/surface-api/src/' },
     to: {
-      path: '^(harness|packs|surfaces|evals|scripts)/',
+      path: '^(harness|packs|surfaces|identities|evals|scripts)/',
       pathNot: ['^harness/surface-api/src/', '^harness/shared/src/'],
+    },
+  },
+  {
+    name: 'identity-api-imports-only-shared',
+    comment:
+      '@harness/identity-api is the contract an identity plug-in implements. It may import @harness/shared and zod, and no other workspace package: a contract that pulled in core-tools would defeat the point of having one, and one that pulled in @harness/pack-api would tie identity to the pack contract. The five levels both contracts need live in @harness/shared for exactly that reason.',
+    severity: 'error',
+    from: { path: '^harness/identity-api/src/' },
+    to: {
+      path: '^(harness|packs|surfaces|identities|evals|scripts)/',
+      pathNot: ['^harness/identity-api/src/', '^harness/shared/src/'],
+    },
+  },
+  {
+    name: 'files-imports-only-shared',
+    comment:
+      '@harness/files parses untrusted documents in a process that holds no key and no database URL. It may import @harness/shared and node built-ins, and no other workspace package: an edge into @harness/db or core-tools would put the key back next to the parser, which is the boundary this package exists to draw.',
+    severity: 'error',
+    from: { path: '^harness/files/src/' },
+    to: {
+      path: '^(harness|packs|surfaces|identities|evals|scripts)/',
+      pathNot: ['^harness/files/src/', '^harness/shared/src/'],
     },
   },
   {
@@ -239,7 +278,7 @@ const GLOBAL_RULES = [
     severity: 'error',
     from: { path: '^packs/', pathNot: ['\\.test\\.ts$', '\\.test-helpers\\.ts$'] },
     to: {
-      path: '^(harness|surfaces|evals|scripts)/',
+      path: '^(harness|surfaces|identities|evals|scripts)/',
       pathNot: ['^harness/pack-api/src/', '^harness/shared/src/'],
     },
   },
@@ -253,8 +292,19 @@ const GLOBAL_RULES = [
       // `surfaces` is in the alternation so one adapter cannot import another: two transports
       // sharing code is a third package, not an edge. `^surfaces/$1/` is the group captured
       // above, so an adapter still reaches its own modules and only its own.
-      path: '^(harness|packs|surfaces|evals|scripts)/',
+      path: '^(harness|packs|surfaces|identities|evals|scripts)/',
       pathNot: ['^harness/surface-api/src/', '^harness/shared/src/', '^surfaces/$1/'],
+    },
+  },
+  {
+    name: 'an-identity-plugin-imports-only-api-and-shared',
+    comment:
+      'An identity plug-in depends on @harness/identity-api and @harness/shared only. An edge into core-tools or @harness/db would be a cycle — the kernel loads the plug-in — and an edge into a pack, a surface or another plug-in would tie who-is-asking to one area of the product or one transport. Its own tests are not exempt.',
+    severity: 'error',
+    from: { path: '^identities/([^/]+)/' },
+    to: {
+      path: '^(harness|packs|surfaces|identities|evals|scripts)/',
+      pathNot: ['^harness/identity-api/src/', '^harness/shared/src/', '^identities/$1/'],
     },
   },
   {
@@ -263,7 +313,7 @@ const GLOBAL_RULES = [
       '@harness/shared is the bottom of the graph. @harness/db and every pack import it, so a dependency on any other workspace package would be a cycle. Node built-ins only.',
     severity: 'error',
     from: { path: '^harness/shared/src/' },
-    to: { path: '^(harness|packs|surfaces|evals|scripts)/', pathNot: '^harness/shared/src/' },
+    to: { path: '^(harness|packs|surfaces|identities|evals|scripts)/', pathNot: '^harness/shared/src/' },
   },
   ...WORKSPACE_DIRS.map(crossPackageRule),
 ];
@@ -285,14 +335,15 @@ module.exports = {
         // One node per package layer, not per file: the graph answers "may this package import
         // that one", which is the same question the rules above answer. `index.ts` is left
         // uncollapsed everywhere, because it is the node every cross-package arrow should land
-        // on. `@harness/shared`, `@harness/pack-api` and `@harness/surface-api` are flat — they
-        // are one layer each — so they get a pattern of their own, as do the pack's two
-        // generator directories.
+        // on. `@harness/shared`, `@harness/pack-api`, `@harness/surface-api` and
+        // `@harness/identity-api` are flat — they are one layer each — so they get a pattern of
+        // their own, as do the pack's two generator directories.
         collapsePattern: [
           '^(harness|packs|evals|scripts)/[^/]+/(src/)?(shared|domain|tools|app)',
-          '^harness/(shared|pack-api|surface-api)/src/(?!index[.]ts)',
+          '^harness/(shared|pack-api|surface-api|identity-api)/src/(?!index[.]ts)',
           '^packs/[^/]+/(synthetic|forms)/',
           '^surfaces/[^/]+/src/(?!index[.]ts)',
+          '^identities/[^/]+/src/(?!index[.]ts)',
         ],
       },
     },

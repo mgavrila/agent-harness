@@ -17,7 +17,7 @@ const echo: CoreToolView = {
 
 const deps: PackToolDeps = {
   client: 'test',
-  caller: 'test-caller',
+  principal: { id: 'u-test', kind: 'user', level: 'practitioner', displayName: 'Test user' },
   now: () => new Date('2026-09-15T12:00:00Z'),
   storageDir: '/srv/storage',
   formsDir: '/srv/forms',

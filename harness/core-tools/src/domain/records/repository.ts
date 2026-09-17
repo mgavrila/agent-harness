@@ -235,7 +235,7 @@ export async function confirmField(
     restricted,
     confidence: 1,
     status: 'verified',
-    confirmedBy: confirmed_by ?? deps.caller,
+    confirmedBy: confirmed_by ?? deps.principal.id,
     confirmedAt: deps.now(),
   };
   await deps.db

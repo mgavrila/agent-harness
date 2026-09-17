@@ -13,7 +13,7 @@
  * the "no test imported by production" architecture rule matches on the name.
  */
 import { randomBytes } from 'node:crypto';
-import { DEFAULT_POLICY, PACK_KERNEL, registryOf, type ToolDeps } from '@harness/core-tools';
+import { DEFAULT_POLICY, PACK_KERNEL, localParser, registryOf, type ToolDeps } from '@harness/core-tools';
 import { createDb } from '@harness/db';
 import { pack as healthcarePack } from '@harness/pack-healthcare';
 import { EVALS_DATABASE_URL } from './corpus.test-helpers.js';
@@ -39,7 +39,14 @@ export function openJudgeDeps(opts: { gatewayUrl: string; storageDir: string }):
     deps: {
       db,
       client: 'evals',
-      caller: 'judge',
+      principal: {
+        id: 'svc-judge',
+        kind: 'service',
+        level: 'service',
+        displayName: 'Eval judge',
+        surfaces: {},
+        attributes: {},
+      },
       policy: { ...DEFAULT_POLICY },
       // Ephemeral: the eval database is truncated between cases, so nothing
       // encrypted under this key has to be readable later.
@@ -49,10 +56,11 @@ export function openJudgeDeps(opts: { gatewayUrl: string; storageDir: string }):
       confidenceThreshold: 0.85,
       gateway: { baseUrl: opts.gatewayUrl, apiKey: 'sk-eval', timeoutMs: 10_000, maxCallsPerRun: 100 },
       storageDir: opts.storageDir,
+      parser: localParser(opts.storageDir),
       formsDir: packs.all[0].formsDir ?? opts.storageDir,
       restrictedToModel: false,
       sinks: {},
-      context: {},
+      context: { runId: null, threadId: null, surface: null, conversation: null },
       tools: new Map(),
       kernelTools: new Map(),
       kernel: PACK_KERNEL,

@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { parse as parseYaml } from 'yaml';
-import { definePack, loadPackSchema, type Policy } from '@harness/pack-api';
+import { definePack, loadPackSchema, type ActionClass, type Behavior } from '@harness/pack-api';
 import { PACK_NAME } from './pack-name.js';
 import { HEALTHCARE_REPLACES, healthcareTools } from './tools/index.js';
 
@@ -13,7 +13,7 @@ const { root, version, records, attachments, extraction } = loadPackSchema(impor
  * yet — see ARCHITECTURE.md, "The kernel and a pack".
  */
 const { classes = {} } = parseYaml(readFileSync(path.join(root, 'policy.yaml'), 'utf8')) as {
-  classes?: Partial<Policy>;
+  classes?: Partial<Record<ActionClass, Behavior>>;
 };
 
 /**
@@ -33,7 +33,7 @@ export const pack = definePack({
   extraction,
   formsDir: path.join(root, 'forms'),
   skillsDir: path.join(root, 'skills'),
-  policy: classes,
+  policy: { classes },
   evals: {
     casesFile: path.join(root, 'synthetic', 'out', 'cases.jsonl'),
     injectionFile: path.join(root, 'evals', 'injection.jsonl'),

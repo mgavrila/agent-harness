@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { describeError } from '@harness/shared';
+import { localParser } from '../domain/documents/parser.js';
 import { connectInProcess } from '../domain/tooling/in-process.js';
 import { DEFAULT_POLICY } from '../domain/tooling/policy.js';
 import { DEFAULT_CONFIDENCE_THRESHOLD, type ToolDeps } from '../domain/tooling/types.js';
@@ -35,7 +36,14 @@ export async function surfaceDeps(): Promise<ToolDeps> {
   return {
     db: null as unknown as ToolDeps['db'],
     client: 'surface',
-    caller: 'surface',
+    principal: {
+      id: 'svc-surface',
+      kind: 'service',
+      level: 'service',
+      displayName: 'Surface recorder',
+      surfaces: {},
+      attributes: {},
+    },
     policy: { ...DEFAULT_POLICY },
     encryptionKey: Buffer.alloc(32),
     now: () => new Date('2026-01-01T00:00:00Z'),
@@ -43,10 +51,11 @@ export async function surfaceDeps(): Promise<ToolDeps> {
     confidenceThreshold: DEFAULT_CONFIDENCE_THRESHOLD,
     gateway: { baseUrl: 'http://127.0.0.1:1', apiKey: 'unused', timeoutMs: 1_000, maxCallsPerRun: 1 },
     storageDir: '/nonexistent/surface',
+    parser: localParser('/nonexistent/surface'),
     formsDir: '/nonexistent/surface',
     restrictedToModel: false,
     sinks: {},
-    context: {},
+    context: { runId: null, threadId: null, surface: null, conversation: null },
     tools: new Map(),
     kernelTools: new Map(),
     kernel: PACK_KERNEL,
@@ -90,13 +99,13 @@ export async function readToolSurface(): Promise<ToolSurfaceEntry[]> {
  *
  *   - Without `--no-interpolate`, Compose refuses to render (`required variable
  *     LITELLM_MASTER_KEY is missing a value`) unless a filled-in `.env` exists — and when one
- *     does, the `hermes` service's `env_file: ../../.env` copies the developer's real API
+ *     does, the agent runtime service's `env_file: ../../.env` copies the developer's real API
  *     keys straight into the output. Nothing like that can be committed.
  *   - Without `--no-path-resolution`, every bind mount is rewritten to an absolute host path,
  *     so the snapshot differs on every machine.
  *
  * Both `--profile` flags are needed because `config` omits services whose profile is not
- * enabled, and `approvals`, `hermes`, `hermes-init` and `core-tools` all have one.
+ * enabled, and every service but `postgres` and `litellm` has one.
  */
 export async function readComposeSurface(repoRoot: string): Promise<string> {
   try {
@@ -149,14 +158,16 @@ export const ENV_READING_HELPERS = [
 /**
  * The directories the environment scan walks. This is every place shipping TypeScript lives
  * today. `clients/` and the repository root are absent because neither holds a `.ts` file —
- * `clients/` is per-client configuration (`.env`, `policy.yaml`, `SOUL.md`, `hermes.config.yaml`)
- * and the root holds only config. Add the directory here if you put source in either, or the
- * variables it reads will go unrecorded and the `.env.example` check will pass while missing them.
- * `surfaces/` is there for the same reason `packs/` is: an adapter reads its own variables, and a
- * scan that did not walk it would let them go undocumented — including the primary adapter's
- * conversation variable, which `surface.test.ts` anchors on.
+ * `clients/` is per-client configuration (`.env`, `policy.yaml`, `identity.yaml`, `SOUL.md`, the
+ * runtime's config) and the root holds only config. Add the directory here if you put source in
+ * either, or the variables it reads will go unrecorded and the `.env.example` check will pass
+ * while missing them. `surfaces/` is there for the same reason `packs/` is: an adapter reads its
+ * own variables, and a scan that did not walk it would let them go undocumented — including the
+ * primary adapter's conversation variable, which `surface.test.ts` anchors on. `identities/` is
+ * there for the same reason `surfaces/` is: a plug-in reads its own variables off `deps.env`
+ * through the shared helpers, and `HARNESS_IDENTITY_FILE` is one of them.
  */
-const SOURCE_ROOTS = ['harness', 'packs', 'surfaces', 'evals', 'scripts'];
+const SOURCE_ROOTS = ['harness', 'packs', 'surfaces', 'identities', 'evals', 'scripts'];
 const DIRECT_ENV = /process\.env\.([A-Z][A-Z0-9_]*)/g;
 const INDEXED_ENV = /process\.env\[\s*'([A-Z][A-Z0-9_]*)'\s*\]/g;
 const HELPER_ENV = new RegExp(

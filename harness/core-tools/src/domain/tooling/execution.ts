@@ -3,7 +3,7 @@ import { withTransaction, type Db } from '@harness/db';
 import { ToolError, describeError } from '@harness/shared';
 import { createOrReuseApproval } from '../approvals/repository.js';
 import { writeAudit } from './audit.js';
-import { preservingContext, withCurrentTool } from './context.js';
+import { withCurrentTool } from './context.js';
 import type { AnyToolDef, AuditBase, Envelope, ToolCallResult, ToolDeps } from './types.js';
 
 /** The envelope every tool's output is wrapped in, so a parked call and a completed one have one shape. */
@@ -63,13 +63,11 @@ export async function runForApproval(
   args: Record<string, unknown>,
 ): Promise<ToolCallResult> {
   try {
-    const row = await preservingContext(deps.context, () =>
-      withTransaction(deps.db, async (tx) => {
-        const parked = await createOrReuseApproval(tx, deps, tool, args, base.argsHash);
-        await writeAudit(tx, { ...base, decision: 'approval', approvalId: parked.id });
-        return parked;
-      }),
-    );
+    const row = await withTransaction(deps.db, async (tx) => {
+      const parked = await createOrReuseApproval(tx, deps, tool, args, base.argsHash);
+      await writeAudit(tx, { ...base, decision: 'approval', approvalId: parked.id });
+      return parked;
+    });
     return envelopeResult({ status: 'pending', approval_id: row.id });
   } catch (err) {
     return await handleUnexpectedError(deps.db, tool, base, err);
@@ -90,17 +88,15 @@ export async function runAuto(
   args: Record<string, unknown>,
 ): Promise<ToolCallResult> {
   try {
-    const result = await preservingContext(deps.context, () =>
-      withTransaction(deps.db, async (tx) => {
-        // Spread keeps the one shared context object, which the handler may mutate.
-        const txDeps: ToolDeps = { ...deps, db: tx };
-        return await withCurrentTool(deps.context, tool.name, async () => {
-          const out = await tool.handler(args, txDeps);
-          await writeAudit(tx, { ...base, decision: 'auto', recordIds: tool.recordIds?.(args, out) ?? [] });
-          return out;
-        });
-      }),
-    );
+    const result = await withTransaction(deps.db, async (tx) => {
+      // Spread keeps the run's context object, which withCurrentTool stamps the tool name on.
+      const txDeps: ToolDeps = { ...deps, db: tx };
+      return await withCurrentTool(deps.context, tool.name, async () => {
+        const out = await tool.handler(args, txDeps);
+        await writeAudit(tx, { ...base, decision: 'auto', recordIds: tool.recordIds?.(args, out) ?? [] });
+        return out;
+      });
+    });
     return envelopeResult({ status: 'ok', result });
   } catch (err) {
     const message = describeError(err);

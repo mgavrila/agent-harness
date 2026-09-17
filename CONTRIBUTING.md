@@ -49,8 +49,10 @@ is empty.
 3. Add it to the exported array at the bottom of that file. `kernelTools(packs)` in
    `src/tools/catalog.ts` already spreads that array, and `publishedTools` decides what of it
    reaches MCP once the loaded packs have had their say.
-4. Choose the action class honestly: `read`, `write.internal`, `external`, `financial`,
-   `destructive`. `external` parks an approval; `financial` is blocked by default.
+4. Choose the action class honestly: `read`, `write.self`, `write.internal`, `write.assign`,
+   `external`, `financial`, `destructive`, `admin`. What each does depends on the caller's
+   level — `DEFAULT_POLICY` in `domain/tooling/policy.ts` is the table; `external` parks an
+   approval for everyone and `financial` is blocked below `lead`.
 5. Throw `ToolError` for anything the caller can fix. Never `throw new Error` in `tools/` —
    its message is masked and the caller learns nothing.
 6. Never send anything from a handler. Stage it with `stageEffect` and let the dispatcher send it.
@@ -210,7 +212,7 @@ complete one; read it alongside this.
    the runner today. `pnpm evals -- --pack <name>` measures it.
 
 10. **Name it where a deployment is configured.** Add the package to `@harness/core-tools`'s
-    `dependencies` so pnpm can resolve the dynamic import, then name it in all three places or
+    `dependencies` so pnpm can resolve the dynamic import, then name it in both places or
     half the deployment stays on the old pack:
 
     - the client's `.env`, which Compose interpolates into both services:
@@ -219,12 +221,9 @@ complete one; read it alongside this.
       is an allowlist — a variable core-tools reads has to be named there or the child never
       sees it — so `HARNESS_PACKS` is written as `'${HARNESS_PACKS}'` and must stay
       interpolated, never pinned to a pack name. The approvals app forwards the real value to
-      its own child already (`harness/approvals/src/app/child-env.ts`);
-    - `HARNESS_FORMS_DIR`, in that same block and in both Compose services. It is an
-      **override**: unset, core-tools takes the forms directory from the first pack in
-      `HARNESS_PACKS`; set, it wins.
+      its own child already (`harness/approvals/src/app/child-env.ts`).
 
-    Every scaffolded client inherits all three, because `pnpm new-client` copies
+    Every scaffolded client inherits both, because `pnpm new-client` copies
     `clients/demo-practice/`.
 
 11. **Run the gates.** `pnpm -r typecheck && pnpm lint && pnpm arch && pnpm test`. If your pack
@@ -240,6 +239,18 @@ declare the same record kind.
 `Pack.policy` is declared but not yet merged into `deps.policy`: a pack's policy is carried,
 not applied. Set the client's `HARNESS_POLICY_FILE` if you need a different action-class table
 today.
+
+**A `classes:` entry does not override a level's own cell.** `decide` reads
+`policy.levels[level][class]` first and falls back to `policy.classes[class]`, and the kernel's
+`DEFAULT_POLICY` already ships several level cells — `levels.member.destructive: blocked`,
+`levels.service.write.assign: approval`, and others. Setting `classes.destructive` in a
+client's `policy.yaml` therefore does nothing for `member`, whose cell wins regardless; to
+loosen or tighten one level, write `levels:`:
+
+```yaml
+levels:
+  member: { destructive: approval }
+```
 
 ## Adding a surface
 
@@ -318,14 +329,58 @@ complete one; read it alongside this, and read `surfaces/slack` for the real thi
 8. **Load it.** Add the package to `@harness/approvals`' dependencies and put its name in
    `HARNESS_SURFACES`. Nothing in the host changes.
 
+## Adding an identity provider
+
+An identity provider — the contract calls it `IdentityProvider`; the kernel, whose vocabulary
+test forbids the word, says "identity plug-in" — answers which principal is behind a surface
+user id. `identities/static` is the smallest complete one; read it alongside this.
+
+1. **Create the package.** `mkdir -p identities/<name>/src` and a `package.json` named
+   `@harness/identity-<name>`, with `"." : "./src/index.ts"` in `exports` and
+   `@harness/identity-api` and `@harness/shared` in `dependencies`. **Never** depend on
+   `@harness/core-tools`, `@harness/db`, a pack, a surface or another plug-in; `pnpm arch` fails
+   the build on any of them, tests included. Add one `PACKAGES` row and one `WORKSPACE_DIRS`
+   entry in `.dependency-cruiser.cjs`, and nothing else.
+
+2. **Declare it, and export it as `identity`.**
+
+   ```ts
+   export const identity = defineIdentityProvider({
+     name: 'entra',
+     version: '0.1.0',
+     secrets: ['ENTRA_CLIENT_SECRET'],
+     connect: async (deps) => createEntraSession(entraConfig(deps.env), deps.log),
+   });
+   ```
+
+   `name` is lowercase and stable. `secrets` lists the environment variables you read that are
+   credentials.
+
+3. **Read configuration from `deps.env`, never `process.env`,** through `@harness/shared`'s env
+   helpers with `deps.env` as their last argument, and document every name in `.env.example` in
+   the same commit — the env scan walks `identities/`. `deps.clientDir` is `clients/<name>/`.
+
+4. **Implement `IdentitySession`.** `resolve({ surface, userId })` answers a `Principal` or
+   `null`, and null means "not authorised" — never invent a guest. `get(id)`, `list()` and
+   `stop()`. A principal's `id` is `u-<slug>` for a person and `svc-<slug>` for a service, its
+   `level` one of the five in `@harness/shared`, and `service` only for a service: whatever your
+   directory says, map it onto those, and keep the id stable across renames, because it is what
+   every audit row carries.
+
+5. **Test it against a fake directory.** No test reaches a real tenant. `StaticIdentity` from
+   `@harness/identity-api/testing` is what to compare against.
+
+6. **Load it.** Add the package to `@harness/core-tools`' dependencies and set
+   `HARNESS_IDENTITY=@harness/identity-<name>`. Nothing in the kernel changes.
+
 ## Adding a client
 
 ```bash
 pnpm new-client --pack healthcare --name acme-clinic
 ```
 
-Then fill in `clients/acme-clinic/.env.example`, review `SOUL.md` and `policy.yaml`, and read
-"Onboarding a client" in `docs/runbook.md`.
+Then fill in `clients/acme-clinic/.env.example`, review `SOUL.md` and `policy.yaml`, declare the
+people and services in `identity.yaml`, and read "Onboarding a client" in `docs/runbook.md`.
 
 ## Adding a migration
 
@@ -390,3 +445,10 @@ silence one with an inline disable to make the count go down — either narrow t
 it in the backlog. `require-await` is off in tests, fakes and `testing.ts`, where an `async`
 with nothing to await is what makes the signature match the interface; it stays a warning in
 shipping code.
+
+`.github/workflows/ci.yml` runs exactly these five on every pull request and every push to
+`main`, against a Postgres service, and then builds every image; a red check there is the same
+failure you would have seen here. The job deliberately does not set `HARNESS_STORAGE_DIR` or
+`HARNESS_ENCRYPTION_KEY` in its ambient environment, because two tests assert on their absence;
+every test that needs them passes them explicitly, so do not "fix" that by adding either one to
+the workflow's `env:` block.

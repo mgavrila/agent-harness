@@ -2,7 +2,7 @@ import * as z from 'zod/v4';
 import { CONVERSATION_ID_PATTERN, SURFACE_NAME_PATTERN } from '@harness/shared';
 import { defineTool } from '../domain/tooling/registry.js';
 import type { AnyToolDef } from '../domain/tooling/types.js';
-import { reconcileForClient, setRunContext, stageNotification } from '../domain/session/repository.js';
+import { reconcileForClient, stageNotification } from '../domain/session/repository.js';
 
 const harnessReconcile = defineTool({
   name: 'harness_reconcile',
@@ -13,25 +13,6 @@ const harnessReconcile = defineTool({
   // Scoped to the calling client: an agent repairs only its own tenant's rows.
   // Process startup runs reconcile unscoped, as an operator-level task.
   handler: async ({ stale_after_minutes }, deps) => reconcileForClient(deps, stale_after_minutes),
-});
-
-const harnessSetContext = defineTool({
-  name: 'harness_set_context',
-  description:
-    'Set the run id, skill, and skill version recorded on every later audit row in this session. Pass null to clear a field. ' +
-    'Call it when a skill starts. Creates the run row if it does not exist.',
-  actionClass: 'write.internal',
-  input: z.object({
-    run_id: z.string().uuid().nullable().optional(),
-    skill: z.string().min(1).nullable().optional(),
-    skill_version: z.string().min(1).nullable().optional(),
-  }),
-  output: z.object({
-    run_id: z.string().nullable(),
-    skill: z.string().nullable(),
-    skill_version: z.string().nullable(),
-  }),
-  handler: async (args, deps) => setRunContext(deps, args),
 });
 
 const harnessNotify = defineTool({
@@ -62,4 +43,4 @@ const harnessNotify = defineTool({
   handler: async (args, deps) => stageNotification(deps, args),
 });
 
-export const harnessTools: AnyToolDef[] = [harnessSetContext, harnessReconcile, harnessNotify];
+export const harnessTools: AnyToolDef[] = [harnessReconcile, harnessNotify];

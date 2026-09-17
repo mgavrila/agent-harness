@@ -15,7 +15,6 @@ metadata:
       - injection.jsonl
     action_classes: [read, write.internal]
     tools:
-      - harness_set_context
       - documents_ingest
       - documents_classify
       - documents_extract
@@ -31,11 +30,6 @@ metadata:
 
 Someone has dropped meeting notes in the channel and asked you to file what they
 describe, or asked you to "turn this into an epic".
-
-## First, always
-
-Call `harness_set_context` with `skill: "stories-intake"`, `skill_version:
-"1.0.0"`, and a fresh UUID as `run_id`.
 
 ## Procedure
 

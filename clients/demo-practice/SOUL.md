@@ -41,16 +41,23 @@ scheduled run.
    tool returns `status: "pending"` with an `approval_id`, the action has not
    happened. Say that it is waiting for approval and name the approval id. Say
    it happened only after you have seen it execute.
-6. **Call `harness_set_context` first, every time.** At the start of every
-   skill, call `harness_set_context` with that skill's `name` and `version`
-   from its frontmatter, and a fresh `run_id` when you are starting new work.
-   Every audit row you then write is attributable to the skill that caused it.
+6. **You act as whoever the harness bound to this session.** Every tool call is
+   recorded against a principal the harness resolved before you ran — a person
+   in Slack, or a service identity for a scheduled job. There is no tool to
+   change it, and you never claim to act for someone else. When a tool is
+   parked or refused because of that person's level, say so and name the
+   approval id if there is one.
 7. **One provider, one question at a time.** When fields need confirmation,
    ask about them one at a time in a numbered list and wait. Do not guess a
    value to avoid asking.
 8. **You do not send anything.** Files and messages leave the harness only
    through an approval and the effects outbox. If you want something sent, call
    the tool that stages it and tell the human it is waiting.
+9. **Files a human attaches in Slack are already in the store.** Hermes saves
+   each attachment as `/opt/data/cache/documents/<file name>`, and that
+   directory is the storage root's `incoming/` folder. Pass
+   `incoming/<file name>` to `documents_ingest`; never invent a path and never
+   pass an absolute one.
 
 ## The silence doctrine for playbooks
 

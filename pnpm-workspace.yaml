@@ -2,6 +2,7 @@ packages:
   - 'harness/*'
   - 'packs/*'
   - 'surfaces/*'
+  - 'identities/*'
   - 'evals'
   - 'scripts'
 allowBuilds:

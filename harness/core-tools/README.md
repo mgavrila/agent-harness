@@ -2,13 +2,13 @@
 
 The MCP server every agent talks to, and a **pack-agnostic kernel**: the tooling layer that
 applies policy, opens the transaction and writes the audit row; the domains that hold the
-actual work; the seventeen kernel tools that expose them; and the shared helpers the packages
+actual work; the sixteen kernel tools that expose them; and the shared helpers the packages
 above this one import instead of copying.
 
 It knows about records, attachments, documents, deadlines, approvals, audit and effects, and
 nothing about any one area of the product. `src/kernel-vocabulary.test.ts` greps this package's
-own source for credentialing vocabulary and its allowlist is empty. The 23 tools a default
-deployment publishes are five of the seventeen plus the eighteen `@harness/pack-healthcare`
+own source for credentialing vocabulary and its allowlist is empty. The 22 tools a default
+deployment publishes are four of the sixteen plus the eighteen `@harness/pack-healthcare`
 contributes; ARCHITECTURE.md, "The kernel and a pack", is the why.
 
 ## Layout
@@ -16,11 +16,11 @@ contributes; ARCHITECTURE.md, "The kernel and a pack", is the why.
 ```
 src/shared/redaction/  patterns, names, text — domain knowledge; the generic env, errors, paths,
                        log, subprocess, jsonl and csv helpers live in @harness/shared instead
-src/domain/        tooling, approvals, audit, deadlines, documents, effects, files, models, packs, records, session, storage
-src/tools/         the seventeen kernel defineTool blocks in 6 files, plus catalog.ts
-src/app/           server.ts (deps from the environment), main.ts (stdio entrypoint), record-surface.ts
+src/domain/        tooling, approvals, audit, deadlines, documents, effects, files, identity, models, packs, records, session, storage
+src/tools/         the sixteen kernel defineTool blocks in 6 files, plus catalog.ts
+src/app/           server.ts (KernelConfig from the environment, the principal, one run), main.ts (stdio entrypoint), record-surface.ts
 src/index.ts       the public API
-src/testing.ts     ./testing: makeTestDeps, connectTools, resultOf, approvalIdOf, useTestDb, startFakeGateway
+src/testing.ts     ./testing: makeTestDeps, connectTools, resultOf, approvalIdOf, useTestDb, startFakeGateway, TEST_PRINCIPAL, TEST_CONTEXT
 ```
 
 ## Public API
@@ -55,10 +55,12 @@ variable.
 `.env.example` documents every name; `src/app/surface.test.ts` fails if the code reads one that
 file does not list.
 
-`HARNESS_CLIENT` and `CORE_TOOLS_CALLER` have defaults, and for both an empty value is a startup
-`ConfigError` naming the variable rather than a silent fall back to the default. Unset keeps the
-default. Blanking one of these lines in a `.env` is a half-filled file, not a choice: an empty
-caller would audit every call as `hermes`.
+`HARNESS_CLIENT`, `HARNESS_PRINCIPAL` and `HARNESS_IDENTITY` have defaults, and for each an
+empty value is a startup `ConfigError` naming the variable rather than a silent fall back.
+`HARNESS_PRINCIPAL` names an id the identity plug-in must declare; one it does not is a startup
+error too, because a server that started anyway would audit every call as somebody nobody
+vouched for. Parsing happens in the files worker when `HARNESS_FILES_URL` is set and in this
+process otherwise.
 
 The four `VERIFY_*` and `NPPES_*` variables are **not** read here any more. They are the
 healthcare pack's, read in `packs/healthcare/src/config.ts` out of `deps.env`, the environment
@@ -106,5 +108,5 @@ allowlist is empty. See CONTRIBUTING.md, "Adding a pack", step 6.
 
 What reaches MCP is not this list. `publishedTools` drops a kernel tool a loaded pack replaced,
 and drops the five generic `records_*` tools when every loaded record kind sets
-`genericTools: false`; `deps.kernelTools` still holds all seventeen by their kernel names, which
+`genericTools: false`; `deps.kernelTools` still holds all sixteen by their kernel names, which
 is how a pack's wrapper calls the handler it took over.

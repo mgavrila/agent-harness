@@ -21,6 +21,10 @@ async function scaffold(): Promise<void> {
     'mcp_servers:\n  core-tools:\n    env:\n      HARNESS_CLIENT: "demo-practice"\n      HARNESS_POLICY_FILE: "/srv/agent-harness/clients/demo-practice/policy.yaml"\n',
   );
   await writeFile(path.join(template, 'policy.yaml'), 'classes:\n  external: approval\n');
+  await writeFile(
+    path.join(template, 'identity.yaml'),
+    'principals:\n  - id: svc-local\n    kind: service\n    level: service\n    displayName: Local operator\n',
+  );
   await writeFile(path.join(template, '.env.example'), 'HARNESS_CLIENT=demo-practice\n');
   await writeFile(path.join(template, 'cron', 'playbooks.sh'), '#!/usr/bin/env bash\n# demo-practice playbooks\n');
   await writeFile(path.join(template, 'scripts', 'harness-outbox-watchdog.sh'), '#!/usr/bin/env bash\nexit 0\n');
@@ -51,6 +55,7 @@ describe('newClient', () => {
         'SOUL.md',
         'cron/playbooks.sh',
         'hermes.config.yaml',
+        'identity.yaml',
         'policy.yaml',
         'scripts/harness-outbox-watchdog.sh',
       ].sort(),

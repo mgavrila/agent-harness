@@ -29,6 +29,7 @@ const TEMPLATE_FILES = [
   'SOUL.md',
   'hermes.config.yaml',
   'policy.yaml',
+  'identity.yaml',
   '.env.example',
   'routing.yaml',
   'cron/playbooks.sh',

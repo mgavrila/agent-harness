@@ -30,6 +30,8 @@ RUN npm install -g pnpm@11.4.0 && npm cache clean --force
 WORKDIR /srv/agent-harness
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml tsconfig.base.json ./
 COPY harness ./harness
+# The identity plug-in HARNESS_IDENTITY names, a workspace dependency of @harness/core-tools.
+COPY identities ./identities
 COPY packs ./packs
 COPY clients ./clients
 COPY scripts ./scripts

@@ -25,7 +25,7 @@ try {
   if (repaired.approvals_expired > 0 || repaired.dispatches_parked > 0) {
     await writeAudit(deps.db, {
       client: deps.client,
-      caller: 'startup',
+      caller: deps.principal.id,
       tool: 'harness_reconcile',
       actionClass: 'write.internal',
       argsHash: hashArgs({ startup: true }),
@@ -38,7 +38,7 @@ try {
 }
 
 serveStdio(() => createCoreToolsServer(deps));
-log.info(`listening on stdio (client=${deps.client}, caller=${deps.caller})`);
+log.info(`listening on stdio (client=${deps.client}, principal=${deps.principal.id}, run=${deps.context.runId})`);
 
 async function shutdown(signal: string): Promise<void> {
   try {

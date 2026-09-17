@@ -1,22 +1,9 @@
-import { eq } from 'drizzle-orm';
-import { runs } from '@harness/db';
-import { ToolError } from '@harness/shared';
-import type { ToolDeps } from '../tooling/types.js';
+import { runs, type Db } from '@harness/db';
+import type { Principal } from '@harness/identity-api';
+import type { RunContext, ToolDeps } from '../tooling/types.js';
 import { reconcile, type ReconcileResult } from '../tooling/reconcile.js';
 import { stageEffect } from '../effects/outbox.js';
 import { assertNoRestrictedPattern } from '../../shared/redaction/patterns.js';
-
-interface SetContextArgs {
-  run_id?: string | null;
-  skill?: string | null;
-  skill_version?: string | null;
-}
-
-interface SetContextResult {
-  run_id: string | null;
-  skill: string | null;
-  skill_version: string | null;
-}
 
 interface NotifyArgs {
   text: string;
@@ -25,38 +12,38 @@ interface NotifyArgs {
   surface?: string;
 }
 
-/**
- * `harness_set_context`: adopt a run, skill and version for this session and
- * create the run row if it does not exist yet. An omitted field leaves the
- * context as it was; an explicit null clears it.
- */
-export async function setRunContext(deps: ToolDeps, args: SetContextArgs): Promise<SetContextResult> {
-  const { run_id, skill, skill_version } = args;
-  // Validate before touching the shared context: a run id naming another
-  // client's run must not be adopted, and must not leave this session
-  // stamping that client's run onto its audit rows.
-  const nextRunId = run_id !== undefined ? (run_id ?? undefined) : deps.context.runId;
-  let runToCreate: string | undefined;
-  if (nextRunId) {
-    const existing = await deps.db.query.runs.findFirst({ where: eq(runs.id, nextRunId) });
-    if (existing && existing.client !== deps.client) {
-      throw new ToolError(`run ${nextRunId} belongs to another client`);
-    }
-    if (!existing) runToCreate = nextRunId;
-  }
+export interface OpenRunInput {
+  client: string;
+  principal: Principal;
+  surface?: string | null;
+  conversation?: string | null;
+  threadId?: string | null;
+  /** Reuse an id: the eval pipeline re-opens its run after `resetDatabase` truncated the row. */
+  id?: string;
+}
 
-  // An omitted field leaves the context as it was; an explicit null clears it.
-  if (run_id !== undefined) deps.context.runId = run_id ?? undefined;
-  if (skill !== undefined) deps.context.skill = skill ?? undefined;
-  if (skill_version !== undefined) deps.context.skillVersion = skill_version ?? undefined;
-  if (runToCreate) {
-    await deps.db.insert(runs).values({ id: runToCreate, client: deps.client, caller: deps.caller });
-  }
-  return {
-    run_id: deps.context.runId ?? null,
-    skill: deps.context.skill ?? null,
-    skill_version: deps.context.skillVersion ?? null,
-  };
+/**
+ * Open a run: write the `runs` row and hand back the context every row of the run will carry.
+ * The one way a run comes to exist — the stdio server calls it once per process, the eval
+ * pipeline once per handle, the host once per turn from Plan 8 — and nothing a model sends can.
+ */
+export async function openRun(db: Db, input: OpenRunInput): Promise<RunContext & { runId: string }> {
+  const threadId = input.threadId ?? null;
+  const surface = input.surface ?? null;
+  const conversation = input.conversation ?? null;
+  const [row] = await db
+    .insert(runs)
+    .values({
+      ...(input.id === undefined ? {} : { id: input.id }),
+      client: input.client,
+      caller: input.principal.id,
+      principalId: input.principal.id,
+      threadId,
+      surface,
+      conversation,
+    })
+    .returning({ id: runs.id });
+  return { runId: row.id, threadId, surface, conversation };
 }
 
 /**

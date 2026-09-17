@@ -2,9 +2,9 @@ import { randomUUID } from 'node:crypto';
 import { describe, it, expect } from 'vitest';
 import * as z from 'zod/v4';
 import { eq } from 'drizzle-orm';
-import { approvals, auditLog, decrypt, records, runs } from '@harness/db';
+import { approvals, auditLog, decrypt, records } from '@harness/db';
 import { ToolError } from '@harness/shared';
-import { approvalIdOf, connectTools, makeTestDeps, textOf, useTestDb } from '../../testing.js';
+import { TEST_PRINCIPAL, approvalIdOf, connectTools, makeTestDeps, textOf, useTestDb } from '../../testing.js';
 import { defineTool } from './registry.js';
 
 const echo = defineTool({
@@ -45,6 +45,15 @@ const pay = defineTool({
   handler: async () => ({ ok: true }),
 });
 
+const purge = defineTool({
+  name: 'purge',
+  description: 'Delete beyond repair (destructive)',
+  actionClass: 'destructive',
+  input: z.object({}),
+  output: z.object({ ok: z.boolean() }),
+  handler: async () => ({ ok: true }),
+});
+
 const boom = defineTool({
   name: 'boom',
   description: 'Always throws',
@@ -79,21 +88,6 @@ const writeThenThrow = defineTool({
   },
 });
 
-const mutateContextThenThrow = defineTool({
-  name: 'mutate_context_then_throw',
-  description: 'Mutates session context then throws to force a rollback',
-  actionClass: 'write.internal',
-  input: z.object({}),
-  output: z.object({}),
-  handler: async (_args, d) => {
-    const runId = randomUUID();
-    d.context.runId = runId;
-    d.context.skill = 'ghost-skill';
-    await d.db.insert(runs).values({ id: runId, client: d.client, caller: d.caller });
-    throw new ToolError('rolled back after mutating context');
-  },
-});
-
 const writeOk = defineTool({
   name: 'write_ok',
   description: 'Inserts a provider row (auto class)',
@@ -120,7 +114,7 @@ describe('registerTools', () => {
     expect(res.structuredContent).toEqual({ status: 'ok', result: { text: 'hi' } });
     const rows = await db.select().from(auditLog);
     expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ tool: 'echo_read', decision: 'auto', recordIds: ['rec-1'], caller: 'test-caller' });
+    expect(rows[0]).toMatchObject({ tool: 'echo_read', decision: 'auto', recordIds: ['rec-1'], caller: 'u-test' });
   });
 
   it('parks approval-class tools and creates one approval row per identical request', async () => {
@@ -131,7 +125,7 @@ describe('registerTools', () => {
     expect(second.structuredContent).toEqual(first.structuredContent);
     const rows = await db.select().from(approvals);
     expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ action: 'send_external', status: 'pending', requestedBy: 'test-caller' });
+    expect(rows[0]).toMatchObject({ action: 'send_external', status: 'pending', requestedBy: 'u-test' });
     expect(rows[0].payload).toEqual({ tool: 'send_external', args: { to: 'payer@example.com' } });
     const audits = await db.select().from(auditLog);
     expect(audits.every((a) => a.decision === 'approval' && a.approvalId === rows[0].id)).toBe(true);
@@ -143,6 +137,27 @@ describe('registerTools', () => {
     expect(res.isError).toBe(true);
     const rows = await db.select().from(auditLog);
     expect(rows[0]).toMatchObject({ tool: 'pay', decision: 'blocked' });
+  });
+
+  it('decides by the principal level: a member is parked on an internal write and a service is refused a destructive one', async () => {
+    const asMember = makeTestDeps(db, { principal: { ...TEST_PRINCIPAL, id: 'u-member', level: 'member' } });
+    const member = await connectTools('registry-test-member', [writeOk], asMember);
+    const parked = await member.callTool({ name: 'write_ok', arguments: { name: 'Dr. Parked' } });
+    expect(parked.structuredContent).toMatchObject({ status: 'pending' });
+    expect(await db.select().from(records)).toHaveLength(0);
+    const [row] = await db.select().from(approvals);
+    expect(row.requestedBy).toBe('u-member');
+
+    const asService = makeTestDeps(db, {
+      principal: { ...TEST_PRINCIPAL, id: 'svc-nightly', kind: 'service', level: 'service' },
+    });
+    const service = await connectTools('registry-test-service', [purge], asService);
+    const refused = await service.callTool({ name: 'purge', arguments: {} });
+    expect(refused.isError).toBe(true);
+    expect(textOf(refused)).toContain('blocked by policy');
+    const audits = await db.select().from(auditLog).where(eq(auditLog.tool, 'purge'));
+    expect(audits).toHaveLength(1);
+    expect(audits[0]).toMatchObject({ decision: 'blocked', caller: 'svc-nightly' });
   });
 
   it('converts thrown errors into isError results and audits them, without leaking the raw message', async () => {
@@ -229,6 +244,7 @@ describe('registerTools', () => {
     expect(JSON.parse(decrypt(row.payloadEncrypted!, deps.encryptionKey))).toEqual({
       tool: 'send_external_redacted',
       args: { to: 'ssn-999-88-7777', note: 'keep me' },
+      level: 'practitioner',
     });
   });
 
@@ -279,22 +295,5 @@ describe('registerTools', () => {
     const res = await client.callTool({ name: 'send_external', arguments: { to: 'payer@example.com' } });
     expect(res.isError).toBe(true);
     expect(await db.select().from(approvals)).toHaveLength(0);
-  });
-
-  it('restores session context when a tool transaction rolls back', async () => {
-    const deps = makeTestDeps(db);
-    const client = await connectTools('registry-test-context-rollback', [mutateContextThenThrow, echo], deps);
-
-    const res = await client.callTool({ name: 'mutate_context_then_throw', arguments: {} });
-    expect(res.isError).toBe(true);
-    expect(deps.context.runId).toBeUndefined();
-    expect(deps.context.skill).toBeUndefined();
-    expect(await db.select().from(runs)).toHaveLength(0);
-
-    const echoRes = await client.callTool({ name: 'echo_read', arguments: { text: 'hi' } });
-    expect(echoRes.isError).toBeFalsy();
-    const rows = await db.select().from(auditLog);
-    const echoAudit = rows.find((r) => r.tool === 'echo_read')!;
-    expect(echoAudit.runId).toBeNull();
   });
 });

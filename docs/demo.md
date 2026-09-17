@@ -96,9 +96,11 @@ columns read `yes` and `no`. The numbers are not in the file.
 
 `audit_query` returns every call in order with its action class and decision:
 reads and internal writes as `auto`, the release as `approval` and then as
-`auto` against the approval id. Point at the `skill` and `skill_version`
-columns — the trail says which skill caused each call — and at `derived_from`
-on the nightly digest, which points back at the query it was built from.
+`auto` against the approval id. Point at the `caller` column — every call
+carries the principal the harness bound to the session, never one the agent
+chose — and at `derived_from` on the nightly digest, which points back at the
+query it was built from. (Skill attribution returns with the runtime in
+Plan 8.)
 
 ### 6. Swap the model provider (30 seconds)
 

@@ -15,7 +15,6 @@ metadata:
       - injection.jsonl
     action_classes: [read, write.internal]
     tools:
-      - harness_set_context
       - documents_ingest
       - documents_classify
       - documents_extract
@@ -36,12 +35,6 @@ metadata:
 Someone has dropped one or more provider documents in the channel, or named a
 provider and asked you to file what they sent. Also use it when asked to "add
 Dr. X" or "process these".
-
-## First, always
-
-Call `harness_set_context` with `skill: "credentialing-intake"`,
-`skill_version: "1.0.0"`, and a fresh UUID as `run_id`. Everything you do next
-is attributed to this run.
 
 ## Procedure
 

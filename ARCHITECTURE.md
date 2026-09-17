@@ -43,11 +43,18 @@ harness/db          schema, migrations, the pool, the encryption primitives.
 harness/gateway     the routing schema and the LiteLLM config renderer.
 harness/surface-api the Surface contract and defineSurface(): cards, forms, conversations, and
                     MemorySurface under its testing subpath. Depends on @harness/shared and zod.
+harness/identity-api the Identity contract and defineIdentityProvider(): Principal, the five
+                    levels (declared in @harness/shared), IdentitySession, and StaticIdentity
+                    under its testing subpath. Depends on @harness/shared and zod.
+harness/files       the parsing worker: pdftotext, pdftoppm and tesseract behind one HTTP route,
+                    in a process with no key, no database and no route out. Depends on
+                    @harness/shared only.
 harness/core-tools  the MCP server: the pack-agnostic kernel, every domain, every kernel tool.
 harness/approvals   the approvals host: cards, decisions, the effects dispatcher, the health
                     endpoint. Loads its messaging adapters from HARNESS_SURFACES.
 surfaces/slack      the Slack adapter: Block Kit, Bolt in Socket Mode, the Web API slice.
 surfaces/memory     the in-process adapter: no transport, used by the suite and for local runs.
+identities/static   the identity plug-in that reads clients/<name>/identity.yaml.
 evals               the eval runner, scorers, judge and report.
 packs/healthcare    a pack: the provider record kind, credential attachment kinds, form
                     templates, skills, the synthetic corpus, and eighteen tools
@@ -60,11 +67,14 @@ The dependency graph in one line per layer, with every arrow pointing at somethi
 ```
 shared  <-  pack-api  <-  { core-tools, packs/* }
 shared  <-  surface-api  <-  { approvals, surfaces/* }
+shared  <-  identity-api  <-  { core-tools, identities/* }
+shared  <-  files
 shared  <-  db        <-  core-tools  <-  { approvals, evals }
 gateway   <-  core-tools      (gateway is the one package with no edge to shared: it needs none)
 core-tools  ..>  packs/*        (runtime only: dynamic import, never a static one)
 evals       ..>  packs/*        (runtime only: HARNESS_PACKS, --pack; no static import)
 approvals   ..>  surfaces/*     (runtime only: HARNESS_SURFACES, never a static import)
+core-tools  ..>  identities/*   (runtime only: HARNESS_IDENTITY, never a static import)
 ```
 
 `scripts` is a leaf. There are no cycles.
@@ -184,10 +194,10 @@ sources may not publish, or replace, the same name. And a source that replaces a
 publish it: a name listed in `replaces` and missing from the catalogue the pack returns would
 otherwise delete the kernel's tool and leave nothing behind it.
 
-The kernel defines seventeen tools. A healthcare-only deployment therefore publishes five of
+The kernel defines sixteen tools. A healthcare-only deployment therefore publishes four of
 them and eighteen of the pack's: twelve of those eighteen are wrappers that reproduce the
 pre-Plan-5 names and schemas byte for byte, and `docs/architecture/tool-surface.json` is what
-proves it. Load the stories pack beside it and the catalogue grows to twenty-eight, by the five
+proves it. Load the stories pack beside it and the catalogue grows to twenty-seven, by the five
 `records_*` tools, because the `epic` kind wants them.
 
 A wrapper that reshapes a result builds its **output schema from `deps`**. `replaces` is
@@ -282,28 +292,73 @@ allowlist in `app/child-env.ts` therefore names no surface.
 
 `CONTRIBUTING.md`, "Adding a surface", is the worked how-to, with `surfaces/memory` as the example.
 
+## Identity
+
+A **principal** is who a run acts as: a person, or a service identity for a scheduled job. It
+is resolved by an **identity plug-in** loaded by name from `HARNESS_IDENTITY` — the same shape
+as a pack and a surface, for the same reasons — and bound to the run by whoever opens it: the
+stdio server from `HARNESS_PRINCIPAL` at startup, a host per turn from Plan 8. A tool reads
+`deps.principal`. Nothing a model sends can set it; there is no tool to, and
+`harness/core-tools/src/tools/harness.test.ts` asserts that no published input schema mentions
+one.
+
+`@harness/identity-api` is the contract. `Principal { id, kind, level, displayName, surfaces,
+attributes }`; `IdentitySession.resolve({ surface, userId })` answers a principal or null, and
+null means "not authorised", never a guest. The five levels — `member`, `practitioner`, `lead`,
+`admin`, `service` — are declared in `@harness/shared` because `@harness/pack-api`'s policy
+matrix is keyed by them too and the two contracts may not import each other.
+
+**Policy is a matrix.** `Policy { classes, levels }`: `classes` is the row every level starts
+from and `levels.<level>.<class>` is where a level differs; `decide(actionClass, level, policy)`
+reads the level's cell first. `DEFAULT_POLICY` in `domain/tooling/policy.ts` is spec 4.4's
+table, with its practitioner row equal to the flat table the kernel shipped before levels
+existed. A client's `policy.yaml` `classes:` entry replaces the kernel's `classes` default for
+that class; a kernel or client `levels` cell always wins over `classes` for that level, so
+`classes:` alone never loosens or tightens a level the kernel already gives its own cell —
+`levels.member.destructive: blocked` and `levels.service.write.assign: approval` ship in
+`DEFAULT_POLICY` and only a `levels:` block of the client's own can move them:
+
+```yaml
+levels:
+  member: { destructive: approval }
+```
+
+**One `RunContext` per run.** `openRun` writes the `runs` row — `principal_id`, `surface`,
+`conversation`, `thread_id` — and returns the context every audit row, effect and model call
+of that run carries. `buildKernelConfig()` does the startup-only work once; `depsForRun(config,
+{ db, principal, context })` clones it per run. The stdio server opens one run per process.
+
+`identities/static` is the first plug-in: it reads `clients/<name>/identity.yaml`
+(`HARNESS_IDENTITY_FILE` overrides the path) through `parseIdentityFile`, which refuses a
+duplicate id, a user without a `u-` id or a service without `svc-`, a user at level `service`,
+and two principals claiming one surface user id. `CONTRIBUTING.md`, "Adding an identity
+provider", is the worked how-to.
+
 ## The path of one tool call
 
 An agent calls `documents_extract`. Every module named here is under
 `harness/core-tools/src/`, and the steps run in this order:
 
-1. **Registration.** `app/server.ts` built `ToolDeps` from the environment at startup, loaded
-   the packs named by `HARNESS_PACKS`, and handed every definition from `tools/catalog.ts` to
-   `registerTools` (`domain/tooling/registry.ts`), which wrapped each one in an MCP callback.
+1. **Registration.** `app/server.ts` built a `KernelConfig` from the environment at startup,
+   resolved the process's principal, opened a run and cloned the two into one `ToolDeps` with
+   `depsForRun`, loaded the packs named by `HARNESS_PACKS`, and handed every definition from
+   `tools/catalog.ts` to `registerTools` (`domain/tooling/registry.ts`), which wrapped each one
+   in an MCP callback.
 2. **Lineage.** The callback splits `derived_from` off the arguments — it is the registry's
    own argument, audited as lineage and never passed to the handler or hashed by `hashArgs`
    (`domain/tooling/audit.ts`).
-3. **Policy.** `decide(tool.actionClass, deps.policy)` (`domain/tooling/policy.ts`) returns
-   `auto`, `approval` or `blocked`. `runBlocked` writes an audit row and returns;
-   `runForApproval` parks a row through `createOrReuseApproval`
+3. **Policy.** `decide(tool.actionClass, deps.principal.level, deps.policy)`
+   (`domain/tooling/policy.ts`) returns `auto`, `approval` or `blocked`. `runBlocked` writes an
+   audit row and returns; `runForApproval` parks a row through `createOrReuseApproval`
    (`domain/approvals/repository.ts`) and returns its id. Both live in
    `domain/tooling/execution.ts`.
 4. **Transaction.** `runAuto` opens one transaction. The handler and its audit row commit
    together, so a handler that throws leaves neither its writes nor a success row behind.
 5. **Handler.** The definition in `tools/documents.ts` validates its input and calls
-   `extractDocument` (`domain/documents/pipeline.ts`), which redacts the page text, builds the
-   model-facing schema from the pack's manifest and stores what came back. The tool file holds
-   no SQL and no prompt text.
+   `extractDocument` (`domain/documents/pipeline.ts`), which redacts the page text — text it got
+   from `deps.parser`, the files worker in Compose and the in-process subprocesses on bare metal
+   — builds the model-facing schema from the pack's manifest and stores what came back. The tool
+   file holds no SQL and no prompt text.
 6. **Audit.** `writeAudit` writes the row inside the same transaction, carrying the arguments
    hash, the action class, the session context and the record ids the tool reported.
 7. **Effects.** Anything that leaves the process is staged, never sent: `stageEffect`
@@ -345,6 +400,14 @@ The cost is real: the domain builds its own adapters, so a caller cannot substit
 going through the module that builds it. Wiring the two interfaces through `ToolDeps` is the
 fix, and it was deferred on purpose — it touches every handler signature and every test's deps
 literal, which is a behaviour-risk refactor and not the file moves this revamp was for.
+
+Three members arrived with Plan 7 and each is deliberate. **`principal`** is who the run acts
+as and is set by whoever built the bag, never by a handler. **`context`** is one `RunContext`
+per run, no longer a process-wide object a tool could mutate; `withCurrentTool` still stamps the
+executing tool's name on it, which is the one field that changes during a call. **`parser`** is
+the one constructed object on the bag, because the choice between parsing here and parsing in
+the files worker is the deployment's (`HARNESS_FILES_URL`) and the domain cannot make it from a
+URL alone.
 
 Three members exist for the **packs** rather than for the kernel, and a kernel handler should
 never reach for them:
@@ -446,15 +509,15 @@ Ask, in order:
 
 ## Tooling
 
-| Command               | What it checks                                                                                                                                                                                                                                          |
-| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `pnpm lint`           | ESLint 9 flat config: type-aware typescript-eslint, import ordering and cycles, unused imports, and the three project rules (`no-console`, `process.env`, `throw new Error` in `tools/`)                                                                |
-| `pnpm lint:strict`    | the same, with `--max-warnings=0`: the type-aware backlog, which no gate fails on                                                                                                                                                                       |
-| `pnpm format:check`   | Prettier                                                                                                                                                                                                                                                |
-| `pnpm arch`           | dependency-cruiser: the layer rules, "no cycles", "no test imported by production code", "no orphans", "other packages import only a declared entry point", "core-tools never statically imports a pack", "the host never statically imports a surface" |
-| `pnpm arch:graph`     | writes `docs/architecture/graph.svg` (needs Graphviz)                                                                                                                                                                                                   |
-| `pnpm surface:record` | regenerates `docs/architecture/tool-surface.json` and `compose-surface.yaml`                                                                                                                                                                            |
-| `pnpm test`           | lint, then every package's vitest suite                                                                                                                                                                                                                 |
+| Command               | What it checks                                                                                                                                                                                                                                                                                                                                                                                                              |
+| --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pnpm lint`           | ESLint 9 flat config: type-aware typescript-eslint, import ordering and cycles, unused imports, and the three project rules (`no-console`, `process.env`, `throw new Error` in `tools/`)                                                                                                                                                                                                                                    |
+| `pnpm lint:strict`    | the same, with `--max-warnings=0`: the type-aware backlog, which no gate fails on                                                                                                                                                                                                                                                                                                                                           |
+| `pnpm format:check`   | Prettier                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `pnpm arch`           | dependency-cruiser: the layer rules, "no cycles", "no test imported by production code", "no orphans", "other packages import only a declared entry point", "core-tools never statically imports a pack", "the host never statically imports a surface", "identity-api and files import only shared", "an identity plug-in imports only its contract and shared", "core-tools never statically imports an identity plug-in" |
+| `pnpm arch:graph`     | writes `docs/architecture/graph.svg` (needs Graphviz)                                                                                                                                                                                                                                                                                                                                                                       |
+| `pnpm surface:record` | regenerates `docs/architecture/tool-surface.json` and `compose-surface.yaml`                                                                                                                                                                                                                                                                                                                                                |
+| `pnpm test`           | lint, then every package's vitest suite                                                                                                                                                                                                                                                                                                                                                                                     |
 
 ESLint's type-aware rules run against TypeScript **6**, installed at the workspace root only,
 because typescript-eslint refuses to load against TypeScript 7. Every package still compiles
@@ -483,14 +546,18 @@ work. `pnpm lint:strict` shows the backlog.
 every run:
 
 - the MCP tool list, with each tool's input and output JSON Schema, against
-  `docs/architecture/tool-surface.json` — 23 tools today;
+  `docs/architecture/tool-surface.json` — 22 tools today;
 - every environment variable name the code reads, against `.env.example`;
 - the rendered Compose config, against `docs/architecture/compose-surface.yaml`.
 
 A renamed tool, a widened schema, an undocumented variable or a changed service definition
 fails the suite. Regenerate the snapshots with `pnpm surface:record` only when the change is
 intended, and say so in the commit message. A new variable name goes into `.env.example` in
-the same commit, or this test fails on it — that is how `HARNESS_PACKS` arrived.
+the same commit, or this test fails on it — that is how `HARNESS_PACKS` arrived. The same file
+also reads three things off the recorded Compose config: that the `files` service has exactly
+three environment variables and sits on an `internal: true` network with no published port
+(invariant 6), that no service mounts the Docker socket, and that no client name appears
+outside a `${HARNESS_CLIENT…}` interpolation.
 
 The recorder behind it is `harness/core-tools/src/app/record-surface.ts`, which is both the
 library the test imports and the CLI `pnpm surface:record` runs.
@@ -498,11 +565,11 @@ library the test imports and the CLI `pnpm surface:record` runs.
 Two more suites guard the boundary the tool surface cannot see, because a kernel can keep every
 schema byte and still know about one area of the product:
 
-| Suite                                              | What it fails on                                                                                                                                                                                                                                                                                   |
-| -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `harness/core-tools/src/kernel-vocabulary.test.ts` | a credentialing word in `harness/core-tools/src` or `evals/src`, tests and `shared/redaction/` aside, and a messaging word (`slack`, `bolt`, `block kit`, `thread_ts`, `blocks`) in the kernel or in a pack. The allowlist is empty, and one case asserts each regex still catches what it claims. |
-| `harness/approvals/src/host-vocabulary.test.ts`    | a Slack word in `harness/approvals/src`, tests aside. Its allowlist is empty too.                                                                                                                                                                                                                  |
-| `harness/core-tools/src/app/dual-pack.test.ts`     | two packs loaded at once whose catalogues collide, whose documents route to the wrong target, or whose records reach each other's reads. It is the suite `packs/stories` exists for.                                                                                                               |
+| Suite                                              | What it fails on                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| -------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `harness/core-tools/src/kernel-vocabulary.test.ts` | a credentialing word in `harness/core-tools/src` or `evals/src`, tests and `shared/redaction/` aside, and a messaging word (`slack`, `bolt`, `block kit`, `thread_ts`, `blocks`) in the kernel or in a pack, a framework or vendor word (`deepagents`, `langchain`, `langgraph`, `entra`, `teams`) and a deployment name (the client's, the runtime's) in the kernel, the identity contract, the identity plug-in, the files worker or the evals. The allowlist is empty, and one case asserts each regex still catches what it claims. |
+| `harness/approvals/src/host-vocabulary.test.ts`    | a Slack word in `harness/approvals/src`, tests aside. Its allowlist is empty too.                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `harness/core-tools/src/app/dual-pack.test.ts`     | two packs loaded at once whose catalogues collide, whose documents route to the wrong target, or whose records reach each other's reads. It is the suite `packs/stories` exists for.                                                                                                                                                                                                                                                                                                                                                    |
 
 And `harness/db/src/domain/migration-0008.test.ts` replays the shipped migration file over a
 fixture of the pre-0008 schema, so the one hand-written data section in the tree is checked

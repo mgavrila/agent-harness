@@ -14,7 +14,18 @@
  * dispatch, because only the adapter knows what its ids look like.
  */
 export { CONVERSATION_ID_PATTERN, SURFACE_NAME_PATTERN } from '@harness/shared';
-export { ACTION_CLASSES, BEHAVIORS, type ActionClass, type Behavior, type Policy } from './policy.js';
+/** Re-exported from @harness/shared for the same reason as the two patterns: the policy matrix is keyed by them. */
+export { LEVELS, USER_LEVELS, type Level } from '@harness/shared';
+export {
+  ACTION_CLASSES,
+  BEHAVIORS,
+  type ActionClass,
+  type Behavior,
+  type ClassTable,
+  type LevelOverrides,
+  type Policy,
+  type PolicyOverrides,
+} from './policy.js';
 export { definePackTool, type AnyToolDef, type ToolDef } from './tool.js';
 export {
   ManifestFieldShape,
@@ -58,6 +69,7 @@ export {
   type PackKernel,
   type PackRegistryView,
   type PackToolDeps,
+  type PrincipalView,
   type RecordAttachmentView,
   type RecordFieldView,
   type RecordsGetResult,

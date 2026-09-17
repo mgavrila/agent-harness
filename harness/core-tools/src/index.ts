@@ -12,7 +12,7 @@
 
 // --- The tooling kernel -------------------------------------------------------------------
 export { defineTool, registerTools } from './domain/tooling/registry.js';
-export { auditBaseFor, preservingContext, withCurrentTool } from './domain/tooling/context.js';
+export { auditBaseFor, withCurrentTool } from './domain/tooling/context.js';
 export { hashArgs, writeAudit, type AuditEntry, type Decision } from './domain/tooling/audit.js';
 export {
   ACTION_CLASSES,
@@ -20,18 +20,23 @@ export {
   DEFAULT_POLICY,
   decide,
   loadPolicy,
+  mergePolicy,
   parsePolicy,
   type ActionClass,
   type Behavior,
+  type ClassTable,
+  type LevelOverrides,
   type Policy,
+  type PolicyOverrides,
 } from './domain/tooling/policy.js';
 export { expireApprovals, parkStuckDispatches, reconcile, type ReconcileResult } from './domain/tooling/reconcile.js';
 export { connectInProcess } from './domain/tooling/in-process.js';
+export { depsForRun, type KernelConfig, type RunDeps } from './domain/tooling/deps.js';
 export {
   DEFAULT_CONFIDENCE_THRESHOLD,
   type AnyToolDef,
   type AuditBase,
-  type SessionContext,
+  type RunContext,
   type ToolDef,
   type ToolDeps,
 } from './domain/tooling/types.js';
@@ -40,6 +45,7 @@ export {
 export { allTools, createCoreToolsServer, kernelTools, publishedTools } from './tools/catalog.js';
 
 // --- Domains ------------------------------------------------------------------------------
+export { openRun, type OpenRunInput } from './domain/session/repository.js';
 export { createOrReuseApproval } from './domain/approvals/repository.js';
 export { executeApproval, type ExecutedApproval } from './domain/approvals/execute.js';
 export {
@@ -51,7 +57,14 @@ export {
   digestKeyFor,
   type UrgencyBucket,
 } from './domain/deadlines/compute.js';
-export { type ExtractedText, type PageText, type ParsedExtraction } from './domain/documents/types.js';
+export {
+  type DocumentParser,
+  type ExtractedText,
+  type PageText,
+  type ParsedDocument,
+  type ParsedExtraction,
+} from './domain/documents/types.js';
+export { REMOTE_PARSE_TIMEOUT_MS, joinPages, localParser, remoteParser } from './domain/documents/parser.js';
 export {
   parseAttachmentKindSpec,
   parseExtractionManifest,
@@ -97,8 +110,14 @@ export { type Storage, type WriteFileInput, type WrittenFile } from './domain/st
 // --- The pack contract ----------------------------------------------------------------------
 export { definePack, type Pack } from '@harness/pack-api';
 
+// --- The identity contract ------------------------------------------------------------------
+export { type Principal } from '@harness/identity-api';
+export { loadIdentity } from './domain/identity/registry.js';
+export { type IdentityDeps, type IdentitySession } from '@harness/identity-api';
+
 // --- Shared helpers, for the packages above this one ---------------------------------------
 export { ConfigError, ModelOutputError, ToolError, describeError } from '@harness/shared';
+export { LEVELS, USER_LEVELS, type Level } from '@harness/shared';
 export { booleanFromEnv, numberFromEnv, optionalEnv, requiredEnv, type NumberEnvOptions } from '@harness/shared';
 export { createLogger, type Logger } from '@harness/shared';
 export { assertInsideRoot, realOrNearestAncestor, type EscapeReason, type InsideRootOptions } from '@harness/shared';
