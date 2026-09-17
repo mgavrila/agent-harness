@@ -23,6 +23,7 @@
   },
   "devDependencies": {
     "@harness/pack-healthcare": "workspace:*",
+    "@harness/pack-stories": "workspace:*",
     "@types/node": "^26.5.1",
     "pdf-lib": "^1.17.1",
     "tsx": "^4.23.13",

@@ -72,6 +72,9 @@ importers:
       '@harness/pack-healthcare':
         specifier: workspace:*
         version: link:../packs/healthcare
+      '@harness/pack-stories':
+        specifier: workspace:*
+        version: link:../packs/stories
       '@types/node':
         specifier: ^26.5.1
         version: 26.5.1
