@@ -7,6 +7,7 @@ import { decrypt, encrypt } from '../shared/crypto.js';
 import { TEST_DATABASE_URL } from '../testing.js';
 import type { Db } from './client.js';
 import { createLegacyDatabase, dropLegacyDatabase } from './legacy-0007.test-helpers.js';
+import { migrationStatements } from './migration-sql.test-helpers.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const MIGRATION = path.resolve(here, '../../drizzle/0008_generic_records.sql');
@@ -21,24 +22,6 @@ const SSN = '123-45-6789';
  */
 let db: Db;
 let close: () => Promise<void>;
-
-/**
- * The migration, statement by statement, with drizzle's own breakpoint as the separator and its
- * comment lines stripped. Reading the shipped file rather than a copy is the point: the test
- * fails if someone edits the migration and not the expectations.
- */
-function migrationStatements(): string[] {
-  return readFileSync(MIGRATION, 'utf8')
-    .split('--> statement-breakpoint')
-    .map((chunk) =>
-      chunk
-        .split('\n')
-        .filter((line) => !line.trimStart().startsWith('--'))
-        .join('\n')
-        .trim(),
-    )
-    .filter((statement) => statement !== '');
-}
 
 beforeAll(async () => {
   ({ db, close } = await createLegacyDatabase(TEST_DATABASE_URL));
@@ -110,7 +93,7 @@ describe('migration 0008_generic_records', () => {
       `),
         );
 
-        for (const statement of migrationStatements()) await tx.execute(sql.raw(statement));
+        for (const statement of migrationStatements(MIGRATION)) await tx.execute(sql.raw(statement));
 
         const one = async (query: string) => Number((await tx.execute(sql.raw(query))).rows[0].n);
         expect(await one('SELECT count(*)::int AS n FROM records')).toBe(3);

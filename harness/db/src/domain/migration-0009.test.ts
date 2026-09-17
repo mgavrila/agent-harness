@@ -6,30 +6,13 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { TEST_DATABASE_URL } from '../testing.js';
 import type { Db } from './client.js';
 import { createLegacy0008Database, dropLegacy0008Database } from './legacy-0008.test-helpers.js';
+import { migrationStatements } from './migration-sql.test-helpers.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const MIGRATION = path.resolve(here, '../../drizzle/0009_surface_addressing.sql');
 
 let db: Db;
 let close: () => Promise<void>;
-
-/**
- * The migration, statement by statement, with drizzle's own breakpoint as the separator and its
- * comment lines stripped. Reading the shipped file rather than a copy is the point: the test
- * fails if someone edits the migration and not the expectations.
- */
-function migrationStatements(): string[] {
-  return readFileSync(MIGRATION, 'utf8')
-    .split('--> statement-breakpoint')
-    .map((chunk) =>
-      chunk
-        .split('\n')
-        .filter((line) => !line.trimStart().startsWith('--'))
-        .join('\n')
-        .trim(),
-    )
-    .filter((statement) => statement !== '');
-}
 
 beforeAll(async () => {
   ({ db, close } = await createLegacy0008Database(TEST_DATABASE_URL));
@@ -50,6 +33,15 @@ describe('migration 0009_surface_addressing', () => {
   });
 
   it('moves the Slack addressing onto the neutral columns and renames the in-flight sinks', async () => {
+    // One transaction for the seed, the replay and every assertion. It is not needed for
+    // isolation — this is a database of its own and `afterAll` drops it — but it pins a single
+    // pooled backend for the whole sequence and it means a half-applied migration cannot be
+    // left behind for a re-run to trip over. There is no `search_path` to set: the legacy
+    // tables and the migration's unqualified references are in the same schema.
+    //
+    // The closing `tx.rollback()` throws drizzle's rollback sentinel and `db.transaction`
+    // re-throws it rather than swallowing it, so it is caught here and only here: any other
+    // error is rethrown, which is what keeps a failed assertion's own message readable.
     try {
       await db.transaction(async (tx) => {
         // Four approvals: one posted and decided, one posted but not yet answered, one claimed
@@ -72,7 +64,7 @@ describe('migration 0009_surface_addressing', () => {
       `),
         );
 
-        for (const statement of migrationStatements()) await tx.execute(sql.raw(statement));
+        for (const statement of migrationStatements(MIGRATION)) await tx.execute(sql.raw(statement));
 
         const one = async (query: string) => Number((await tx.execute(sql.raw(query))).rows[0].n);
 

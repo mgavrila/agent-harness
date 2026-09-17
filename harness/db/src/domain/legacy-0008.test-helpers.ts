@@ -6,9 +6,12 @@ import { createDb, type Db } from './client.js';
  *
  * Copied out of `schema.ts` as it was before this task rather than derived from anything, on
  * purpose: this is the *old* shape, and a fixture generated from the current schema would
- * happily agree with a migration that dropped half the data. `tool_effects.run_id` is declared
- * without its foreign key because the `runs` table is not here — 0009 does not touch it, and a
- * fixture that recreated every table would be a second copy of the schema to keep in step.
+ * happily agree with a migration that dropped half the data. The indexes are all three the 0008
+ * snapshot records for these two tables, the non-unique one included: the sink rename selects on
+ * `status`, so leaving it out would replay the migration against a plan the real database never
+ * uses. `tool_effects.run_id` is declared without its foreign key because the `runs` table is not
+ * here — 0009 does not touch it, and a fixture that recreated every table would be a second copy
+ * of the schema to keep in step.
  */
 export const LEGACY_0008_DDL = `
 CREATE TABLE "approvals" (
@@ -50,6 +53,7 @@ CREATE TABLE "tool_effects" (
 	"dispatched_at" timestamp with time zone
 );
 CREATE UNIQUE INDEX "tool_effects_idempotency_uq" ON "tool_effects" USING btree ("idempotency_key");
+CREATE INDEX "tool_effects_status_created_idx" ON "tool_effects" USING btree ("status","created_at");
 `;
 
 /**
