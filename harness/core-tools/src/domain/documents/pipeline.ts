@@ -262,7 +262,12 @@ export async function extractDocument(
     messages,
     jsonSchema: buildExtractionSchema({
       schemaName: target.target.schema_name,
-      documentKinds: deps.packs.documentKinds(),
+      // The owning pack's kinds, not every loaded pack's. `targetFor` has already decided who
+      // owns this extraction and `parseExtraction` discards a `document_kind` the owner does not
+      // declare, so offering another pack's kinds could only ever produce an answer thrown away
+      // as `'other'`. With one pack loaded the two lists are the same, which is why the surface
+      // and prompt byte tests do not move.
+      documentKinds: target.pack.documentKinds,
       fields: modelFields,
       attachmentKinds: target.attachmentKinds,
       attachmentsKey: target.target.attachments_key,

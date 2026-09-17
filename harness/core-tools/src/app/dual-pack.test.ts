@@ -189,6 +189,17 @@ describe('two packs in one process', () => {
       await client.callTool({ name: 'documents_extract', arguments: { document_id: ingested.document_id } }),
     );
     expect(extracted.document_kind).toBe('meeting_notes');
+
+    // The `document_kind` enum the model was offered holds the owning pack's kinds and nothing
+    // else. Healthcare's five are loaded in this process, and `parseExtraction` would discard
+    // any of them as `'other'` for a stories document — so offering one could only ever buy a
+    // wrong answer that is then thrown away and written to `documents.kind`.
+    const format = fake.calls.at(-1)?.responseFormat as {
+      json_schema: { schema: { properties: { document_kind: { enum: string[] } } } };
+    };
+    expect(format.json_schema.schema.properties.document_kind.enum).toEqual(['meeting_notes']);
+    expect(packs.documentKinds().length).toBeGreaterThan(1);
+
     // The healthcare wrapper answers for a foreign document in the kernel's words, not its own:
     // this is an epic, so there is no `provider_id` and no `credentials` to report.
     expect(extracted).not.toHaveProperty('provider_id');
