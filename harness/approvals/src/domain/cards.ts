@@ -27,6 +27,11 @@ export interface ApprovalMetadata {
   conversation: string;
 }
 
+/** Cut to `limit` characters with an ellipsis. Both previews below run long text through it. */
+function capped(text: string, limit: number): string {
+  return text.length > limit ? `${text.slice(0, limit)}…` : text;
+}
+
 export function payloadPreview(payload: unknown, limit = 2000): string {
   let text: string;
   try {
@@ -35,7 +40,7 @@ export function payloadPreview(payload: unknown, limit = 2000): string {
     return 'payload could not be rendered';
   }
   if (containsRestrictedPattern(text)) return 'payload withheld: it did not pass the redaction check';
-  return text.length > limit ? `${text.slice(0, limit)}…` : text;
+  return capped(text, limit);
 }
 
 /**
@@ -60,8 +65,7 @@ const MAX_EXECUTION_ERROR_LENGTH = 300;
  */
 function executionFailureLine(error: string | undefined): string {
   if (!error || containsRestrictedPattern(error)) return EXECUTION_FAILURE_FALLBACK;
-  const capped = error.length > MAX_EXECUTION_ERROR_LENGTH ? `${error.slice(0, MAX_EXECUTION_ERROR_LENGTH)}…` : error;
-  return `Execution failed: ${capped}. Nothing was sent.`;
+  return `Execution failed: ${capped(error, MAX_EXECUTION_ERROR_LENGTH)}. Nothing was sent.`;
 }
 
 /** The two lines both cards open with: what was asked, and the arguments it was asked with. */
