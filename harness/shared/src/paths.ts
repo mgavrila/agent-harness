@@ -33,15 +33,15 @@ export interface InsideRootOptions {
    * What to do when `realpath` fails for a reason other than a missing path — ELOOP, EACCES,
    * ENOTDIR. `'rethrow'` (the default) propagates the original error, which is what the two
    * storage callers want, because the errno message never reaches a caller. `'escape'` reports
-   * it through `onEscape`, for the Slack sink, whose failures land in a plaintext column and
-   * must never quote a path.
+   * it through `onEscape`, for the surface file sink, whose failures land in a plaintext column
+   * and must never quote a path.
    */
   onUnreadable?: 'rethrow' | 'escape';
 }
 
 /**
  * The single containment primitive for the whole file store: three implementations of this
- * check used to sit in three files, and the one in the Slack sink had already drifted.
+ * check used to sit in three files, and the one in the surface file sink had already drifted.
  *
  * Both the lexical path and the symlink-resolved path are compared, and both are necessary.
  * Lexical alone is not enough because every reader here follows symlinks: a link planted under
