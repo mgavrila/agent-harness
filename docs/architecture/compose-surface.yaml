@@ -26,6 +26,7 @@ services:
       HARNESS_PACKS: ${HARNESS_PACKS:-@harness/pack-healthcare}
       HARNESS_POLICY_FILE: /srv/agent-harness/clients/demo-practice/policy.yaml
       HARNESS_STORAGE_DIR: /srv/harness-storage
+      HARNESS_SURFACES: ${HARNESS_SURFACES:-@harness/surface-slack}
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?set LITELLM_MASTER_KEY in .env}
       RECONCILE_SECONDS: ${RECONCILE_SECONDS:-300}
       SLACK_ALLOWED_USERS: ${SLACK_ALLOWED_USERS:-}

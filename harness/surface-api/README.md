@@ -14,4 +14,17 @@ the host load an adapter by name at runtime instead of importing it at build tim
 | `src/models.ts`  | the zod shapes of the two outbox payloads, and the two id patterns           |
 | `src/testing.ts` | `MemorySurface`, reached as `@harness/surface-api/testing`                   |
 
+`MemorySurface` is both the fake every host test drives and the whole of `@harness/surface-memory`,
+so the thing the suite proves the host against is the thing that runs.
+
+An adapter declares what it can do beyond posting, and the host reads those flags rather than
+trying and catching:
+
+| Surface            | forms                  | privateReply                    | update |
+| ------------------ | ---------------------- | ------------------------------- | ------ |
+| `slack`            | yes (a modal)          | yes (ephemeral)                 | yes    |
+| `memory`           | yes                    | yes                             | yes    |
+| Teams (planned)    | yes (a task module)    | no — post in the thread instead | yes    |
+| Telegram (planned) | no — there is no modal | no                              | yes    |
+
 `CONTRIBUTING.md`, "Adding a surface", is the worked how-to.

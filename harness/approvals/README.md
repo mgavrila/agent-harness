@@ -1,32 +1,36 @@
 # @harness/approvals
 
-The Slack app a human approves through. It polls `approvals` for pending rows and posts a
-Block Kit card, records the decision, calls `approvals_execute` over a stdio MCP client, and
-drains the `tool_effects` outbox through Slack sinks on a timer.
+The approvals host. It polls `approvals` for pending rows and posts a card on the primary
+messaging surface, records the decision, calls `approvals_execute` over a stdio MCP client, and
+drains the `tool_effects` outbox through the `surface_message` and `surface_file` sinks on a
+timer.
+
+It holds no transport. Adapters are loaded by name from `HARNESS_SURFACES`, which is required and
+has no default in this package — the demo's Compose service sets `@harness/surface-slack`. Everything
+the host says is a neutral `Card`, `Form` or line of text from `@harness/surface-api`.
 
 ## Layout
 
-```
-src/domain/slack/     the SlackApi interface, the WebClient adapter, FakeSlack, the button handlers
-src/domain/render/    types (ids, ApprovalRow), blocks (cards), modal (the note dialog)
-src/domain/execute/   the CoreToolsClient interface, the stdio MCP adapter, FakeCoreToolsClient
-src/domain/poller.ts  claim a pending row, post its card, record the timestamp
+```text
+src/domain/cards.ts      approvalCard, decidedCard, editForm: what a human reads, in neutral models
+src/domain/surfaces/     loadSurfaces: HARNESS_SURFACES, the primary rule, the failure messages
+src/domain/handlers.ts   the button and form handlers, authorised per surface
+src/domain/execute/      the CoreToolsClient interface, the stdio MCP adapter, FakeCoreToolsClient
+src/domain/poller.ts     claim a pending row, post its card, record the message reference
 src/domain/decisions.ts  the one writer of approvals.status outside core-tools
-src/domain/sinks.ts   slack_message and slack_file senders for the outbox
-src/domain/runner.ts  three independent loops: poll, dispatch, reconcile
-src/domain/health.ts  GET /healthz for the cron watchdogs
-src/app/main.ts       Bolt in Socket Mode, the runner, the health server
-src/app/child-env.ts  the allowlist the core-tools child process is launched with
-src/index.ts          the public API
-src/testing.ts        ./testing: FakeSlack, FakeCoreToolsClient, useTestDb
+src/domain/sinks.ts      surface_message and surface_file senders for the outbox
+src/domain/runner.ts     three independent loops: poll, dispatch, reconcile
+src/domain/health.ts     GET /healthz for the cron watchdogs
+src/app/main.ts          connects the surfaces, wires the handlers, starts the runner
+src/app/child-env.ts     the allowlist the core-tools child process is launched with
+src/index.ts             the public API
+src/testing.ts           ./testing: MemorySurface, FakeCoreToolsClient, useTestDb
 ```
 
-## Two Slack apps, not one
+## Slack
 
-This process needs `APPROVALS_SLACK_BOT_TOKEN` and `APPROVALS_SLACK_APP_TOKEN`, which are a
-_different_ Slack app from Hermes's. Slack routes each Socket Mode event to exactly one of an
-app's open connections, so one shared app loses about half of every button click. There is
-deliberately no fallback to `SLACK_BOT_TOKEN`.
+See `surfaces/slack/README.md`. The short version is that the host needs its own Slack app, not
+Hermes's.
 
 ## What it must never do
 
@@ -43,5 +47,6 @@ deliberately no fallback to `SLACK_BOT_TOKEN`.
 pnpm --filter @harness/approvals test
 ```
 
-Real Postgres (`harness_test`) through `useTestDb()`, `FakeSlack` and `FakeCoreToolsClient`
-from `./testing`. No real Slack call anywhere in the suite.
+Real Postgres (`harness_test`) through `useTestDb()`, `MemorySurface` and `FakeCoreToolsClient`
+from `./testing`. The dual-surface suite loads the real Slack adapter beside it over
+`fakeSlackSession` from `@harness/surface-slack/testing`, so no call leaves the process.
