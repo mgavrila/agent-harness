@@ -12,6 +12,7 @@ import type { ExtractionCase, InjectionCase } from './cases.js';
 import { scoreInjection, type CaseOutcome, type StoredField } from './score.js';
 import {
   KERNEL_PIPELINE_TOOLS,
+  extractIdKeyFor,
   normalizeMasking,
   openPipeline,
   resolvePipelineTools,
@@ -253,25 +254,16 @@ describe('resolvePipelineTools', () => {
       ingestTool: 'documents_ingest',
       extractTool: 'documents_extract',
       readTool: 'providers_get',
-      extractIdKey: 'provider_id',
       readIdKey: 'provider_id',
       attachmentsKey: 'credentials',
     });
   });
 
-  /**
-   * The bug this whole block exists for. `Pack.replaces` is process-wide, so with healthcare
-   * loaded the published `documents_extract` is healthcare's and answers `provider_id` for every
-   * pack's documents. A second measured pack reading the kernel's `record_id` off that result got
-   * `undefined` and failed every case. It reads the extract result with the publisher's key and
-   * calls its own `records_get` with its own.
-   */
-  it('reads the extract result with the key of whichever pack publishes that tool', () => {
+  it('gives a second measured pack its own read tool and key, from the same registry', () => {
     expect(resolvePipelineTools(both, 'stories')).toEqual({
       ingestTool: 'documents_ingest',
       extractTool: 'documents_extract',
       readTool: 'records_get',
-      extractIdKey: 'provider_id',
       readIdKey: 'record_id',
       attachmentsKey: 'attachments',
     });
@@ -279,6 +271,44 @@ describe('resolvePipelineTools', () => {
 
   it('falls back to the kernel throughout when the measured pack is alone and declares nothing', () => {
     expect(resolvePipelineTools(registryOf([stubPack]), 'stories')).toEqual(KERNEL_PIPELINE_TOOLS);
+  });
+});
+
+/**
+ * The bug this function exists for, asked the way the fix asks it.
+ *
+ * `Pack.replaces` is process-wide, so with healthcare loaded the published `documents_extract`
+ * is healthcare's for every document in the process — but healthcare only renames the id to
+ * `provider_id` for a document of its *own* kind and hands another pack's document back exactly
+ * as the kernel produced it. Reading one key for the whole run is wrong in both directions: a
+ * second measured pack reading `record_id` off a credentialing result got `undefined`, and
+ * reading `provider_id` off a foreign result gets `undefined` just the same. The claimant of the
+ * document's kind is the only thing that answers it.
+ */
+describe('extractIdKeyFor', () => {
+  const both = registryOf([healthcarePack, stubPack]);
+
+  it('uses the replacing pack’s key for a document that pack claims', () => {
+    expect(extractIdKeyFor(registryOf([healthcarePack]), 'documents_extract', 'state_license')).toBe('provider_id');
+    expect(extractIdKeyFor(both, 'documents_extract', 'state_license')).toBe('provider_id');
+  });
+
+  it('uses the kernel’s key for a document claimed by a pack that replaces nothing', () => {
+    expect(extractIdKeyFor(both, 'documents_extract', 'brief')).toBe('record_id');
+  });
+
+  it('uses the kernel’s key when no loaded pack replaces the extract tool at all', () => {
+    expect(extractIdKeyFor(registryOf([stubPack]), 'documents_extract', 'brief')).toBe('record_id');
+  });
+
+  /**
+   * Nobody has said what the document is, so the kernel routes it to the primary pack's target —
+   * the first entry of `HARNESS_PACKS` — and the answer follows that pack, not the load order of
+   * whoever happens to replace the tool.
+   */
+  it('follows the primary pack for a case that declares no kind', () => {
+    expect(extractIdKeyFor(both, 'documents_extract', undefined)).toBe('provider_id');
+    expect(extractIdKeyFor(registryOf([stubPack, healthcarePack]), 'documents_extract', undefined)).toBe('record_id');
   });
 });
 

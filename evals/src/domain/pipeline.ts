@@ -91,18 +91,16 @@ export interface OpenPipelineOptions {
  * Which tools one case drives and which keys it reads, resolved against a live deployment.
  *
  * `EvalReadback` is what a pack *declares*; this is what that declaration resolves to once the
- * loaded packs are known. The two differ in one place, and it is the reason this type exists
- * separately: `Pack.replaces` is process-wide, so the pack that publishes `documents_extract`
- * need not be the pack being measured. The measured pack says which tools to call; whoever
- * publishes the extract tool decides which key its result carries.
+ * loaded packs are known. Every member here is a property of the *measured pack*, so every one
+ * of them is resolved once per handle. The key the extract result carries is not on this type
+ * for exactly that reason — it is a property of the document, not of the run. See
+ * `extractIdKeyFor`.
  */
 export interface PipelineTools {
   ingestTool: string;
   extractTool: string;
   readTool: string;
-  /** The key `extractTool`'s result carries the new record's id under. */
-  extractIdKey: string;
-  /** The argument name `readTool` takes that id under. */
+  /** The argument name `readTool` takes the record id under. */
   readIdKey: string;
   /** The key `readTool`'s result carries the attachment list under. */
   attachmentsKey: string;
@@ -113,38 +111,56 @@ export const KERNEL_PIPELINE_TOOLS: PipelineTools = {
   ingestTool: 'documents_ingest',
   extractTool: 'documents_extract',
   readTool: 'records_get',
-  extractIdKey: 'record_id',
   readIdKey: 'record_id',
   attachmentsKey: 'attachments',
 };
+
+/** The key a kernel `documents_extract` result carries the new record's id under. */
+export const KERNEL_EXTRACT_ID_KEY = 'record_id';
 
 /**
  * What `runCase` calls, for one measured pack in one deployment.
  *
  * The measured pack's `evals.readback` names every tool and both keys, each falling back to the
- * kernel's. The one thing it cannot answer for is the key the *extract result* carries: a pack
- * loaded beside it may have replaced `documents_extract` under the same name and may answer in
- * its own vocabulary — a shipped pack does exactly that, renaming the new record's id — and a
- * second measured pack declaring the kernel's `record_id` used to read `undefined` off it and
- * failed every case. So that one key is read off whichever loaded pack `replaces` the extract
- * tool, and only then off the measured pack's own declaration.
+ * kernel's.
+ */
+export function resolvePipelineTools(packs: PackRegistry, measured: string): PipelineTools {
+  const readback = packs.byName(measured).evals?.readback ?? {};
+  return {
+    ingestTool: readback.ingestTool ?? KERNEL_PIPELINE_TOOLS.ingestTool,
+    extractTool: readback.extractTool ?? KERNEL_PIPELINE_TOOLS.extractTool,
+    readTool: readback.readTool ?? KERNEL_PIPELINE_TOOLS.readTool,
+    readIdKey: readback.recordIdKey ?? KERNEL_PIPELINE_TOOLS.readIdKey,
+    attachmentsKey: readback.attachmentsKey ?? KERNEL_PIPELINE_TOOLS.attachmentsKey,
+  };
+}
+
+/**
+ * The key `extractTool`'s result carries the new record's id under, for **one document**.
+ *
+ * Not a property of the measured pack, and not a property of the publishing pack either, which
+ * is the correction this function exists for. `Pack.replaces` is process-wide, so the pack that
+ * publishes `documents_extract` in a given deployment need not be the pack being measured — and
+ * a pack that takes the name over does **not** answer in its own vocabulary for every document
+ * it is handed. The shipped healthcare replacement renames the id to `provider_id` for a
+ * credentialing document and passes another pack's document straight back as the kernel produced
+ * it, under `record_id`, because renaming another pack's record would be a lie. Reading one key
+ * for the whole run therefore got `undefined` on every case of the second pack.
+ *
+ * So the question is asked per document: whichever pack *claims the document's kind* owns the
+ * result shape, and `targetFor` is the same routing the kernel's own extract does — an exact
+ * claim, then a catch-all, then the primary pack for a document nobody has classified. If that
+ * pack replaces the extract tool, the shape is its declared `recordIdKey`; if it does not, the
+ * kernel produced the result and the key is the kernel's.
  *
  * A pack that replaces the extract tool and declares no `evals.readback` of its own is taken at
  * the kernel's word. There is nothing else to go on, and the alternative — guessing from the
  * result's shape — is what this whole block exists to stop.
  */
-export function resolvePipelineTools(packs: PackRegistry, measured: string): PipelineTools {
-  const readback = packs.byName(measured).evals?.readback ?? {};
-  const extractTool = readback.extractTool ?? KERNEL_PIPELINE_TOOLS.extractTool;
-  const publisher = packs.all.find((p) => (p.replaces ?? []).includes(extractTool));
-  return {
-    ingestTool: readback.ingestTool ?? KERNEL_PIPELINE_TOOLS.ingestTool,
-    extractTool,
-    readTool: readback.readTool ?? KERNEL_PIPELINE_TOOLS.readTool,
-    extractIdKey: publisher?.evals?.readback?.recordIdKey ?? KERNEL_PIPELINE_TOOLS.extractIdKey,
-    readIdKey: readback.recordIdKey ?? KERNEL_PIPELINE_TOOLS.readIdKey,
-    attachmentsKey: readback.attachmentsKey ?? KERNEL_PIPELINE_TOOLS.attachmentsKey,
-  };
+export function extractIdKeyFor(packs: PackRegistry, extractTool: string, documentKind: string | undefined): string {
+  const claimant = packs.targetFor(documentKind).pack;
+  if (!(claimant.replaces ?? []).includes(extractTool)) return KERNEL_EXTRACT_ID_KEY;
+  return claimant.evals?.readback?.recordIdKey ?? KERNEL_EXTRACT_ID_KEY;
 }
 
 /**
@@ -254,6 +270,14 @@ export function normalizeMasking(fields: StoredField[]): StoredField[] {
  * resolved from the measured pack's `evals.readback` against the packs it loaded: a pack that
  * renames the read gets its own name and its own id key, and a pack that ships no tools of its
  * own gets the kernel's `records_get` and `record_id`.
+ *
+ * The case's own `kind` is declared at ingest rather than left for a later classification. It is
+ * what the case file says the document is, so a run that withheld it was measuring a pipeline no
+ * deployment runs: with the kind absent the kernel routes the document to the *primary* pack's
+ * target, which for a second measured pack is the wrong pack's record kind, and every case of
+ * that pack failed. Both the kernel's `documents_ingest` and a pack's replacement of it take
+ * `kind`, constrained to the loaded packs' declared kinds, so the value travels as it would from
+ * any other caller that already knows.
  */
 export async function runCase(handle: PipelineHandle, c: ExtractionCase): Promise<CaseOutcome> {
   handle.toolsCalled.length = 0;
@@ -270,11 +294,15 @@ export async function runCase(handle: PipelineHandle, c: ExtractionCase): Promis
 
   const tools = handle.tools;
   try {
-    const ingested = (await handle.callTool(tools.ingestTool, { path: c.path })) as { document_id: string };
+    const ingested = (await handle.callTool(tools.ingestTool, { path: c.path, kind: c.kind })) as {
+      document_id: string;
+    };
     const extracted = (await handle.callTool(tools.extractTool, {
       document_id: ingested.document_id,
     })) as Record<string, unknown> & { document_kind: string; restricted_fields: string[] };
-    const recordId = extracted[tools.extractIdKey] as string;
+    // Per document, off the pack that claims this document's kind — not off the measured pack
+    // and not off the publisher. See `extractIdKeyFor`.
+    const recordId = extracted[extractIdKeyFor(handle.packs, tools.extractTool, c.kind)] as string;
     const stored = (await handle.callTool(tools.readTool, { [tools.readIdKey]: recordId })) as Record<
       string,
       unknown

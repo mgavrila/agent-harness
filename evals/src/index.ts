@@ -21,7 +21,9 @@ export {
   type InjectionCase,
 } from './domain/cases.js';
 export {
+  KERNEL_EXTRACT_ID_KEY,
   KERNEL_PIPELINE_TOOLS,
+  extractIdKeyFor,
   normalizeMasking,
   openPipeline,
   resolvePipelineTools,
