@@ -36,14 +36,25 @@ never hold a Slack credential knows to leave both out of it.
 Bolt's `message` and `app_mention` listeners narrow every payload to a `SlackInbound` and hand it
 to the one handler `SurfaceSession.onMessage` registered. `mentioned` is true for a direct
 message and for a mention; a plain channel message is `mentioned: false` and the host still
-receives it but does not answer. A `message` that carries the mention token is dropped, because
-`app_mention` already delivered it — Slack sends both when the bot is a channel member. Messages
-with a `bot_id`, and any subtype but `file_share` (edits, deletions, joins), are dropped.
+receives it but does not answer. A **channel** `message` that carries the mention token is dropped,
+because `app_mention` already delivered it — Slack sends both when the bot is a channel member. A
+direct message is kept whether or not it names the bot, with the token stripped: `app_mention` is
+documented for channels, and dropping a DM on the assumption it arrives twice would lose it
+outright. Messages with a `bot_id`, and any subtype but `file_share` (edits, deletions, joins),
+are dropped.
+
+**A follow-up inside a thread in a channel has to mention the bot again.** A reply is posted in a
+thread under the message that caused it, so the natural next message is written in that thread —
+where, in a channel, it arrives as an ordinary unmentioned `message` and the host stays silent.
+Mention the bot in the thread and it answers, in that same thread. A direct message needs no
+mention, in a thread or out of one.
 
 A file attached to a message is downloaded by `transport/files.ts` with the bot token into
 `<storageDir>/incoming/<message ts, dot replaced by a dash>-<file name, sanitised to
 [A-Za-z0-9._-]>`, checked against the storage root before anything is written; two attachments
-sharing a name in one message get `-2`, `-3`, ... before the extension. A download over
+sharing a name in one message get `-2`, `-3`, ... before the extension. The URL is pinned to Slack
+before the bot token is sent: `https:` on a `.slack.com` host, with redirects refused, and any
+other URL drops that attachment the way a failed download does. A download over
 `MAX_ATTACHMENT_BYTES` (64 MiB — Slack itself allows up to 1 GiB, which is not a size this host
 buffers or stores unbounded) is refused: a declared `content-length` over the limit is refused
 before a byte is read, and the body is otherwise streamed to disk and cut off — deleting whatever

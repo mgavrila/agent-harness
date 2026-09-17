@@ -25,7 +25,7 @@ trying and catching:
 
 | Surface            | forms                  | privateReply                    | update | streaming | inlineConfirm |
 | ------------------ | ---------------------- | ------------------------------- | ------ | --------- | ------------- |
-| `slack`            | yes (a modal)          | yes (ephemeral)                 | yes    | no        | no            |
+| `slack`            | yes (a modal)          | yes (ephemeral)                 | yes    | yes       | no            |
 | `memory`           | yes                    | yes                             | yes    | yes       | no            |
 | Teams (planned)    | yes (a task module)    | no — post in the thread instead | yes    | no        | no            |
 | Telegram (planned) | no — there is no modal | no                              | yes    | no        | no            |

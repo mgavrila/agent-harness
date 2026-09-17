@@ -133,7 +133,7 @@ Run this before the demo. Each line either passes or tells you what is wrong.
 - [ ] `docker compose --env-file .env -f harness/compose/docker-compose.yml --profile demo exec host printenv SLACK_APP_TOKEN` prints the one token.
 - [ ] A direct message to the bot is answered.
 - [ ] A mention in a channel is answered, and an unmentioned message in that channel is not.
-- [ ] Asking the bot "what tools do you have?" lists `mcp_core_tools_*` names and **no** terminal or file tools.
+- [ ] Asking the bot "what tools do you have?" lists the kernel's own tool names plus `read_file`, `ls`, `glob` and `grep`, and **no** terminal tool.
 - [ ] A test release round-trips: ask for a roster of one provider, approve the card, and confirm the file arrives.
 - [ ] `psql "$DATABASE_URL" -c "select tool, decision from audit_log order by created_at desc limit 5"` shows that round-trip.
 - [ ] `psql "$DATABASE_URL" -c "select status, count(*) from tool_effects group by status"` shows no `failed` and no `needs_review`.

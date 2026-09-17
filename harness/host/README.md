@@ -47,20 +47,31 @@ a bind-mounted storage directory still has both.
 `openKernel`/`kernel.close` gives each run its own `ToolDeps` and in-process MCP client; the
 runtime never talks to Postgres or the kernel directly.
 
+Both flows go through `serialize`, which chains a thread's turns on `host.turns`: a second message
+in the same conversation, or a decision resuming a thread that is still mid-turn, waits for the
+turn in flight instead of running beside it. A runtime keeps its own state per thread — the Deep
+Agents checkpointer is keyed on the thread id — and two turns writing it at once leave only the
+one that finished last. The chain is per thread, so different conversations still run at once.
+
 ## The loops, and health
 
 `@harness/approvals`'s three loops run in this same process: poll pending approvals and post
 their cards, dispatch the effects outbox to a surface, and reconcile stuck rows. `startHealthServer`
-serves `GET /healthz` for the watchdogs, on `APPROVALS_HEALTH_PORT`/`APPROVALS_HEALTH_BIND` —
+serves `GET /healthz` for whatever probe an operator points at it — the two watchdog scripts that
+used to poll it are gone — on `APPROVALS_HEALTH_PORT`/`APPROVALS_HEALTH_BIND` —
 the names are unchanged from when `@harness/approvals` hosted its own process, because renaming
 them would touch Compose, the snapshot and the runbook for no behaviour.
 
 ## Shutdown
 
 `app/main.ts` traps `SIGINT`/`SIGTERM` and closes everything in the reverse of startup order:
-abort every run still in `host.active`, stop the runner, close the health server, stop every
-surface, stop the runtime, stop the identity plug-in, close the core-tools client, close the
-database pool.
+`drainActive` first — it cancels every run still in `host.active` and waits, for at most ten
+seconds, until each turn has closed its run row and its kernel — then stop the runner, close the
+health server, stop every surface, stop the runtime, stop the identity plug-in, close the
+core-tools client, close the database pool. The drain comes first because everything after it
+takes away something a turn is still using: the runtime's `stop()` ends its checkpointer pool and
+`closeDb()` the host's, and a turn that lost that race left its `runs` row `running` forever.
+Nothing sweeps such a row — `harness_reconcile` reads approvals and dispatches, never `runs`.
 
 ## Layout
 
@@ -72,7 +83,7 @@ src/domain/threads/trim.ts     trimHistory: the newest turns under a message and
 src/domain/skills.ts           readSkillCatalogue: name, version, description off every SKILL.md
 src/domain/persona.ts          readPersona: SOUL.md
 src/domain/kernel.ts           openKernel: one run, one ToolDeps, one in-process MCP client
-src/domain/conversation.ts     runTurn, handleMessage, attachMessageHandlers, cancelRun
+src/domain/conversation.ts     runTurn, handleMessage, attachMessageHandlers, serialize, cancelRun, drainActive
 src/domain/resume.ts           resumeText, resumeOnDecision, decisionDeps: the onDecided hook
 src/app/main.ts                the composition root: env, the three plug-ins, the loops, health, shutdown
 src/index.ts                   the public API

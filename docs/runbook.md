@@ -184,18 +184,28 @@ erroring (check `/healthz` and the log), or the rows belong to a different
 
 ## Reconciliation
 
-`harness_reconcile` (also run once at process start) expires approvals past
-their TTL and parks stuck dispatches. The host's reconcile loop calls
-it every `RECONCILE_SECONDS`. It never re-sends anything. A scheduled watch
-beyond that loop — a job that checks reconciliation is actually happening —
-is Plan 9's, on the scheduler.
+`harness_reconcile` expires approvals past their TTL and parks stuck dispatches.
+It never re-sends anything. A scheduled watch beyond that loop — a job that
+checks reconciliation is actually happening — is Plan 9's, on the scheduler.
 
-The MCP tool repairs **only the calling client's rows**, so an agent acting for
-one practice can never retire another practice's approvals. The startup pass in
-`main.ts` runs **unscoped**, as an operator-level task across every tenant; when
-it actually repairs something it writes one `audit_log` row with `caller` set to
-the principal the process runs as (`svc-local` or `svc-host` in the shipped
-configs) and `tool = 'harness_reconcile'`.
+**The deployed stack reconciles in one place only: the host's loop, every
+`RECONCILE_SECONDS` (default 300).** The MCP tool repairs **only the calling
+client's rows**, so an agent acting for one practice can never retire another
+practice's approvals, and the host calls it as its own service principal for the
+client it serves. When it repairs something it writes one `audit_log` row with
+`caller` set to that principal (`svc-host` in the shipped configs) and
+`tool = 'harness_reconcile'`.
+
+There is a second, **unscoped** pass — an operator-level sweep across every
+tenant — but it runs at the start of the stdio core-tools server, which Compose
+no longer starts. It reaches a developer running that server by hand and nothing
+else, so do not expect another client's stale rows to be repaired by the running
+stack.
+
+Nothing reconciles `runs`. A row left `running` is a process that died mid-turn:
+the host's own shutdown drains the turns in flight and closes their rows, so a
+`running` row with an old `started_at` means the process was killed rather than
+stopped.
 
 ## Runs and principals
 
@@ -535,6 +545,12 @@ A file attached to the message has already been downloaded, by the surface, into
 `incoming/`. A reply streams as edits to one message, at a bounded rate, on a surface whose
 `capabilities.streaming` is true; otherwise it posts once when the run finishes.
 
+**One turn at a time per thread.** Two messages a moment apart in the same conversation, or a
+decision resuming a thread that is still mid-turn, queue behind the turn in flight rather than
+running beside it: the runtime keeps its own state per thread, and two turns writing it at once
+lose one of them. Different conversations still run at the same time, so a slow turn holds up
+that conversation and no other.
+
 ### Slack credentials: one app
 
 One Slack app carries chat and approvals, because the host is the only process that holds a
@@ -631,6 +647,54 @@ already gives its own cell:
 levels:
   member: { destructive: approval }
 ```
+
+## Upgrading from Plan 7
+
+An existing deployment on the retired runtime's shape hits every one of these. Work through them
+in order, with the stack down.
+
+1. **Migrate the database.** `pnpm db:migrate` applies 0011: it adds `threads`, `messages`,
+   `approvals.thread_id`, `runs.status` and the foreign keys, and drops `runs.caller`. It is safe
+   on live data — nothing before 0011 ever wrote `runs.thread_id`, so the new key cannot fail on
+   an existing row. Optionally follow it with
+   `UPDATE runs SET status = 'done' WHERE ended_at IS NOT NULL`: the new column's default makes
+   every historic run read as `running`, and nothing reads the column yet, so the statement only
+   matters to the first query you write on it. At its first start the host also creates schema
+   `langgraph` in the `harness` database through the checkpointer's own setup; the `harness` role
+   can already `CREATE SCHEMA` on the stock Compose Postgres.
+2. **Collapse the two Slack apps into one.** Keep the app whose tokens are `SLACK_BOT_TOKEN` and
+   `SLACK_APP_TOKEN`, turn **Interactivity on** for it (it had none), and confirm its event
+   subscriptions: `message.channels`, `message.groups`, `message.im`, `message.mpim` and
+   `app_mention`. Delete the second app. Remove `APPROVALS_SLACK_BOT_TOKEN`,
+   `APPROVALS_SLACK_APP_TOKEN`, `SLACK_HOME_CHANNEL`, `SLACK_HOME_CHANNEL_NAME`,
+   `SLACK_ALLOWED_USERS` and `MEMORY_ALLOWED_USERS` from `.env`. Invite the bot to
+   `SLACK_APPROVALS_CHANNEL` and to every channel it should answer in.
+3. **Rewrite `identity.yaml`.** Replace the retired service principals with `svc-host`, or point
+   `HARNESS_HOST_PRINCIPAL` at a service id the file already declares; the host refuses to start
+   otherwise. Replace the placeholder member ids with real Slack member ids — until you do, every
+   human is refused with "You are not authorised to use this assistant." and every button press
+   with "You are not an approver for this workspace."
+4. **Set the runtime in `.env`.** Add `HARNESS_RUNTIME=@harness/runtime-deepagents` for a
+   bare-metal `pnpm host`; Compose supplies it for the container. Drop the retired runtime's
+   `*_UID`/`*_GID` variables.
+5. **Clean the client folder.** Delete the retired runtime's config file, `cron/` and `scripts/`
+   from any client scaffolded before this release; the scaffolder no longer copies them and
+   nothing reads them.
+6. **Remove the old containers.** `pnpm demo:down`, then
+   `docker compose --env-file .env -f harness/compose/docker-compose.yml --profile demo down --remove-orphans`
+   to take away the retired runtime's containers and the separate approvals container.
+   `docker volume rm` its data volume once you no longer want that state: conversation history
+   does not carry over, and threads start fresh. The `storage` volume is reused as is (already
+   `1000:1000`), and the old approvals image is left dangling.
+7. **Expect these behaviour changes.** No nightly `credentialing-expirations` digest and no
+   watchdogs until Plan 9. An attachment is stored as `incoming/<ts>-<safe name>` rather than
+   under its original name. A reply lands in a Slack thread under the message that caused it, and
+   a follow-up written in that thread, in a channel, has to mention the bot again. Every chat turn
+   now runs as the writer's own principal and level, so a `member` who used to act through a
+   service principal at `service` level is parked for `write.internal` unless the client's
+   `policy.yaml` says otherwise (the demo's says `auto`).
+8. **Health is unchanged.** `/healthz` still answers on `127.0.0.1:8787`; the two watchdog
+   scripts that used to poll it are gone, so point your own probe at it.
 
 ## Playbooks
 
