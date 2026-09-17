@@ -1,17 +1,16 @@
-/** What a test of @harness/approvals reaches for: the two fakes, the test database, and one approval. */
+/** What a test of @harness/approvals reaches for: the fakes, the test database, and one approval. */
 import type { approvals } from '@harness/db';
-import type { ApprovalRow } from './domain/render/types.js';
+import type { ApprovalRow } from './domain/cards.js';
 
-export { FakeSlack } from './domain/slack/fake.js';
 export { FakeCoreToolsClient } from './domain/execute/fake.js';
 export { useTestDb } from '@harness/db/testing';
+export { MemorySurface } from '@harness/surface-api/testing';
 
 /**
- * The action every test in this package parks: one roster file released to a
- * payer, requested by the agent. Stated once because the poller, the runner,
- * the Slack handlers, the decision path and the card renderer are five views
- * of the same approval, and a card whose summary no longer matches the row the
- * decision test decides on is two tests that only look like a pair.
+ * The action every test in this package parks: one roster file released to a payer, requested by
+ * the agent. Stated once because the poller, the runner, the handlers, the decision path and the
+ * card renderer are five views of the same approval, and a card whose summary no longer matches
+ * the row the decision test decides on is two tests that only look like a pair.
  */
 const PENDING = () => ({
   client: 'demo-practice',
@@ -20,8 +19,7 @@ const PENDING = () => ({
   summary: 'forms_release (external) requested by hermes',
   requestedBy: 'hermes',
   idempotencyKey: 'k1',
-  // A fresh Date per call: a shared instance would be one mutable object
-  // handed to every row in the suite.
+  // A fresh Date per call: a shared instance would be one mutable object handed to every row.
   expiresAt: new Date('2026-09-16T12:00:00Z'),
 });
 
@@ -31,11 +29,11 @@ export function pendingApproval(over: Partial<typeof approvals.$inferInsert> = {
 }
 
 /**
- * The same approval as `approvals` would select it: posted to Slack, still
- * pending, with `over` applied last. This is what the renderers take.
+ * The same approval as `approvals` would select it: not yet posted anywhere, still pending, with
+ * `over` applied last. This is what the card builders take.
  *
- * Cast rather than constructed field by field: drizzle's inferred row type
- * carries generated columns this fixture does not need to restate.
+ * Cast rather than constructed field by field: drizzle's inferred row type carries generated
+ * columns this fixture does not need to restate.
  */
 export function approvalRow(over: Partial<ApprovalRow> = {}): ApprovalRow {
   return {

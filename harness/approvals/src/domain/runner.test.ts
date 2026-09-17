@@ -4,7 +4,9 @@ import path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { describe, it, expect } from 'vitest';
 import { approvals, encrypt, toolEffects } from '@harness/db';
-import { FakeCoreToolsClient, FakeSlack, pendingApproval, useTestDb } from '../testing.js';
+import type { SurfaceSession } from '@harness/surface-api';
+import { fakeSlackSession } from '@harness/surface-slack/testing';
+import { FakeCoreToolsClient, MemorySurface, pendingApproval, useTestDb } from '../testing.js';
 import {
   runPollTick,
   runDispatchTick,
@@ -13,23 +15,16 @@ import {
   startRunner,
   type RunnerDeps,
 } from './runner.js';
-import { slackSinks } from './sinks.js';
+import { surfaceSinks } from './sinks.js';
+import { surfacesOf } from './surfaces/registry.js';
 
 const db = useTestDb();
 const key = randomBytes(32);
 const now = () => new Date('2026-09-15T12:00:00Z');
 
-function makeDeps(api: FakeSlack, core: FakeCoreToolsClient): RunnerDeps {
-  return {
-    db,
-    api,
-    core,
-    sinks: slackSinks(api, { defaultChannel: 'C0DEMO' }),
-    client: 'demo-practice',
-    channel: 'C0DEMO',
-    encryptionKey: key,
-    now,
-  };
+function makeDeps(surface: SurfaceSession, core: FakeCoreToolsClient): RunnerDeps {
+  const surfaces = surfacesOf([surface]);
+  return { db, surfaces, core, sinks: surfaceSinks(surfaces), client: 'demo-practice', encryptionKey: key, now };
 }
 
 describe('runner ticks', () => {
@@ -38,19 +33,19 @@ describe('runner ticks', () => {
     await db.insert(toolEffects).values({
       client: 'demo-practice',
       tool: 'credentialing_expirations',
-      sink: 'slack_message',
+      sink: 'surface_message',
       idempotencyKey: 'demo-practice:expirations:2026-09-15',
       payloadEncrypted: encrypt(JSON.stringify({ text: '2 credentials expire within 90 days.' }), key),
       summary: 'expirations digest',
     });
 
-    const api = new FakeSlack();
+    const surface = new MemorySurface();
     const core = new FakeCoreToolsClient();
-    const deps = makeDeps(api, core);
+    const deps = makeDeps(surface, core);
 
     expect(await runPollTick(deps)).toMatchObject({ posted: 1 });
     expect(await runDispatchTick(deps)).toMatchObject({ dispatched: 1 });
-    expect(api.posts.map((p) => p.text)).toContain('2 credentials expire within 90 days.');
+    expect(surface.texts.map((t) => t.text)).toContain('2 credentials expire within 90 days.');
 
     const handle = startRunner(deps, {
       pollMs: 3_600_000,
@@ -69,9 +64,9 @@ describe('runner ticks', () => {
   });
 
   it('calls harness_reconcile through core-tools rather than touching the rows itself', async () => {
-    const api = new FakeSlack();
+    const surface = new MemorySurface();
     const core = new FakeCoreToolsClient();
-    const out = await runReconcileTick(makeDeps(api, core), 10);
+    const out = await runReconcileTick(makeDeps(surface, core), 10);
     expect(out).toEqual({ approvals_expired: 0, dispatches_parked: 0 });
     expect(core.reconciled).toEqual([10]);
   });
@@ -80,13 +75,17 @@ describe('runner ticks', () => {
     await db.insert(toolEffects).values({
       client: 'demo-practice',
       tool: 'forms_release',
-      sink: 'slack_file',
+      sink: 'surface_file',
       idempotencyKey: 'demo-practice:forms_release:gone',
-      payloadEncrypted: encrypt(JSON.stringify({ path: '/nope/gone.csv', filename: 'gone.csv' }), key),
-      summary: 'Release gone.csv to Slack',
+      payloadEncrypted: encrypt(
+        JSON.stringify({ path: '/nope/gone.csv', filename: 'gone.csv', conversation: 'C0DEMO' }),
+        key,
+      ),
+      summary: 'Release gone.csv',
     });
-    const api = new FakeSlack();
-    const deps = makeDeps(api, new FakeCoreToolsClient());
+    // The adapter that reads the bytes is the one that can fail that way; the memory surface
+    // records a path and never opens it.
+    const deps = makeDeps(fakeSlackSession().session, new FakeCoreToolsClient());
     const out = await runDispatchTick(deps);
     expect(out).toMatchObject({ dispatched: 0, retried: 1 });
     const [row] = await db.select().from(toolEffects);
@@ -98,13 +97,13 @@ describe('runner ticks', () => {
     await db.insert(toolEffects).values({
       client: 'demo-practice',
       tool: 'forms_release',
-      sink: 'slack_file',
+      sink: 'surface_file',
       idempotencyKey: 'demo-practice:forms_release:stuck',
       payloadEncrypted: encrypt(JSON.stringify({ path: '/x', filename: 'x' }), key),
-      summary: 'Release x to Slack',
+      summary: 'Release x',
       status: 'needs_review',
     });
-    const handle = startRunner(makeDeps(new FakeSlack(), new FakeCoreToolsClient()), {
+    const handle = startRunner(makeDeps(new MemorySurface(), new FakeCoreToolsClient()), {
       pollMs: 3_600_000,
       dispatchMs: 3_600_000,
       reconcileMs: 3_600_000,
@@ -120,8 +119,8 @@ describe('runner ticks', () => {
   });
 
   it('stops cleanly and runs nothing afterwards', async () => {
-    const api = new FakeSlack();
-    const handle = startRunner(makeDeps(api, new FakeCoreToolsClient()), {
+    const surface = new MemorySurface();
+    const handle = startRunner(makeDeps(surface, new FakeCoreToolsClient()), {
       pollMs: 5,
       dispatchMs: 5,
       reconcileMs: 5,
@@ -135,10 +134,10 @@ describe('runner ticks', () => {
   });
 
   it('marks a loop unhealthy on a failed tick, and healthy again once it recovers', async () => {
-    const api = new FakeSlack();
+    const surface = new MemorySurface();
     const core = new FakeCoreToolsClient();
     core.failReconcileWith = 'boom';
-    const deps = makeDeps(api, core);
+    const deps = makeDeps(surface, core);
     const handle = startRunner(deps, {
       pollMs: 3_600_000,
       dispatchMs: 3_600_000,
@@ -161,7 +160,7 @@ describe('runner ticks', () => {
     }
   });
 
-  it('writes an out-file effect to Slack when the file exists', async () => {
+  it('writes an out-file effect to the surface when the file exists', async () => {
     const dir = await mkdtemp(path.join(tmpdir(), 'harness-runner-'));
     const file = path.join(dir, 'out', 'roster', 'aetna-abc123def456.csv');
     await mkdir(path.dirname(file), { recursive: true });
@@ -169,15 +168,15 @@ describe('runner ticks', () => {
     await db.insert(toolEffects).values({
       client: 'demo-practice',
       tool: 'forms_release',
-      sink: 'slack_file',
+      sink: 'surface_file',
       idempotencyKey: 'demo-practice:forms_release:ok',
       payloadEncrypted: encrypt(JSON.stringify({ path: file, filename: 'aetna-roster.csv' }), key),
-      summary: 'Release aetna-roster.csv to Slack',
+      summary: 'Release aetna-roster.csv',
     });
-    const api = new FakeSlack();
-    const out = await runDispatchTick(makeDeps(api, new FakeCoreToolsClient()));
+    const surface = new MemorySurface();
+    const out = await runDispatchTick(makeDeps(surface, new FakeCoreToolsClient()));
     expect(out.dispatched).toBe(1);
-    expect(api.uploads[0].filename).toBe('aetna-roster.csv');
+    expect(surface.uploads[0].filename).toBe('aetna-roster.csv');
     await rm(dir, { recursive: true, force: true });
   });
 });

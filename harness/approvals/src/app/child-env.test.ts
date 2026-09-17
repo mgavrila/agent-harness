@@ -1,5 +1,14 @@
 import { describe, it, expect } from 'vitest';
-import { coreToolsChildEnv, NEVER_FORWARDED } from './child-env.js';
+import { surface as memorySurface } from '@harness/surface-memory';
+import { surface as slackSurface } from '@harness/surface-slack';
+import { coreToolsChildEnv, neverForwarded } from './child-env.js';
+
+/**
+ * The names the real adapter declares, read off its own `Surface.secrets` rather than written out
+ * here. A hand-written array would keep passing on the day someone adds a fifth credential to the
+ * adapter and forgets this list, which is the failure the test exists to catch.
+ */
+const declared = [...slackSurface.secrets];
 
 const base: NodeJS.ProcessEnv = {
   PATH: '/usr/bin',
@@ -13,6 +22,7 @@ const input = (over: NodeJS.ProcessEnv = {}) => ({
   env: { ...base, ...over },
   client: 'demo-practice',
   storageRoot: '/srv/harness-storage',
+  surfaceSecrets: declared,
 });
 
 describe('coreToolsChildEnv', () => {
@@ -40,10 +50,27 @@ describe('coreToolsChildEnv', () => {
     );
   });
 
-  it('is an allowlist: no Slack token and no provider key reaches the child', () => {
-    const secrets = Object.fromEntries(NEVER_FORWARDED.map((name) => [name, `secret-${name}`]));
-    const env = coreToolsChildEnv(input(secrets));
-    for (const name of NEVER_FORWARDED) expect(env).not.toHaveProperty(name);
+  it('is an allowlist: no credential an adapter declared, and no provider key, reaches the child', () => {
+    // A guard against the vacuous version of this test: an adapter declaring nothing would make
+    // every assertion below pass over an empty list.
+    expect(declared.length).toBeGreaterThan(0);
+    const secrets = Object.fromEntries(neverForwarded(declared).map((name) => [name, `secret-${name}`]));
+    const env = coreToolsChildEnv({ ...input(secrets), surfaceSecrets: declared });
+    for (const name of neverForwarded(declared)) expect(env).not.toHaveProperty(name);
+    expect(JSON.stringify(env)).not.toContain('secret-');
+  });
+
+  /**
+   * The same property with two adapters loaded, which is the arrangement `LoadedSurfaces.secrets`
+   * exists for: the union of what both declared is what the child does not get. The host names
+   * none of these variables, so a third adapter needs no edit here.
+   */
+  it('strips the union of two loaded adapters, not one adapter it happens to know about', () => {
+    const union = [...new Set([...slackSurface.secrets, ...memorySurface.secrets])];
+    expect(union.length).toBeGreaterThan(0);
+    const secrets = Object.fromEntries(neverForwarded(union).map((name) => [name, `secret-${name}`]));
+    const env = coreToolsChildEnv({ ...input(secrets), surfaceSecrets: union });
+    for (const name of neverForwarded(union)) expect(env).not.toHaveProperty(name);
     expect(JSON.stringify(env)).not.toContain('secret-');
   });
 

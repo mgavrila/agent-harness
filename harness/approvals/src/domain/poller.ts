@@ -1,16 +1,16 @@
 import { and, asc, eq, gt, isNotNull, isNull, lte } from 'drizzle-orm';
 import { approvals, type Db } from '@harness/db';
 import { createLogger } from '@harness/shared';
-import type { SlackApi } from './slack/types.js';
-import { approvalBlocks, approvalFallbackText } from './render/blocks.js';
+import type { SurfaceSession } from '@harness/surface-api';
+import { approvalCard } from './cards.js';
 
 const log = createLogger('approvals');
 
 export interface PollDeps {
   db: Db;
-  api: SlackApi;
+  /** Where cards are posted: the primary surface. */
+  surface: SurfaceSession;
   client: string;
-  channel: string;
   now: () => Date;
 }
 
@@ -21,36 +21,28 @@ export interface PollResult {
 }
 
 /**
- * A claim with no `message_ref` older than this is assumed abandoned (a poller
- * crashed, or its process was killed, between claiming and posting) and is
- * released so the row can be tried again. The window is measured from
- * `claimed_at`, so a row that was already old when first claimed is not
- * mistaken for a stale claim on the very next tick. Nothing claims a row before
- * a poller has actually picked it up.
+ * A claim with no `message_ref` older than this is assumed abandoned (a poller crashed, or its
+ * process was killed, between claiming and posting) and is released so the row can be tried
+ * again. The window is measured from `claimed_at`, so a row that was already old when first
+ * claimed is not mistaken for a stale claim on the very next tick.
  */
 const STALE_CLAIM_MS = 2 * 60 * 1000;
 
 /**
  * Turn every pending approval that has no card yet into one.
  *
- * `conversation_id` doubles as the claim marker: a poller claims a row by
- * setting it to its own conversation *before* calling Slack, guarded on the row
- * still being pending and unclaimed (`conversation_id IS NULL`). Only one
- * concurrent claim on the same row can win that guard, so two pollers can
- * never both post a card for it — the loser's claim affects zero rows and the
- * row is left for the winner or a later run. Posting happens only after a
- * successful claim; `message_ref` is written on success, and a failed post
- * releases the claim (`conversation_id` back to null) so the row stays postable
- * on the next run instead of being stranded.
+ * `conversation_id` doubles as the claim marker: a poller claims a row by setting it *before*
+ * calling the surface, guarded on the row still being pending and unclaimed
+ * (`conversation_id IS NULL`). Only one concurrent claim on the same row can win that guard, so
+ * two pollers can never both post a card for it — the loser's claim affects zero rows and the row
+ * is left for the winner or a later run. Posting happens only after a successful claim;
+ * `message_ref` is written on success, and a failed post releases the claim so the row stays
+ * postable on the next run instead of being stranded.
  *
- * Only a *failed post* releases the claim. If the post succeeds and writing
- * `message_ref` is what fails, the claim stays: the card is already in the
- * channel, and releasing it would post a second one on the very next tick.
- * That row is then recovered by the stale sweep below rather than at once.
- *
- * Because there is no separate "claim expired but the process died before it
- * could release" signal, this run first releases any claim whose `claimed_at`
- * is older than `STALE_CLAIM_MS` and that never got a `message_ref`.
+ * Only a *failed post* releases the claim. If the post succeeds and writing `message_ref` is what
+ * fails, the claim stays: the card is already in the conversation, and releasing it would post a
+ * second one on the very next tick. That row is then recovered by the stale sweep below rather
+ * than at once.
  */
 export async function postPendingApprovals(deps: PollDeps, limit = 20): Promise<PollResult> {
   const now = deps.now();
@@ -85,10 +77,11 @@ export async function postPendingApprovals(deps: PollDeps, limit = 20): Promise<
     .limit(limit);
 
   const result: PollResult = { posted: 0, orphaned: 0 };
+  const conversation = deps.surface.defaultConversation;
   for (const row of pending) {
     const claimed = await deps.db
       .update(approvals)
-      .set({ surface: 'slack', conversationId: deps.channel, claimedAt: now })
+      .set({ surface: deps.surface.name, conversationId: conversation, claimedAt: now })
       .where(and(eq(approvals.id, row.id), eq(approvals.status, 'pending'), isNull(approvals.conversationId)))
       .returning({ id: approvals.id });
     if (claimed.length === 0) {
@@ -97,18 +90,13 @@ export async function postPendingApprovals(deps: PollDeps, limit = 20): Promise<
       continue;
     }
 
-    // Two separate try blocks, because the right recovery differs on each
-    // side of the post. Before it, nothing reached Slack, so the claim is
-    // released and the next tick retries immediately. After it, a card is
-    // live in the channel: releasing the claim there would put a second card
+    // Two separate try/catch pairs, because the right recovery differs on each side of the post.
+    // Before it, nothing was sent, so the claim is released and the next tick retries
+    // immediately. After it, a card is live: releasing the claim there would put a second card
     // with a second set of working buttons next to it on the next tick.
-    let postResult: Awaited<ReturnType<typeof deps.api.chat.postMessage>>;
+    let ref: Awaited<ReturnType<typeof deps.surface.postCard>>;
     try {
-      postResult = await deps.api.chat.postMessage({
-        channel: deps.channel,
-        text: approvalFallbackText(row),
-        blocks: approvalBlocks(row),
-      });
+      ref = await deps.surface.postCard(conversation, approvalCard(row, deps.surface.capabilities));
     } catch (err) {
       log.error(`could not post the card for ${row.id}`, err);
       await deps.db
@@ -119,17 +107,14 @@ export async function postPendingApprovals(deps: PollDeps, limit = 20): Promise<
     }
 
     try {
-      // A missing timestamp belongs on this side of the split: Slack answered,
-      // so the card is in the channel even though we cannot record where.
-      if (!postResult.ts) throw new Error('Slack accepted the message without a timestamp');
-      await deps.db.update(approvals).set({ messageRef: postResult.ts }).where(eq(approvals.id, row.id));
+      await deps.db.update(approvals).set({ messageRef: ref.id }).where(eq(approvals.id, row.id));
       result.posted += 1;
     } catch (err) {
-      // Deliberately no release. The row stays claimed with no message_ref, and
-      // the stale-claim sweep above picks it up after STALE_CLAIM_MS — late
-      // enough for a transient database failure to have been noticed.
+      // Deliberately no release. The row stays claimed with no message_ref, and the stale-claim
+      // sweep above picks it up after STALE_CLAIM_MS — late enough for a transient database
+      // failure to have been noticed.
       log.error(
-        `posted the card for ${row.id} but could not record its timestamp; ` +
+        `posted the card for ${row.id} but could not record its message reference; ` +
           `leaving the claim in place so no duplicate is posted`,
         err,
       );

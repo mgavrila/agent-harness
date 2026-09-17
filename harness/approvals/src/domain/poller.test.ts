@@ -1,17 +1,17 @@
 import { describe, it, expect, vi } from 'vitest';
 import { approvals, type Db } from '@harness/db';
-import { FakeSlack, pendingApproval, useTestDb } from '../testing.js';
-import { postPendingApprovals } from './poller.js';
+import type { Card, MessageRef } from '@harness/surface-api';
+import { MemorySurface, pendingApproval, useTestDb } from '../testing.js';
+import { postPendingApprovals, type PollResult } from './poller.js';
 
 const db = useTestDb();
 const now = () => new Date('2026-09-15T12:00:00Z');
 
 /**
- * A database whose only broken operation is the `message_ref` write — a
- * connection reset or a statement timeout landing between the successful
- * postMessage and the row update. Every other query, the claim included, runs
- * for real, so the test exercises the true post-succeeded/write-failed state
- * rather than a simulation of it.
+ * A database whose only broken operation is the `message_ref` write — a connection reset or a
+ * statement timeout landing between the successful post and the row update. Every other query,
+ * the claim included, runs for real, so the test exercises the true post-succeeded/write-failed
+ * state rather than a simulation of it.
  */
 function dbWithFailingMessageRefWrite(real: Db): Db {
   return {
@@ -28,27 +28,44 @@ function dbWithFailingMessageRefWrite(real: Db): Db {
   } as unknown as Db;
 }
 
+/** A surface that starts a second poll run in the middle of the first one's post. */
+class RacingSurface extends MemorySurface {
+  second: PollResult | undefined;
+  private racing = false;
+
+  override async postCard(conversation: string, card: Card): Promise<MessageRef> {
+    if (!this.racing) {
+      this.racing = true;
+      // By the time this fires, the first run has already claimed the row but has not yet
+      // posted, so a second poller starting here must see it as claimed and post nothing.
+      this.second = await postPendingApprovals({ db, surface: this, client: 'demo-practice', now });
+    }
+    return super.postCard(conversation, card);
+  }
+}
+
 describe('postPendingApprovals', () => {
   it('posts one card per unposted pending approval and records where it went', async () => {
     await db.insert(approvals).values([pendingApproval(), pendingApproval({ idempotencyKey: 'k2' })]);
-    const slack = new FakeSlack();
-    const out = await postPendingApprovals({ db, api: slack, client: 'demo-practice', channel: 'C0DEMO', now });
+    const surface = new MemorySurface();
+    const out = await postPendingApprovals({ db, surface, client: 'demo-practice', now });
     expect(out).toMatchObject({ posted: 2, orphaned: 0 });
-    expect(slack.posts).toHaveLength(2);
-    expect(slack.posts[0].channel).toBe('C0DEMO');
-    expect(slack.posts[0].text).toContain('Approval needed');
+    expect(surface.cards).toHaveLength(2);
+    expect(surface.cards[0].ref.conversation).toBe('memory');
+    expect(surface.cards[0].card.title).toBe('Approval needed');
     const rows = await db.select().from(approvals);
-    expect(rows.every((r) => r.messageRef !== null && r.conversationId === 'C0DEMO')).toBe(true);
-    expect(rows.every((r) => r.surface === 'slack')).toBe(true);
+    expect(rows.every((r) => r.messageRef !== null && r.conversationId === 'memory' && r.surface === 'memory')).toBe(
+      true,
+    );
   });
 
   it('posts nothing on a second pass', async () => {
     await db.insert(approvals).values(pendingApproval());
-    const slack = new FakeSlack();
-    const deps = { db, api: slack, client: 'demo-practice', channel: 'C0DEMO', now };
+    const surface = new MemorySurface();
+    const deps = { db, surface, client: 'demo-practice', now };
     await postPendingApprovals(deps);
     await postPendingApprovals(deps);
-    expect(slack.posts).toHaveLength(1);
+    expect(surface.cards).toHaveLength(1);
   });
 
   it('skips decided, expired and other-client rows', async () => {
@@ -59,28 +76,28 @@ describe('postPendingApprovals', () => {
         pendingApproval({ idempotencyKey: 'k2', expiresAt: new Date('2026-09-15T11:00:00Z') }),
         pendingApproval({ idempotencyKey: 'k3', client: 'other-clinic' }),
       ]);
-    const slack = new FakeSlack();
-    const out = await postPendingApprovals({ db, api: slack, client: 'demo-practice', channel: 'C0DEMO', now });
+    const surface = new MemorySurface();
+    const out = await postPendingApprovals({ db, surface, client: 'demo-practice', now });
     expect(out.posted).toBe(0);
-    expect(slack.posts).toHaveLength(0);
+    expect(surface.cards).toHaveLength(0);
   });
 
-  it('releases the claim when Slack rejects the post, and posts it on the next run', async () => {
+  it('releases the claim when the surface rejects the post, and posts it on the next run', async () => {
     await db.insert(approvals).values(pendingApproval());
-    const slack = new FakeSlack();
-    slack.failWith = 'channel_not_found';
-    const deps = { db, api: slack, client: 'demo-practice', channel: 'C0DEMO', now };
+    const surface = new MemorySurface();
+    surface.failWith = 'conversation_not_found';
+    const deps = { db, surface, client: 'demo-practice', now };
     const out1 = await postPendingApprovals(deps);
     expect(out1.posted).toBe(0);
     const [afterFailure] = await db.select().from(approvals);
     expect(afterFailure.conversationId).toBeNull();
     expect(afterFailure.messageRef).toBeNull();
 
-    slack.failWith = undefined;
+    surface.failWith = undefined;
     const out2 = await postPendingApprovals(deps);
     expect(out2.posted).toBe(1);
     const [afterRetry] = await db.select().from(approvals);
-    expect(afterRetry.conversationId).toBe('C0DEMO');
+    expect(afterRetry.conversationId).toBe('memory');
     expect(afterRetry.messageRef).not.toBeNull();
   });
 
@@ -88,86 +105,73 @@ describe('postPendingApprovals', () => {
     const staleClaimedAt = new Date(now().getTime() - 3 * 60 * 1000);
     await db.insert(approvals).values(
       pendingApproval({
-        surface: 'slack',
-        conversationId: 'C0STALE',
+        surface: 'memory',
+        conversationId: 'memory-stale',
         claimedAt: staleClaimedAt,
         createdAt: staleClaimedAt,
       }),
     );
-    const slack = new FakeSlack();
-    const out = await postPendingApprovals({ db, api: slack, client: 'demo-practice', channel: 'C0DEMO', now });
+    const surface = new MemorySurface();
+    const out = await postPendingApprovals({ db, surface, client: 'demo-practice', now });
     expect(out.posted).toBe(1);
-    expect(slack.posts).toHaveLength(1);
+    expect(surface.cards).toHaveLength(1);
     const [row] = await db.select().from(approvals);
-    expect(row.conversationId).toBe('C0DEMO');
+    expect(row.conversationId).toBe('memory');
     expect(row.messageRef).not.toBeNull();
   });
 
   it('leaves a fresh claim on an old row alone: the window runs from the claim, not from creation', async () => {
     const createdLongAgo = new Date(now().getTime() - 30 * 60 * 1000);
-    await db
-      .insert(approvals)
-      .values(
-        pendingApproval({ surface: 'slack', conversationId: 'C0OTHER', claimedAt: now(), createdAt: createdLongAgo }),
-      );
-    const slack = new FakeSlack();
-    const out = await postPendingApprovals({ db, api: slack, client: 'demo-practice', channel: 'C0DEMO', now });
+    await db.insert(approvals).values(
+      pendingApproval({
+        surface: 'memory',
+        conversationId: 'elsewhere',
+        claimedAt: now(),
+        createdAt: createdLongAgo,
+      }),
+    );
+    const surface = new MemorySurface();
+    const out = await postPendingApprovals({ db, surface, client: 'demo-practice', now });
     expect(out.posted).toBe(0);
-    expect(slack.posts).toHaveLength(0);
+    expect(surface.cards).toHaveLength(0);
     const [row] = await db.select().from(approvals);
-    expect(row.conversationId).toBe('C0OTHER');
+    expect(row.conversationId).toBe('elsewhere');
     expect(row.messageRef).toBeNull();
   });
 
   it('keeps the claim when the post succeeded but recording message_ref failed, so the next tick posts nothing', async () => {
     await db.insert(approvals).values(pendingApproval());
-    const slack = new FakeSlack();
+    const surface = new MemorySurface();
     const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     const out1 = await postPendingApprovals({
       db: dbWithFailingMessageRefWrite(db),
-      api: slack,
+      surface,
       client: 'demo-practice',
-      channel: 'C0DEMO',
       now,
     });
-    // The card reached Slack; only the bookkeeping failed, so nothing counts
-    // as posted and nothing is released.
+    // The card reached the surface; only the bookkeeping failed, so nothing counts as posted and
+    // nothing is released.
     expect(out1.posted).toBe(0);
-    expect(slack.posts).toHaveLength(1);
+    expect(surface.cards).toHaveLength(1);
     const [afterWriteFailure] = await db.select().from(approvals);
-    expect(afterWriteFailure.conversationId).toBe('C0DEMO');
+    expect(afterWriteFailure.conversationId).toBe('memory');
     expect(afterWriteFailure.messageRef).toBeNull();
 
     // The next tick, on a healthy database, must not post a second card.
-    const out2 = await postPendingApprovals({ db, api: slack, client: 'demo-practice', channel: 'C0DEMO', now });
+    const out2 = await postPendingApprovals({ db, surface, client: 'demo-practice', now });
     expect(out2).toMatchObject({ posted: 0, orphaned: 0 });
-    expect(slack.posts).toHaveLength(1);
+    expect(surface.cards).toHaveLength(1);
 
     errors.mockRestore();
   });
 
   it('produces exactly one post when a second poll run starts while the first is posting', async () => {
     await db.insert(approvals).values(pendingApproval());
-    const slack = new FakeSlack();
-    let secondRun: Awaited<ReturnType<typeof postPendingApprovals>> | undefined;
-    const racing = {
-      ...slack,
-      chat: {
-        update: slack.chat.update,
-        postEphemeral: slack.chat.postEphemeral,
-        postMessage: async (args: Parameters<typeof slack.chat.postMessage>[0]) => {
-          // By the time this fires, the first run has already claimed the row
-          // (set conversation_id) but has not yet posted, so a second poller
-          // starting here must see it as already claimed and post nothing.
-          secondRun = await postPendingApprovals({ db, api: slack, client: 'demo-practice', channel: 'C0DEMO', now });
-          return slack.chat.postMessage(args);
-        },
-      },
-    };
-    const out = await postPendingApprovals({ db, api: racing, client: 'demo-practice', channel: 'C0DEMO', now });
-    expect(secondRun).toMatchObject({ posted: 0, orphaned: 0 });
+    const surface = new RacingSurface();
+    const out = await postPendingApprovals({ db, surface, client: 'demo-practice', now });
+    expect(surface.second).toMatchObject({ posted: 0, orphaned: 0 });
     expect(out).toMatchObject({ posted: 1, orphaned: 0 });
-    expect(slack.posts).toHaveLength(1);
+    expect(surface.cards).toHaveLength(1);
   });
 });

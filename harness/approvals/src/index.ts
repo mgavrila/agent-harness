@@ -1,19 +1,21 @@
-export { slackSinks } from './domain/sinks.js';
-export { webClientApi } from './domain/slack/web-client.js';
-export type { SlackApi } from './domain/slack/types.js';
+export { surfaceSinks } from './domain/sinks.js';
+export { loadSurfaces, surfacesOf, type LoadedSurfaces } from './domain/surfaces/registry.js';
 export { postPendingApprovals, type PollDeps, type PollResult } from './domain/poller.js';
-export { approvalBlocks, approvalFallbackText, decidedBlocks, payloadPreview } from './domain/render/blocks.js';
-export { editModalView, parseEditModalMetadata } from './domain/render/modal.js';
 export {
   APPROVE_ACTION_ID,
+  CARD_ID,
   DECLINE_ACTION_ID,
   EDIT_ACTION_ID,
-  EDIT_MODAL_CALLBACK_ID,
-  EDIT_NOTE_ACTION_ID,
-  EDIT_NOTE_BLOCK_ID,
+  EDIT_FORM_ID,
+  EDIT_NOTE_FIELD_ID,
+  approvalCard,
+  decidedCard,
+  editForm,
+  parseApprovalMetadata,
+  payloadPreview,
+  type ApprovalMetadata,
   type ApprovalRow,
-  type EditModalMetadata,
-} from './domain/render/types.js';
+} from './domain/cards.js';
 /** The one restricted-value guard, from the package that owns the patterns. */
 export { containsRestrictedPattern } from '@harness/core-tools/redaction';
 export { createMcpCoreToolsClient } from './domain/execute/mcp-client.js';
@@ -25,14 +27,7 @@ export {
   type DecisionInput,
   type DecisionResult,
 } from './domain/decisions.js';
-export {
-  parseAllowedUsers,
-  registerApprovalHandlers,
-  type ActionArgs,
-  type AppDeps,
-  type HandlerRegistry,
-  type ViewArgs,
-} from './domain/slack/handlers.js';
+export { registerApprovalHandlers } from './domain/handlers.js';
 export {
   collectHealth,
   runDispatchTick,

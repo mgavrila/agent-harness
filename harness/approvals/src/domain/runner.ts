@@ -2,19 +2,18 @@ import { and, eq } from 'drizzle-orm';
 import { approvals, toolEffects, type Db } from '@harness/db';
 import { dispatchStagedEffects, type DispatchResult, type SinkRegistry } from '@harness/core-tools/effects';
 import { createLogger, describeError } from '@harness/shared';
-import type { SlackApi } from './slack/types.js';
 import type { CoreToolsClient } from './execute/types.js';
+import type { LoadedSurfaces } from './surfaces/registry.js';
 import { postPendingApprovals, type PollResult } from './poller.js';
 
 const log = createLogger('approvals');
 
 export interface RunnerDeps {
   db: Db;
-  api: SlackApi;
+  surfaces: LoadedSurfaces;
   core: CoreToolsClient;
   sinks: SinkRegistry;
   client: string;
-  channel: string;
   encryptionKey: Buffer;
   now: () => Date;
 }
@@ -46,13 +45,7 @@ export interface RunnerStatus {
 }
 
 export function runPollTick(deps: RunnerDeps): Promise<PollResult> {
-  return postPendingApprovals({
-    db: deps.db,
-    api: deps.api,
-    client: deps.client,
-    channel: deps.channel,
-    now: deps.now,
-  });
+  return postPendingApprovals({ db: deps.db, surface: deps.surfaces.primary, client: deps.client, now: deps.now });
 }
 
 export function runDispatchTick(deps: RunnerDeps): Promise<DispatchResult> {
@@ -91,7 +84,7 @@ type LoopName = keyof typeof LAST_TICK_FIELD;
 
 /**
  * Three independent loops. Each tick is guarded so a slow one never overlaps
- * itself, and every failure is logged and swallowed: a Slack outage must not
+ * itself, and every failure is logged and swallowed: an outage on one surface must not
  * stop the dispatcher from retrying five seconds later.
  */
 export function startRunner(deps: RunnerDeps, intervals: RunnerIntervals): RunnerHandle {

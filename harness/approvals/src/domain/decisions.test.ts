@@ -1,9 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { approvals } from '@harness/db';
-import { FakeCoreToolsClient, FakeSlack, pendingApproval, useTestDb } from '../testing.js';
+import { FakeCoreToolsClient, MemorySurface, pendingApproval, useTestDb } from '../testing.js';
+import type { ApprovalRow } from './cards.js';
 import { decideApproval, threadReplyText } from './decisions.js';
-import type { ApprovalRow } from './render/types.js';
+import { surfacesOf } from './surfaces/registry.js';
 
 const db = useTestDb();
 const now = () => new Date('2026-09-15T12:00:00Z');
@@ -12,93 +13,150 @@ const now = () => new Date('2026-09-15T12:00:00Z');
 async function seed(over: Record<string, unknown> = {}): Promise<ApprovalRow> {
   const [row] = await db
     .insert(approvals)
-    .values(pendingApproval({ surface: 'slack', conversationId: 'C0DEMO', messageRef: '1789000000.000001', ...over }))
+    .values(pendingApproval({ surface: 'memory', conversationId: 'memory', messageRef: 'm1', ...over }))
     .returning();
   return row;
 }
 
-function deps(api: FakeSlack, core: FakeCoreToolsClient) {
-  return { db, api, core, client: 'demo-practice', now };
+function deps(surface: MemorySurface, core: FakeCoreToolsClient) {
+  return { db, surfaces: surfacesOf([surface]), core, client: 'demo-practice', now };
+}
+
+/**
+ * The surface as the poller leaves it: one card already in the conversation, so its ref is `m1`
+ * and the decision has something to edit in place rather than a missing message to log about.
+ */
+async function postedSurface(): Promise<MemorySurface> {
+  const surface = new MemorySurface();
+  await surface.postCard('memory', {
+    id: 'harness_approval',
+    title: 'Approval needed',
+    notice: '',
+    body: [],
+    actions: [],
+  });
+  return surface;
 }
 
 describe('decideApproval', () => {
-  it('approves, executes once through core-tools, edits the card and replies in thread', async () => {
+  it('approves, executes once through core-tools, edits the card and replies under it', async () => {
     const row = await seed();
-    const api = new FakeSlack();
+    const surface = await postedSurface();
     const core = new FakeCoreToolsClient();
-    const res = await decideApproval(deps(api, core), { approvalId: row.id, decision: 'approved', decidedBy: 'U012' });
+    const res = await decideApproval(deps(surface, core), {
+      approvalId: row.id,
+      decision: 'approved',
+      decidedBy: 'U012',
+      surface: 'memory',
+    });
     expect(res).toMatchObject({ outcome: 'decided', status: 'approved' });
     expect(core.executed).toEqual([row.id]);
     const [after] = await db.select().from(approvals).where(eq(approvals.id, row.id));
     expect(after).toMatchObject({ status: 'approved', decidedBy: 'U012' });
     expect(after.decidedAt).not.toBeNull();
-    expect(api.updates).toHaveLength(1);
-    expect(api.updates[0]).toMatchObject({ channel: 'C0DEMO', ts: '1789000000.000001' });
-    expect(api.posts).toHaveLength(1);
-    expect(api.posts[0].thread_ts).toBe('1789000000.000001');
-    expect(api.posts[0].text).toContain('approved by');
+    expect(surface.cards).toHaveLength(1);
+    expect(surface.cards[0].card.actions).toEqual([]);
+    expect(surface.texts).toHaveLength(1);
+    expect(surface.texts[0].replyTo).toMatchObject({ surface: 'memory', conversation: 'memory', id: 'm1' });
+    expect(surface.texts[0].text).toContain('approved by');
   });
 
-  it('declines with a note, never executes, and carries the note into the thread', async () => {
+  it('declines with a note, never executes, and carries the note into the reply', async () => {
     const row = await seed();
-    const api = new FakeSlack();
+    const surface = await postedSurface();
     const core = new FakeCoreToolsClient();
-    await decideApproval(deps(api, core), {
+    await decideApproval(deps(surface, core), {
       approvalId: row.id,
       decision: 'declined',
       decidedBy: 'U012',
+      surface: 'memory',
       note: 'Use the Q4 roster, not Q3.',
     });
     expect(core.executed).toEqual([]);
     const [after] = await db.select().from(approvals).where(eq(approvals.id, row.id));
     expect(after).toMatchObject({ status: 'declined', decisionNote: 'Use the Q4 roster, not Q3.' });
-    expect(api.posts[0].text).toContain('Use the Q4 roster, not Q3.');
-    expect(api.posts[0].text).toContain('Nothing was sent');
+    expect(surface.texts[0].text).toContain('Use the Q4 roster, not Q3.');
+    expect(surface.texts[0].text).toContain('Nothing was sent');
   });
 
   it('refuses a row that is already decided', async () => {
     const row = await seed({ status: 'declined' });
-    const api = new FakeSlack();
+    const surface = new MemorySurface();
     const core = new FakeCoreToolsClient();
-    const res = await decideApproval(deps(api, core), { approvalId: row.id, decision: 'approved', decidedBy: 'U012' });
+    const res = await decideApproval(deps(surface, core), {
+      approvalId: row.id,
+      decision: 'approved',
+      decidedBy: 'U012',
+      surface: 'memory',
+    });
     expect(res).toEqual({ outcome: 'not_actionable' });
     expect(core.executed).toEqual([]);
-    expect(api.updates).toHaveLength(0);
+    expect(surface.cards).toHaveLength(0);
   });
 
   it('refuses a row past its expiry', async () => {
     const row = await seed({ expiresAt: new Date('2026-09-15T11:00:00Z') });
-    const api = new FakeSlack();
-    const core = new FakeCoreToolsClient();
-    const res = await decideApproval(deps(api, core), { approvalId: row.id, decision: 'approved', decidedBy: 'U012' });
+    const res = await decideApproval(deps(new MemorySurface(), new FakeCoreToolsClient()), {
+      approvalId: row.id,
+      decision: 'approved',
+      decidedBy: 'U012',
+      surface: 'memory',
+    });
     expect(res).toEqual({ outcome: 'not_actionable' });
   });
 
   it('refuses a row belonging to another client', async () => {
     const row = await seed({ client: 'other-clinic' });
-    const api = new FakeSlack();
-    const core = new FakeCoreToolsClient();
-    const res = await decideApproval(deps(api, core), { approvalId: row.id, decision: 'approved', decidedBy: 'U012' });
+    const res = await decideApproval(deps(new MemorySurface(), new FakeCoreToolsClient()), {
+      approvalId: row.id,
+      decision: 'approved',
+      decidedBy: 'U012',
+      surface: 'memory',
+    });
     expect(res).toEqual({ outcome: 'not_actionable' });
+  });
+
+  it('refuses a decision that arrives on a surface the card was not posted to', async () => {
+    const row = await seed();
+    const elsewhere = new MemorySurface({ name: 'other', conversation: 'other' });
+    const surfaces = surfacesOf([new MemorySurface(), elsewhere]);
+    const core = new FakeCoreToolsClient();
+    const res = await decideApproval(
+      { db, surfaces, core, client: 'demo-practice', now },
+      { approvalId: row.id, decision: 'approved', decidedBy: 'U012', surface: 'other' },
+    );
+    expect(res).toEqual({ outcome: 'wrong_surface' });
+    expect(core.executed).toEqual([]);
+    const [after] = await db.select().from(approvals).where(eq(approvals.id, row.id));
+    expect(after.status).toBe('pending');
   });
 
   it('reports a failed execution without claiming anything was sent', async () => {
     const row = await seed();
-    const api = new FakeSlack();
+    const surface = await postedSurface();
     const core = new FakeCoreToolsClient();
     core.failExecuteWith = 'approval is not executable: it must be approved and unexpired';
-    const res = await decideApproval(deps(api, core), { approvalId: row.id, decision: 'approved', decidedBy: 'U012' });
+    const res = await decideApproval(deps(surface, core), {
+      approvalId: row.id,
+      decision: 'approved',
+      decidedBy: 'U012',
+      surface: 'memory',
+    });
     expect(res).toMatchObject({ outcome: 'decided', execution: { status: 'failed' } });
-    expect(api.posts[0].text).toContain('Nothing was sent');
-    expect(api.posts[0].text).not.toContain('Executed');
+    expect(surface.texts[0].text).toContain('Nothing was sent');
+    expect(surface.texts[0].text).not.toContain('Executed');
   });
 
-  it('still records the decision when Slack is unreachable', async () => {
+  it('still records the decision when the surface is unreachable', async () => {
     const row = await seed();
-    const api = new FakeSlack();
-    api.failWith = 'channel_not_found';
-    const core = new FakeCoreToolsClient();
-    const res = await decideApproval(deps(api, core), { approvalId: row.id, decision: 'declined', decidedBy: 'U012' });
+    const surface = await postedSurface();
+    surface.failWith = 'conversation_not_found';
+    const res = await decideApproval(deps(surface, new FakeCoreToolsClient()), {
+      approvalId: row.id,
+      decision: 'declined',
+      decidedBy: 'U012',
+      surface: 'memory',
+    });
     expect(res).toMatchObject({ outcome: 'decided', status: 'declined' });
     const [after] = await db.select().from(approvals).where(eq(approvals.id, row.id));
     expect(after.status).toBe('declined');
@@ -108,7 +166,7 @@ describe('decideApproval', () => {
 describe('threadReplyText', () => {
   it('withholds a note that fails the redaction check', async () => {
     const row = await seed({ status: 'declined', decidedBy: 'U012', decisionNote: 'bad ssn 123-45-6789' });
-    const text = threadReplyText(row);
+    const text = threadReplyText(row, (id) => `@${id}`);
     expect(text).not.toContain('123-45-6789');
     expect(text).toContain('withheld');
   });
