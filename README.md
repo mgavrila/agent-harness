@@ -8,7 +8,8 @@ clients by adding content and configuration, not code.
   local vLLM later.
 - **Core**: tool policy and audit, approval engine, record store, playbook
   conventions, evals.
-- **Packs**: reusable industry content (skills, schemas, forms, eval sets).
+- **Packs**: reusable industry content (record kinds, skills, forms, eval
+  sets) plus any tools that area needs, behind one contract.
 - **Clients**: one folder per deployment (SOUL, routing, policy, env).
 
 First pack: healthcare credentialing. First client: a demo medical practice
@@ -23,10 +24,11 @@ harness/shared/      env, errors, paths, logging, subprocess, JSONL, CSV. No dep
 harness/pack-api/    the Pack contract every pack implements and core loads
 harness/db/          schema, migrations, the pool, encryption
 harness/gateway/     the routing table and the LiteLLM config renderer
-harness/core-tools/  the MCP server: shared/, domain/, tools/, app/
+harness/core-tools/  the pack-agnostic kernel and MCP server: shared/, domain/, tools/, app/
 harness/approvals/   the Slack approval app and the effects dispatcher
 harness/compose/     the Docker stack
-packs/healthcare/    the credentialing pack: schema, forms, skills, eval sets, synthetic corpus
+packs/healthcare/    the credentialing pack: record and attachment kinds, forms, skills, eval sets, corpus, eighteen tools
+packs/stories/       the proof pack: one record kind, one document kind, no tools
 clients/             one folder per deployment: SOUL, routing, policy, env
 evals/               the runner, scorers, judge and report
 scripts/             the client scaffolder
@@ -35,21 +37,23 @@ docs/                specs, runbook, demo, promotion gate, architecture
 
 Every package has the same four layers — `shared` → `domain` → `tools` → `app` — with one
 public entry point. A **pack** is an area of the product core loads at runtime rather than
-imports: set `HARNESS_PACKS` to choose. **[ARCHITECTURE.md](ARCHITECTURE.md)** explains the
+imports: set `HARNESS_PACKS` to choose. The kernel knows about records, attachments, documents
+and deadlines, and nothing about medicine — a grep test fails the build on the word `provider`
+in `harness/core-tools/src`. **[ARCHITECTURE.md](ARCHITECTURE.md)** explains the
 layers, the packs, the path of one tool call and the three invariants;
 **[CONTRIBUTING.md](CONTRIBUTING.md)** is how to add a tool, a domain, a pack, a client, a
 migration or a test.
 
 ## Documents
 
-|                                                  |                                                                                                                                                                                                                                                                                                                                           |
-| ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [ARCHITECTURE.md](ARCHITECTURE.md)               | the layers, the package map, the path of a tool call, the three invariants                                                                                                                                                                                                                                                                |
-| [CONTRIBUTING.md](CONTRIBUTING.md)               | how to add a tool, a domain, a pack, a client, a migration, a test                                                                                                                                                                                                                                                                        |
-| [docs/runbook.md](docs/runbook.md)               | operating it: audit, effects, reconciliation, storage, the Slack app, onboarding                                                                                                                                                                                                                                                          |
-| [docs/demo.md](docs/demo.md)                     | the five-minute demo script                                                                                                                                                                                                                                                                                                               |
-| [docs/promotion-gate.md](docs/promotion-gate.md) | what an eval run has to clear                                                                                                                                                                                                                                                                                                             |
-| package READMEs                                  | [shared](harness/shared/README.md), [pack-api](harness/pack-api/README.md), [db](harness/db/README.md), [gateway](harness/gateway/README.md), [core-tools](harness/core-tools/README.md), [approvals](harness/approvals/README.md), [evals](evals/README.md), [pack-healthcare](packs/healthcare/README.md), [scripts](scripts/README.md) |
+|                                                  |                                                                                                                                                                                                                                                                                                                                                                                    |
+| ------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [ARCHITECTURE.md](ARCHITECTURE.md)               | the layers, the package map, the path of a tool call, the three invariants                                                                                                                                                                                                                                                                                                         |
+| [CONTRIBUTING.md](CONTRIBUTING.md)               | how to add a tool, a domain, a pack, a client, a migration, a test                                                                                                                                                                                                                                                                                                                 |
+| [docs/runbook.md](docs/runbook.md)               | operating it: audit, effects, reconciliation, storage, the Slack app, onboarding                                                                                                                                                                                                                                                                                                   |
+| [docs/demo.md](docs/demo.md)                     | the five-minute demo script                                                                                                                                                                                                                                                                                                                                                        |
+| [docs/promotion-gate.md](docs/promotion-gate.md) | what an eval run has to clear                                                                                                                                                                                                                                                                                                                                                      |
+| package READMEs                                  | [shared](harness/shared/README.md), [pack-api](harness/pack-api/README.md), [db](harness/db/README.md), [gateway](harness/gateway/README.md), [core-tools](harness/core-tools/README.md), [approvals](harness/approvals/README.md), [evals](evals/README.md), [pack-healthcare](packs/healthcare/README.md), [pack-stories](packs/stories/README.md), [scripts](scripts/README.md) |
 
 ## Run locally
 
@@ -100,6 +104,7 @@ The Compose image for `core-tools` installs both; see
 
 ```bash
 pnpm synth        # 20 synthetic providers, 4 documents each, text-layer and scanned
+pnpm synth:stories # 3 synthetic meeting notes
 pnpm evals        # run the pipeline over them and score it
 ```
 
@@ -110,6 +115,10 @@ case did not hold. The rule it enforces is in `docs/promotion-gate.md`.
 Add `--limit=24` to run a sample instead of all 162 cases, which is what a free
 provider tier can absorb. The sample keeps the injection documents and takes the
 rest evenly from both splits.
+
+Add `--pack=<name>` to measure one of several loaded packs. The corpus, the
+cases, the injection file, the intake skill, the judged fields and the tools the
+pipeline drives all come off that pack; `evals/README.md` has the detail.
 
 Add `--gateway=<url>` to point a run at a gateway other than
 `HARNESS_GATEWAY_URL` (a staging proxy, or a fake one for an ad hoc check). It
