@@ -6,6 +6,7 @@ host needs, all behind `@harness/surface-api`.
 ```text
 src/config.ts            the three variables this adapter reads, from deps.env only
 src/session.ts           SurfaceSession over the transport: post, update, reply, upload, open a form
+src/stream.ts            startStream: a reply as one message edited at a bounded rate
 src/render/blocks.ts     a Card as Block Kit. Byte-pinned against what the app produced before Plan 6
 src/render/modal.ts      a Form as a Slack modal view, and reading a submission back
 src/transport/           the SlackApi slice, the WebClient adapter, the Bolt listener, the file
@@ -51,10 +52,31 @@ Any failed or refused download drops that one attachment (logged by name and rea
 path or the signed URL) and the message is still delivered. `MessageEvent.attachments[].path` is
 that name, relative to `incoming/`.
 
+## Streaming
+
+`startStream` (`src/stream.ts`) answers a run's text deltas as one message edited in place, over
+the two calls the adapter already makes rather than Slack's native streaming API. The first delta
+posts the message (in the thread, when asked to reply to one); every later delta is folded into
+the next edit, which happens no sooner than `STREAM_EDIT_INTERVAL_MS` (1.5 s) after the previous
+one — `chat.update` is a Tier 3 method (about fifty calls a minute per app), and one edit per 1.5 s
+per reply leaves room for several replies at once and for the approvals loops' own calls. `end`
+waits for the post, sends one last edit with the whole text, and returns the message; a trailing
+edit still waiting on its interval is folded into that final edit rather than fired again on a
+stray timer. A mid-stream edit's failure is swallowed — the text arrives with the next edit or the
+final one — but a failed post or a failed final edit rejects `end` with a `SurfaceError`, which the
+host logs.
+
+Slack's Web API also has a native streaming surface (`chat.startStream`/`appendStream`/`stopStream`
+in the installed SDK). It was not used here: outside a direct message it wants a recipient user and
+team the adapter cannot always supply, and it is new enough that this repository has no way to
+exercise it against real Slack from a test. `startStream`'s `opts.recipient` carries the user a
+reply is for, so an adapter that adopts the native API later has it in hand already. Edits are the
+well-trodden path in the meantime.
+
 ## Capabilities
 
-Forms (a modal), private replies (ephemeral messages) and editing a posted card: all three.
-Streaming is not yet: `capabilities.streaming` is false until Plan 8b's next task.
+Forms (a modal), private replies (ephemeral messages), editing a posted card and streaming: all
+four.
 
 ## What is pinned
 

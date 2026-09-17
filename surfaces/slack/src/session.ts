@@ -12,6 +12,7 @@ import type {
 import type { SlackConfig } from './config.js';
 import { cardBlocks } from './render/blocks.js';
 import { formView, valuesOf } from './render/modal.js';
+import { createEditStream } from './stream.js';
 import type { SlackTransport } from './transport/types.js';
 
 const NAME = 'slack';
@@ -63,7 +64,7 @@ export function createSlackSession(transport: SlackTransport, config: SlackConfi
 
   return {
     name: NAME,
-    capabilities: { forms: true, privateReply: true, update: true, streaming: false, inlineConfirm: false },
+    capabilities: { forms: true, privateReply: true, update: true, streaming: true, inlineConfirm: false },
     defaultConversation: config.defaultConversation,
 
     mention: (userId) => `<@${userId}>`,
@@ -183,8 +184,9 @@ export function createSlackSession(transport: SlackTransport, config: SlackConfi
       });
     },
 
-    startStream() {
-      throw new SurfaceError(`${NAME}: cannot stream a reply`);
+    startStream(conversation, opts = {}) {
+      assertConversation(conversation);
+      return createEditStream({ api, conversation, threadTs: opts.replyTo?.id });
     },
 
     start: () => events.start(),

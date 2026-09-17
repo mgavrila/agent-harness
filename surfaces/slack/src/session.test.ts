@@ -40,7 +40,7 @@ describe('the Slack session', () => {
       forms: true,
       privateReply: true,
       update: true,
-      streaming: false,
+      streaming: true,
       inlineConfirm: false,
     });
     expect(session.defaultConversation).toBe('C0DEMO');
@@ -261,6 +261,20 @@ describe('the Slack session', () => {
     await session.stop();
     expect(events.started).toBe(true);
     expect(events.stopped).toBe(true);
+  });
+
+  it('streams a reply as one message edited in the thread it was asked to reply in', async () => {
+    const { session, api } = fakeSlackSession();
+    const replyTo = { surface: 'slack', conversation: 'C0DEMO', id: '1700000000.000100' };
+    const stream = session.startStream('C0DEMO', { replyTo });
+    stream.append('Hel');
+    stream.append('lo');
+    const ref = await stream.end();
+    expect(api.posts).toHaveLength(1);
+    expect(api.posts[0]).toMatchObject({ channel: 'C0DEMO', thread_ts: '1700000000.000100', text: 'Hel' });
+    expect(api.updates).toHaveLength(1);
+    expect(api.updates[0]).toMatchObject({ channel: 'C0DEMO', text: 'Hello' });
+    expect(ref).toEqual({ surface: 'slack', conversation: 'C0DEMO', id: api.updates[0].ts });
   });
 });
 
