@@ -40,7 +40,10 @@ export async function createOrReuseApproval(
       // Plaintext jsonb for humans reviewing the request; restricted values are
       // redacted out of it. The full arguments live in payload_encrypted.
       payload: { tool: tool.name, args: tool.redact ? tool.redact(args) : args },
-      payloadEncrypted: encrypt(JSON.stringify({ tool: tool.name, args }), deps.encryptionKey),
+      payloadEncrypted: encrypt(
+        JSON.stringify({ tool: tool.name, args, level: deps.principal.level }),
+        deps.encryptionKey,
+      ),
       summary,
       requestedBy: deps.principal.id,
       expiresAt,

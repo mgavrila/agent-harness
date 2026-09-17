@@ -1,6 +1,6 @@
 import { and, eq, gt } from 'drizzle-orm';
 import { approvals, auditLog, decrypt } from '@harness/db';
-import { ToolError } from '@harness/shared';
+import { LEVELS, ToolError, type Level } from '@harness/shared';
 import { auditBaseFor, withCurrentTool } from '../tooling/context.js';
 import { hashArgs, writeAudit } from '../tooling/audit.js';
 import { decide } from '../tooling/policy.js';
@@ -39,13 +39,19 @@ export async function executeApproval(deps: ToolDeps, approvalId: string): Promi
   const parsed = JSON.parse(decrypt(row.payloadEncrypted, deps.encryptionKey)) as {
     tool: string;
     args: Record<string, unknown>;
+    level?: Level;
   };
   const target = deps.tools.get(parsed.tool);
   if (!target) throw new ToolError(`approval ${approvalId} references unknown tool ${parsed.tool}`);
-  // Policy is re-read at replay time: an approval granted before the class
-  // was blocked must not become a way around the current policy. Throwing
-  // here rolls the `executed` transition back to `approved`.
-  if (decide(target.actionClass, deps.principal.level, deps.policy) === 'blocked') {
+  // Policy is re-read at replay time: an approval granted before the class was blocked must not
+  // become a way around the current policy. It is re-checked at the level the action was parked
+  // under, never at the replaying process's level, because the approvals host always replays as
+  // a service principal, which would otherwise block or (wrongly) permit the action on its own
+  // level rather than the requester's. A row parked before this level was recorded falls back to
+  // the replaying process's level. Throwing here rolls the `executed` transition back to
+  // `approved`.
+  const parkedLevel = parsed.level && (LEVELS as readonly string[]).includes(parsed.level) ? parsed.level : undefined;
+  if (decide(target.actionClass, parkedLevel ?? deps.principal.level, deps.policy) === 'blocked') {
     throw new ToolError(`approval ${approvalId} cannot execute: ${target.name} is now blocked by policy`);
   }
 

@@ -244,6 +244,7 @@ describe('registerTools', () => {
     expect(JSON.parse(decrypt(row.payloadEncrypted!, deps.encryptionKey))).toEqual({
       tool: 'send_external_redacted',
       args: { to: 'ssn-999-88-7777', note: 'keep me' },
+      level: 'practitioner',
     });
   });
 

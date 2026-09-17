@@ -92,7 +92,10 @@ logical call has the same hash across retries. Use it to group repeated
 failures. The raw arguments are not stored in the audit log.
 
 `caller` is the principal id since Plan 7 — `u-…` for a person, `svc-…` for a service — so a
-row's `caller` and its run's `principal_id` always agree.
+row's `caller` and its run's `principal_id` always agree. A row written before migration 0010
+keeps its old string (`hermes`, `approvals-app`, `eval-runner`), and that migration's backfill
+copied that same string into the run's `principal_id` verbatim, so the two still agree on old
+rows too.
 
 ## What is not audited
 
@@ -209,6 +212,11 @@ the runtime's service principal, at level `service`.
 
 A multi-run host builds one `KernelConfig` and calls `openRun` and `depsForRun` per run; it
 must never reuse one `ToolDeps` across runs, or one run's id would be stamped on another's rows.
+
+A parked approval's policy re-check at replay time uses the level the action was parked under,
+not the replaying process's level: the approvals host always replays as `svc-approvals`, a
+service principal, so re-checking on its level would block or (wrongly) permit the action on a
+level the original requester never held.
 
 To see what a run did:
 
