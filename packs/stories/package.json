@@ -15,7 +15,6 @@
   },
   "dependencies": {
     "@harness/pack-api": "workspace:*",
-    "@harness/shared": "workspace:*",
     "pdf-lib": "^1.17.1"
   },
   "devDependencies": {

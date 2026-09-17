@@ -324,9 +324,6 @@ importers:
       '@harness/pack-api':
         specifier: workspace:*
         version: link:../../harness/pack-api
-      '@harness/shared':
-        specifier: workspace:*
-        version: link:../../harness/shared
       pdf-lib:
         specifier: ^1.17.1
         version: 1.17.1
