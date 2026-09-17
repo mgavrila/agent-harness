@@ -15,21 +15,18 @@ const NO_PACKS_MESSAGE = 'HARNESS_PACKS names no pack; at least one is required'
  * `recordKinds()` and `attachmentKinds()` answer with each pack's declarations **parsed**, not
  * the raw values off `Pack.records` and `Pack.attachments`. Those two members are typed
  * `RawRecordKind` and `RawAttachmentKind`, which say so: a pack is free to hand in the raw JSON
- * a human edits rather than validating it itself, and the raw value is missing the zod defaults `buildExtractionSchema` depends on (`restricted: false`,
- * `source: 'model'`). Parsing here, once, at construction, is what makes those defaults exist
- * no matter which pack, or which test, built this registry; validating against *this build's*
- * restricted-name rules rather than the pack's matters too, because those rules decide what
- * gets encrypted, so they belong to whoever does the encrypting. A pack shipped against an
- * older rule set fails here, at startup, named.
+ * a human edits rather than validating it itself, and the raw value is missing the zod defaults
+ * `buildExtractionSchema` depends on (`restricted: false`, `source: 'model'`). Parsing here,
+ * once, at construction, is what makes those defaults exist no matter which pack, or which test,
+ * built this registry; validating against *this build's* restricted-name rules rather than the
+ * pack's matters too, because those rules decide what gets encrypted, so they belong to whoever
+ * does the encrypting. A pack shipped against an older rule set fails here, at startup, named.
  *
  * Refuses an empty list up front: `manifest()` and `formsDir()` would otherwise answer for
  * `all[0]` of an empty array, throwing a raw `TypeError` that names no variable and no pack.
  */
 export function registryOf(all: Pack[]): PackRegistry {
   if (all.length === 0) throw new ConfigError(NO_PACKS_MESSAGE);
-  // Parsed here, once, at construction: a pack hands over the JSON a human edits, and these are
-  // the rules that decide what gets encrypted, so they are applied by whoever does the
-  // encrypting. A pack shipped against an older rule set fails here, at startup, named.
   const records = all.flatMap((p) => p.records.map((r) => parseRecordKindSpec(r)));
   // Per pack as well as flattened: a resolved target offers the model exactly its own pack's
   // attachment kinds, and parsing them once here is what keeps `targetFor` free of zod.
