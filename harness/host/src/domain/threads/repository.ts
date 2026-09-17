@@ -1,6 +1,6 @@
 import { and, desc, eq } from 'drizzle-orm';
 import { containsRestrictedPattern } from '@harness/core-tools/redaction';
-import { messages, threads, type Db } from '@harness/db';
+import { messages, threads, withTransaction, type Db } from '@harness/db';
 import type { RunHistoryTurn } from '@harness/runtime-api';
 
 export interface ThreadKey {
@@ -38,7 +38,11 @@ export async function findOrCreateThread(
   return row;
 }
 
-/** Store one turn. The content is checked first and replaced, never stored, when it fails. Returns what was stored. */
+/**
+ * Store one turn. The content is checked first and replaced, never stored, when it fails.
+ * Returns what was stored. The insert and the thread's `updated_at` bump are one transaction,
+ * so a failure between them cannot leave a message with no bump to show for it.
+ */
 export async function appendMessage(
   db: Db,
   m: {
@@ -50,8 +54,10 @@ export async function appendMessage(
   },
 ): Promise<string> {
   const content = containsRestrictedPattern(m.content) ? WITHHELD : m.content;
-  await db.insert(messages).values({ ...m, content });
-  await db.update(threads).set({ updatedAt: new Date() }).where(eq(threads.id, m.threadId));
+  await withTransaction(db, async (tx) => {
+    await tx.insert(messages).values({ ...m, content });
+    await tx.update(threads).set({ updatedAt: new Date() }).where(eq(threads.id, m.threadId));
+  });
   return content;
 }
 

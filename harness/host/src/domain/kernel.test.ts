@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { auditLog, runs } from '@harness/db';
+import { openRun, type KernelConfig } from '@harness/core-tools';
 import type { Principal } from '@harness/identity-api';
 import { testKernelConfig, useTestDb } from '../testing.js';
-import { openKernel } from './kernel.js';
+import { finishKernel, openKernel } from './kernel.js';
 
 const db = useTestDb();
 const LEAD: Principal = {
@@ -44,5 +45,31 @@ describe('openKernel', () => {
     const [row] = await db.select().from(auditLog).where(eq(auditLog.tool, 'harness_reconcile'));
     expect(row).toMatchObject({ skill: 'credentialing-roster', skillVersion: '1.0.0' });
     await kernel.close('done');
+  });
+
+  it('ends the run as error, with an end time, when building the in-process server throws before any call is made', async () => {
+    // `packs` missing breaks `createCoreToolsServer` before the caller ever gets a client: the
+    // open run must still be closed rather than left `running` forever.
+    const broken = { ...testKernelConfig(db), packs: undefined } as unknown as KernelConfig;
+    const host = { db, config: broken, client: 'test', now: () => new Date('2026-09-15T12:00:00Z') };
+    await expect(
+      openKernel(host, { principal: LEAD, threadId: null, surface: null, conversation: null }),
+    ).rejects.toThrow();
+    const [run] = await db.select().from(runs);
+    expect(run.status).toBe('error');
+    expect(run.endedAt).not.toBeNull();
+  });
+});
+
+describe('finishKernel', () => {
+  it("still closes the run with the call's status when closing the transport itself rejects", async () => {
+    const context = await openRun(db, { client: 'test', principal: LEAD });
+    const rejectingClose = () => Promise.reject(new Error('transport already gone'));
+    await expect(
+      finishKernel(db, context.runId, 'done', () => new Date('2026-09-15T12:00:00Z'), rejectingClose),
+    ).resolves.toBeUndefined();
+    const [run] = await db.select().from(runs).where(eq(runs.id, context.runId));
+    expect(run).toMatchObject({ status: 'done' });
+    expect(run.endedAt).not.toBeNull();
   });
 });
