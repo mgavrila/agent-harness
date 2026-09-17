@@ -48,9 +48,8 @@ export async function stageRelease(
   args: { file_id: string; channel?: string; surface?: string },
 ): Promise<StagedRelease> {
   const { file_id, channel, surface } = args;
-  // Both addressing arguments are agent-chosen and both are stored in plaintext, and their
-  // schemas validate a shape that a restricted identifier fits. Checked before anything is
-  // resolved or staged, the same way `harness_notify` checks its own.
+  // Before the file is resolved, so a refused release stages nothing at all. Why the addressing
+  // arguments need this and not only the prose is on `assertNoRestrictedPattern`.
   assertNoRestrictedPattern(channel, 'conversation id');
   assertNoRestrictedPattern(surface, 'surface name');
   const absolute = await resolveOutFile(file_id, deps.storageDir);

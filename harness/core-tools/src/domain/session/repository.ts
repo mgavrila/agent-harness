@@ -74,11 +74,8 @@ export async function stageNotification(
   { text, idempotency_key, channel, surface }: NotifyArgs,
 ): Promise<{ effect_id: string; staged: boolean }> {
   assertNoRestrictedPattern(text, 'message');
-  // The addressing arguments are checked too, and for a different reason than
-  // the text: they are stored in plaintext, and an adapter that rejects an id
-  // it does not recognise writes its complaint into tool_effects.last_error,
-  // which is plaintext as well. Their schemas validate a shape only, and both
-  // shapes admit a restricted one.
+  // The addressing arguments too, for the reason on `assertNoRestrictedPattern`: they are
+  // stored in plaintext and their schemas admit a restricted-looking value.
   assertNoRestrictedPattern(channel, 'conversation id');
   assertNoRestrictedPattern(surface, 'surface name');
   // The text is the payload and is stored encrypted. The summary is a label
