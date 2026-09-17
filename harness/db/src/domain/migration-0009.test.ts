@@ -5,22 +5,26 @@ import { sql, TransactionRollbackError } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { TEST_DATABASE_URL } from '../testing.js';
 import type { Db } from './client.js';
-import { createLegacy0008Database, dropLegacy0008Database } from './legacy-0008.test-helpers.js';
+import { LEGACY_0008_DDL } from './legacy-0008.test-helpers.js';
 import { migrationStatements } from './migration-sql.test-helpers.js';
+import { scratchDatabase } from './scratch-database.test-helpers.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const MIGRATION = path.resolve(here, '../../drizzle/0009_surface_addressing.sql');
+
+// A name of its own, not the 0008 test's: the two suites may run side by side.
+const scratch = scratchDatabase(`harness_test_migration_0009_${process.pid}`);
 
 let db: Db;
 let close: () => Promise<void>;
 
 beforeAll(async () => {
-  ({ db, close } = await createLegacy0008Database(TEST_DATABASE_URL));
+  ({ db, close } = await scratch.create(TEST_DATABASE_URL, LEGACY_0008_DDL));
 });
 
 afterAll(async () => {
   await close?.();
-  await dropLegacy0008Database(TEST_DATABASE_URL);
+  await scratch.drop(TEST_DATABASE_URL);
 });
 
 describe('migration 0009_surface_addressing', () => {

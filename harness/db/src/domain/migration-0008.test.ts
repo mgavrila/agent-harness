@@ -6,8 +6,9 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { decrypt, encrypt } from '../shared/crypto.js';
 import { TEST_DATABASE_URL } from '../testing.js';
 import type { Db } from './client.js';
-import { createLegacyDatabase, dropLegacyDatabase } from './legacy-0007.test-helpers.js';
+import { LEGACY_0007_DDL } from './legacy-0007.test-helpers.js';
 import { migrationStatements } from './migration-sql.test-helpers.js';
+import { scratchDatabase } from './scratch-database.test-helpers.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const MIGRATION = path.resolve(here, '../../drizzle/0008_generic_records.sql');
@@ -16,22 +17,24 @@ const key = Buffer.alloc(32, 7);
 const LICENCE_NUMBER = 'AB1234567';
 const SSN = '123-45-6789';
 
+const scratch = scratchDatabase(`harness_test_migration_${process.pid}`);
+
 /**
  * Assigned in `beforeAll`, because the handle cannot exist before the database does. Every
- * statement below runs against `harness_test_migration`, never against `harness_test`.
+ * statement below runs against the scratch database, never against `harness_test`.
  */
 let db: Db;
 let close: () => Promise<void>;
 
 beforeAll(async () => {
-  ({ db, close } = await createLegacyDatabase(TEST_DATABASE_URL));
+  ({ db, close } = await scratch.create(TEST_DATABASE_URL, LEGACY_0007_DDL));
 });
 
 // Close this file's pool on the scratch database before dropping it, or the drop waits on the
 // connection. The drop runs even when the pool is already gone, and even when `beforeAll` threw.
 afterAll(async () => {
   await close?.();
-  await dropLegacyDatabase(TEST_DATABASE_URL);
+  await scratch.drop(TEST_DATABASE_URL);
 });
 
 describe('migration 0008_generic_records', () => {

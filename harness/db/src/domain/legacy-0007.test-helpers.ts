@@ -1,6 +1,3 @@
-import { sql } from 'drizzle-orm';
-import { createDb, type Db } from './client.js';
-
 /**
  * The five tables migration 0008 touches, as they stood after 0007 (column order differs from the migrations, which appended text_path and client later; every statement names its columns).
  *
@@ -74,62 +71,3 @@ CREATE TABLE "deadlines" (
 );
 CREATE UNIQUE INDEX "deadlines_credential_kind_uq" ON "deadlines" USING btree ("credential_id","kind");
 `;
-
-/** The database the migration test builds and drops. Nothing else in the repository uses it. */
-// Suffixed with the process id so two concurrent runs of this package cannot drop each other's
-// scratch database mid-test.
-export const MIGRATION_DATABASE = `harness_test_migration_${process.pid}`;
-
-/** `maintenanceUrl` with its database swapped for `MIGRATION_DATABASE`, everything else intact. */
-export function migrationDatabaseUrl(maintenanceUrl: string): string {
-  const url = new URL(maintenanceUrl);
-  url.pathname = `/${MIGRATION_DATABASE}`;
-  return url.toString();
-}
-
-/**
- * Build a database that looks like the world just after migration 0007, and hand back a handle
- * on it.
- *
- * `maintenanceUrl` is `TEST_DATABASE_URL`: `CREATE DATABASE` has to be issued from a connection
- * to some *other* database, and `harness_test` is the one that is always there. The drop-first
- * is for the run after a crashed one; `WITH (FORCE)` closes any connection a dead worker left
- * behind. Neither statement may run inside a transaction, which is why they go straight at the
- * pool rather than through `db.transaction`.
- *
- * The tables land in the new database's own `public` schema. That is the whole point: the
- * migration's generated SQL is schema-qualified to `"public"`, so it replays byte for byte,
- * with no rewriting and no `search_path` to get wrong.
- */
-export async function createLegacyDatabase(maintenanceUrl: string): Promise<{ db: Db; close: () => Promise<void> }> {
-  const maintenance = createDb(maintenanceUrl);
-  try {
-    await maintenance.db.execute(sql.raw(`DROP DATABASE IF EXISTS "${MIGRATION_DATABASE}" WITH (FORCE)`));
-    await maintenance.db.execute(sql.raw(`CREATE DATABASE "${MIGRATION_DATABASE}"`));
-  } finally {
-    await maintenance.close();
-  }
-
-  const scratch = createDb(migrationDatabaseUrl(maintenanceUrl));
-  try {
-    await scratch.db.execute(sql.raw(LEGACY_0007_DDL));
-  } catch (err) {
-    await scratch.close();
-    throw err;
-  }
-  return { db: scratch.db, close: scratch.close };
-}
-
-/**
- * Drop the scratch database. Safe to call when it was never created, and safe to call twice.
- * The caller closes its own pool on the scratch database *first*, or the drop blocks behind it
- * — `WITH (FORCE)` covers the case where it forgot.
- */
-export async function dropLegacyDatabase(maintenanceUrl: string): Promise<void> {
-  const maintenance = createDb(maintenanceUrl);
-  try {
-    await maintenance.db.execute(sql.raw(`DROP DATABASE IF EXISTS "${MIGRATION_DATABASE}" WITH (FORCE)`));
-  } finally {
-    await maintenance.close();
-  }
-}
