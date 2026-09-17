@@ -11,17 +11,6 @@ import * as z from 'zod/v4';
 import type { LoadedSurfaces } from './surfaces/registry.js';
 
 /**
- * Validate an outbox payload without ever repeating it. A zod message can name a key and a type,
- * and `tool_effects.last_error` is stored in plaintext, so the sink reports only that validation
- * failed and leaves the detail to the staging tool, which knows what it wrote.
- */
-function parsePayload<T>(schema: z.ZodType<T>, payload: unknown, sink: string): T {
-  const parsed = schema.safeParse(payload);
-  if (!parsed.success) throw new Error(`${sink} payload failed validation`);
-  return parsed.data;
-}
-
-/**
  * Reject a staged path that does not resolve inside `root`. The staging tool already confines the
  * path it stages to the out tree, so this is defence in depth against a corrupted or
  * otherwise-produced row, not the primary guarantee.
@@ -50,23 +39,34 @@ async function assertUnderRoot(candidate: string, root: string, effectId: string
 }
 
 /**
- * Which surface and which conversation an effect is addressed to.
+ * Read an outbox row: what it says, and where it is addressed.
+ *
+ * The payload is validated without ever being repeated. A zod message can name a key and a type,
+ * and `tool_effects.last_error` is stored in plaintext, so a failure reports only that validation
+ * failed and leaves the detail to the staging tool, which knows what it wrote.
  *
  * `payload.surface` names one of the loaded surfaces; with none, it is the primary. The
  * conversation is the payload's, or that surface's default. `channel` is read after
  * `conversation` for one reason: a row staged before migration 0009 spells it that way and is
  * still in the outbox.
  */
-function target(
+function addressed<T extends { surface?: string | null; conversation?: string | null; channel?: string | null }>(
+  schema: z.ZodType<T>,
+  payload: unknown,
   surfaces: LoadedSurfaces,
-  payload: { surface?: string | null; conversation?: string | null; channel?: string | null },
   sink: string,
   effectId: string,
-): { session: SurfaceSession; conversation: Conversation['id'] } {
-  const name = payload.surface ?? null;
+): { payload: T; session: SurfaceSession; conversation: Conversation['id'] } {
+  const parsed = schema.safeParse(payload);
+  if (!parsed.success) throw new Error(`${sink} payload failed validation`);
+  const name = parsed.data.surface ?? null;
   const session = name === null ? surfaces.primary : surfaces.find(name);
   if (!session) throw new Error(`${sink}: no surface named "${name}" is loaded (effect ${effectId})`);
-  return { session, conversation: payload.conversation ?? payload.channel ?? session.defaultConversation };
+  return {
+    payload: parsed.data,
+    session,
+    conversation: parsed.data.conversation ?? parsed.data.channel ?? session.defaultConversation,
+  };
 }
 
 /**
@@ -90,32 +90,42 @@ async function viaSurface<T>(sink: string, effectId: string, run: () => Promise<
  * value in `tool_effects.result` as plaintext jsonb, so nothing from the payload may come back out.
  */
 export function surfaceSinks(surfaces: LoadedSurfaces, opts: { outDir?: string } = {}): SinkRegistry {
-  const messageSink: SinkHandler = async (payload, effect) => {
-    const p = parsePayload(SurfaceMessagePayloadShape, payload, 'surface_message');
-    const { session, conversation } = target(surfaces, p, 'surface_message', effect.id);
+  const messageSink: SinkHandler = async (raw, effect) => {
+    const { payload, session, conversation } = addressed(
+      SurfaceMessagePayloadShape,
+      raw,
+      surfaces,
+      'surface_message',
+      effect.id,
+    );
     // No reply target: an outbox message is a standalone post. The only reply this host writes is
     // the decisions thread reply, which goes straight through `postText({ replyTo })`.
-    const ref = await viaSurface('surface_message', effect.id, () => session.postText(conversation, p.text));
+    const ref = await viaSurface('surface_message', effect.id, () => session.postText(conversation, payload.text));
     return { surface: session.name, conversation, message_id: ref.id };
   };
 
-  const fileSink: SinkHandler = async (payload, effect) => {
-    const p = parsePayload(SurfaceFilePayloadShape, payload, 'surface_file');
-    const { session, conversation } = target(surfaces, p, 'surface_file', effect.id);
+  const fileSink: SinkHandler = async (raw, effect) => {
+    const { payload, session, conversation } = addressed(
+      SurfaceFilePayloadShape,
+      raw,
+      surfaces,
+      'surface_file',
+      effect.id,
+    );
     // `outDir` is the fill output tree (`<HARNESS_STORAGE_DIR>/out`), not the whole store: the
     // rest of it holds ingested documents, which must never be uploadable. Optional so a test
     // that stages a path under an arbitrary tmpdir is unaffected; main.ts always passes it.
-    if (opts.outDir) await assertUnderRoot(p.path, opts.outDir, effect.id);
+    if (opts.outDir) await assertUnderRoot(payload.path, opts.outDir, effect.id);
     await viaSurface('surface_file', effect.id, () =>
       session.uploadFile(conversation, {
-        path: p.path,
-        filename: p.filename,
+        path: payload.path,
+        filename: payload.filename,
         // The staging tool already wrote a restricted-free label; reuse it rather than composing
         // a new comment out of payload values.
         comment: effect.summary,
       }),
     );
-    return { surface: session.name, conversation, filename: p.filename };
+    return { surface: session.name, conversation, filename: payload.filename };
   };
 
   return {
