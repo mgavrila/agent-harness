@@ -5,7 +5,10 @@ import type { ToolDeps } from '../tooling/types.js';
 import { resolveOutFile } from '../storage/file-store.js';
 import { stageEffect } from '../effects/outbox.js';
 
-/** Slack rejects very large uploads, and a 25 MB generated file is a bug rather than a delivery. */
+/**
+ * The smallest upload limit among the surfaces the harness supports, and a 25 MB generated file
+ * is a bug rather than a delivery.
+ */
 const MAX_RELEASE_BYTES = 25 * 1024 * 1024;
 
 /**
@@ -41,9 +44,9 @@ export interface StagedRelease {
  */
 export async function stageRelease(
   deps: ToolDeps,
-  args: { file_id: string; channel?: string },
+  args: { file_id: string; channel?: string; surface?: string },
 ): Promise<StagedRelease> {
-  const { file_id, channel } = args;
+  const { file_id, channel, surface } = args;
   const absolute = await resolveOutFile(file_id, deps.storageDir);
   let size: number;
   try {
@@ -59,14 +62,15 @@ export async function stageRelease(
     throw new ToolError(`file "${file_id}" is ${size} bytes, over the ${MAX_RELEASE_BYTES} byte release limit`);
   }
   const filename = path.basename(absolute);
-  // Keyed on the file id, which is content-addressed: releasing the same
-  // bytes twice is one delivery, and re-filling after a correction produces
-  // a new id and therefore a new delivery.
   const staged = await stageEffect(deps, {
-    sink: 'slack_file',
-    idempotencyKey: `${RELEASE_KEY_PREFIX}${file_id}${channel ? `:${channel}` : ''}`,
-    payload: { file_id, path: absolute, filename, channel: channel ?? null },
-    summary: `Release ${filename} to Slack`,
+    sink: 'surface_file',
+    // Keyed on the file id, which is content-addressed: releasing the same bytes twice is one
+    // delivery, and re-filling after a correction produces a new id and therefore a new one.
+    // The conversation and the surface are part of the key because the same file sent to two
+    // places is two deliveries, not a duplicate.
+    idempotencyKey: `${RELEASE_KEY_PREFIX}${file_id}${channel ? `:${channel}` : ''}${surface ? `@${surface}` : ''}`,
+    payload: { file_id, path: absolute, filename, conversation: channel ?? null, surface: surface ?? null },
+    summary: `Release ${filename}`,
   });
   return { effect_id: staged.effect_id, staged: staged.staged, file_id, filename, bytes: size };
 }

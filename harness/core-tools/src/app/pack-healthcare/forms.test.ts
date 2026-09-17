@@ -373,7 +373,7 @@ describe('forms_release', () => {
     expect(row.status).toBe('pending');
   });
 
-  it('stages exactly one slack_file effect when the approval is executed', async () => {
+  it('stages exactly one surface_file effect when the approval is executed', async () => {
     const providerId = await seedCompleteProvider();
     const client = await connectTools('forms-test', [...healthcarePack.tools!(deps), ...approvalTools], deps);
     const filled = resultOf<{ file_id: string }>(
@@ -393,7 +393,7 @@ describe('forms_release', () => {
     await client.callTool({ name: 'approvals_execute', arguments: { approval_id: approvalId } });
     const effects = await db.select().from(toolEffects);
     expect(effects).toHaveLength(1);
-    expect(effects[0]).toMatchObject({ sink: 'slack_file', tool: 'forms_release', status: 'staged', client: 'test' });
+    expect(effects[0]).toMatchObject({ sink: 'surface_file', tool: 'forms_release', status: 'staged', client: 'test' });
     expect(effects[0].idempotencyKey).toBe(`test:forms_release:${filled.file_id}`);
     expect(effects[0].summary).not.toContain(storageDir);
   });

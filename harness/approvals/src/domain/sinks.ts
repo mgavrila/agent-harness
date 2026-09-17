@@ -121,13 +121,5 @@ export function surfaceSinks(surfaces: LoadedSurfaces, opts: { outDir?: string }
   return {
     surface_message: messageSink,
     surface_file: fileSink,
-    // The two names the kernel still stages under until the next task renames them. Migration
-    // 0009 renamed the rows that were in flight; these cover the ones a running kernel writes
-    // between this commit and that one. **Task 5 deletes both lines in the commit that stops
-    // staging them** — a sink name nothing writes is a name nobody can look up — and adds
-    // `host-vocabulary.test.ts` in that same commit, because these two keys are the last
-    // adapter-specific word left in host source.
-    slack_message: messageSink,
-    slack_file: fileSink,
   };
 }

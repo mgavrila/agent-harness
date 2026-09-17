@@ -11,7 +11,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import * as z from 'zod/v4';
 import { ToolError } from '@harness/shared';
-import { definePackTool, type AnyToolDef } from '@harness/pack-api';
+import { CONVERSATION_ID_PATTERN, SURFACE_NAME_PATTERN, definePackTool, type AnyToolDef } from '@harness/pack-api';
 import { getTemplate, loadManifest, mappingLabel } from '../domain/forms/templates.js';
 import { fillTemplatePdf, resolveMappings } from '../domain/forms/fill.js';
 import { buildRoster, loadProviderData } from '../domain/forms/provider-data.js';
@@ -137,14 +137,18 @@ const formsRoster = definePackTool({
 const formsRelease = definePackTool({
   name: 'forms_release',
   description:
-    'Send a file that forms_fill or forms_roster produced to Slack. External: it parks an approval, and only ' +
-    'approvals_execute stages the delivery. Nothing leaves the harness until a human approves.',
+    'Send a file that forms_fill or forms_roster produced to the people who approve releases. External: it parks ' +
+    'an approval, and only approvals_execute stages the delivery. Nothing leaves the harness until a human approves.',
   actionClass: 'external',
   input: z.object({
     file_id: z.string().min(1).max(300),
     channel: z
       .string()
-      .regex(/^[CGD][A-Z0-9]{2,}$/, 'channel must be a Slack channel id')
+      .regex(CONVERSATION_ID_PATTERN, 'channel must be a conversation id on the target surface')
+      .optional(),
+    surface: z
+      .string()
+      .regex(SURFACE_NAME_PATTERN, 'surface must be the name of a loaded messaging surface')
       .optional(),
   }),
   output: z.object({

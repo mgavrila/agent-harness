@@ -7,7 +7,7 @@ import type { Card, CardLine, Form, NotePart } from '@harness/surface-api';
  *
  * Every string a reader sees is built here and nothing here knows how it will be drawn: no
  * markup, no emoji, no date format, no mention syntax. An adapter turns a `Card` into whatever
- * its own surface draws — rich layout blocks, an Adaptive Card, a plain message — and the host
+ * its own surface draws — a rich layout, an Adaptive Card, a plain message — and the host
  * stays the same either way.
  */
 

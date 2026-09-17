@@ -3,7 +3,7 @@ import { CREDENTIAL_KINDS } from '../credentials/kinds.js';
 
 /**
  * Credential columns a template may print. `number` is deliberately absent:
- * it is stored encrypted and a filled form is uploaded to Slack, so there is
+ * it is stored encrypted and a filled form is released to a human, so there is
  * no path by which a credential number may reach a PDF.
  */
 export const CREDENTIAL_PROPERTIES = ['issuer', 'state', 'issued_at', 'expires_at'] as const;

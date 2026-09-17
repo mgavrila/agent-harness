@@ -1,4 +1,5 @@
 import * as z from 'zod/v4';
+import { CONVERSATION_ID_PATTERN, SURFACE_NAME_PATTERN } from '@harness/shared';
 import { defineTool } from '../domain/tooling/registry.js';
 import type { AnyToolDef } from '../domain/tooling/types.js';
 import { reconcileForClient, setRunContext, stageNotification } from '../domain/session/repository.js';
@@ -36,7 +37,7 @@ const harnessSetContext = defineTool({
 const harnessNotify = defineTool({
   name: 'harness_notify',
   description:
-    'Stage one Slack message in this client channel, sent by the dispatcher after the call commits. ' +
+    'Stage one message in this client conversation, sent by the dispatcher after the call commits. ' +
     'Use it from a scheduled playbook so the message is audited and sent exactly once per idempotency key: ' +
     'staging the same key twice is a no-op. Refuses text that looks like it carries a restricted identifier.',
   actionClass: 'write.internal',
@@ -44,9 +45,17 @@ const harnessNotify = defineTool({
     text: z.string().min(1).max(3000),
     /** Scoped to the client by stageEffect. Make it identify the content, e.g. `expirations:2026-09-15:overdue`. */
     idempotency_key: z.string().regex(/^[a-z0-9][a-z0-9:_-]{0,199}$/, 'idempotency_key must be a lowercase slug'),
+    // Still called `channel`: the skills and playbooks that pass it say channel, and renaming an
+    // argument an agent has been told about is a behaviour change. What it means is a
+    // conversation on the target surface, and only that surface can say whether the id is real —
+    // it checks at dispatch and fails that one effect, visible through harness_reconcile.
     channel: z
       .string()
-      .regex(/^[CGD][A-Z0-9]{2,}$/, 'channel must be a Slack channel id')
+      .regex(CONVERSATION_ID_PATTERN, 'channel must be a conversation id on the target surface')
+      .optional(),
+    surface: z
+      .string()
+      .regex(SURFACE_NAME_PATTERN, 'surface must be the name of a loaded messaging surface')
       .optional(),
   }),
   output: z.object({ effect_id: z.string(), staged: z.boolean() }),

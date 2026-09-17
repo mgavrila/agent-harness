@@ -7,6 +7,13 @@
  * is what lets core load a pack by name at runtime instead of importing it at build time. See
  * ARCHITECTURE.md, "Adding a pack".
  */
+/**
+ * Re-exported from `@harness/shared`, which is where both contracts can reach them. A pack's
+ * tool schema validates a `channel` argument with `CONVERSATION_ID_PATTERN`, and so does the
+ * kernel's; a surface adapter validates the same string against its own, much narrower, shape at
+ * dispatch, because only the adapter knows what its ids look like.
+ */
+export { CONVERSATION_ID_PATTERN, SURFACE_NAME_PATTERN } from '@harness/shared';
 export { ACTION_CLASSES, BEHAVIORS, type ActionClass, type Behavior, type Policy } from './policy.js';
 export { definePackTool, type AnyToolDef, type ToolDef } from './tool.js';
 export {

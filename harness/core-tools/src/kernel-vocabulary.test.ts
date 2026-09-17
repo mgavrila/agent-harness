@@ -19,25 +19,79 @@ const repoRoot = path.resolve(here, '../../..');
  * where a letter does not sit on either side. An underscore still counts as a boundary, so
  * `record_npi` is caught and `openPipeline` is not.
  */
-const FORBIDDEN =
+const DOMAIN_FORBIDDEN =
   /provider|credential|licen[cs]e|(?<![A-Za-z])npi(?![A-Za-z])|nppes|malpractice|dea_number|payer|roster/i;
 
 /**
- * Directories scanned, and what is left out of each.
+ * Words that belong to one messaging surface and must not appear in the kernel or in a pack.
  *
- * `*.test.ts` is excluded because a test names what it tests: the healthcare suites in
- * `app/pack-healthcare/` are full of these words on purpose. `shared/redaction/` is excluded
- * because `RESTRICTED_NAME_KEYS` is a list of identifier stems — `dea_number` is one of them —
- * and that list is a data-protection primitive the kernel keeps on purpose (spec section 6).
+ * The kernel stages an effect and a pack releases a file; which of those becomes a Block Kit
+ * block, a Bolt listener or a `thread_ts` is `surfaces/slack`'s business. A word here in kernel
+ * or pack source is either a schema key an agent will read, an identifier the next reader will
+ * copy, or a comment that teaches the wrong model.
  *
- * **The allowlist is empty and must stay empty.** A word that has to appear belongs in a pack,
- * or the comment that carries it should say what the kernel actually means: a model *vendor*, a
- * *record*, a *file*. Adding an entry here is a decision to write down in ARCHITECTURE.md, not a
- * way to get a red suite green.
+ * `evals/src` is **not** scanned for these, deliberately: `domain/report/render.ts` and
+ * `report/build.ts` both say a missing metric "blocks promotion", which is English about
+ * promotion gates and has nothing to do with Block Kit. Rewording eval prose to satisfy a
+ * messaging rule would be the tail wagging the dog. `harness/approvals/src` is not scanned here
+ * either — it has its own copy of this rule, in `harness/approvals/src/host-vocabulary.test.ts`,
+ * because a test in this package that scanned another package's source would fail in whichever
+ * suite happened to run it.
+ */
+const MESSAGING_FORBIDDEN = /slack|bolt|block ?kit|thread_ts|\bblocks\b/i;
+
+/**
+ * What is scanned for what, and what is left out of each.
+ *
+ * `*.test.ts` is excluded everywhere because a test names what it tests: the healthcare suites in
+ * `app/pack-healthcare/` are full of credentialing words on purpose. `shared/redaction/` is
+ * excluded from the credentialing scan only, because `RESTRICTED_NAME_KEYS` is a list of
+ * identifier stems — `dea_number` is one of them — that the kernel keeps on purpose (spec
+ * section 6); it has no such exemption from the messaging scan, and needs none.
+ *
+ * `minFiles` guards against the one way this test can lie: a scan that reached nothing passes.
+ *
+ * **The allowlist is empty and must stay empty.** A word that has to appear belongs in a pack or
+ * in an adapter, or the comment that carries it should say what the kernel actually means: a
+ * model *vendor*, a *record*, a *file*, a *surface*. Adding an entry here is a decision to write
+ * down in ARCHITECTURE.md, not a way to get a red suite green.
  */
 const SCANNED = [
-  { root: 'harness/core-tools/src', skip: [/\.test\.ts$/, /\/shared\/redaction\//] },
-  { root: 'evals/src', skip: [/\.test\.ts$/, /\.test-helpers\.ts$/] },
+  {
+    what: 'credentialing vocabulary',
+    root: 'harness/core-tools/src',
+    forbidden: DOMAIN_FORBIDDEN,
+    minFiles: 10,
+    skip: [/\.test\.ts$/, /\/shared\/redaction\//],
+  },
+  {
+    what: 'credentialing vocabulary',
+    root: 'evals/src',
+    forbidden: DOMAIN_FORBIDDEN,
+    minFiles: 10,
+    skip: [/\.test\.ts$/, /\.test-helpers\.ts$/],
+  },
+  {
+    what: 'messaging vocabulary',
+    root: 'harness/core-tools/src',
+    forbidden: MESSAGING_FORBIDDEN,
+    minFiles: 10,
+    skip: [/\.test\.ts$/],
+  },
+  {
+    what: 'messaging vocabulary',
+    root: 'packs/healthcare/src',
+    forbidden: MESSAGING_FORBIDDEN,
+    minFiles: 10,
+    skip: [/\.test\.ts$/],
+  },
+  {
+    what: 'messaging vocabulary',
+    root: 'packs/stories/src',
+    forbidden: MESSAGING_FORBIDDEN,
+    minFiles: 1,
+    skip: [/\.test\.ts$/],
+  },
 ];
 
 /**
@@ -61,17 +115,17 @@ async function sourceFiles(dir: string, skip: RegExp[]): Promise<string[]> {
 }
 
 describe('the kernel names no area of the product', () => {
-  for (const { root, skip } of SCANNED) {
-    it(`finds no credentialing vocabulary in ${root}`, async () => {
+  for (const { what, root, forbidden, minFiles, skip } of SCANNED) {
+    it(`finds no ${what} in ${root}`, async () => {
       const hits: string[] = [];
       const files = await sourceFiles(path.join(repoRoot, root), skip);
       // A scan that reached nothing would pass silently, which is the one way this test can lie.
-      expect(files.length).toBeGreaterThan(10);
+      expect(files.length).toBeGreaterThanOrEqual(minFiles);
       for (const file of files) {
         const relative = path.relative(repoRoot, file).split(path.sep).join('/');
         const text = await readFile(file, 'utf8');
         text.split('\n').forEach((line, i) => {
-          const match = FORBIDDEN.exec(line);
+          const match = forbidden.exec(line);
           if (!match) return;
           const exempt = ALLOWLIST.some((a) => a.file === relative && line.includes(a.contains));
           if (!exempt) hits.push(`${relative}:${i + 1}: ${match[0]} — ${line.trim()}`);
@@ -86,8 +140,8 @@ describe('the kernel names no area of the product', () => {
   });
 
   it('catches the words it claims to, so an empty result means the rule ran', () => {
-    // The regex itself, checked against what it is for. Without this, a typo that made FORBIDDEN
-    // match nothing would turn the two scans above into a pair of assertions that always pass.
+    // Each regex, checked against what it is for. Without this, a typo that made one of them
+    // match nothing would turn the scans above into assertions that always pass.
     for (const line of [
       'const providerId = 1;',
       '/** the credential this evidences */',
@@ -100,12 +154,25 @@ describe('the kernel names no area of the product', () => {
       "fields.name === 'dea_number'",
       'the payer roster',
     ]) {
-      expect(FORBIDDEN.test(line), line).toBe(true);
+      expect(DOMAIN_FORBIDDEN.test(line), line).toBe(true);
     }
     // And the two shapes it must not catch: an ordinary identifier that happens to contain the
     // three letters of `npi`, and a word the kernel legitimately uses.
     for (const line of ['await openPipeline(opts);', 'const record = await readRecord(deps, id);']) {
-      expect(FORBIDDEN.test(line), line).toBe(false);
+      expect(DOMAIN_FORBIDDEN.test(line), line).toBe(false);
+    }
+    for (const line of [
+      "import { App } from '@slack/bolt';",
+      'sink: `slack_message`,',
+      '// the Block Kit card',
+      'thread_ts: row.messageRef,',
+      'const blocks = cardBlocks(card);',
+    ]) {
+      expect(MESSAGING_FORBIDDEN.test(line), line).toBe(true);
+    }
+    // And the shapes it must not catch: an ordinary identifier, and the words the kernel uses.
+    for (const line of ['const prompt = dataBlockSystemPrompt(role);', "sink: 'surface_message',"]) {
+      expect(MESSAGING_FORBIDDEN.test(line), line).toBe(false);
     }
   });
 });

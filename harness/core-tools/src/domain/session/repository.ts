@@ -22,6 +22,7 @@ interface NotifyArgs {
   text: string;
   idempotency_key: string;
   channel?: string;
+  surface?: string;
 }
 
 /**
@@ -67,22 +68,25 @@ export async function reconcileForClient(deps: ToolDeps, staleAfterMinutes: numb
   return reconcile(deps.db, { now: deps.now, staleAfterMs: staleAfterMinutes * 60_000, client: deps.client });
 }
 
-/** `harness_notify`: stage one Slack message for the dispatcher to send after the call commits. */
+/** `harness_notify`: stage one message for the dispatcher to send after the call commits. */
 export async function stageNotification(
   deps: ToolDeps,
-  { text, idempotency_key, channel }: NotifyArgs,
+  { text, idempotency_key, channel, surface }: NotifyArgs,
 ): Promise<{ effect_id: string; staged: boolean }> {
   if (containsRestrictedPattern(text)) {
     throw new ToolError(
-      'message refused: it looks like it contains a restricted identifier; restricted values never go to Slack',
+      'message refused: it looks like it contains a restricted identifier; restricted values never leave the harness',
     );
   }
   // The text is the payload and is stored encrypted. The summary is a label
   // only: tool_effects.summary is plaintext and operators read it freely.
   return stageEffect(deps, {
-    sink: 'slack_message',
+    sink: 'surface_message',
     idempotencyKey: idempotency_key,
-    payload: { text, channel: channel ?? null },
-    summary: `Slack message (${text.length} characters)`,
+    // `conversation` and `surface` are both optional and both null when the caller named
+    // neither: the host's sink resolves an unaddressed effect to the primary surface's default
+    // conversation, which is what every playbook has always meant by "the client channel".
+    payload: { text, conversation: channel ?? null, surface: surface ?? null },
+    summary: `Message (${text.length} characters)`,
   });
 }

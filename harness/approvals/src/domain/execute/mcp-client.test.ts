@@ -57,7 +57,7 @@ describe('core-tools MCP client', () => {
       expect(after.status).toBe('executed');
       const effects = await db.select().from(toolEffects);
       expect(effects).toHaveLength(1);
-      expect(effects[0]).toMatchObject({ sink: 'slack_file', tool: 'forms_release', status: 'staged' });
+      expect(effects[0]).toMatchObject({ sink: 'surface_file', tool: 'forms_release', status: 'staged' });
 
       // Exactly once: a second call finds the row no longer approved.
       const again = await core.execute(row.id);

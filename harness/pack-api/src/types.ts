@@ -87,8 +87,14 @@ export interface PackKernel {
   isRestrictedName(this: void, name: string): boolean;
   /** Write bytes into this client's out tree under a content-addressed id. */
   writeOutFile(deps: PackToolDeps, input: WriteOutFileInput): Promise<WrittenFile>;
-  /** Stage one generated file for delivery through the effects outbox. Sends nothing. */
-  stageRelease(deps: PackToolDeps, args: { file_id: string; channel?: string }): Promise<StagedRelease>;
+  /**
+   * Stage one generated file for delivery through the effects outbox, on the named surface or
+   * the primary one. Sends nothing.
+   */
+  stageRelease(
+    deps: PackToolDeps,
+    args: { file_id: string; channel?: string; surface?: string },
+  ): Promise<StagedRelease>;
 }
 
 /**

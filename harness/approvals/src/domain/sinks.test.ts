@@ -75,13 +75,6 @@ describe('surface sinks', () => {
     expect(primary.texts[0].conversation).toBe('C0OLD');
   });
 
-  it('is still registered under the two names the kernel stages today', async () => {
-    await stage('slack_message', { text: 'from the old kernel' }, 'note', 'k5');
-    const { primary, sinks } = wire();
-    expect(await dispatchStagedEffects(db, sinks, { key })).toMatchObject({ dispatched: 1 });
-    expect(primary.texts[0].text).toBe('from the old kernel');
-  });
-
   it('fails the row when the payload names a surface this host has not loaded', async () => {
     await stage('surface_message', { text: 'hello', surface: 'teams' }, 'note', 'k6');
     const { sinks } = wire();
