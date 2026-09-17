@@ -18,7 +18,7 @@ import {
   type DeadlinesUpcomingResult,
 } from '@harness/pack-api';
 import { URGENCY_BUCKETS } from '../shapes.js';
-import { callKernel } from './kernel-call.js';
+import { callKernel } from '../../shared/kernel-call.js';
 
 const deadlinesCompute = definePackTool({
   name: 'deadlines_compute',

@@ -4,12 +4,11 @@ import { definePackTool, type AnyToolDef, type PackToolDeps, type RecordsGetResu
 import { namesMatch } from '../domain/verify/names.js';
 import { nppesRegistry } from '../domain/verify/nppes.js';
 import type { VerifyConfig } from '../domain/verify/types.js';
+import { callKernel } from '../shared/kernel-call.js';
 
 /** `requireRecord` through the kernel: client-scoped, and a `ToolError` on an unknown id. */
 async function readProvider(deps: PackToolDeps, providerId: string): Promise<{ name: string }> {
-  const tool = deps.kernelTools.get('records_get');
-  if (!tool) throw new ToolError('kernel tool "records_get" is not loaded');
-  const r = (await tool.handler({ record_id: providerId }, deps)) as RecordsGetResult;
+  const r = await callKernel<RecordsGetResult>(deps, 'records_get', { record_id: providerId });
   return { name: r.record.name };
 }
 

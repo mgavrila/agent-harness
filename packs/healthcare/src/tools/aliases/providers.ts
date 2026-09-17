@@ -22,7 +22,7 @@ import {
 } from '@harness/pack-api';
 import { CREDENTIAL_KINDS } from '../../domain/credentials/kinds.js';
 import { FieldInput } from '../shapes.js';
-import { callKernel } from './kernel-call.js';
+import { callKernel } from '../../shared/kernel-call.js';
 
 /**
  * The credential input, written out rather than derived from `AttachmentInput`.

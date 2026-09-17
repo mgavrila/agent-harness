@@ -25,7 +25,7 @@ import {
   type PackToolDeps,
 } from '@harness/pack-api';
 import { PACK_NAME } from '../../pack-name.js';
-import { callKernel } from './kernel-call.js';
+import { callKernel } from '../../shared/kernel-call.js';
 
 /** One document as this pack has always reported it: `provider_id` for the owner. */
 const DocumentView = z.object({
