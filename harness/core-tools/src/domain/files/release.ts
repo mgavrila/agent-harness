@@ -68,7 +68,14 @@ export async function stageRelease(
     // delivery, and re-filling after a correction produces a new id and therefore a new one.
     // The conversation and the surface are part of the key because the same file sent to two
     // places is two deliveries, not a duplicate.
-    idempotencyKey: `${RELEASE_KEY_PREFIX}${file_id}${channel ? `:${channel}` : ''}${surface ? `@${surface}` : ''}`,
+    //
+    // The surface is joined on with `|`, which `CONVERSATION_ID_PATTERN` does not admit, so no
+    // conversation id can spell the separator and impersonate an addressed release: `@` would
+    // have made `channel: 'C1@memory'` and `channel: 'C1', surface: 'memory'` the same key, and
+    // the second delivery would have been silently dropped as a duplicate of the first. With no
+    // surface named, nothing is appended and the key is byte-identical to the pre-surface one,
+    // which is what keeps a release already in a live outbox deduplicating across the upgrade.
+    idempotencyKey: `${RELEASE_KEY_PREFIX}${file_id}${channel ? `:${channel}` : ''}${surface ? `|${surface}` : ''}`,
     payload: { file_id, path: absolute, filename, conversation: channel ?? null, surface: surface ?? null },
     summary: `Release ${filename}`,
   });

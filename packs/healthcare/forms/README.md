@@ -15,8 +15,9 @@ byte-deterministic, so a diff on these files means a field changed.
 **A mapping may never name a restricted value.** `credentials.number` is absent
 from the `property` enum on purpose, and a `field` mapping whose name is a
 restricted identifier (`ssn`, `ein`, `dea_number`, …) is refused at fill time
-by `forms_fill`. A filled form leaves the harness as a Slack upload; restricted
-identifiers do not travel that way.
+by `forms_fill`. A filled form leaves the harness as a file released to a
+human on the configured messaging surface; restricted identifiers do not
+travel that way.
 
 ## Roster CSV columns
 

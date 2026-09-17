@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { and, eq } from 'drizzle-orm';
-import { auditLog, attachments, fields, records, approvals, toolEffects } from '@harness/db';
+import { auditLog, attachments, fields, records, approvals, toolEffects, decrypt } from '@harness/db';
 import { ROSTER_COLUMNS, pack as healthcarePack } from '@harness/pack-healthcare';
 import { useTestDb, makeTestDeps, connectTools, resultOf, approvalIdOf, textOf } from '../../testing.js';
 import type { ToolDeps } from '../../domain/tooling/types.js';
@@ -396,6 +396,39 @@ describe('forms_release', () => {
     expect(effects[0]).toMatchObject({ sink: 'surface_file', tool: 'forms_release', status: 'staged', client: 'test' });
     expect(effects[0].idempotencyKey).toBe(`test:forms_release:${filled.file_id}`);
     expect(effects[0].summary).not.toContain(storageDir);
+  });
+
+  it('carries the surface and conversation the caller named through to the staged effect', async () => {
+    const providerId = await seedCompleteProvider();
+    const client = await connectTools('forms-test', [...healthcarePack.tools!(deps), ...approvalTools], deps);
+    const filled = resultOf<{ file_id: string }>(
+      await client.callTool({
+        name: 'forms_fill',
+        arguments: { template_id: 'state-license-renewal-cover', provider_id: providerId },
+      }),
+    );
+    const approvalId = approvalIdOf(
+      await client.callTool({
+        name: 'forms_release',
+        arguments: { file_id: filled.file_id, channel: 'ops-room', surface: 'memory' },
+      }),
+    );
+    await db
+      .update(approvals)
+      .set({ status: 'approved', decidedBy: 'U1', decidedAt: deps.now() })
+      .where(eq(approvals.id, approvalId));
+
+    await client.callTool({ name: 'approvals_execute', arguments: { approval_id: approvalId } });
+    const [effect] = await db.select().from(toolEffects);
+    // Both halves of the address reach the host, which is what lets a playbook send to a second
+    // surface: the sink reads `surface` to pick the session and `conversation` to pick where.
+    const payload = JSON.parse(decrypt(effect.payloadEncrypted, deps.encryptionKey)) as {
+      surface: string | null;
+      conversation: string | null;
+    };
+    expect(payload).toMatchObject({ surface: 'memory', conversation: 'ops-room' });
+    // The surface is joined on with `|`, which no conversation id may contain.
+    expect(effect.idempotencyKey).toBe(`test:forms_release:${filled.file_id}:ops-room|memory`);
   });
 
   it('refuses a file id that escapes the output directory', async () => {

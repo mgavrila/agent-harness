@@ -57,7 +57,7 @@ describe('reconcile', () => {
   it("parks only the given client's stuck dispatches when one is passed", async () => {
     const base = {
       tool: 't',
-      sink: 'slack',
+      sink: 'test_sink',
       payloadEncrypted: Buffer.from('x'),
       summary: 's',
       status: 'dispatching',
@@ -78,7 +78,7 @@ describe('reconcile', () => {
   });
 
   it('parks dispatching effects older than the stale window as needs_review', async () => {
-    const base = { client: 'test', tool: 't', sink: 'slack', payloadEncrypted: Buffer.from('x'), summary: 's' };
+    const base = { client: 'test', tool: 't', sink: 'test_sink', payloadEncrypted: Buffer.from('x'), summary: 's' };
     await db.insert(toolEffects).values([
       { ...base, idempotencyKey: 'old', status: 'dispatching', updatedAt: new Date('2026-09-15T11:30:00Z') },
       { ...base, idempotencyKey: 'fresh', status: 'dispatching', updatedAt: new Date('2026-09-15T11:58:00Z') },

@@ -48,7 +48,7 @@ describe('storage paths', () => {
 
   it('rejects a file id that reaches outside through a symlink', async () => {
     // A lexical check passes this: `out/escape/secrets.txt` has no `..` and is
-    // not absolute. `stat` in forms_release and `readFile` in the Slack sink
+    // not absolute. `stat` in forms_release and `readFile` in the host's file sink
     // both follow the link, so only the real path settles it.
     const outside = path.join(root, 'outside');
     await mkdir(outside, { recursive: true });
