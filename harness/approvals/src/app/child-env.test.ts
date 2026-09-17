@@ -57,6 +57,9 @@ describe('coreToolsChildEnv', () => {
     expect(coreToolsChildEnv(input({ HARNESS_GATEWAY_URL: 'http://litellm:4000' })).HARNESS_GATEWAY_URL).toBe(
       'http://litellm:4000',
     );
+    expect(coreToolsChildEnv(input({ HARNESS_FILES_URL: 'http://files:8790' })).HARNESS_FILES_URL).toBe(
+      'http://files:8790',
+    );
   });
 
   it('is an allowlist: no credential an adapter declared, and no provider key, reaches the child', () => {

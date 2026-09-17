@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, it, expect } from 'vitest';
 import { ConfigError, envOrDefault } from '@harness/shared';
-import { clientDirFor, formsDirFrom, resolvePrincipal } from './server.js';
+import { clientDirFor, formsDirFrom, parserFromEnv, resolvePrincipal } from './server.js';
 
 /**
  * The two variables `buildDepsFromEnv` reads with a default. Each one used to go through
@@ -83,5 +83,14 @@ describe('formsDirFrom', () => {
     expect(formsDirFrom(packs, undefined)).toBe('/packs/healthcare/forms');
     expect(formsDirFrom(packs, '/srv/elsewhere/forms')).toBe('/srv/elsewhere/forms');
     expect(formsDirFrom(packs, './forms')).toBe(path.resolve('./forms'));
+  });
+});
+
+describe('parserFromEnv', () => {
+  it('parses in this process unless HARNESS_FILES_URL names a worker', async () => {
+    // The two implementations are told apart by how they fail on a file that is not there: the
+    // remote one never reaches a worker on a closed port, the local one reads the filesystem.
+    await expect(parserFromEnv('/nonexistent', 'http://127.0.0.1:1').extract('a.pdf')).rejects.toThrow(/unreachable/);
+    await expect(parserFromEnv('/nonexistent', undefined).extract('a.pdf')).rejects.not.toThrow(/unreachable/);
   });
 });

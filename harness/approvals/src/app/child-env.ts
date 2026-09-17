@@ -52,6 +52,8 @@ export function coreToolsChildEnv({ env, client, storageRoot, surfaceSecrets }: 
     ...(env.HARNESS_IDENTITY_FILE ? { HARNESS_IDENTITY_FILE: env.HARNESS_IDENTITY_FILE } : {}),
     ...(env.HARNESS_FORMS_DIR ? { HARNESS_FORMS_DIR: env.HARNESS_FORMS_DIR } : {}),
     ...(env.HARNESS_GATEWAY_URL ? { HARNESS_GATEWAY_URL: env.HARNESS_GATEWAY_URL } : {}),
+    // Where the child parses documents. Unset on bare metal, where it parses in-process.
+    ...(env.HARNESS_FILES_URL ? { HARNESS_FILES_URL: env.HARNESS_FILES_URL } : {}),
     ...(env.HARNESS_PACKS ? { HARNESS_PACKS: env.HARNESS_PACKS } : {}),
     // HARNESS_SURFACES is deliberately absent: the child is the kernel, which stages effects and
     // never sends one. Only this process talks to a surface.

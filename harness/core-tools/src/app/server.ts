@@ -3,7 +3,8 @@ import { fileURLToPath } from 'node:url';
 import { createDb, loadKey } from '@harness/db';
 import type { Principal } from '@harness/identity-api';
 import { ConfigError, booleanFromEnv, createLogger, envOrDefault, numberFromEnv, optionalEnv } from '@harness/shared';
-import { localParser } from '../domain/documents/parser.js';
+import { localParser, remoteParser } from '../domain/documents/parser.js';
+import type { DocumentParser } from '../domain/documents/types.js';
 import { loadIdentity } from '../domain/identity/registry.js';
 import { depsForRun, type KernelConfig } from '../domain/tooling/deps.js';
 import { loadPolicy } from '../domain/tooling/policy.js';
@@ -52,6 +53,18 @@ export function clientDirFor(client: string, repoRoot: string = REPO_ROOT): stri
 }
 
 /**
+ * Where documents are parsed. In Compose, `HARNESS_FILES_URL` names the files worker and the
+ * bytes never enter this process; unset, the subprocesses run here, which is what a test and a
+ * bare-metal developer want.
+ */
+export function parserFromEnv(
+  storageDir: string,
+  filesUrl: string | undefined = optionalEnv('HARNESS_FILES_URL'),
+): DocumentParser {
+  return filesUrl ? remoteParser(filesUrl, storageDir) : localParser(storageDir);
+}
+
+/**
  * Everything every run shares, read and loaded once per process. Nothing here is per run:
  * the database handle, the principal and the run context arrive through `depsForRun`.
  */
@@ -68,7 +81,7 @@ export async function buildKernelConfig(): Promise<KernelConfig> {
     confidenceThreshold: numberFromEnv('CONFIDENCE_THRESHOLD', DEFAULT_CONFIDENCE_THRESHOLD, { min: 0, max: 1 }),
     gateway: gatewayFromEnv(),
     storageDir,
-    parser: localParser(storageDir),
+    parser: parserFromEnv(storageDir),
     formsDir: formsDirFrom(packs),
     restrictedToModel: booleanFromEnv('HARNESS_RESTRICTED_TO_MODEL'),
     packs,

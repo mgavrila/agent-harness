@@ -64,7 +64,7 @@ export {
   type ParsedDocument,
   type ParsedExtraction,
 } from './domain/documents/types.js';
-export { joinPages, localParser } from './domain/documents/parser.js';
+export { REMOTE_PARSE_TIMEOUT_MS, joinPages, localParser, remoteParser } from './domain/documents/parser.js';
 export {
   parseAttachmentKindSpec,
   parseExtractionManifest,

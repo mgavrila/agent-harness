@@ -63,6 +63,36 @@ services:
       retries: 12
       start_period: 30s
 
+  # Untrusted document parsing, in a process that holds no key and no database URL and cannot
+  # reach the network. core-tools sends it a path under the storage root and gets pages back;
+  # see harness/files/README.md. No env_file: its whole environment is the three lines below.
+  files:
+    build:
+      context: ../..
+      dockerfile: harness/compose/files.Dockerfile
+    image: harness-files
+    profiles: ['demo']
+    restart: unless-stopped
+    networks:
+      - files
+    environment:
+      HARNESS_STORAGE_DIR: '/srv/harness-storage'
+      HARNESS_FILES_PORT: '8790'
+      # Every interface inside the container: the internal network is the boundary, and a
+      # container-loopback listener would answer neither of the services that call it.
+      HARNESS_FILES_BIND: '0.0.0.0'
+    volumes:
+      - storage:/srv/harness-storage
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'node -e "fetch(''http://127.0.0.1:8790/healthz'').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"',
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+
   # Built, not started: Hermes launches core-tools over stdio in Plan 3.
   # `docker compose build core-tools` proves the image still builds.
   core-tools:
@@ -125,16 +155,18 @@ services:
         # would abort this script under `set -e`.
         sed '/^APPROVALS_SLACK_/d' /srv/env/.env > /data/.env
         # Hermes interpolates the core-tools child's env block from this file,
-        # not from the process environment, so the two host-loopback addresses
+        # not from the process environment, so the three host-side addresses
         # in the operator's .env must be rewritten to their compose-network
         # forms here or the child cannot reach the database or the gateway.
         sed -i \
           -e 's#^DATABASE_URL=.*#DATABASE_URL=postgres://harness:harness@postgres:5432/harness#' \
           -e 's#^HARNESS_GATEWAY_URL=.*#HARNESS_GATEWAY_URL=http://litellm:4000#' \
+          -e 's#^HARNESS_FILES_URL=.*#HARNESS_FILES_URL=http://files:8790#' \
           /data/.env
         # An operator's .env may lack a trailing newline; append on a fresh line.
         [ -z "$$(tail -c1 /data/.env)" ] || echo >> /data/.env
         grep -q '^HARNESS_GATEWAY_URL=' /data/.env || echo 'HARNESS_GATEWAY_URL=http://litellm:4000' >> /data/.env
+        grep -q '^HARNESS_FILES_URL=' /data/.env || echo 'HARNESS_FILES_URL=http://files:8790' >> /data/.env
         chmod 600 /data/.env
         # jobs.json is deliberately NOT seeded: its record shape is not
         # documented, and Hermes creates it on the first `hermes cron create`.
@@ -163,6 +195,9 @@ services:
     image: harness-hermes
     profiles: ['demo']
     restart: unless-stopped
+    networks:
+      - default
+      - files
     depends_on:
       postgres:
         condition: service_healthy
@@ -170,6 +205,8 @@ services:
         condition: service_healthy
       hermes-init:
         condition: service_completed_successfully
+      files:
+        condition: service_healthy
     env_file:
       - ../../.env
     environment:
@@ -195,6 +232,8 @@ services:
       # comes from .env: it is the only credential this container needs for
       # models, because the provider keys never leave the proxy.
       HARNESS_GATEWAY_URL: 'http://litellm:4000'
+      # The core-tools child parses documents in the files worker, on the internal network.
+      HARNESS_FILES_URL: 'http://files:8790'
       LITELLM_MASTER_KEY: '${LITELLM_MASTER_KEY:?set LITELLM_MASTER_KEY in .env}'
     volumes:
       - hermesdata:/opt/data
@@ -229,8 +268,13 @@ services:
     image: harness-approvals
     profiles: ['demo']
     restart: unless-stopped
+    networks:
+      - default
+      - files
     depends_on:
       postgres:
+        condition: service_healthy
+      files:
         condition: service_healthy
     # No env_file here, deliberately. This service gets an explicit allowlist
     # interpolated from ../../.env, so Hermes's Slack tokens never enter the
@@ -255,6 +299,8 @@ services:
       # without a gateway key. Same proxy as Hermes, reached on the compose
       # network rather than the host loopback the .env value names.
       HARNESS_GATEWAY_URL: 'http://litellm:4000'
+      # Same worker, same network: the child this app spawns parses documents there.
+      HARNESS_FILES_URL: 'http://files:8790'
       LITELLM_MASTER_KEY: '${LITELLM_MASTER_KEY:?set LITELLM_MASTER_KEY in .env}'
       # The approver's own Slack app — a second app, not Hermes's. One app
       # token cannot serve two Socket Mode connections: Slack delivers each
@@ -280,6 +326,13 @@ services:
       - storage:/srv/harness-storage
       - ../../packs:/srv/agent-harness/packs:ro
       - ../../clients:/srv/agent-harness/clients:ro
+
+networks:
+  # The files worker's network. `internal: true` means no route out of it: the worker reaches
+  # nothing — not the gateway, not the database, not the internet — and only the services
+  # listed on it reach the worker (spec decision 3, invariant 6).
+  files:
+    internal: true
 
 volumes:
   pgdata: {}

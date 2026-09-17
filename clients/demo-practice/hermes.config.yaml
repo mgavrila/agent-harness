@@ -114,6 +114,9 @@ mcp_servers:
       # this is the only model credential the child holds. The URL is the
       # compose service, not the host loopback in .env.
       HARNESS_GATEWAY_URL: '${HARNESS_GATEWAY_URL}'
+      # The files worker on the internal network; hermes-init writes it into the .env this
+      # block is interpolated from. Unset on bare metal, where the child parses in-process.
+      HARNESS_FILES_URL: '${HARNESS_FILES_URL}'
       LITELLM_MASTER_KEY: '${LITELLM_MASTER_KEY}'
     timeout: 120
     connect_timeout: 60

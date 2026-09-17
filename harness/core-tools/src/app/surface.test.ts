@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, it, expect } from 'vitest';
+import { parse as parseYaml } from 'yaml';
 import { CONVERSATION_ID_PATTERN, SURFACE_NAME_PATTERN } from '@harness/pack-api';
 import {
   ARCHITECTURE_DIR,
@@ -119,6 +120,46 @@ describe('the four places Plan 6 moved the tool surface', () => {
       const schema = tool.inputSchema as InputSchema;
       expect(schema.properties.surface.pattern).toBe(SURFACE_NAME_PATTERN.source);
       expect(schema.required ?? []).not.toContain('surface');
+    }
+  });
+});
+
+/**
+ * Invariant 6, read off the recorded Compose config: the files worker holds no key, no database
+ * URL and no provider credential, sits on a network that routes nowhere, and publishes no port.
+ */
+describe('the files worker boundary', () => {
+  interface Rendered {
+    networks: Record<string, { internal?: boolean }>;
+    services: Record<
+      string,
+      { environment?: Record<string, string>; networks?: Record<string, unknown>; ports?: unknown[] }
+    >;
+  }
+  const rendered = async (): Promise<Rendered> =>
+    parseYaml(await readFile(path.join(architecture, 'compose-surface.yaml'), 'utf8')) as Rendered;
+
+  it('gives the worker a storage root, a port and a bind address, and nothing else', async () => {
+    const { services } = await rendered();
+    expect(Object.keys(services.files.environment ?? {}).sort()).toEqual([
+      'HARNESS_FILES_BIND',
+      'HARNESS_FILES_PORT',
+      'HARNESS_STORAGE_DIR',
+    ]);
+  });
+
+  it('puts the worker on an internal network and no other, with no published port', async () => {
+    const { networks, services } = await rendered();
+    expect(networks.files.internal).toBe(true);
+    expect(Object.keys(services.files.networks ?? {})).toEqual(['files']);
+    expect(services.files.ports).toBeUndefined();
+  });
+
+  it('is reached by the two services that spawn a core-tools child, which tell the child where it is', async () => {
+    const { services } = await rendered();
+    for (const name of ['hermes', 'approvals']) {
+      expect(Object.keys(services[name].networks ?? {}).sort(), name).toEqual(['default', 'files']);
+      expect(services[name].environment?.HARNESS_FILES_URL, name).toBe('http://files:8790');
     }
   });
 });

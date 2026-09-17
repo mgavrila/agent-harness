@@ -2,12 +2,18 @@ name: agent-harness
 networks:
   default:
     name: agent-harness_default
+  files:
+    internal: true
+    name: agent-harness_files
 services:
   approvals:
     build:
       context: ../..
       dockerfile: harness/compose/node.Dockerfile
     depends_on:
+      files:
+        condition: service_healthy
+        required: true
       postgres:
         condition: service_healthy
         required: true
@@ -21,6 +27,7 @@ services:
       EFFECTS_DISPATCH_SECONDS: ${EFFECTS_DISPATCH_SECONDS:-5}
       HARNESS_CLIENT: ${HARNESS_CLIENT:-demo-practice}
       HARNESS_ENCRYPTION_KEY: ${HARNESS_ENCRYPTION_KEY:-}
+      HARNESS_FILES_URL: http://files:8790
       HARNESS_FORMS_DIR: /srv/agent-harness/packs/healthcare/forms
       HARNESS_GATEWAY_URL: http://litellm:4000
       HARNESS_PACKS: ${HARNESS_PACKS:-@harness/pack-healthcare}
@@ -34,6 +41,7 @@ services:
     image: harness-approvals
     networks:
       default: null
+      files: null
     ports:
       - 127.0.0.1:${APPROVALS_HEALTH_HOST_PORT:-8787}:8787
     profiles:
@@ -84,6 +92,32 @@ services:
         source: ../../storage
         target: /data/storage
         type: bind
+  files:
+    build:
+      context: ../..
+      dockerfile: harness/compose/files.Dockerfile
+    environment:
+      HARNESS_FILES_BIND: 0.0.0.0
+      HARNESS_FILES_PORT: "8790"
+      HARNESS_STORAGE_DIR: /srv/harness-storage
+    healthcheck:
+      interval: 10s
+      retries: 6
+      test:
+        - CMD-SHELL
+        - 'node -e "fetch(''http://127.0.0.1:8790/healthz'').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"'
+      timeout: 5s
+    image: harness-files
+    networks:
+      files: null
+    profiles:
+      - demo
+    restart: unless-stopped
+    volumes:
+      - source: storage
+        target: /srv/harness-storage
+        type: volume
+        volume: {}
   hermes:
     build:
       context: ../..
@@ -92,6 +126,9 @@ services:
       - gateway
       - run
     depends_on:
+      files:
+        condition: service_healthy
+        required: true
       hermes-init:
         condition: service_completed_successfully
         required: true
@@ -108,6 +145,7 @@ services:
       APPROVALS_SLACK_APP_TOKEN: ""
       APPROVALS_SLACK_BOT_TOKEN: ""
       DATABASE_URL: postgres://harness:harness@postgres:5432/harness
+      HARNESS_FILES_URL: http://files:8790
       HARNESS_FORMS_DIR: /srv/agent-harness/packs/healthcare/forms
       HARNESS_GATEWAY_URL: http://litellm:4000
       HARNESS_PACKS: ${HARNESS_PACKS:-@harness/pack-healthcare}
@@ -119,6 +157,7 @@ services:
     image: harness-hermes
     networks:
       default: null
+      files: null
     profiles:
       - demo
     restart: unless-stopped
@@ -174,16 +213,18 @@ services:
         # would abort this script under `set -e`.
         sed '/^APPROVALS_SLACK_/d' /srv/env/.env > /data/.env
         # Hermes interpolates the core-tools child's env block from this file,
-        # not from the process environment, so the two host-loopback addresses
+        # not from the process environment, so the three host-side addresses
         # in the operator's .env must be rewritten to their compose-network
         # forms here or the child cannot reach the database or the gateway.
         sed -i \
           -e 's#^DATABASE_URL=.*#DATABASE_URL=postgres://harness:harness@postgres:5432/harness#' \
           -e 's#^HARNESS_GATEWAY_URL=.*#HARNESS_GATEWAY_URL=http://litellm:4000#' \
+          -e 's#^HARNESS_FILES_URL=.*#HARNESS_FILES_URL=http://files:8790#' \
           /data/.env
         # An operator's .env may lack a trailing newline; append on a fresh line.
         [ -z "$$(tail -c1 /data/.env)" ] || echo >> /data/.env
         grep -q '^HARNESS_GATEWAY_URL=' /data/.env || echo 'HARNESS_GATEWAY_URL=http://litellm:4000' >> /data/.env
+        grep -q '^HARNESS_FILES_URL=' /data/.env || echo 'HARNESS_FILES_URL=http://files:8790' >> /data/.env
         chmod 600 /data/.env
         # jobs.json is deliberately NOT seeded: its record shape is not
         # documented, and Hermes creates it on the first `hermes cron create`.
