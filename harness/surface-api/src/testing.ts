@@ -61,6 +61,12 @@ export class MemorySurface implements SurfaceSession {
     if (this.failWith) throw new SurfaceError(this.failWith);
   }
 
+  /** The transport check every call makes, then the capability check three of them make. */
+  private requires(capable: boolean, cannot: string): void {
+    this.guard();
+    if (!capable) throw new SurfaceError(`${this.name}: ${cannot}`);
+  }
+
   private ref(conversation: string): MessageRef {
     this.seq += 1;
     return { surface: this.name, conversation, id: `m${this.seq}` };
@@ -78,8 +84,7 @@ export class MemorySurface implements SurfaceSession {
   }
 
   async updateCard(ref: MessageRef, card: Card): Promise<void> {
-    this.guard();
-    if (!this.capabilities.update) throw new SurfaceError(`${this.name}: cannot update a message`);
+    this.requires(this.capabilities.update, 'cannot update a message');
     const found = this.cards.findIndex(
       (c) => c.ref.id === ref.id && c.ref.conversation === ref.conversation && c.ref.surface === ref.surface,
     );
@@ -94,8 +99,7 @@ export class MemorySurface implements SurfaceSession {
   }
 
   async postPrivate(conversation: string, userId: string, text: string): Promise<void> {
-    this.guard();
-    if (!this.capabilities.privateReply) throw new SurfaceError(`${this.name}: cannot send a private note`);
+    this.requires(this.capabilities.privateReply, 'cannot send a private note');
     this.privates.push({ conversation, userId, text });
   }
 
@@ -106,8 +110,7 @@ export class MemorySurface implements SurfaceSession {
   }
 
   async openForm(trigger: string, form: Form): Promise<void> {
-    this.guard();
-    if (!this.capabilities.forms) throw new SurfaceError(`${this.name}: cannot open a form`);
+    this.requires(this.capabilities.forms, 'cannot open a form');
     this.forms.push({ trigger, form });
   }
 
