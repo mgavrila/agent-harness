@@ -223,6 +223,34 @@ const SCANNED = [
     minFiles: 4,
     skip: [/\.test\.ts$/],
   },
+  {
+    what: 'credentialing vocabulary',
+    root: 'harness/host/src',
+    forbidden: DOMAIN_FORBIDDEN,
+    minFiles: 8,
+    skip: [/\.test\.ts$/],
+  },
+  {
+    what: 'messaging vocabulary',
+    root: 'harness/host/src',
+    forbidden: MESSAGING_FORBIDDEN,
+    minFiles: 8,
+    skip: [/\.test\.ts$/],
+  },
+  {
+    what: 'framework and vendor vocabulary',
+    root: 'harness/host/src',
+    forbidden: FRAMEWORK_FORBIDDEN,
+    minFiles: 8,
+    skip: [/\.test\.ts$/],
+  },
+  {
+    what: 'deployment vocabulary',
+    root: 'harness/host/src',
+    forbidden: DEPLOYMENT_FORBIDDEN,
+    minFiles: 8,
+    skip: [/\.test\.ts$/],
+  },
 ];
 
 /**

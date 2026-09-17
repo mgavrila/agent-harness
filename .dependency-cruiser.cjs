@@ -40,6 +40,7 @@ const PACKAGES = [
   { name: 'gateway', src: 'harness/gateway/src', severity: 'error' },
   { name: 'core-tools', src: 'harness/core-tools/src', severity: 'error' },
   { name: 'approvals', src: 'harness/approvals/src', severity: 'error' },
+  { name: 'host', src: 'harness/host/src', severity: 'error' },
   { name: 'files', src: 'harness/files/src', severity: 'error' },
   { name: 'evals', src: 'evals/src', severity: 'error' },
   { name: 'pack-healthcare', src: 'packs/healthcare/src', severity: 'error' },
@@ -107,6 +108,7 @@ const WORKSPACE_DIRS = [
   'harness/gateway',
   'harness/core-tools',
   'harness/approvals',
+  'harness/host',
   'harness/files',
   'evals',
   'packs/healthcare',
@@ -205,6 +207,14 @@ const GLOBAL_RULES = [
       pathNot: ['\\.test\\.ts$'],
     },
     to: { path: '^surfaces/[^/]+/', dependencyTypesNot: ['dynamic-import'] },
+  },
+  {
+    name: 'the-host-never-statically-imports-a-plugin',
+    comment:
+      'The host loads its surfaces from HARNESS_SURFACES, its identity plug-in from HARNESS_IDENTITY and its runtime from HARNESS_RUNTIME, all through dynamic imports. A static edge from harness/host/src into surfaces/, identities/, runtimes/ or packs/ would wire the one process every client runs to one transport, one directory or one framework by name. src/testing.ts and *.test.ts are exempt: a host test drives the real memory surface and the real runtime loader against the packages that ship, and is not shipped itself.',
+    severity: 'error',
+    from: { path: '^harness/host/src/', pathNot: ['\\.test\\.ts$', '^harness/host/src/testing\\.ts$'] },
+    to: { path: '^(surfaces|identities|runtimes|packs)/[^/]+/', dependencyTypesNot: ['dynamic-import'] },
   },
   {
     name: 'no-unresolvable-workspace-import',
