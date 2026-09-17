@@ -38,36 +38,8 @@ async function assertUnderRoot(candidate: string, root: string, effectId: string
   );
 }
 
-/**
- * Read an outbox row: what it says, and where it is addressed.
- *
- * The payload is validated without ever being repeated. A zod message can name a key and a type,
- * and `tool_effects.last_error` is stored in plaintext, so a failure reports only that validation
- * failed and leaves the detail to the staging tool, which knows what it wrote.
- *
- * `payload.surface` names one of the loaded surfaces; with none, it is the primary. The
- * conversation is the payload's, or that surface's default. `channel` is read after
- * `conversation` for one reason: a row staged before migration 0009 spells it that way and is
- * still in the outbox.
- */
-function addressed<T extends { surface?: string | null; conversation?: string | null; channel?: string | null }>(
-  schema: z.ZodType<T>,
-  payload: unknown,
-  surfaces: LoadedSurfaces,
-  sink: string,
-  effectId: string,
-): { payload: T; session: SurfaceSession; conversation: Conversation['id'] } {
-  const parsed = schema.safeParse(payload);
-  if (!parsed.success) throw new Error(`${sink} payload failed validation`);
-  const name = parsed.data.surface ?? null;
-  const session = name === null ? surfaces.primary : surfaces.find(name);
-  if (!session) throw new Error(`${sink}: no surface named "${name}" is loaded (effect ${effectId})`);
-  return {
-    payload: parsed.data,
-    session,
-    conversation: parsed.data.conversation ?? parsed.data.channel ?? session.defaultConversation,
-  };
-}
+/** The three fields that say where an effect goes, which both payload shapes carry. */
+type Addressing = { surface?: string | null; conversation?: string | null; channel?: string | null };
 
 /**
  * An adapter's failure is expected and is recorded on the row; anything else is a bug and keeps
@@ -90,14 +62,38 @@ async function viaSurface<T>(sink: string, effectId: string, run: () => Promise<
  * value in `tool_effects.result` as plaintext jsonb, so nothing from the payload may come back out.
  */
 export function surfaceSinks(surfaces: LoadedSurfaces, opts: { outDir?: string } = {}): SinkRegistry {
+  /**
+   * Read an outbox row: what it says, and where it is addressed.
+   *
+   * The payload is validated without ever being repeated. A zod message can name a key and a
+   * type, and `tool_effects.last_error` is stored in plaintext, so a failure reports only that
+   * validation failed and leaves the detail to the staging tool, which knows what it wrote.
+   *
+   * `payload.surface` names one of the loaded surfaces; with none, it is the primary. The
+   * conversation is the payload's, or that surface's default. `channel` is read after
+   * `conversation` for one reason: a row staged before migration 0009 spells it that way and is
+   * still in the outbox.
+   */
+  function addressed<T extends Addressing>(
+    schema: z.ZodType<T>,
+    raw: unknown,
+    sink: string,
+    effectId: string,
+  ): { payload: T; session: SurfaceSession; conversation: Conversation['id'] } {
+    const parsed = schema.safeParse(raw);
+    if (!parsed.success) throw new Error(`${sink} payload failed validation`);
+    const name = parsed.data.surface ?? null;
+    const session = name === null ? surfaces.primary : surfaces.find(name);
+    if (!session) throw new Error(`${sink}: no surface named "${name}" is loaded (effect ${effectId})`);
+    return {
+      payload: parsed.data,
+      session,
+      conversation: parsed.data.conversation ?? parsed.data.channel ?? session.defaultConversation,
+    };
+  }
+
   const messageSink: SinkHandler = async (raw, effect) => {
-    const { payload, session, conversation } = addressed(
-      SurfaceMessagePayloadShape,
-      raw,
-      surfaces,
-      'surface_message',
-      effect.id,
-    );
+    const { payload, session, conversation } = addressed(SurfaceMessagePayloadShape, raw, 'surface_message', effect.id);
     // No reply target: an outbox message is a standalone post. The only reply this host writes is
     // the decisions thread reply, which goes straight through `postText({ replyTo })`.
     const ref = await viaSurface('surface_message', effect.id, () => session.postText(conversation, payload.text));
@@ -105,13 +101,7 @@ export function surfaceSinks(surfaces: LoadedSurfaces, opts: { outDir?: string }
   };
 
   const fileSink: SinkHandler = async (raw, effect) => {
-    const { payload, session, conversation } = addressed(
-      SurfaceFilePayloadShape,
-      raw,
-      surfaces,
-      'surface_file',
-      effect.id,
-    );
+    const { payload, session, conversation } = addressed(SurfaceFilePayloadShape, raw, 'surface_file', effect.id);
     // `outDir` is the fill output tree (`<HARNESS_STORAGE_DIR>/out`), not the whole store: the
     // rest of it holds ingested documents, which must never be uploadable. Optional so a test
     // that stages a path under an arbitrary tmpdir is unaffected; main.ts always passes it.
