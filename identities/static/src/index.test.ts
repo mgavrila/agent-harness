@@ -76,7 +76,7 @@ describe('@harness/identity-static', () => {
       'u-practice-manager:admin',
       'u-coordinator:lead',
       'svc-hermes:service',
-      'svc-approvals:service',
+      'svc-host:service',
       'svc-local:service',
     ]);
   });

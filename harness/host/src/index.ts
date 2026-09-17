@@ -23,3 +23,4 @@ export {
   type TurnInput,
   type TurnResult,
 } from './domain/conversation.js';
+export { decisionDeps, resumeOnDecision, resumeText } from './domain/resume.js';

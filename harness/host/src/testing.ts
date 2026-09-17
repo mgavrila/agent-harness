@@ -89,7 +89,11 @@ export async function hostFixture(
     budget: { maxModelCalls: 30, maxToolCalls: 60, timeoutMs: 30_000, maxHistoryMessages: 40, ...opts.budget },
     servicePrincipal: HOST_PRINCIPAL,
     log: { info() {}, warn() {}, error() {} },
-    now: () => new Date(),
+    // The same frozen clock `testKernelConfig`'s `now` carries (core-tools' `makeTestDeps`), so a
+    // row an approval tool stages under one and a decision taken under the other agree on
+    // whether it has expired — real wall-clock time would drift out of the TTL window depending
+    // on when the suite happens to run, exactly the flakiness a frozen test clock exists to avoid.
+    now: () => new Date('2026-09-15T12:00:00Z'),
     active: new Map(),
   };
   return {

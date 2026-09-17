@@ -6,8 +6,8 @@
 #   level  member < practitioner < lead < admin for a person; service for a scheduled job's
 #          or a process's own identity. A service is never "at least" a user level.
 #
-# The Slack member ids below are placeholders: nothing resolves a Slack user to a principal
-# until Plan 8's host does. Replace them with the two humans' real ids then.
+# The Slack member ids below are placeholders until Plan 8b's Slack inbound; replace them with
+# the two humans' real ids then.
 principals:
   - id: u-practice-manager
     kind: user
@@ -26,11 +26,11 @@ principals:
     kind: service
     level: service
     displayName: Chat runtime
-  # The core-tools child the approvals host launches (harness/approvals/src/app/child-env.ts).
-  - id: svc-approvals
+  # The host's own identity (HARNESS_HOST_PRINCIPAL): reconciliation, and playbooks from Plan 9.
+  - id: svc-host
     kind: service
     level: service
-    displayName: Approvals host
+    displayName: Harness host
   # The stdio server's default: the MCP inspector and the eval runner on an operator's machine.
   - id: svc-local
     kind: service
