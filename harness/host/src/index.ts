@@ -14,3 +14,12 @@ export { HISTORY_MAX_CHARS, trimHistory } from './domain/threads/trim.js';
 export { readSkillCatalogue } from './domain/skills.js';
 export { readPersona } from './domain/persona.js';
 export { openKernel } from './domain/kernel.js';
+export {
+  UNAUTHORISED_TEXT,
+  attachMessageHandlers,
+  cancelRun,
+  handleMessage,
+  runTurn,
+  type TurnInput,
+  type TurnResult,
+} from './domain/conversation.js';

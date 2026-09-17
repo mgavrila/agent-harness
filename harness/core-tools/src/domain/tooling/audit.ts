@@ -4,7 +4,8 @@ import type { ActionClass } from './policy.js';
 
 export { hashArgs };
 
-export type Decision = 'auto' | 'approval' | 'blocked' | 'error';
+/** `unauthorised` is the host's own decision (spec 3.2): a message from nobody the identity plug-in knows. */
+export type Decision = 'auto' | 'approval' | 'blocked' | 'error' | 'unauthorised';
 
 export interface AuditEntry {
   client: string;
