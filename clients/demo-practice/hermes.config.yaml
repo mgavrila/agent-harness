@@ -13,7 +13,7 @@
 model:
   default: 'chat'
   provider: 'custom'
-  base_url: 'http://gateway:4000/v1'
+  base_url: 'http://litellm:4000/v1'
   api_key: '${LITELLM_MASTER_KEY}'
   context_length: 131072
 
@@ -21,7 +21,7 @@ model:
 fallback_providers:
   - provider: custom
     model: 'reason'
-    base_url: 'http://gateway:4000/v1'
+    base_url: 'http://litellm:4000/v1'
 
 # --- Sandbox ----------------------------------------------------------------
 terminal:
