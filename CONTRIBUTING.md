@@ -274,7 +274,10 @@ complete one; read it alongside this, and read `surfaces/slack` for the real thi
    helpers with `deps.env` as their last argument, so your variables are validated and worded like
    everyone else's — and so a test suite cannot open a real connection because the machine running
    it has a filled-in `.env`. Document every name in `.env.example` in the same commit:
-   `surface.test.ts` walks `surfaces/` and fails on one you did not.
+   `surface.test.ts` walks `surfaces/` and fails on one you did not. It finds names read through
+   those helpers, so a value taken straight off `deps.env` — as `surfaces/memory` does, because
+   unset and empty have to mean different things there — is invisible to the scan and has to be
+   documented by hand.
 
 4. **Implement `SurfaceSession`.** Post and update a card, post text with an optional reply
    target, send a private note, upload a file, open a form, deliver actions and submissions, start
