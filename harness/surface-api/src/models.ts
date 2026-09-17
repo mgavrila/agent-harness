@@ -30,18 +30,21 @@ const conversation = z
   .nullable()
   .optional();
 
-export const SurfaceMessagePayloadShape = z.object({
+/** Where an effect is addressed, which is the same three fields whatever it carries. */
+const addressing = {
   surface: surfaceName,
   conversation,
   /** Pre-0009 rows carry the conversation here. */
   channel: conversation,
+};
+
+export const SurfaceMessagePayloadShape = z.object({
+  ...addressing,
   text: z.string().min(1).max(3000),
 });
 
 export const SurfaceFilePayloadShape = z.object({
-  surface: surfaceName,
-  conversation,
-  channel: conversation,
+  ...addressing,
   path: z.string().min(1),
   filename: z.string().min(1),
   file_id: z.string().optional(),
