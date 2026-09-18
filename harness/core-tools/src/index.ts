@@ -78,6 +78,15 @@ export {
 export { CHUNK_OVERLAP, CHUNK_SIZE, chunkText } from './domain/knowledge/chunk.js';
 export { parseKnowledgeDocument, readKnowledgeFolder } from './domain/knowledge/document.js';
 export {
+  findOrCreateSource,
+  replaceChunks,
+  tombstoneMissing,
+  touchSource,
+  upsertDocument,
+  type DocumentChange,
+} from './domain/knowledge/repository.js';
+export { syncKnowledge } from './domain/knowledge/sync.js';
+export {
   PLAYBOOK_RUN_STATUSES,
   type PlaybookRow,
   type PlaybookRunRow,
