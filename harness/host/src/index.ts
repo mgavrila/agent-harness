@@ -60,3 +60,16 @@ export {
   type SchedulerStatus,
   type TickResult,
 } from './domain/playbooks/scheduler.js';
+export {
+  API_MAX_ATTACHMENTS,
+  API_MAX_BODY_BYTES,
+  API_MAX_TEXT_CHARS,
+  API_THREAD_MESSAGES,
+  DEFAULT_HOST_BIND,
+  DEFAULT_HOST_PORT,
+  SSE_KEEPALIVE_MS,
+  type RunApiOptions,
+  type RunApiServer,
+} from './domain/api/types.js';
+export { startRunApi } from './domain/api/server.js';
+export { bearerOk, handleApiRequest } from './domain/api/routes.js';

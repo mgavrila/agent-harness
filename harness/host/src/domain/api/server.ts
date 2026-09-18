@@ -1,0 +1,42 @@
+import { createServer, type Server } from 'node:http';
+import type { Host } from '../host.js';
+import { handleApiRequest } from './routes.js';
+import { DEFAULT_HOST_BIND, DEFAULT_HOST_PORT, type RunApiOptions, type RunApiServer } from './types.js';
+
+/**
+ * The run API's listener (spec 5.8).
+ *
+ * Shaped like `startHealthServer`, and for the same reasons: `ready` resolves on `'listening'` so a
+ * test can bind port 0 and read back what it got, and a bind failure still surfaces as the
+ * server's own `'error'` event rather than a rejection nobody handled.
+ *
+ * `close` closes the open connections first. A Server-Sent Events response is open by design, so a
+ * plain `close()` would wait for every listening caller to hang up — and shutdown calls this
+ * *before* the drain, so nothing new is accepted while the turns in flight unwind.
+ */
+export function startRunApi(host: Host, opts: RunApiOptions): RunApiServer {
+  const server: Server = createServer((req, res) => {
+    void handleApiRequest(host, req, res, opts).catch((err: unknown) => {
+      // A fixed body. Anything thrown this far is a driver, filesystem or socket error, and those
+      // carry fragments of a statement or a path; the detail goes to the log, where an operator
+      // can read it.
+      host.log.error('the run API failed a request', err);
+      if (res.headersSent) res.end();
+      else {
+        res.writeHead(500, { 'content-type': 'application/json' });
+        res.end('{"error":"the request failed"}');
+      }
+    });
+  });
+  const ready = new Promise<void>((resolve) => server.once('listening', () => resolve()));
+  server.listen(opts.port ?? DEFAULT_HOST_PORT, opts.bind ?? DEFAULT_HOST_BIND);
+  return {
+    ready,
+    address: () => server.address(),
+    close: () =>
+      new Promise<void>((resolve) => {
+        server.closeAllConnections();
+        server.close(() => resolve());
+      }),
+  };
+}
