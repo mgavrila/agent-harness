@@ -21,6 +21,7 @@ describe('systemPrompt', () => {
     const memoryLine = KERNEL_RULES.split('\n').find((line) => line.includes('/memories/MEMORY.md'));
     expect(memoryLine).toBeDefined();
     expect(memoryLine).toContain('read_file');
+    for (const tool of ['memory_add', 'memory_remove', 'session_search']) expect(memoryLine).toContain(tool);
     expect(KERNEL_RULES).not.toContain('edit_file');
   });
 });

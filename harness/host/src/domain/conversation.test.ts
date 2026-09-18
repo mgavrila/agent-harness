@@ -1,9 +1,21 @@
 import { describe, expect, it, vi } from 'vitest';
 import { eq } from 'drizzle-orm';
-import { approvals, auditLog, messages, runs, threads } from '@harness/db';
-import { COORDINATOR, hostFixture, useTestDb } from '../testing.js';
-import { TIMEOUT_MARGIN_MS, UNAUTHORISED_TEXT, attachMessageHandlers, cancelRun, drainActive } from './conversation.js';
+import type { RunEvent, RuntimeSession } from '@harness/runtime-api';
+import { approvals, auditLog, memoryEntries, messages, runs, threads } from '@harness/db';
+import { COORDINATOR, hostFixture, useTestDb, type HostFixture } from '../testing.js';
+import {
+  TIMEOUT_MARGIN_MS,
+  UNAUTHORISED_TEXT,
+  attachMessageHandlers,
+  cancelRun,
+  drainActive,
+  runTurn,
+  type TurnDelivery,
+  type TurnInput,
+} from './conversation.js';
+import { findOrCreateThread } from './threads/repository.js';
 import * as threadsRepository from './threads/repository.js';
+import { HISTORY_MAX_CHARS } from './threads/trim.js';
 
 const db = useTestDb();
 
@@ -320,5 +332,170 @@ describe("the host's timeout backstop", () => {
     const [run] = await db.select().from(runs);
     expect(run.status).toBe('done');
     expect(f.surface.texts.map((t) => t.text)).toEqual(['in time']);
+  });
+});
+
+describe('memory on the run', () => {
+  it('hands the runtime the caller snapshot, rendered once before the run and never mid-run', async () => {
+    const f = await hostFixture(db, {
+      trajectory: [{ tool: 'memory_add', args: { text: 'Prefers bullet points.' } }, { say: 'Noted.' }],
+    });
+    attachMessageHandlers(f.host);
+    await db.insert(memoryEntries).values({
+      client: 'test',
+      scope: 'client',
+      principalId: null,
+      text: 'The office closes at five.',
+      createdBy: 'u-coordinator',
+    });
+    await f.surface.say('U012', 'remember that I like bullets');
+    expect(f.runtime.requests[0].memory).toContain('- The office closes at five. (id: ');
+    // Added during the turn, so not in this turn's snapshot: frozen for the run.
+    expect(f.runtime.requests[0].memory).not.toContain('Prefers bullet points.');
+    await f.surface.say('U012', 'and now?');
+    expect(f.runtime.requests[1].memory).toContain('## Your notes (principal scope)\n- Prefers bullet points. (id: ');
+  });
+
+  it('keeps a remembered fact across a restart, and away from another principal (the exit criterion)', async () => {
+    const first = await hostFixture(db, {
+      trajectory: [{ tool: 'memory_add', args: { text: 'Prefers bullet points.' } }, { say: 'Noted.' }],
+    });
+    attachMessageHandlers(first.host);
+    await first.surface.say('U012', 'remember that I like bullets');
+    await first.close();
+    // A second host over the same database is a restart: nothing survives but the tables.
+    const second = await hostFixture(db, { trajectory: [{ say: 'hi' }] });
+    attachMessageHandlers(second.host);
+    await second.surface.say('U012', 'hello again');
+    expect(second.runtime.requests[0].memory).toContain('Prefers bullet points.');
+    await second.surface.say('U345', 'hello from someone else');
+    expect(second.runtime.requests[1].memory).toBe('');
+  });
+});
+
+describe('the history budget', () => {
+  it('is spent on history only, never on the message being run', async () => {
+    const f = await hostFixture(db, { trajectory: [{ say: 'ok' }] });
+    attachMessageHandlers(f.host);
+    await f.surface.say('U012', 'first');
+    await f.surface.say('U012', 'x'.repeat(HISTORY_MAX_CHARS + 1_000));
+    expect(f.runtime.requests[1].history).toEqual([
+      { role: 'user', content: 'first' },
+      { role: 'assistant', content: 'ok' },
+    ]);
+  });
+});
+
+describe('cancelRun after the backstop', () => {
+  it('refuses to cancel a run the host timeout already ended', async () => {
+    const f = await hostFixture(db, { trajectory: [{ say: 'unused' }] });
+    const controller = new AbortController();
+    controller.abort('timeout');
+    f.host.active.set('r1', { controller, done: Promise.resolve() });
+    expect(cancelRun(f.host, 'r1')).toBe(false);
+    // The turn's own `finally` removes the entry; a refused cancel leaves it alone.
+    expect(f.host.active.has('r1')).toBe(true);
+  });
+});
+
+/** A runtime that reports spend, then waits for the abort the host owes it, then ends cancelled. */
+function spender(costUsd: number): RuntimeSession {
+  return {
+    name: 'spender',
+    run: (request) => ({
+      events: (async function* (): AsyncGenerator<RunEvent> {
+        yield { type: 'usage', inputTokens: 1, outputTokens: 1, costUsd };
+        if (!request.signal.aborted) {
+          await new Promise<void>((resolve) =>
+            request.signal.addEventListener('abort', () => resolve(), { once: true }),
+          );
+        }
+        yield { type: 'error', message: 'cancelled' };
+      })(),
+    }),
+    stop: async () => {},
+  };
+}
+
+describe('where a turn delivers', () => {
+  async function turnOn(f: HostFixture, deliver: TurnDelivery, extra: Partial<TurnInput> = {}) {
+    const thread = await findOrCreateThread(db, {
+      client: 'test',
+      surface: 'memory',
+      conversation: 'memory',
+      principalId: 'u-coordinator',
+    });
+    return runTurn(f.host, {
+      thread,
+      principal: COORDINATOR,
+      role: 'host',
+      text: 'go',
+      attachments: [],
+      replyTo: null,
+      deliver,
+      ...extra,
+    });
+  }
+
+  it("'none' records the reply and posts nothing, not even on a streaming surface", async () => {
+    const f = await hostFixture(db, { trajectory: [{ say: 'Nothing to report.' }], streaming: true });
+    const result = await turnOn(f, 'none');
+    expect(result).toMatchObject({ status: 'done', text: 'Nothing to report.', error: null });
+    expect(f.surface.texts).toEqual([]);
+    expect(f.surface.streams).toEqual([]);
+    expect((await db.select().from(messages)).map((m) => [m.role, m.content])).toEqual([
+      ['host', 'go'],
+      ['assistant', 'Nothing to report.'],
+    ]);
+  });
+
+  it('a named conversation gets one post and no stream', async () => {
+    const f = await hostFixture(db, { trajectory: [{ say: 'Two renewals.' }], streaming: true });
+    await turnOn(f, { surface: 'memory', conversation: 'C-ops' });
+    expect(f.surface.streams).toEqual([]);
+    expect(f.surface.texts).toEqual([{ conversation: 'C-ops', text: 'Two renewals.', replyTo: null }]);
+  });
+
+  it('a surface that is not loaded is refused before a run opens', async () => {
+    const f = await hostFixture(db, { trajectory: [{ say: 'never' }] });
+    await expect(turnOn(f, { surface: 'nowhere', conversation: 'x' })).rejects.toThrow('which is not loaded');
+    expect(await db.select().from(runs)).toHaveLength(0);
+  });
+
+  it('offers only the skills the turn names, and uses the turn timeout', async () => {
+    const f = await hostFixture(db, { trajectory: [{ say: 'ok' }] });
+    const one = { name: 'only-this', version: '2.0.0', description: 'one skill', dir: '/nonexistent' };
+    await turnOn(f, 'none', { skills: [one], timeoutMs: 45_000 });
+    expect(f.runtime.requests[0].skills).toEqual([one]);
+    expect(f.runtime.requests[0].budget.timeoutMs).toBe(45_000);
+  });
+
+  it('aborts a run whose reported spend passes the cost cap, and says so', async () => {
+    const f = await hostFixture(db, { trajectory: [{ say: 'unused' }] });
+    f.host.runtime = spender(0.75);
+    const result = await turnOn(f, 'none', { costCapUsd: 0.5 });
+    expect(result).toMatchObject({
+      status: 'error',
+      error: 'the run exceeded its cost cap',
+      text: 'The run stopped: the run exceeded its cost cap.',
+    });
+    const [run] = await db.select().from(runs);
+    expect(run.status).toBe('error');
+    expect(f.host.active.size).toBe(0);
+  });
+
+  it('reports the runtime fixed message on error, so a caller can decide on it', async () => {
+    const f = await hostFixture(db, { trajectory: [{ say: 'unused' }] });
+    f.host.runtime = {
+      name: 'broken',
+      run: () => ({
+        events: (async function* (): AsyncGenerator<RunEvent> {
+          yield { type: 'error', message: 'the run failed; see the host log' };
+        })(),
+      }),
+      stop: async () => {},
+    };
+    const result = await turnOn(f, 'none');
+    expect(result).toMatchObject({ status: 'error', error: 'the run failed; see the host log' });
   });
 });

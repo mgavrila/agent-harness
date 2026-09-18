@@ -74,7 +74,7 @@ export interface RunRequest {
   /** The persona text (SOUL.md). */
   persona: string;
   skills: readonly RunSkill[];
-  /** The curated memory snapshot, frozen for this run. Empty until Plan 9 renders one. */
+  /** The curated memory snapshot, rendered by the host before the run starts and frozen for it. Empty when the principal has none. */
   memory: string;
   /** An MCP client already connected to a core-tools server built on this run's `ToolDeps`. */
   tools: Client;

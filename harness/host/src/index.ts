@@ -15,11 +15,16 @@ export { readSkillCatalogue } from './domain/skills.js';
 export { readPersona } from './domain/persona.js';
 export { openKernel } from './domain/kernel.js';
 export {
+  COST_CAP_EXCEEDED,
+  RUNTIME_FAILED,
   UNAUTHORISED_TEXT,
   attachMessageHandlers,
   cancelRun,
   handleMessage,
   runTurn,
+  serialize,
+  type AbortReason,
+  type TurnDelivery,
   type TurnInput,
   type TurnResult,
 } from './domain/conversation.js';
