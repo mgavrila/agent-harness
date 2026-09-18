@@ -7,6 +7,15 @@ import * as threadsRepository from './threads/repository.js';
 
 const db = useTestDb();
 
+/** Poll until `ready` holds, so a test waits on the signal it means rather than on a fixed delay. */
+async function waitFor(ready: () => boolean, timeoutMs = 2_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!ready()) {
+    if (Date.now() > deadline) throw new Error('timed out waiting for the condition');
+    await new Promise((r) => setTimeout(r, 5));
+  }
+}
+
 describe('a message on a surface', () => {
   it('runs as the resolved principal, replies once on a surface without streaming, and records both turns', async () => {
     const f = await hostFixture(db, {
@@ -259,11 +268,16 @@ describe('drainActive', () => {
       trajectory: (request) => (request.input.text === 'first' ? [{ sleep: 10_000 }] : [{ say: 'two' }]),
     });
     attachMessageHandlers(f.host);
-    const turns = [f.surface.say('U012', 'first'), f.surface.say('U012', 'second')];
-    await new Promise((r) => setTimeout(r, 50));
+    // Wait for the first turn's run to be in flight rather than for a fixed delay, and only then
+    // send the second: under full-suite load the run can take well over 50 ms to open, and both
+    // messages started together reach the thread's chain in whichever order their identity and
+    // thread lookups finish in, so "second" could be the turn that runs.
+    const first = f.surface.say('U012', 'first');
+    await waitFor(() => f.host.active.size === 1);
+    const second = f.surface.say('U012', 'second');
 
     await drainActive(f.host, 10_000);
-    await Promise.all(turns);
+    await Promise.all([first, second]);
 
     // The second turn was next on the thread's chain; starting it now would open a run against a
     // runtime and a pool the caller is about to stop.
