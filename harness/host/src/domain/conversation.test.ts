@@ -72,6 +72,11 @@ describe('a message on a surface', () => {
     // The runtime was handed this run's kernel, the persona, the skills and the principal as the model user.
     const request = f.runtime.requests[0];
     expect(request.principal.id).toBe('u-coordinator');
+    // The caller's own name and level, as the identity plug-in resolved them. A runtime that has
+    // them can say who it is speaking with; one that has only the id reads a name out of it, which
+    // is what a live run did. This is the fact the prompt line in runtimes/deepagents renders.
+    expect(request.principal.displayName).toBe('Coordinator');
+    expect(request.principal.level).toBe('lead');
     expect(request.model).toMatchObject({ route: 'chat', fallbackRoute: 'reason', user: 'u-coordinator' });
     expect(request.persona).toBe('You are the test assistant.');
     expect(request.skills.map((s) => s.name)).toEqual(['sample-skill']);
