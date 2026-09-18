@@ -30,3 +30,14 @@ export {
   type TurnResult,
 } from './domain/conversation.js';
 export { decisionDeps, resumeOnDecision, resumeText } from './domain/resume.js';
+export {
+  DELIVERIES,
+  PLAYBOOK_NAME_PATTERN,
+  PlaybookShape,
+  PlaybooksFileShape,
+  nextRunAfter,
+  parsePlaybooksFile,
+  readPlaybooksFile,
+  type PlaybookDefinition,
+} from './domain/playbooks/schema.js';
+export { claimDuePlaybooks, finishPlaybookRun, syncPlaybooks, type ClaimedRun } from './domain/playbooks/repository.js';

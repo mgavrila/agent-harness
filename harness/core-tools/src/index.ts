@@ -62,6 +62,14 @@ export {
 export { addMemory, findMemoryEntry, listMemory, memoryUsage, removeMemory } from './domain/memory/repository.js';
 export { memorySnapshot, renderMemorySnapshot } from './domain/memory/render.js';
 export { searchSessions } from './domain/memory/search.js';
+export {
+  PLAYBOOK_RUN_STATUSES,
+  type PlaybookRow,
+  type PlaybookRunRow,
+  type PlaybookRunStatus,
+  type PlaybookSummary,
+} from './domain/playbooks/types.js';
+export { findPlaybook, listPlaybooks, requestPlaybookRun, summarisePlaybook } from './domain/playbooks/repository.js';
 export { executeApproval, type ExecutedApproval } from './domain/approvals/execute.js';
 export {
   URGENCY_BUCKETS,

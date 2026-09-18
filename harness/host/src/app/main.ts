@@ -19,6 +19,8 @@ import { ConfigError, createLogger, envOrDefault, numberFromEnv, requiredEnv } f
 import { SHUTDOWN_DRAIN_MS, TIMEOUT_MARGIN_MS, attachMessageHandlers, drainActive } from '../domain/conversation.js';
 import type { Host } from '../domain/host.js';
 import { readPersona } from '../domain/persona.js';
+import { syncPlaybooks } from '../domain/playbooks/repository.js';
+import { readPlaybooksFile } from '../domain/playbooks/schema.js';
 import { decisionDeps } from '../domain/resume.js';
 import { loadRuntime } from '../domain/runtime/registry.js';
 import { readSkillCatalogue } from '../domain/skills.js';
@@ -99,6 +101,17 @@ const host: Host = {
   turns: new Map(),
   draining: false,
 };
+
+// The file into the table, once per start: a playbook edited, added or removed in
+// clients/<name>/playbooks.yaml takes effect on the next start, and a firing missed while the
+// process was down is not replayed (next_run_at is recomputed from now).
+const playbooksFile = await readPlaybooksFile(clientDir);
+const synced = await syncPlaybooks(db, { client: config.client, now: host.now() }, playbooksFile.playbooks);
+log.info(
+  playbooksFile.present
+    ? `playbooks: ${synced.upserted} from ${playbooksFile.file}, ${synced.disabled} disabled`
+    : `playbooks: no playbooks.yaml in ${clientDir}; ${synced.disabled} disabled`,
+);
 
 const core = createInProcessCoreToolsClient({ db, config, client: config.client, servicePrincipal });
 const deps = decisionDeps(host, core);
