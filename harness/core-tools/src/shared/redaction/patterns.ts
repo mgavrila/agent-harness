@@ -38,6 +38,17 @@ export function containsRestrictedPattern(text: string): boolean {
 }
 
 /**
+ * What text becomes when it fails the check above on its way out of the harness (invariant 10):
+ * the replacement, never the value, and never a partially masked version of it either.
+ *
+ * The host keeps a byte-identical copy for the messages it stores and posts, and the approvals
+ * app a third for the decision notes it renders. They are separate constants on purpose — each
+ * of those packages applies the rule at its own edge — but the sentence a human reads has to be
+ * one sentence, so a change here is a change in all three.
+ */
+export const WITHHELD = '(withheld: it did not pass the redaction check)';
+
+/**
  * Refuse an agent-supplied argument that looks like a restricted identifier, in the one wording
  * every staging tool uses.
  *

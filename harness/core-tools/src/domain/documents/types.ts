@@ -24,6 +24,26 @@ export interface ExtractedText {
   ocrUsed: boolean;
 }
 
+/**
+ * What `documents_read` answers with. Declared here rather than in the pack contract, unlike the
+ * ingest, classify and extract results: no pack wraps this tool, because a file's own text is
+ * the kernel's business and belongs to a client whether or not one is loaded.
+ *
+ * `from` and `to` are the range actually read, which is not always the range asked for: a
+ * caller that named no end gets the last page, and one that named a page past the end is
+ * refused rather than quietly clamped.
+ */
+export interface DocumentsReadResult {
+  id: string;
+  /** How many pages of text the document has, whatever range was read. */
+  pages: number;
+  from: number;
+  to: number;
+  /** True when the text was cut at `max_chars`; ask for the next range to see the rest. */
+  truncated: boolean;
+  text: string;
+}
+
 export interface ExtractedField {
   name: string;
   value: string;

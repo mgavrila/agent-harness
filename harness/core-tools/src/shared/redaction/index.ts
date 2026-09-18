@@ -10,7 +10,7 @@
  * `src/index.ts` re-exports all three, so an existing importer that reaches them through the
  * package root is not wrong, only broader than it needs to be.
  */
-export { containsRestrictedPattern, isValidDea, type RestrictedKind } from './patterns.js';
+export { WITHHELD, containsRestrictedPattern, isValidDea, type RestrictedKind } from './patterns.js';
 export { MASKED, isRestrictedName } from './names.js';
 export {
   assertRedacted,

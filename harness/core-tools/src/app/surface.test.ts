@@ -71,6 +71,12 @@ describe('public surface', () => {
  *
  * Plan 9 adds the four memory tools of spec 5.5 (Task 3) and the two playbook tools of spec 5.6 (Task 7).
  * Plan 10 adds the two knowledge tools of spec 5.7 (Task 6).
+ *
+ * The first live session adds one more, `documents_read`, and nothing else moves: no pack
+ * replaces it, so it lands in the recorded surface as the kernel defines it. It is the only
+ * way to see what is inside an attached file — `documents_get` never returns text — and the
+ * client it was added for has no pack, which is why it is a kernel tool rather than one of the
+ * two the publication gate withholds.
  */
 const RECORDED_TOOLS = [
   'approvals_execute',
@@ -82,6 +88,7 @@ const RECORDED_TOOLS = [
   'documents_get',
   'documents_ingest',
   'documents_list',
+  'documents_read',
   'forms_fill',
   'forms_list_templates',
   'forms_release',
@@ -111,7 +118,7 @@ describe('the four places Plan 6 moved the tool surface', () => {
   const recorded = async (): Promise<ToolSurfaceEntry[]> =>
     JSON.parse(await readFile(path.join(architecture, 'tool-surface.json'), 'utf8')) as ToolSurfaceEntry[];
 
-  it('publishes the twenty-two tools of Plan 6 less harness_set_context, plus the memory, playbook and knowledge tools of Plans 9 and 10', async () => {
+  it('publishes the twenty-two tools of Plan 6 less harness_set_context, plus the memory, playbook and knowledge tools of Plans 9 and 10, plus documents_read', async () => {
     expect((await recorded()).map((tool) => tool.name)).toEqual(RECORDED_TOOLS);
   });
 

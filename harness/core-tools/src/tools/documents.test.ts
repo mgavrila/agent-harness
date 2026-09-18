@@ -9,11 +9,13 @@ import {
   connectTools,
   makeTestDeps,
   resultOf,
+  textOf,
   useTestDb,
   startFakeGateway,
   type FakeGateway,
   type TestDepsOverrides,
 } from '../testing.js';
+import { WITHHELD } from '../shared/redaction/patterns.js';
 import { documentTextPath } from '../domain/storage/layout.js';
 import { writePdf } from '../domain/documents/pdf.test-helpers.js';
 import { recordTools } from './records.js';
@@ -370,5 +372,129 @@ describe('documents_classify and documents_extract', () => {
     expect(out).toMatchObject({ ocr_used: true, pages: 1 });
     const onDisk = await readFile(path.join(storageDir, 'incoming/license.pdf.redacted.txt'), 'utf8');
     expect(onDisk).toContain('Ada Lovelace MD');
+  });
+});
+
+describe('documents_read', () => {
+  interface ReadOut {
+    id: string;
+    pages: number;
+    from: number;
+    to: number;
+    truncated: boolean;
+    text: string;
+  }
+
+  /**
+   * Put a redacted text file beside an ingested document and point its row at it, the way
+   * `documents_extract` leaves one behind. Written here rather than produced by running the
+   * extraction pipeline, because what this suite is about is reading text back rather than
+   * producing it — and because the client this tool exists for has no pack and so never
+   * reaches that pipeline at all.
+   */
+  async function storeText(documentId: string, storagePath: string, pages: string[]): Promise<void> {
+    const abs = documentTextPath(path.join(storageDir, storagePath));
+    await writeFile(abs, pages.map((text, i) => `<<<PAGE ${i + 1}>>>\n${text}`).join('\n\n'), 'utf8');
+    await db
+      .update(documents)
+      .set({ textPath: path.relative(storageDir, abs) })
+      .where(eq(documents.id, documentId));
+  }
+
+  async function ingest(client: Awaited<ReturnType<typeof connect>>, storagePath: string): Promise<string> {
+    const out = resultOf<IngestOut>(
+      await client.callTool({ name: 'documents_ingest', arguments: { path: storagePath } }),
+    );
+    return out.document_id;
+  }
+
+  const BODY = ['First page body.', 'Second page body.'];
+
+  it('reads the stored text of a document, every page by default', async () => {
+    const client = await connect();
+    const id = await ingest(client, 'incoming/license.pdf');
+    await storeText(id, 'incoming/license.pdf', BODY);
+
+    const out = resultOf<ReadOut>(await client.callTool({ name: 'documents_read', arguments: { id } }));
+    expect(out).toMatchObject({ id, pages: 2, from: 1, to: 2, truncated: false });
+    expect(out.text).toContain('First page body.');
+    expect(out.text).toContain('Second page body.');
+  });
+
+  it('reads one page range and reports the range it read', async () => {
+    const client = await connect();
+    const id = await ingest(client, 'incoming/license.pdf');
+    await storeText(id, 'incoming/license.pdf', BODY);
+
+    const out = resultOf<ReadOut>(
+      await client.callTool({ name: 'documents_read', arguments: { id, page_from: 2, page_to: 2 } }),
+    );
+    expect(out).toMatchObject({ pages: 2, from: 2, to: 2, truncated: false });
+    expect(out.text).toBe('Second page body.');
+  });
+
+  it('refuses a range that ends before it starts, and one that starts past the last page', async () => {
+    const client = await connect();
+    const id = await ingest(client, 'incoming/license.pdf');
+    await storeText(id, 'incoming/license.pdf', BODY);
+
+    const backwards = await client.callTool({ name: 'documents_read', arguments: { id, page_from: 2, page_to: 1 } });
+    expect(backwards.isError).toBe(true);
+    const past = await client.callTool({ name: 'documents_read', arguments: { id, page_from: 9 } });
+    expect(past.isError).toBe(true);
+    expect(textOf(past)).toContain('2 page');
+  });
+
+  it('truncates at max_chars and says so', async () => {
+    const client = await connect();
+    const id = await ingest(client, 'incoming/license.pdf');
+    await storeText(id, 'incoming/license.pdf', BODY);
+
+    const out = resultOf<ReadOut>(await client.callTool({ name: 'documents_read', arguments: { id, max_chars: 5 } }));
+    expect(out.truncated).toBe(true);
+    expect(out.text).toBe('First');
+  });
+
+  it('withholds text that does not pass the restricted-pattern check', async () => {
+    // Text is written to disk redacted, so this is a last gate rather than the first one: a file
+    // that predates the redaction pass, or one a later change leaves unredacted, must not reach
+    // a model through this tool.
+    const client = await connect();
+    await writePdf(storageDir, 'incoming/unredacted.pdf', ['Request for Taxpayer Identification']);
+    const id = await ingest(client, 'incoming/unredacted.pdf');
+    await storeText(id, 'incoming/unredacted.pdf', ['Name: Ada Lovelace\nSSN: 123-45-6789']);
+
+    const out = resultOf<ReadOut>(await client.callTool({ name: 'documents_read', arguments: { id } }));
+    expect(out.text).toBe(WITHHELD);
+    expect(out.text).not.toContain('123-45-6789');
+  });
+
+  it('refuses a document another client owns, in the words documents_get uses', async () => {
+    const owner = await connect();
+    const otherDeps = makeTestDeps(db, { storageDir, client: 'other-clinic-3' });
+    const otherClient = await connectTools(
+      'other-clinic-3',
+      [...recordTools(otherDeps.packs), ...documentTools(otherDeps.packs)],
+      otherDeps,
+    );
+    const foreign = await ingest(otherClient, 'incoming/notes.txt');
+    await storeText(foreign, 'incoming/notes.txt', ['Notes that belong to somebody else.']);
+
+    const res = await owner.callTool({ name: 'documents_read', arguments: { id: foreign } });
+    expect(res.isError).toBe(true);
+    expect(textOf(res)).toContain(`document ${foreign} not found`);
+    expect(textOf(res)).not.toContain('belong to somebody else');
+  });
+
+  it('reads a document that has no text on file yet, through the parser seam', async () => {
+    // The client this tool exists for has no pack, so `documents_extract` is never published to
+    // it and nothing ever writes the text file. Reading has to reach the document itself,
+    // redacting as it goes, or this tool would answer "no text on file" for everything such a
+    // client ingests — which is the whole case it was added for.
+    const client = await connect();
+    const id = await ingest(client, 'incoming/license.pdf');
+    const out = resultOf<ReadOut>(await client.callTool({ name: 'documents_read', arguments: { id } }));
+    expect(out.pages).toBe(2);
+    expect(out.text).toContain('Ada Lovelace MD');
   });
 });

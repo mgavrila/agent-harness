@@ -1,4 +1,4 @@
-import { unlink, writeFile } from 'node:fs/promises';
+import { readFile, unlink, writeFile } from 'node:fs/promises';
 import { and, eq } from 'drizzle-orm';
 import * as z from 'zod/v4';
 import { documents } from '@harness/db';
@@ -11,6 +11,7 @@ import type {
   RecordKindSpec,
 } from '@harness/pack-api';
 import type { ToolDeps } from '../tooling/types.js';
+import { WITHHELD, containsRestrictedPattern } from '../../shared/redaction/patterns.js';
 import { assertRedacted, redactPages } from '../../shared/redaction/text.js';
 import { documentTextPath, toStorageRelative } from '../storage/layout.js';
 import { readDocumentBytes, resolveStoragePath, sha256File } from '../storage/file-store.js';
@@ -22,7 +23,7 @@ import { pdfPageCount } from './text.js';
 import { buildClassificationSchema, buildExtractionSchema } from './schema.js';
 import { buildClassificationMessages, buildExtractionMessages } from './prompts.js';
 import { parseExtraction } from './parse.js';
-import type { ExtractedField } from './types.js';
+import type { DocumentsReadResult, ExtractedField, PageText } from './types.js';
 
 /** One document as the `documents_*` tools report it. */
 export function documentView(row: typeof documents.$inferSelect): DocumentRecordView {
@@ -67,6 +68,95 @@ export async function listDocuments(deps: ToolDeps, recordId?: string): Promise<
     .where(and(...conditions));
   rows.sort((a, b) => b.ingestedAt.getTime() - a.ingestedAt.getTime());
   return rows.map(documentView);
+}
+
+/**
+ * How much text `documents_read` returns when the caller names no ceiling of its own. Big enough
+ * that an ordinary attachment comes back whole, small enough that a long one cannot fill a run's
+ * context in a single call: past it the reply is cut and `truncated` says so, and the caller asks
+ * for the next page range.
+ */
+export const DOCUMENT_READ_MAX_CHARS = 20_000;
+
+/** Every page of a document's text file, in the format `renderDocumentText` below writes. */
+function pagesFromText(raw: string): PageText[] {
+  const parts = raw.split(/(?:^|\n\n)<<<PAGE (\d+)>>>\n/);
+  const pages: PageText[] = [];
+  for (let i = 1; i + 1 < parts.length; i += 2) {
+    pages.push({ num: Number(parts[i]), text: parts[i + 1] });
+  }
+  // A file with no heading in it at all is one page: the format is this module's own, but a
+  // caller asking to read a document is owed its text rather than an empty answer.
+  return pages.length > 0 ? pages : [{ num: 1, text: raw }];
+}
+
+/** The text file's contents. One function, so the writer and the reader above cannot drift apart. */
+function renderDocumentText(pages: readonly PageText[]): string {
+  return pages.map((p) => `<<<PAGE ${p.num}>>>\n${p.text}`).join('\n\n');
+}
+
+/**
+ * `documents_read`: hand back a document's redacted text, a page range at a time.
+ *
+ * Two sources, in order. A document that has been through `documents_extract` has its redacted
+ * text on disk already and it is read from there. One that has not — every document a client
+ * with no pack ingests, since extraction needs a pack to have somewhere to write — is read
+ * through the parser seam and redacted in this process, and nothing is written back: this is a
+ * `read`, and the sidecar is the extraction's to produce.
+ *
+ * The check on the way out is the same one the host applies to a reply: text that still looks
+ * like it carries a restricted identifier is replaced wholesale rather than handed over.
+ */
+export async function readDocumentText(
+  deps: ToolDeps,
+  args: { id: string; page_from?: number; page_to?: number; max_chars: number },
+): Promise<DocumentsReadResult> {
+  const { id, max_chars } = args;
+  const row = await requireDocument(deps, id);
+  const pages = row.textPath === null ? await parseForReading(deps, row) : await readStoredText(deps, row.textPath);
+
+  const from = args.page_from ?? 1;
+  const to = args.page_to ?? pages.length;
+  // The end of the document is checked before the shape of the range, so that a `page_from` past
+  // the last page is told how long the document is rather than told its range runs backwards —
+  // which is what a caller that named no `page_to` would otherwise read, since the default end
+  // is the last page.
+  if (from > pages.length) {
+    throw new ToolError(`document ${id} has ${pages.length} page(s), so there is no page ${from} to read`);
+  }
+  if (to < from) throw new ToolError(`page_to ${to} is before page_from ${from}`);
+  // Sliced by position rather than by the number in the heading: a document whose text was
+  // produced from a subset of its pages still answers "page 1" for the first thing in it.
+  const selected = pages.slice(from - 1, to);
+  const joined = selected.map((p) => p.text).join('\n\n');
+  const truncated = joined.length > max_chars;
+  const text = truncated ? joined.slice(0, max_chars) : joined;
+  return {
+    id,
+    pages: pages.length,
+    from,
+    to: from + selected.length - 1,
+    truncated,
+    text: containsRestrictedPattern(text) ? WITHHELD : text,
+  };
+}
+
+/** The redacted text already on disk. The stored path is checked against the root like any other. */
+async function readStoredText(deps: ToolDeps, textPath: string): Promise<PageText[]> {
+  const abs = await resolveStoragePath(deps.storageDir, textPath);
+  try {
+    return pagesFromText(await readFile(abs, 'utf8'));
+  } catch {
+    // The path came off the row, not off the caller, and naming it tells the agent nothing it
+    // could not read from `documents_get`.
+    throw new ToolError(`cannot read the text of document ${textPath}`);
+  }
+}
+
+/** A document with no text on file: parse it now and redact it here, writing nothing. */
+async function parseForReading(deps: ToolDeps, row: typeof documents.$inferSelect): Promise<PageText[]> {
+  const { pages } = await deps.parser.extract(row.storagePath);
+  return redactPages(pages).pages;
 }
 
 /**
@@ -364,7 +454,7 @@ export async function extractDocument(
   // same document computes the same path and overwrites it. If the write
   // itself fails partway, remove whatever landed.
   try {
-    await writeFile(textAbs, redacted.map((p) => `<<<PAGE ${p.num}>>>\n${p.text}`).join('\n\n'), 'utf8');
+    await writeFile(textAbs, renderDocumentText(redacted), 'utf8');
   } catch (err) {
     await unlink(textAbs).catch(() => {});
     throw err;

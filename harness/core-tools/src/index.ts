@@ -177,7 +177,7 @@ export { assertInsideRoot, realOrNearestAncestor, type EscapeReason, type Inside
 export { runBounded, type RunBoundedOptions, type RunBoundedOutcome } from '@harness/shared';
 export { readJsonl, writeJsonl, type JsonlRow } from '@harness/shared';
 export { csvCell } from '@harness/shared';
-export { containsRestrictedPattern, isValidDea, type RestrictedKind } from './shared/redaction/patterns.js';
+export { WITHHELD, containsRestrictedPattern, isValidDea, type RestrictedKind } from './shared/redaction/patterns.js';
 export { MASKED, isRestrictedName } from './shared/redaction/names.js';
 export {
   assertRedacted,

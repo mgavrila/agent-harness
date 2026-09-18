@@ -10,7 +10,7 @@ const packs = registryOf([]);
 
 /**
  * A client with no pack at all — an internal team that wants memory, playbooks, knowledge,
- * approvals and files and no product area. Seventeen tools today: the kernel's twenty-four, less
+ * approvals and files and no product area. Eighteen tools today: the kernel's twenty-five, less
  * the five generic `records_*` tools no record kind wants and the two `documents_*` tools that
  * need a pack to reach. The counts are derived from the catalogue rather than written out: a
  * number copied into a test is a number that goes stale the next time the kernel gains a tool,
@@ -42,7 +42,19 @@ describe('a deployment with no pack', () => {
     const client = await connectTestClient(() => createCoreToolsServer(deps));
     const names = (await client.listTools()).tools.map((t) => t.name);
     for (const name of PACK_DOCUMENT_TOOLS) expect(names).not.toContain(name);
-    for (const name of ['documents_ingest', 'documents_get', 'documents_list']) expect(names).toContain(name);
+    for (const name of ['documents_ingest', 'documents_get', 'documents_list', 'documents_read']) {
+      expect(names).toContain(name);
+    }
+  });
+
+  it('publishes documents_read, which is the only way this client can see inside a file at all', async () => {
+    // `documents_get` never returns text and the two tools above are withheld here, so without
+    // this one an assistant with no pack could register an attachment and then say nothing
+    // about it.
+    const deps = makeTestDeps(db, { packs });
+    const client = await connectTestClient(() => createCoreToolsServer(deps));
+    const read = (await client.listTools()).tools.find((t) => t.name === 'documents_read');
+    expect(read?.inputSchema.properties).toHaveProperty('page_from');
   });
 
   it('serves that catalogue over MCP, so no schema is built from a pack declaration that is not there', async () => {
