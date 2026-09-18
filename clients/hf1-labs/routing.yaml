@@ -7,7 +7,7 @@
 routes:
   # Interactive Slack turns.
   chat:
-    model: gemini/gemini-3-flash-preview
+    model: gemini/gemini-2.5-flash
     daily_budget_usd: 3
 
   # Document classification and field extraction. Needs a response schema.
