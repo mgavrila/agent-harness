@@ -74,7 +74,28 @@ export interface ParsedExtraction {
  * because core-tools does not depend on the worker.
  */
 export interface ParsedDocument extends ExtractedText {
-  text: string;
+  /**
+   * The same pages joined by a blank line, for a caller that wants one string.
+   *
+   * Optional, and no caller in this package asks for it. `localParser` leaves it out rather than
+   * building a second complete copy of a document's text beside the pages it already returned —
+   * `documents_read` slices at most `max_chars` out of the pages and would hold both. The files
+   * worker still sends it, because it is on that wire shape, and `remoteParser` drops it there.
+   */
+  text?: string;
+}
+
+/**
+ * The pages a caller wants, 1-based and inclusive, as a hint to whatever does the parsing.
+ *
+ * A hint rather than a contract: a parser that ignores it and returns the whole document is
+ * correct, only slower, because every caller selects by `PageText.num` afterwards. What it buys
+ * where it is honoured is the expensive half — `ocrPdf` rasterises and reads one page at a time,
+ * so a range is the difference between three pages and five hundred.
+ */
+export interface PageRange {
+  from: number;
+  to: number;
 }
 
 /**
@@ -87,5 +108,5 @@ export interface ParsedDocument extends ExtractedText {
  * outside it — by both implementations, before anything is read or sent.
  */
 export interface DocumentParser {
-  extract(relPath: string): Promise<ParsedDocument>;
+  extract(relPath: string, range?: PageRange): Promise<ParsedDocument>;
 }

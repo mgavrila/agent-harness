@@ -19,11 +19,11 @@ import { callModelJson } from '../models/gateway.js';
 import type { ModelMessage } from '../models/types.js';
 import { requireRecord, upsertRecord } from '../records/repository.js';
 import type { AttachmentInput, FieldInput } from '../records/types.js';
-import { pdfPageCount } from './text.js';
+import { MAX_PARSE_PAGES, pdfPageCount } from './text.js';
 import { buildClassificationSchema, buildExtractionSchema } from './schema.js';
 import { buildClassificationMessages, buildExtractionMessages } from './prompts.js';
 import { parseExtraction } from './parse.js';
-import type { DocumentsReadResult, ExtractedField, PageText } from './types.js';
+import type { DocumentsReadResult, ExtractedField, PageRange, PageText } from './types.js';
 
 /** One document as the `documents_*` tools report it. */
 export function documentView(row: typeof documents.$inferSelect): DocumentRecordView {
@@ -113,29 +113,35 @@ export async function readDocumentText(
 ): Promise<DocumentsReadResult> {
   const { id, max_chars } = args;
   const row = await requireDocument(deps, id);
-  const pages = row.textPath === null ? await parseForReading(deps, row) : await readStoredText(deps, row.textPath);
+  const stored = row.textPath === null ? null : await readStoredText(deps, row.textPath);
+  // How many pages there are to read: the stored text's own, which is what the extraction wrote,
+  // and otherwise the count `documents_ingest` recorded off the file. Asked before anything is
+  // parsed, so the range below can be settled without reading the document at all.
+  const total = stored?.length ?? row.pages ?? 1;
 
   const from = args.page_from ?? 1;
-  const to = args.page_to ?? pages.length;
+  const to = args.page_to ?? total;
   // The end of the document is checked before the shape of the range, so that a `page_from` past
   // the last page is told how long the document is rather than told its range runs backwards —
   // which is what a caller that named no `page_to` would otherwise read, since the default end
   // is the last page.
-  if (from > pages.length) {
-    throw new ToolError(`document ${id} has ${pages.length} page(s), so there is no page ${from} to read`);
-  }
+  if (from > total) throw new ToolError(`document ${id} has ${total} page(s), so there is no page ${from} to read`);
   if (to < from) throw new ToolError(`page_to ${to} is before page_from ${from}`);
-  // Sliced by position rather than by the number in the heading: a document whose text was
-  // produced from a subset of its pages still answers "page 1" for the first thing in it.
-  const selected = pages.slice(from - 1, to);
+  const last = Math.min(to, total);
+
+  const pages = stored ?? (await parseForReading(deps, row, { from, to: last }));
+  // Selected on the page number rather than on position in the array. The range handed to the
+  // parser is a hint: one that honours it returns those pages and one that ignores it returns
+  // all of them, and this is what makes both answer the same thing.
+  const selected = pages.filter((p) => p.num >= from && p.num <= last);
   const joined = selected.map((p) => p.text).join('\n\n');
   const truncated = joined.length > max_chars;
   const text = truncated ? joined.slice(0, max_chars) : joined;
   return {
     id,
-    pages: pages.length,
+    pages: total,
     from,
-    to: from + selected.length - 1,
+    to: last,
     truncated,
     text: containsRestrictedPattern(text) ? WITHHELD : text,
   };
@@ -153,9 +159,27 @@ async function readStoredText(deps: ToolDeps, textPath: string): Promise<PageTex
   }
 }
 
-/** A document with no text on file: parse it now and redact it here, writing nothing. */
-async function parseForReading(deps: ToolDeps, row: typeof documents.$inferSelect): Promise<PageText[]> {
-  const { pages } = await deps.parser.extract(row.storagePath);
+/**
+ * A document with no text on file: parse it now and redact it here, writing nothing.
+ *
+ * Refused above the page cap rather than begun. Parsing a scan is one rasterise and one OCR pass
+ * per page, bounded per page and run in sequence, so the wall clock for the call is the page
+ * count times those bounds — and the count is on the row already, which means the size of the job
+ * is known before any of it is started. The same number the files worker refuses at, so a
+ * document Compose will not read is not one bare metal accepts.
+ */
+async function parseForReading(
+  deps: ToolDeps,
+  row: typeof documents.$inferSelect,
+  range: PageRange,
+): Promise<PageText[]> {
+  const count = row.pages ?? 1;
+  if (count > MAX_PARSE_PAGES) {
+    throw new ToolError(
+      `document ${row.id} has ${count} pages, over the ${MAX_PARSE_PAGES}-page limit for reading a document with no text on file`,
+    );
+  }
+  const { pages } = await deps.parser.extract(row.storagePath, range);
   return redactPages(pages).pages;
 }
 

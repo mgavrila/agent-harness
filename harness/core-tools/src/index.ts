@@ -112,6 +112,7 @@ export {
 export {
   type DocumentParser,
   type ExtractedText,
+  type PageRange,
   type PageText,
   type ParsedDocument,
   type ParsedExtraction,

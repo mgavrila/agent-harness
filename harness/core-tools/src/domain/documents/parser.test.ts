@@ -6,7 +6,7 @@ import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { ToolError } from '@harness/shared';
 import { writePdf } from './pdf.test-helpers.js';
-import { localParser, remoteParser } from './parser.js';
+import { joinPages, localParser, remoteParser } from './parser.js';
 
 let storageDir: string;
 
@@ -28,7 +28,17 @@ describe('localParser', () => {
     expect(out.pages.map((p) => p.num)).toEqual([1, 2]);
     expect(out.pages[1].text).toContain('A98765');
     expect(out.ocrUsed).toBe(false);
-    expect(out.text).toBe(`${out.pages[0].text}\n\n${out.pages[1].text}`);
+    // No joined copy: building one here would be the whole document over again beside the pages
+    // just returned, and nothing in this package reads it. `joinPages` is what a caller that
+    // wants one string calls.
+    expect(out.text).toBeUndefined();
+    expect(joinPages(out.pages)).toBe(`${out.pages[0].text}\n\n${out.pages[1].text}`);
+  });
+
+  it('reads only the pages of a range that is asked for', async () => {
+    const out = await localParser(storageDir).extract('incoming/two-pages.pdf', { from: 2, to: 2 });
+    expect(out.pages.map((p) => p.num)).toEqual([2]);
+    expect(out.pages[0].text).toContain('A98765');
   });
 
   it('refuses a path outside the storage root before touching the filesystem', async () => {
@@ -64,7 +74,9 @@ describe('remoteParser', () => {
     requests.length = 0;
     reply = { status: 200, body: { pages: [{ num: 1, text: 'hello' }], text: 'hello', ocrUsed: true } };
     const out = await remoteParser(`${base}/`, storageDir).extract('incoming/two-pages.pdf');
-    expect(out).toEqual({ pages: [{ num: 1, text: 'hello' }], text: 'hello', ocrUsed: true });
+    // The worker's `text` is checked as part of its wire shape and then dropped: it is the pages
+    // over again, and holding it here is a second complete copy of the document.
+    expect(out).toEqual({ pages: [{ num: 1, text: 'hello' }], ocrUsed: true });
     expect(requests).toEqual([{ url: '/extract', body: { path: 'incoming/two-pages.pdf' } }]);
   });
 

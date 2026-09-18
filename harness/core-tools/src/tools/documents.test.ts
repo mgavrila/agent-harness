@@ -16,6 +16,7 @@ import {
   type TestDepsOverrides,
 } from '../testing.js';
 import { WITHHELD } from '../shared/redaction/patterns.js';
+import { MAX_PARSE_PAGES } from '../domain/documents/text.js';
 import { documentTextPath } from '../domain/storage/layout.js';
 import { writePdf } from '../domain/documents/pdf.test-helpers.js';
 import { recordTools } from './records.js';
@@ -484,6 +485,58 @@ describe('documents_read', () => {
     expect(res.isError).toBe(true);
     expect(textOf(res)).toContain(`document ${foreign} not found`);
     expect(textOf(res)).not.toContain('belong to somebody else');
+  });
+
+  it('refuses a document over the page cap instead of parsing it, naming the limit', async () => {
+    // Parsing is rasterising and OCR-ing every page, at up to three minutes a page. The row
+    // already carries the page count, so the size of the job is known before any of it starts and
+    // a document too big to read is refused rather than begun.
+    let parsed = 0;
+    const capped = makeTestDeps(db, {
+      storageDir,
+      parser: {
+        extract: async () => {
+          parsed += 1;
+          return { pages: [{ num: 1, text: 'never reached' }], ocrUsed: false };
+        },
+      },
+    });
+    const client = await connectTools('capped', [...recordTools(capped.packs), ...documentTools(capped.packs)], capped);
+    const id = await ingest(client, 'incoming/notes.txt');
+    await db
+      .update(documents)
+      .set({ pages: MAX_PARSE_PAGES + 1 })
+      .where(eq(documents.id, id));
+
+    const res = await client.callTool({ name: 'documents_read', arguments: { id } });
+    expect(res.isError).toBe(true);
+    expect(textOf(res)).toContain(`over the ${MAX_PARSE_PAGES}-page limit`);
+    expect(parsed).toBe(0);
+  });
+
+  it('asks the parser for only the pages the caller wants, and selects by page number', async () => {
+    // A range the parser honours is a range it does not rasterise the rest of the document for.
+    // Selecting on `num` rather than on position is what keeps that safe: a parser that ignores
+    // the hint and returns every page still yields exactly the pages asked for.
+    const ranges: unknown[] = [];
+    const ranged = makeTestDeps(db, {
+      storageDir,
+      parser: {
+        extract: async (_relPath, range) => {
+          ranges.push(range);
+          return { pages: [{ num: 2, text: 'Only page two.' }], ocrUsed: false };
+        },
+      },
+    });
+    const client = await connectTools('ranged', [...recordTools(ranged.packs), ...documentTools(ranged.packs)], ranged);
+    const id = await ingest(client, 'incoming/license.pdf');
+
+    const out = resultOf<ReadOut>(
+      await client.callTool({ name: 'documents_read', arguments: { id, page_from: 2, page_to: 2 } }),
+    );
+    expect(ranges).toEqual([{ from: 2, to: 2 }]);
+    expect(out).toMatchObject({ pages: 2, from: 2, to: 2 });
+    expect(out.text).toBe('Only page two.');
   });
 
   it('reads a document that has no text on file yet, through the parser seam', async () => {
