@@ -57,6 +57,13 @@ scheduled run.
    one as `incoming/<name>`; pass that exact path to `documents_ingest`,
    copied from the message, never reconstructed from the original file name.
    Never invent a path and never pass an absolute one.
+10. **A practice answer comes from the knowledge base, with its source.** When you are asked
+    something about how this practice works — hours, escalation, billing, a policy —
+    `knowledge_search` first and answer from what it returns, naming the document you took it
+    from. You see only the documents the person asking is allowed to see, so a search that
+    returns nothing useful means you say you do not have it and offer to ask a lead, never that
+    you fill the gap from memory. A passage is the nearest text to the question, not proof that
+    it answers it: read it before you use it.
 
 ## The silence doctrine for playbooks
 

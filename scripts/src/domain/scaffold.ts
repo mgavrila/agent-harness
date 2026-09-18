@@ -3,11 +3,12 @@
  *
  *   pnpm new-client --pack healthcare --name river-clinic
  *
- * A client is content and configuration, never code: five files and an env example.
+ * A client is content and configuration, never code: five files, an env example and a
+ * knowledge folder.
  * This copies `clients/demo-practice` and rewrites the client slug and display name. It
  * deliberately does not touch `.env`, because secrets are the operator's job.
  */
-import { access, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -32,6 +33,14 @@ const TEMPLATE_FILES = [
   'playbooks.yaml',
   '.env.example',
 ] as const;
+
+/**
+ * Directories copied whole, file by file. Only markdown is taken: a client's knowledge folder is
+ * documents, and a stray binary in the template is not something a new client should inherit. A
+ * template with no such directory simply reports it under `skipped`, exactly as a missing file is
+ * reported, because a client with no knowledge base is an ordinary client.
+ */
+const TEMPLATE_DIRS = ['knowledge'] as const;
 
 export interface NewClientOptions {
   pack: string;
@@ -116,6 +125,19 @@ export async function newClient(opts: NewClientOptions): Promise<NewClientResult
       }
       await copyTextFile(from, path.join(dir, relative), templateSlug, name);
       files.push(relative);
+    }
+    for (const directory of TEMPLATE_DIRS) {
+      const from = path.join(templateDir, directory);
+      if (!(await exists(from))) {
+        skipped.push(`${directory}/`);
+        continue;
+      }
+      for (const entry of (await readdir(from, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name))) {
+        if (!entry.isFile() || !entry.name.endsWith('.md')) continue;
+        const relative = `${directory}/${entry.name}`;
+        await copyTextFile(path.join(templateDir, relative), path.join(dir, relative), templateSlug, name);
+        files.push(relative);
+      }
     }
   } catch (err) {
     // Never leave a half-written client directory behind: a retry should

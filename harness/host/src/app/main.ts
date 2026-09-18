@@ -26,7 +26,7 @@ import { readPlaybooksFile } from '../domain/playbooks/schema.js';
 import { SCHEDULER_TICK_MS, startScheduler } from '../domain/playbooks/scheduler.js';
 import { decisionDeps } from '../domain/resume.js';
 import { loadRuntime } from '../domain/runtime/registry.js';
-import { readSkillCatalogue } from '../domain/skills.js';
+import { kernelSkillsDir, readSkillCatalogue } from '../domain/skills.js';
 
 const log = createLogger('host');
 
@@ -110,7 +110,10 @@ const host: Host = {
   surfaces,
   runtime,
   persona: await readPersona(clientDir),
-  skills: await readSkillCatalogue(config.packs.skillsDirs()),
+  // The kernel's own skills first, then every pack's, so a pack cannot shadow one by name: the
+  // catalogue is built in directory order and `readSkillCatalogue` refuses a duplicate directory
+  // name within one directory, not across two.
+  skills: await readSkillCatalogue([kernelSkillsDir(), ...config.packs.skillsDirs()]),
   model: { baseUrl: config.gateway.baseUrl, apiKey: config.gateway.apiKey, route: 'chat', fallbackRoute: 'reason' },
   budget: {
     maxModelCalls: numberFromEnv('HARNESS_RUN_MAX_MODEL_CALLS', 30, { min: 1, max: 1_000, integer: true }),
