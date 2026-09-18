@@ -1,6 +1,5 @@
 AMA's knowledge base: one markdown document per topic, each with a `title` and a `min_level`
 in its frontmatter. `knowledge_sync` reads every `.md` in this folder and `knowledge_search`
-answers from it, which is why this placeholder is not markdown — anything with a `.md` suffix
-here becomes a document AMA will quote. See "Knowledge" in docs/runbook.md, and
-clients/demo-practice/knowledge for two worked examples. Empty for now: a search returns
-nothing and AMA says she does not have it.
+answers from it, which is why this file is not markdown — anything with a `.md` suffix here
+becomes a document AMA will quote. The playbook beside it syncs the folder every morning. See
+"Knowledge" in docs/runbook.md, and clients/demo-practice/knowledge for two worked examples.

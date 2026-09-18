@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { decide, loadIdentity, loadPolicy, type PlaybookRow } from '@harness/core-tools';
+import { decide, loadIdentity, loadPolicy, readKnowledgeFolder, type PlaybookRow } from '@harness/core-tools';
 import { createLogger } from '@harness/shared';
 import { COORDINATOR, PLAYBOOKS_PRINCIPAL, hostFixture, testKernelConfig, useTestDb } from '../../testing.js';
 import { kernelSkillsDir, readSkillCatalogue } from '../skills.js';
@@ -142,9 +142,49 @@ describe('the shipped demo playbooks (I1)', () => {
 describe('the shipped hf1-labs client', () => {
   const clientDir = path.join(repoRoot, 'clients', 'hf1-labs');
 
-  it('schedules nothing yet, and says so in the form the host parses', async () => {
+  it('syncs its knowledge folder every morning, and preflights on the kernel skill alone', async () => {
     const { playbooks } = await readPlaybooksFile(clientDir);
-    expect(playbooks).toEqual([]);
+    expect(playbooks.map((p) => p.name)).toEqual(['knowledge-sync']);
+    const [sync] = playbooks;
+    expect(sync).toMatchObject({
+      schedule: '0 7 * * *',
+      timezone: 'Europe/Bucharest',
+      skill: 'knowledge-sync',
+      principal: 'svc-playbooks',
+      deliver: 'none',
+      cost_cap_usd: 0.5,
+      timeout_s: 300,
+      enabled: true,
+    });
+
+    const f = await hostFixture(db, { trajectory: [] });
+    f.host.identity = await loadIdentity('@harness/identity-static', { env: {}, log: f.host.log, clientDir });
+    // The kernel's own skills directory and nothing else: this client loads no pack of its own,
+    // so a playbook that needed one would fail here rather than on the first firing.
+    f.host.skills = await readSkillCatalogue([kernelSkillsDir()]);
+    const result = await preflightPlaybook(
+      f.host,
+      row({
+        name: sync.name,
+        schedule: sync.schedule,
+        timezone: sync.timezone,
+        skill: sync.skill,
+        principalId: sync.principal,
+        surface: sync.surface ?? null,
+        costCapUsd: sync.cost_cap_usd,
+        timeoutS: sync.timeout_s,
+      }),
+    );
+    expect(result).toMatchObject({ ok: true });
+  });
+
+  it('ships one knowledge document, which parses and every member may read', async () => {
+    const docs = await readKnowledgeFolder(path.join(clientDir, 'knowledge'));
+    expect(docs.map((d) => [d.path, d.title, d.minLevel])).toEqual([['team.md', 'The HF1 Labs team', 'member']]);
+    // Nobody is named on it, so `min_level` alone decides who sees it, and every teammate the
+    // `defaults` rule admits is a member.
+    expect(docs[0].principals).toEqual([]);
+    expect(docs[0].body).toContain('Who does what at HF1 Labs');
   });
 
   it('declares its three admins and admits everyone else in the workspace as a member', async () => {
