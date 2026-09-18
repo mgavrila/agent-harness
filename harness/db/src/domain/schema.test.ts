@@ -12,6 +12,9 @@ import {
   playbooks,
   runs,
   threads,
+  knowledgeChunks,
+  knowledgeDocuments,
+  knowledgeSources,
 } from './schema.js';
 
 let db: Db;
@@ -202,6 +205,59 @@ describe('schema', () => {
         costCapUsd: 1,
       }),
     ).rejects.toThrow();
+  });
+
+  it('stores a knowledge source, a document and its chunks, and drops the chunks with the document', async () => {
+    const [source] = await db
+      .insert(knowledgeSources)
+      .values({ client: 'test', name: 'client-folder', kind: 'folder', location: 'clients/test/knowledge' })
+      .returning();
+    expect(source.lastSyncedAt).toBeNull();
+    const [document] = await db
+      .insert(knowledgeDocuments)
+      .values({
+        client: 'test',
+        sourceId: source.id,
+        path: 'front-desk.md',
+        title: 'Front desk',
+        sha256: 'a'.repeat(64),
+        minLevel: 'member',
+        minRank: 0,
+      })
+      .returning();
+    expect(document).toMatchObject({ principals: [], deletedAt: null });
+    await db.insert(knowledgeChunks).values([
+      {
+        documentId: document.id,
+        client: 'test',
+        ordinal: 0,
+        text: 'the office closes at five',
+        embedding: Array.from({ length: 1024 }, () => 0.01),
+        minLevel: 'member',
+        minRank: 0,
+      },
+      {
+        documentId: document.id,
+        client: 'test',
+        ordinal: 1,
+        text: 'escalate anything urgent',
+        embedding: Array.from({ length: 1024 }, () => 0.02),
+        minLevel: 'lead',
+        minRank: 2,
+        principals: ['u-coordinator'],
+      },
+    ]);
+    expect(await db.$count(knowledgeChunks)).toBe(2);
+    // The generated tsvector is filled by Postgres, so full-text search needs no writer.
+    const matched = await db
+      .select({ ordinal: knowledgeChunks.ordinal })
+      .from(knowledgeChunks)
+      .where(sql`${knowledgeChunks.tsv} @@ plainto_tsquery('english', 'office closes')`);
+    expect(matched).toEqual([{ ordinal: 0 }]);
+    // And the cascade: deleting the document takes its chunks with it, which is what lets a
+    // re-sync replace a document's chunks in one statement.
+    await db.delete(knowledgeDocuments).where(eq(knowledgeDocuments.id, document.id));
+    expect(await db.$count(knowledgeChunks)).toBe(0);
   });
 });
 

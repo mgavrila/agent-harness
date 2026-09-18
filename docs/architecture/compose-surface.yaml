@@ -179,7 +179,7 @@ services:
         - CMD-SHELL
         - pg_isready -U harness -d harness
       timeout: 3s
-    image: postgres:16
+    image: pgvector/pgvector:pg16
     networks:
       default: null
     ports:

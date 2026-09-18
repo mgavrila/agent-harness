@@ -20,7 +20,11 @@ name: agent-harness
 
 services:
   postgres:
-    image: postgres:16
+    # Postgres 16 with pgvector (spec section 7): migration 0013 declares `embedding vector(1024)`
+    # and `runMigrations` installs the extension before migrating, which a plain postgres:16
+    # cannot answer. Same major version, same data directory layout, so an existing pgdata volume
+    # is reused as it is — see "Upgrading from Plan 9" in docs/runbook.md.
+    image: pgvector/pgvector:pg16
     environment:
       POSTGRES_USER: harness
       POSTGRES_PASSWORD: harness
