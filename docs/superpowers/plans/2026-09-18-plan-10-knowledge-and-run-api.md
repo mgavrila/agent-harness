@@ -8,26 +8,26 @@
 
 **Tech Stack:** Node `>=22`, pnpm `11.4.0`, TypeScript 7 in every package (`typescript@6.0.3` at the workspace root only), ESM only, zod v4 as `import * as z from 'zod/v4'`, drizzle-orm `^0.45.2` + drizzle-kit `^0.31.10`, `@modelcontextprotocol/server`/`client` v2, vitest 5, Postgres 16 with pgvector 0.8.6. **No new third-party dependency.** One new workspace package, `@harness/surface-http`, which depends only on `@harness/surface-api` and `@harness/shared`, as every adapter does.
 
-**Spec:** `docs/superpowers/specs/2026-09-17-kernel-design.md` — this plan is the row "10 Knowledge and run API" of its section 10. It implements section 5.7 (knowledge), section 5.8 (the run API), migration 0013 of section 6, the `knowledge/` folder and the `embed` route of section 7, invariants 7 and 10 of section 8 as they apply to `knowledge_chunks`, and the exit criterion "a cited answer from `clients/demo-practice/knowledge/` at the caller's level; a run driven over HTTP streams and cancels". It starts from `worktree-plan-10-knowledge-run-api` at `be12228` (main after Plans 7-9), which is Plan 9's final head (`main` at `c0a14ba` plus Plan 9); Plan 9's pull request is in review and this branch is rebased onto `main` when it merges.
+**Spec:** `docs/superpowers/specs/2026-09-17-kernel-design.md` — this plan is the row "10 Knowledge and run API" of its section 10. It implements section 5.7 (knowledge), section 5.8 (the run API), migration 0013 of section 6, the `knowledge/` folder and the `embed` route of section 7, invariants 7 and 10 of section 8 as they apply to `knowledge_chunks`, and the exit criterion "a cited answer from `clients/demo-practice/knowledge/` at the caller's level; a run driven over HTTP streams and cancels". It starts from `worktree-plan-10-knowledge-run-api` at `be12228`, which **is** `main`: Plan 9 merged as "Merge pull request #3: Plan 9 — memory and playbooks". There is no rebase pending.
 
 ## Global Constraints
 
 Every task's requirements implicitly include this section.
 
 - Node `>=22`; pnpm `11.4.0`; TypeScript 7 (`^7.0.2`) in every package, `typescript@6.0.3` at the workspace root only for typescript-eslint and never changed; ESM only; zod v4 imported as `import * as z from 'zod/v4'`; vitest `^5.0.0`; drizzle-orm `^0.45.2`.
-- **The four gates pass at the end of every task, at zero errors:** `pnpm -r typecheck`, `pnpm lint` (zero errors; the type-aware warnings are a known backlog), `pnpm arch` (zero violations: every rule is an error), `pnpm format:check`, and `pnpm test` (lint, then every package's suite; needs Postgres on `TEST_DATABASE_URL=postgres://harness:harness@localhost:15432/harness_test`, see `.env.example`; the suites run serially — `fileParallelism: false`). No task ends red and no gate is parked.
+- **The four gates pass at the end of every task, at zero errors:** `pnpm -r typecheck`, `pnpm lint` (zero errors; the type-aware warnings are a known backlog), `pnpm arch` (zero violations: every rule is an error), `pnpm format:check`, and `pnpm test` (lint, then every package's suite; needs Postgres on whatever `TEST_DATABASE_URL` names — in this worktree `postgres://harness:harness@localhost:15433/harness_test`, a pgvector database; see `.env.example` and the Facts table; the suites run serially — `fileParallelism: false`). No task ends red and no gate is parked.
 - **Migrations:** edit `harness/db/src/domain/schema.ts`, then from `harness/db/` run `pnpm drizzle-kit generate` twice — the second run must print "No schema changes". Never `--custom`, and **never hand-edit a generated `.sql` file**. **Task 1 is the one migration of this plan, `0013_knowledge`.** No other task touches `schema.ts` or `drizzle/`.
 - **New environment variables, and only these three:** `HARNESS_EMBED_DIMS` (Task 2), `HARNESS_HOST_TOKEN` and `HARNESS_HOST_BIND` (Task 9), plus `HARNESS_HOST_PORT` (Task 9; see decision 12 for why the spec's bind needs a port beside it) and the Compose-only `HARNESS_HOST_PUBLISHED_PORT` (Task 10, read by no TypeScript). Each is documented in `.env.example` **by the task that first reads it**, because `harness/core-tools/src/app/surface.test.ts` scans every non-test source file for environment reads and fails on a name the example file does not document.
 - **Snapshots.** The tool-surface snapshot (`docs/architecture/tool-surface.json`) changes in **Task 6** only, which adds `knowledge_search` and `knowledge_sync`, re-records with `pnpm surface:record`, extends `RECORDED_TOOLS` in `harness/core-tools/src/app/surface.test.ts` from 28 to 30 names and moves the published-tool count in `harness/core-tools/src/app/dual-pack.test.ts` from 33 to 35. The Compose snapshot (`docs/architecture/compose-surface.yaml`) changes in **Task 1** (the Postgres image) and **Task 10** (the host's new port and variables) and in no other task. Every other task leaves both snapshots byte-identical, which `git status --short docs/architecture` proves.
 - **One new package: `@harness/surface-http` (Task 8).** It adds one `PACKAGES` row and one `WORKSPACE_DIRS` entry to `.dependency-cruiser.cjs`, exactly as the file's "HOW A NEW PACKAGE IS ADDED" note says, and nothing else there changes. **No new third-party dependency anywhere**: the API server is `node:http`, the Server-Sent Events writer is ours, and the chunker is ours (see the Facts table for why each was not a package).
 - **No framework import outside `runtimes/deepagents`.** Nothing in this plan imports `langchain`, `langgraph` or `deepagents`; the chunker is a `RecursiveCharacterTextSplitter`-equivalent written in `harness/core-tools/src/domain/knowledge/chunk.ts`, because the kernel-vocabulary test forbids those words in core-tools.
-- **Kernel vocabulary.** `harness/core-tools/src/kernel-vocabulary.test.ts` keeps its **empty allowlist**. `harness/core-tools/src` and `harness/host/src` are scanned for `provider`, `credential`, `licen[cs]e`, `slack`, `bolt`, `blocks`, `deepagents`, `langchain`, `langgraph`, `entra`, `teams`, `demo-practice` and `hermes`: the knowledge modules say "identity plug-in" and "the gateway", never "provider"; the run API's modules name no surface; and Task 8 adds `surfaces/http/src` to the scanned roots for all four word lists, because an HTTP transport that knew a product area, a messaging vendor or a framework would be the coupling the surface contract exists to remove. A `*.test.ts` file is skipped by every scan.
+- **Kernel vocabulary.** `harness/core-tools/src/kernel-vocabulary.test.ts` keeps its **empty allowlist**. `harness/core-tools/src` and `harness/host/src` are scanned for `provider`, `credential`, `licen[cs]e`, `slack`, `bolt`, `blocks`, `deepagents`, `langchain`, `langgraph`, `entra`, `teams`, `demo-practice` and `hermes`: the knowledge modules say "identity plug-in" and "the gateway", never "provider"; the run API's modules name no surface; and Task 8 adds `surfaces/http/src` to the scanned roots for all four word lists, because an HTTP transport that knew a product area, a messaging vendor or a framework would be the coupling the surface contract exists to remove. A `*.test.ts` file is skipped by every scan. **`credential` is the word this plan keeps reaching for and must not write**: a bearer token is a natural thing to call a credential, the scan's own regex is `/provider|credential|licen[cs]e|…/i`, and it matches inside a comment — `kernel-vocabulary.test.ts` asserts that it catches `/** the credential this evidences */`. Say "token", "bearer secret" or "secret" in `harness/host/src` and `surfaces/http/src`. Only `.ts` files are scanned, so `.env.example`, the runbook and Compose may say whatever reads best.
 - **Commit messages: conventional prefix, imperative subject, and NO trailer of any kind.** No `Co-Authored-By`, no `Generated with`, nothing. This overrides any trailer guidance from the environment.
 - **TDD in every task:** write the failing test first, run it and watch it fail, implement, run it green, run the gates, commit.
 - **Host tests use `hostFixture`** (`harness/host/src/testing.ts`: `MemorySurface` + `StaticIdentity` + `ScriptedRuntime` over the real kernel and Postgres). **No test sleeps for more than 200 ms**, and no test waits for a real interval: the scheduler is driven by hand through `tick()`, and the run API's end-to-end test binds `127.0.0.1:0` and reads the port off the listening socket.
 - **Never run `docker compose up`, `docker compose down`, `pnpm db:up`, `pnpm db:down` or `pnpm demo:up` from a task.** `docker compose ... config` is read-only and is what the surface recorder uses.
 - **Never source `.env` into the shell before running tests.**
-- Test database: `postgres://harness:harness@localhost:15432/harness_test`. It exists; do not create or drop it. Task 1's migration test creates and drops `harness_test_migration_0013_<pid>` and `harness_test_migrate_all_<pid>` over that connection, as `migration-0012.test.ts` does. `runMigrations` runs from every package's `test-global-setup.ts`, so 0013 is applied to `harness_test` by the first suite that starts after Task 1.
+- Test database: whatever `TEST_DATABASE_URL` names — in this worktree `postgres://harness:harness@localhost:15433/harness_test`, which is a throwaway pgvector container beside the compose-managed Postgres on 15432, not the compose one. It exists; do not create or drop it, and run no container command against either. Task 1's migration test creates and drops `harness_test_migration_0013_<pid>` and `harness_test_migrate_all_<pid>` over that connection, as `migration-0012.test.ts` does. `runMigrations` runs from every package's `test-global-setup.ts`, so 0013 is applied to `harness_test` by the first suite that starts after Task 1.
 - Do not push from a task. Do not open a pull request from a task.
 
 ---
@@ -40,7 +40,8 @@ Read out of the worktree at `.claude/worktrees/plan-10-knowledge-run-api` (branc
 
 | Fact | Value | Where |
 |---|---|---|
-| The local test Postgres has **no** pgvector | `select version()` → `PostgreSQL 16.15 (Debian 16.15-1.pgdg13+2)`; `pg_available_extensions` where name in (`vector`,`pgvector`) → **empty**; `CREATE EXTENSION IF NOT EXISTS vector` → `extension "vector" is not available`. The Compose service is `image: postgres:16`, which does not ship it | `pg` against `TEST_DATABASE_URL`; `harness/compose/docker-compose.yml` |
+| The **Compose** Postgres has no pgvector, which is why Task 1 changes the image | the service is `image: postgres:16`, which does not ship the extension; against a `postgres:16` database `CREATE EXTENSION IF NOT EXISTS vector` answers `extension "vector" is not available` | `harness/compose/docker-compose.yml` |
+| The **test** database does, and it is not the Compose one | this worktree's `.env` sets `TEST_DATABASE_URL=postgres://harness:harness@localhost:15433/harness_test` — a throwaway pgvector container on port **15433**, beside the compose-managed one on 15432, which was left alone. `select name, default_version from pg_available_extensions where name = 'vector'` → `vector \| 0.8.6`, not yet installed | `pg` against `TEST_DATABASE_URL`, 2026-09-18 |
 | CI already uses the right image | `.github/workflows/ci.yml`, service `postgres`, `image: pgvector/pgvector:pg16`, with the comment "The image Plan 10 will need for pgvector" | that file |
 | `pgvector/pgvector:pg16` ships extension `vector` **0.8.6** | `CREATE EXTENSION` then `select extname, extversion from pg_extension` → `vector | 0.8.6` | throwaway `docker run --rm pgvector/pgvector:pg16`, psql |
 | `vector(1024)`, HNSW `vector_cosine_ops`, GIN on a generated `tsvector` and GIN on `text[]` are all valid there | `CREATE TABLE … "embedding" vector(1024) …`; `CREATE INDEX … USING hnsw ("embedding" vector_cosine_ops)`; `CREATE INDEX … USING gin ("tsv")`; `CREATE INDEX … USING gin ("principals")` — all four succeeded; `1 - (embedding <=> $v)` returned `1` for the identical vector; `ts_rank_cd(tsv, plainto_tsquery('english','office closes'))` returned `0.1`; `principals @> ARRAY['u-coordinator']` matched | same probe |
@@ -156,7 +157,7 @@ Read out of the worktree at `.claude/worktrees/plan-10-knowledge-run-api` (branc
 
 15. **`runTurn` gains one hook, `observe`, and the API is its only caller.** `TurnInput.observe?: (event: TurnEvent) => void` where `TurnEvent = { type: 'run'; runId } | RunEvent | { type: 'result'; status; text; error }`. It is called once with the run id as soon as the kernel is open, once per event the runtime produces, and once with the turn's own outcome (the host's forced outcomes applied and the final text already passed through the restricted-pattern check). A watcher that throws is logged and swallowed — a turn is not failed by whoever is watching it. It receives the runtime's `text` deltas **unfiltered**, exactly as a streamed surface reply does today; the API's writer is what applies `containsRestrictedPattern` to each delta before it leaves the process, and the `result` frame carries the whole reply already withheld if it tripped.
 
-16. **The API's status route is where the scheduler's status finally surfaces (the Plan 9 carry).** `GET /v1/status` answers `{ client, surfaces, runs_in_flight, scheduler }`, bearer-protected like every other route. `/healthz` is untouched: its shape is documented in the runbook and is read by container health checks, and widening it is not this plan's business.
+16. **The API's status route is where the scheduler's status finally surfaces (the Plan 9 carry).** `GET /v1/status` answers six fields — `{ client, surfaces, primary_surface, runs_in_flight, draining, scheduler }` — bearer-protected like every other route. `primary_surface` because the first entry of `HARNESS_SURFACES` is where approval cards go and an operator who has just added `http` to that list wants to see which one won; `draining` because a process on its way out answers every other field normally and a caller deserves to know why its next run will be refused. Counts and names only: never a conversation, a principal or a message. `/healthz` is untouched: its shape is documented in the runbook and is read by container health checks, and widening it is not this plan's business.
 
 17. **`claimDuePlaybooks`'s unused `limit` option is removed (the other Plan 9 carry).** No caller passes it. The bound itself is load-bearing — a tick must not claim an unbounded number of rows — so it becomes a module constant `CLAIM_BATCH = 10` with the comment that says why it exists, and the parameter goes.
 
@@ -164,7 +165,7 @@ Read out of the worktree at `.claude/worktrees/plan-10-knowledge-run-api` (branc
 
 19. **Limits: a 1 MiB body, ten attachments, 10,000 characters of text, 200 messages on a thread read, and one run per thread.** The body cap is enforced while reading and answers `413`. Attachment paths are checked with `assertInsideRoot` against `<storageDir>/incoming` before the run opens, and an escape is `400`. Concurrency is `serialize(host, thread.id, …)`, the same chain an adapter's message takes, so two requests on one conversation run one after the other rather than over each other.
 
-20. **The demo's `knowledge-sync` playbook names a skill the *host* ships.** `preflightPlaybook` requires the playbook's skill to be in `host.skills`, and `host.skills` comes only from the packs today — so scheduling the sync would otherwise mean putting a kernel skill inside the healthcare pack. Instead the host gains a skills directory of its own, `harness/host/skills/`, holding exactly one skill, `knowledge-sync`, and `app/main.ts` reads `readSkillCatalogue([kernelSkillsDir(), ...config.packs.skillsDirs()])`. The alternative — making `playbooks.skill` nullable — needs a column change that migration 0013 is not allowed to carry.
+20. **The demo's `knowledge-sync` playbook names a skill the *host* ships.** *This amends spec 5.3, which says `skills.ts` builds its catalogue "from the loaded packs' `skillsDir`s" — after this plan it builds it from the kernel's own directory and then the packs'. The amendment is deliberate and its reason is below; record it against 5.3 rather than leaving it buried in a decision.* `preflightPlaybook` requires the playbook's skill to be in `host.skills`, and `host.skills` comes only from the packs today — so scheduling the sync would otherwise mean putting a kernel skill inside the healthcare pack. Instead the host gains a skills directory of its own, `harness/host/skills/`, holding exactly one skill, `knowledge-sync`, and `app/main.ts` reads `readSkillCatalogue([kernelSkillsDir(), ...config.packs.skillsDirs()])`. The alternative — making `playbooks.skill` nullable — needs a column change that migration 0013 is not allowed to carry.
 
 21. **The demo's `embed` route points at a Gemini embedding deployment, and the client verifies the width it gets back.** Which vendor model returns exactly 1,024 dimensions is not something this plan can verify: it has no provider key and makes no network call. `embedTexts` therefore sends `dimensions: deps.embedDims` on every request (the OpenAI embeddings parameter, which LiteLLM passes through and `drop_params: true` drops for a deployment that does not take it) **and checks the length of every vector it gets back**, refusing with a fixed `ToolError` naming both numbers. The runbook's "Knowledge" section tells the operator the one `curl` that confirms it before the first sync.
 
@@ -285,7 +286,7 @@ Run, from the repository root:
 ```bash
 node --input-type=module -e "
 import pg from 'pg';
-const c = new pg.Client({ connectionString: process.env.TEST_DATABASE_URL ?? 'postgres://harness:harness@localhost:15432/harness_test' });
+const c = new pg.Client({ connectionString: process.env.TEST_DATABASE_URL ?? 'postgres://harness:harness@localhost:15433/harness_test' });
 await c.connect();
 await c.query('CREATE EXTENSION IF NOT EXISTS vector');
 const r = await c.query(\"select extname, extversion from pg_extension where extname = 'vector'\");
@@ -298,7 +299,9 @@ await c.end();
 
 Expected: `[{"extname":"vector","extversion":"0.8.6"}]`.
 
-**If it prints `extension "vector" is not available`, STOP and report BLOCKED.** The local container is still on `postgres:16`, which does not ship pgvector, and the controller has to recreate it on `pgvector/pgvector:pg16` against the same `pgdata` volume before this task can go on. Do not attempt `docker compose up`, `docker compose down` or any other container command yourself: this plan forbids them, and the recreation is the controller's step. Say exactly which command printed what, and stop.
+`TEST_DATABASE_URL` is whatever `.env` sets it to, and in this worktree that is **not** the compose-managed Postgres: it is `postgres://harness:harness@localhost:15433/harness_test`, a throwaway pgvector container the controller started on port 15433, beside the compose one on 15432. The command above is the only check that matters — it asks the database the suite will actually use.
+
+**If it prints `extension "vector" is not available`, STOP and report BLOCKED.** That means `TEST_DATABASE_URL` is pointing at a plain `postgres:16` after all, and only the controller can fix it. **Run no container command yourself** — not `docker run`, not `docker compose up`, not `docker compose down`, not `pnpm db:up` or `db:down`. Starting, stopping or recreating a database is the controller's step, and the compose-managed container must be left exactly as it is. Say which command printed what, and stop.
 
 - [ ] **Step 2: Point Compose at the image that ships it**
 
@@ -659,7 +662,11 @@ describe('migration 0013_knowledge', () => {
       )
     ).rows as { indexname: string; indexdef: string }[];
     const byName = new Map(indexes.map((i) => [i.indexname, i.indexdef]));
-    expect(byName.get('knowledge_chunks_embedding_idx')).toContain('USING hnsw ("embedding" vector_cosine_ops)');
+    // `pg_indexes.indexdef` is Postgres re-rendering the index it actually built, not the text
+    // of the migration: it drops the quotes the generator wrote around every identifier. So the
+    // migration file says `USING hnsw ("embedding" vector_cosine_ops)` and this says the same
+    // thing unquoted — as the two gin assertions below already do.
+    expect(byName.get('knowledge_chunks_embedding_idx')).toContain('USING hnsw (embedding vector_cosine_ops)');
     expect(byName.get('knowledge_chunks_tsv_idx')).toContain('USING gin (tsv)');
     expect(byName.get('knowledge_chunks_principals_idx')).toContain('USING gin (principals)');
   });
@@ -1204,7 +1211,7 @@ Create `harness/core-tools/src/domain/knowledge/embed.test.ts`:
 ```ts
 import { sql } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished } from 'vitest';
-import { modelCalls } from '@harness/db';
+import { modelCalls, withTransaction } from '@harness/db';
 import { ConfigError, ToolError } from '@harness/shared';
 import { openRun } from '../session/repository.js';
 import type { ToolDeps } from '../tooling/types.js';
@@ -1311,15 +1318,23 @@ describe('assertEmbedDims', () => {
 
   it('says what to run when the table is not there at all', async () => {
     await db.execute(sql.raw('CREATE SCHEMA IF NOT EXISTS knowledge_probe'));
-    // A search_path with no `public` makes `knowledge_chunks` unresolvable, which is what a
-    // database that has not been migrated looks like to this check.
-    await db.execute(sql.raw("SET search_path TO knowledge_probe"));
     try {
-      await expect(assertEmbedDims(db, 1024)).rejects.toThrow(
-        'knowledge_chunks does not exist; run pnpm db:migrate before starting',
-      );
+      // A search_path with no `public` makes `knowledge_chunks` unresolvable, which is what a
+      // database that has not been migrated looks like to this check.
+      //
+      // `SET LOCAL`, inside a transaction, on that transaction's own connection — not a plain
+      // `SET` on the pool. `createDb` hands out a `pg.Pool`, a `SET` binds to whichever client
+      // happened to serve it, and the next statement is free to land on a different one: the
+      // assertion below would then run with `public` still on the path and pass for the wrong
+      // reason. Inside a transaction there is one client by construction, and `SET LOCAL` is
+      // undone by the rollback, so nothing has to be put back afterwards either.
+      await expect(
+        withTransaction(db, async (tx) => {
+          await tx.execute(sql.raw('SET LOCAL search_path TO knowledge_probe'));
+          await assertEmbedDims(tx, 1024);
+        }),
+      ).rejects.toThrow('knowledge_chunks does not exist; run pnpm db:migrate before starting');
     } finally {
-      await db.execute(sql.raw('SET search_path TO public'));
       await db.execute(sql.raw('DROP SCHEMA IF EXISTS knowledge_probe CASCADE'));
     }
   });
@@ -1564,7 +1579,7 @@ export async function assertEmbedDims(db: Db, dims: number): Promise<void> {
 - [ ] **Step 14: Run the embeddings test to verify it passes**
 
 Run: `pnpm --filter @harness/core-tools exec vitest run src/domain/knowledge/embed.test.ts`
-Expected: PASS, eight tests.
+Expected: PASS, nine tests — six under `embedTexts`, three under `assertEmbedDims`.
 
 - [ ] **Step 15: Check the width at startup, in both composition roots, and hand the host its client folder**
 
@@ -1662,7 +1677,7 @@ git commit -m "feat(gateway): add the embed route and an embeddings client, and 
 **Interfaces:**
 - Consumes: `USER_LEVELS`, `type Level`, `ConfigError` from `@harness/shared`; `PRINCIPAL_ID_PATTERN` from `@harness/identity-api`; `parse as parseYaml` from `yaml` (added to the package in Task 2).
 - Produces:
-  - `KNOWLEDGE_SOURCE_NAME = 'client-folder'`, `KNOWLEDGE_SOURCE_KIND = 'folder'`, `KNOWLEDGE_SEARCH_LIMIT = 20`, `KNOWLEDGE_DEFAULT_K = 5`, `RRF_K = 60`, `levelRank(level: Level): number`.
+  - `KNOWLEDGE_SOURCE_NAME = 'client-folder'`, `KNOWLEDGE_SOURCE_KIND = 'folder'`, `KNOWLEDGE_SEARCH_LIMIT = 20`, `KNOWLEDGE_DEFAULT_K = 5`, `RRF_K = 60`, `SERVICE_RANK = -1`, `levelRank(level: Level): number`.
   - `interface ParsedKnowledgeDocument { path: string; title: string; minLevel: Level; minRank: number; principals: string[]; sha256: string; body: string }`.
   - `interface KnowledgeHit { chunk_id: string; document_id: string; path: string; title: string; updated_at: string; ordinal: number; text: string; score: number }`.
   - `interface KnowledgeSyncResult { source: string; scanned: number; added: number; updated: number; unchanged: number; removed: number; chunks: number; skipped: { path: string; reason: string }[] }`.
@@ -1772,16 +1787,23 @@ export const KNOWLEDGE_DEFAULT_K = 5;
 export const RRF_K = 60;
 
 /**
+ * What a principal off the level ladder ranks as (decision 4).
+ *
+ * `service` is not a user level — `levelAtLeast('service', 'member')` is false — and the user
+ * levels start at 0, so anything below them clears nothing: `min_rank <= -1` matches no chunk, and
+ * a scheduled job reads a knowledge document only when the document names its principal id.
+ */
+export const SERVICE_RANK = -1;
+
+/**
  * A level as a number the database can compare (decision 3).
  *
  * The four user levels are a ladder: `member` 0 through `admin` 3, so `min_rank <= $rank` is
- * exactly "this level or above". `service` is **not** on that ladder — `levelAtLeast('service',
- * 'member')` is false — so it gets `-1`, which clears nothing: a scheduled job reads a knowledge
- * document only when the document names its principal id (decision 4).
+ * exactly "this level or above". `indexOf` answers `-1` for anything not on that ladder, which is
+ * `SERVICE_RANK` already — the one value that is deliberately what the miss returns.
  */
 export function levelRank(level: Level): number {
-  const rank = (USER_LEVELS as readonly string[]).indexOf(level);
-  return rank === -1 ? -1 : rank;
+  return (USER_LEVELS as readonly string[]).indexOf(level);
 }
 
 /** One markdown file, read and validated, ready to be upserted and chunked. */
@@ -2127,6 +2149,7 @@ export {
   KNOWLEDGE_SOURCE_KIND,
   KNOWLEDGE_SOURCE_NAME,
   RRF_K,
+  SERVICE_RANK,
   levelRank,
   type KnowledgeHit,
   type KnowledgeSyncResult,
@@ -2177,7 +2200,7 @@ Create `harness/core-tools/src/domain/knowledge/repository.test.ts`:
 ```ts
 import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
-import { knowledgeChunks, knowledgeDocuments } from '@harness/db';
+import { knowledgeChunks, knowledgeDocuments, knowledgeSources } from '@harness/db';
 import { useTestDb } from '../../testing.js';
 import { parseKnowledgeDocument } from './document.js';
 import { findOrCreateSource, replaceChunks, tombstoneMissing, touchSource, upsertDocument } from './repository.js';
@@ -2311,8 +2334,6 @@ describe('touchSource', () => {
   });
 });
 ```
-
-The `@harness/db` import at the top of that file is `import { knowledgeChunks, knowledgeDocuments, knowledgeSources } from '@harness/db';`.
 
 - [ ] **Step 2: Run it to verify it fails**
 
@@ -2501,6 +2522,7 @@ Create `harness/core-tools/src/domain/knowledge/sync.test.ts`:
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { eq } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { knowledgeChunks, knowledgeDocuments } from '@harness/db';
 import { makeTestDeps, startFakeGateway, useTestDb } from '../../testing.js';
@@ -2509,14 +2531,21 @@ import { syncKnowledge } from './sync.js';
 
 const db = useTestDb();
 
-/** A client folder with a `knowledge/` directory, and deps whose gateway is the fake. */
-async function clientFolder(): Promise<{ deps: ToolDeps; dir: string; write: (rel: string, text: string) => Promise<void> }> {
+/**
+ * A client folder with a `knowledge/` directory, and deps whose gateway is the fake. The client
+ * name is a parameter so the last test can build a second client and prove one folder's sync
+ * leaves the other's documents alone.
+ */
+async function clientFolder(
+  client = 'test',
+): Promise<{ deps: ToolDeps; dir: string; write: (rel: string, text: string) => Promise<void> }> {
   const fake = await startFakeGateway();
   onTestFinished(() => fake.close());
   const clientDir = await mkdtemp(path.join(tmpdir(), 'harness-client-'));
   const dir = path.join(clientDir, 'knowledge');
   await mkdir(dir, { recursive: true });
   const deps = makeTestDeps(db, {
+    client,
     clientDir,
     embedDims: 16,
     gateway: { baseUrl: fake.url, apiKey: 'sk-test', timeoutMs: 5_000, maxCallsPerRun: 100 },
@@ -2624,16 +2653,6 @@ describe('syncKnowledge', () => {
   });
 });
 ```
-
-Add `eq` to that file's `drizzle-orm` import. `clientFolder` takes the client name so the last test can build a second one:
-
-```ts
-async function clientFolder(
-  client = 'test',
-): Promise<{ deps: ToolDeps; dir: string; write: (rel: string, text: string) => Promise<void> }> {
-```
-
-with `client,` added to the `makeTestDeps` overrides inside it.
 
 - [ ] **Step 6: Run it to verify it fails**
 
@@ -2959,7 +2978,7 @@ Expected: FAIL — `./search.js` does not exist.
 Create `harness/core-tools/src/domain/knowledge/search.ts`:
 
 ```ts
-import { and, desc, eq, isNotNull, isNull, lte, or, sql, type SQL } from 'drizzle-orm';
+import { and, desc, eq, isNotNull, isNull, lte, sql, type InferColumnsDataTypes, type SQL } from 'drizzle-orm';
 import { knowledgeChunks, knowledgeDocuments } from '@harness/db';
 import type { ToolDeps } from '../tooling/types.js';
 import { embedTexts } from './embed.js';
@@ -2986,14 +3005,13 @@ export interface KnowledgeCandidate {
  */
 function visibleTo(deps: ToolDeps): SQL {
   const rank = levelRank(deps.principal.level);
-  return and(
-    eq(knowledgeChunks.client, deps.client),
-    isNull(knowledgeDocuments.deletedAt),
-    or(
-      lte(knowledgeChunks.minRank, rank),
-      sql`${knowledgeChunks.principals} @> ARRAY[${deps.principal.id}]::text[]`,
-    ),
-  )!;
+  // Built as one `sql` fragment rather than `and(...)`, which is typed `SQL | undefined` because
+  // it is allowed to be handed nothing. It never is here — the three clauses below are literals —
+  // so the alternative was a `!` telling the next reader to take that on trust.
+  return sql`${eq(knowledgeChunks.client, deps.client)} AND ${isNull(knowledgeDocuments.deletedAt)} AND (${lte(
+    knowledgeChunks.minRank,
+    rank,
+  )} OR ${knowledgeChunks.principals} @> ARRAY[${deps.principal.id}]::text[])`;
 }
 
 const COLUMNS = {
@@ -3006,15 +3024,13 @@ const COLUMNS = {
   updatedAt: knowledgeDocuments.updatedAt,
 };
 
-type Row = {
-  chunkId: string;
-  documentId: string;
-  ordinal: number;
-  text: string;
-  path: string;
-  title: string;
-  updatedAt: Date;
-};
+/**
+ * The row shape `COLUMNS` selects, derived from the columns themselves rather than written out
+ * beside them. A hand-written copy is a second place to forget: rename a column or widen one to
+ * nullable and the copy still compiles, the cast below it still passes, and the mismatch surfaces
+ * as a runtime `undefined` somewhere downstream.
+ */
+type Row = InferColumnsDataTypes<typeof COLUMNS>;
 
 const candidateOf = (row: Row): KnowledgeCandidate => ({
   chunk_id: row.chunkId,
@@ -3037,13 +3053,13 @@ const candidateOf = (row: Row): KnowledgeCandidate => ({
  */
 async function vectorTopK(deps: ToolDeps, vector: readonly number[], k: number): Promise<KnowledgeCandidate[]> {
   const literal = sql`${`[${vector.join(',')}]`}::vector`;
-  const rows = (await deps.db
+  const rows: Row[] = await deps.db
     .select(COLUMNS)
     .from(knowledgeChunks)
     .innerJoin(knowledgeDocuments, eq(knowledgeDocuments.id, knowledgeChunks.documentId))
     .where(and(visibleTo(deps), isNotNull(knowledgeChunks.embedding)))
     .orderBy(sql`${knowledgeChunks.embedding} <=> ${literal}`)
-    .limit(k)) as Row[];
+    .limit(k);
   return rows.map(candidateOf);
 }
 
@@ -3057,13 +3073,13 @@ async function vectorTopK(deps: ToolDeps, vector: readonly number[], k: number):
  */
 async function lexicalTopK(deps: ToolDeps, query: string, k: number): Promise<KnowledgeCandidate[]> {
   const tsquery = sql`plainto_tsquery('english', ${query})`;
-  const rows = (await deps.db
+  const rows: Row[] = await deps.db
     .select(COLUMNS)
     .from(knowledgeChunks)
     .innerJoin(knowledgeDocuments, eq(knowledgeDocuments.id, knowledgeChunks.documentId))
     .where(and(visibleTo(deps), sql`${knowledgeChunks.tsv} @@ ${tsquery}`))
     .orderBy(desc(sql`ts_rank_cd(${knowledgeChunks.tsv}, ${tsquery})`))
-    .limit(k)) as Row[];
+    .limit(k);
   return rows.map(candidateOf);
 }
 
@@ -3537,7 +3553,7 @@ and add to `TurnInput`, after `costCapUsd`:
   observe?: (event: TurnEvent) => void;
 ```
 
-In `runTurn`, right after `const runId = kernel.context.runId;`, add:
+In `runTurn`, **immediately after `host.active.set(runId, { controller, done: finished });`** — not after `const runId = kernel.context.runId;`, which is nine lines earlier — add:
 
 ```ts
   /**
@@ -3553,6 +3569,11 @@ In `runTurn`, right after `const runId = kernel.context.runId;`, add:
       host.log.error(`run ${runId}: the turn watcher threw`, err);
     }
   };
+  // After `host.active.set`, deliberately. `cancelRun` looks the run up in `host.active` and
+  // answers false when it is not there, so a watcher told the run id one line earlier would be
+  // handed an id it cannot cancel — and a caller that cancels the instant it reads the first
+  // frame is exactly what the run API's stream invites. The test below cancels from inside
+  // `observe` and asserts `true`, which is what pins this ordering.
   emit({ type: 'run', runId });
 ```
 
@@ -3857,8 +3878,8 @@ export const surface: Surface = defineSurface({
   version: '0.1.0',
   secrets: [],
   // Not `async`: a surface with no transport has nothing to await on the way up. The run API's
-  // own credential is HARNESS_HOST_TOKEN and is read by the host, not by this adapter, which is
-  // why `secrets` is empty.
+  // own bearer secret is HARNESS_HOST_TOKEN and is read by the host, not by this adapter, which
+  // is why `secrets` is empty.
   connect: () => Promise.resolve(session()),
 });
 ```
@@ -3981,6 +4002,7 @@ git commit -m "feat(surface-http): add the surface a headless caller speaks as"
 - Test: `harness/host/src/domain/api/sse.test.ts`
 - Create: `harness/host/src/domain/api/repository.ts`
 - Create: `harness/host/src/domain/api/routes.ts`
+- Test: `harness/host/src/domain/api/routes.test.ts`
 - Create: `harness/host/src/domain/api/server.ts`
 - Test: `harness/host/src/domain/api/server.test.ts`
 - Modify: `harness/host/src/app/main.ts`, `harness/host/src/index.ts`
@@ -3993,7 +4015,7 @@ git commit -m "feat(surface-http): add the surface a headless caller speaks as"
   - `interface RunApiOptions { token: string; bind?: string; port?: number; scheduler?: { status(): SchedulerStatus } }`.
   - `interface RunApiServer { ready: Promise<void>; address(): AddressInfo | string | null; close(): Promise<void> }`.
   - `sseStream(res: ServerResponse, opts?: { keepAliveMs?: number }): SseStream` with `SseStream { readonly open: boolean; send(event: string, data: unknown): void; comment(text: string): void; end(): void }`.
-  - `bearerOk(header: string | undefined, token: string): boolean`; `handleApiRequest(host: Host, req: IncomingMessage, res: ServerResponse, opts: RunApiOptions): Promise<void>`.
+  - `bearerOk(header: string | undefined, token: string): boolean`; `readBody(req: IncomingMessage): Promise<{ ok: true; text: string } | { ok: false }>`; `handleApiRequest(host: Host, req: IncomingMessage, res: ServerResponse, opts: RunApiOptions): Promise<void>`. The first two are exported for their own tests: the bearer check and the body cap are the module's two security decisions and neither is legible in an assertion about a 401 or a 413.
   - `findRunFor(db, input): Promise<{ id: string } | null>`; `readThreadFor(db, input): Promise<{ thread: ApiThread; messages: ApiMessage[] } | null>`.
   - `startRunApi(host: Host, opts: RunApiOptions): RunApiServer`.
 
@@ -4009,6 +4031,11 @@ import { sseStream } from './sse.js';
 
 let server: Server;
 let url = '';
+/**
+ * What `stream.open` read either side of `end()`, recorded by the `/open` handler because the
+ * stream object itself lives inside the server and a test outside it can only see the bytes.
+ */
+let openAround: { before: boolean; after: boolean } | null = null;
 
 beforeAll(async () => {
   server = createServer((req, res) => {
@@ -4020,6 +4047,14 @@ beforeAll(async () => {
       stream.end();
       // Everything after `end` is dropped rather than throwing on a finished response.
       stream.send('result', { type: 'result', status: 'done' });
+    } else if (req.url === '/open') {
+      const before = stream.open;
+      stream.end();
+      const after = stream.open;
+      // Both kinds of write, after the close: neither may reach the body below.
+      stream.send('dropped', { type: 'dropped' });
+      stream.comment('dropped');
+      openAround = { before, after };
     } else {
       stream.end();
     }
@@ -4049,11 +4084,14 @@ describe('sseStream', () => {
     );
   });
 
-  it('reports whether it is still open, and drops everything after it closes', async () => {
-    const response = await fetch(`${url}/`);
-    const body = await response.text();
-    expect(body).toContain('event: run');
-    expect(body.endsWith('\n\n')).toBe(true);
+  it('reports whether it is still open, and drops every write after it closes', async () => {
+    const body = await (await fetch(`${url}/open`)).text();
+    // `open` is the flag the run API's writer reads before it bothers to build a frame.
+    expect(openAround).toEqual({ before: true, after: false });
+    // And the drop is real, not just reported: the frame and the comment written after `end`
+    // are absent, and nothing threw on a finished response.
+    expect(body).toBe('event: run\ndata: {"type":"run","runId":"r-1"}\n\n: still here\n\n');
+    expect(body).not.toContain('dropped');
   });
 });
 ```
@@ -4082,7 +4120,7 @@ export const API_MAX_BODY_BYTES = 1_048_576;
 /** One message. Longer than any human writes and shorter than a document, which belongs in `incoming/`. */
 export const API_MAX_TEXT_CHARS = 10_000;
 export const API_MAX_ATTACHMENTS = 10;
-/** How many messages `GET /v1/threads/:id` returns, oldest first. */
+/** How many of a thread's **most recent** messages `GET /v1/threads/:id` returns, newest last. */
 export const API_THREAD_MESSAGES = 200;
 /**
  * How often an idle stream writes a comment line. A run can go minutes between events while a
@@ -4196,7 +4234,7 @@ Expected: PASS, three tests.
 Create `harness/host/src/domain/api/repository.ts`:
 
 ```ts
-import { and, asc, eq } from 'drizzle-orm';
+import { and, desc, eq } from 'drizzle-orm';
 import { messages, runs, threads, type Db } from '@harness/db';
 import { API_THREAD_MESSAGES } from './types.js';
 
@@ -4234,7 +4272,13 @@ export async function findRunFor(
 }
 
 /**
- * This thread and its messages, oldest last, if it is this client's and this principal's.
+ * This thread and its most recent messages, **newest last**, if it is this client's and this
+ * principal's.
+ *
+ * Read newest-first under the limit and then reversed, which is the only way to take the *tail* of
+ * a long thread: `ORDER BY … ASC LIMIT 200` would hand back the two hundred oldest messages, so a
+ * caller reading a thread that had run for a month would see how it started and never how it was
+ * going. The caller wants the recent end, and gets it in reading order.
  *
  * Ordered by `(created_at, seq)`: two rows written by one transaction carry one timestamp, and
  * `seq` is the tiebreak the whole codebase orders by since Plan 9.
@@ -4255,12 +4299,13 @@ export async function readThreadFor(
     )
     .limit(1);
   if (!thread) return null;
-  const rows = await db
+  const newestFirst = await db
     .select({ role: messages.role, content: messages.content, createdAt: messages.createdAt })
     .from(messages)
     .where(eq(messages.threadId, thread.id))
-    .orderBy(asc(messages.createdAt), asc(messages.seq))
+    .orderBy(desc(messages.createdAt), desc(messages.seq))
     .limit(API_THREAD_MESSAGES);
+  const rows = newestFirst.reverse();
   return {
     thread: {
       id: thread.id,
@@ -4334,7 +4379,7 @@ export function bearerOk(header: string | undefined, token: string): boolean {
 }
 
 /** Read the body, refusing past the cap while it arrives rather than after. */
-async function readBody(req: IncomingMessage): Promise<{ ok: true; text: string } | { ok: false }> {
+export async function readBody(req: IncomingMessage): Promise<{ ok: true; text: string } | { ok: false }> {
   return new Promise((resolve) => {
     const chunks: Buffer[] = [];
     let size = 0;
@@ -4478,7 +4523,7 @@ async function cancelRoute(host: Host, url: URL, res: ServerResponse, runId: str
   return json(res, 200, { run_id: runId, cancelled: cancelRun(host, runId) });
 }
 
-/** A thread of the caller's own, messages oldest last (spec 5.8). */
+/** A thread of the caller's own, most recent messages, newest last (spec 5.8). */
 async function threadRoute(host: Host, url: URL, res: ServerResponse, threadId: string): Promise<void> {
   const caller = await callerOf(host, {
     surface: url.searchParams.get('surface') ?? '',
@@ -4580,9 +4625,94 @@ export function startRunApi(host: Host, opts: RunApiOptions): RunApiServer {
 }
 ```
 
-- [ ] **Step 7: Write the failing end-to-end test**
+- [ ] **Step 7: Write the failing tests — the two helpers, then the whole API**
 
-Create `harness/host/src/domain/api/server.test.ts`:
+The bearer check and the body cap are the two pieces of this module that are worth failing on
+their own: one decides whether a stranger gets in, the other whether a stranger can make this
+process hold a gigabyte, and neither is legible in an end-to-end assertion about a 401 or a 413.
+
+Create `harness/host/src/domain/api/routes.test.ts`:
+
+```ts
+import { createServer, type Server } from 'node:http';
+import type { AddressInfo } from 'node:net';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { bearerOk, readBody } from './routes.js';
+import { API_MAX_BODY_BYTES } from './types.js';
+
+describe('bearerOk', () => {
+  it('accepts the exact token and nothing else', () => {
+    expect(bearerOk('Bearer sk-right', 'sk-right')).toBe(true);
+    expect(bearerOk('Bearer sk-wrong', 'sk-right')).toBe(false);
+    // A prefix and a suffix both answer false rather than throwing: `timingSafeEqual` rejects a
+    // length mismatch, which is why the length is compared before it is called.
+    expect(bearerOk('Bearer sk-righ', 'sk-right')).toBe(false);
+    expect(bearerOk('Bearer sk-righty', 'sk-right')).toBe(false);
+  });
+
+  it('refuses a missing header, an empty one, and every other scheme', () => {
+    // `bearer` lowercase is refused too. The scheme is case-insensitive in the HTTP standard and
+    // strict here on purpose: this is one deployment's own control plane, the runbook shows the
+    // exact header, and a spelling nobody documented is likelier a broken client than a caller.
+    for (const header of [undefined, '', 'sk-right', 'bearer sk-right', 'Basic sk-right', 'Bearer']) {
+      expect(bearerOk(header, 'sk-right'), String(header)).toBe(false);
+    }
+  });
+});
+
+type Body = Awaited<ReturnType<typeof readBody>>;
+
+let server: Server;
+let url = '';
+let deliver: ((body: Body) => void) | null = null;
+
+beforeAll(async () => {
+  server = createServer((req, res) => {
+    void readBody(req).then((body) => {
+      deliver?.(body);
+      try {
+        res.writeHead(200).end();
+      } catch {
+        // The cap destroyed the socket before the handler could answer, which is the point of it.
+      }
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+});
+afterAll(async () => {
+  server.closeAllConnections();
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+});
+
+/** POST a body and hand back what `readBody` made of it, whether or not the request survived. */
+async function sent(body: string): Promise<Body> {
+  const read = new Promise<Body>((resolve) => {
+    deliver = resolve;
+  });
+  await fetch(url, { method: 'POST', body }).catch(() => undefined);
+  return read;
+}
+
+describe('readBody', () => {
+  it('reads a whole body, over however many chunks it arrives in', async () => {
+    expect(await sent('{"text":"hello"}')).toEqual({ ok: true, text: '{"text":"hello"}' });
+    // Comfortably more than one TCP segment, so the `data` handler really is accumulating.
+    const long = JSON.stringify({ text: 'y'.repeat(200_000) });
+    expect(await sent(long)).toEqual({ ok: true, text: long });
+  });
+
+  it('reads an empty body as an empty string, which is a 400 upstream and not a 413', async () => {
+    expect(await sent('')).toEqual({ ok: true, text: '' });
+  });
+
+  it('refuses a body past the cap while it is still arriving, rather than after', async () => {
+    expect(await sent('y'.repeat(API_MAX_BODY_BYTES + 1_024))).toEqual({ ok: false });
+  });
+});
+```
+
+Then create `harness/host/src/domain/api/server.test.ts`:
 
 ```ts
 import type { AddressInfo } from 'node:net';
@@ -4762,7 +4892,7 @@ describe('the run API: a run', () => {
 });
 
 describe('the run API: a thread and the status', () => {
-  it("reads back the caller's own thread, oldest message last", async () => {
+  it("reads back the caller's own thread, newest message last", async () => {
     const a = await api([{ say: 'nothing is overdue' }]);
     await collect(await a.open(asCoordinator('anything overdue?')));
     const [thread] = await db.select().from(threads).where(eq(threads.principalId, COORDINATOR.id));
@@ -4811,10 +4941,10 @@ describe('the run API: a thread and the status', () => {
 });
 ```
 
-- [ ] **Step 8: Run it to verify it fails, then passes**
+- [ ] **Step 8: Run them to verify they fail, then pass**
 
-Run: `pnpm --filter @harness/host exec vitest run src/domain/api/server.test.ts`
-Expected: FAIL first (the module did not exist when the test was written), then PASS once Step 6's files are in place — thirteen tests. If the cancel test is flaky, it is because the runtime's `sleep` step is shorter than the round trip; raise the step to 200 ms, which is the ceiling this plan allows, and no higher.
+Run: `pnpm --filter @harness/host exec vitest run src/domain/api/routes.test.ts src/domain/api/server.test.ts`
+Expected: FAIL first (the modules did not exist when the tests were written), then PASS once Step 6's files are in place — **seventeen** tests: five in `routes.test.ts` (two `bearerOk`, three `readBody`) and twelve in `server.test.ts` (five authorisation, three run, four thread and status). If the cancel test is flaky, it is because the runtime's `sleep` step is shorter than the round trip; raise the step to 200 ms, which is the ceiling this plan allows, and no higher.
 
 - [ ] **Step 9: Start it from the composition root**
 
@@ -4840,7 +4970,7 @@ In `harness/host/src/app/main.ts`, add `import { DEFAULT_HOST_BIND, DEFAULT_HOST
 
 ```ts
 // The run API (spec 5.8). No token, no listener: a control plane that opened a socket with no
-// credential because a variable was missing is the failure this avoids (decision 13). The
+// bearer secret because a variable was missing is the failure this avoids (decision 13). The
 // scheduler's handle goes in so `GET /v1/status` can report it, which is the one place that
 // status is reachable from.
 const hostToken = (optionalEnv('HARNESS_HOST_TOKEN') ?? '').trim();
@@ -4909,6 +5039,8 @@ git add harness/host/src/domain/api harness/host/src/app/main.ts harness/host/sr
 git commit -m "feat(host): serve the run API over HTTP, streaming a run's events and cancelling it"
 ```
 
+(`harness/host/src/domain/api` is the whole directory, so `routes.test.ts` and `server.test.ts` go with it.)
+
 ---
 
 ### Task 10: Compose, the demo client's knowledge folder, the sync playbook and the scaffolder
@@ -4919,7 +5051,9 @@ git commit -m "feat(host): serve the run API over HTTP, streaming a run's events
 - Create: `harness/host/skills/knowledge-sync/SKILL.md`
 - Modify: `harness/host/src/domain/skills.ts`, `harness/host/src/app/main.ts`, `harness/host/src/index.ts`
 - Test: `harness/host/src/domain/skills.test.ts`
+- Test: `harness/host/src/domain/playbooks/preflight.test.ts` (the shipped demo playbook is now two, and one of them names a kernel skill)
 - Create: `clients/demo-practice/knowledge/front-desk.md`, `clients/demo-practice/knowledge/escalation-and-billing.md`
+- Test: `harness/core-tools/src/domain/knowledge/shipped-documents.test.ts` (new — the shipped demo documents, parsed)
 - Modify: `clients/demo-practice/playbooks.yaml`, `clients/demo-practice/identity.yaml`, `clients/demo-practice/SOUL.md`
 - Modify: `scripts/src/domain/scaffold.ts`
 - Test: `scripts/src/domain/scaffold.test.ts`
@@ -5106,6 +5240,111 @@ The comment gains:
 # right default.
 ```
 
+- [ ] **Step 6a: Teach the shipped-playbook test that there are now two**
+
+`harness/host/src/domain/playbooks/preflight.test.ts` already proves the demo's `playbooks.yaml`
+against the real identity and the real skills, in `describe('the shipped demo playbook (I1)')`. It
+asserts `expect(playbooks).toHaveLength(1)` and loads skills from the packs alone, so step 6 breaks
+it twice over: there are two playbooks now, and the second names a skill no pack ships. Replace the
+body of that `it` with a loop over both:
+
+```ts
+  it('are valid entries, and pass preflight against the shipped skills and identity', async () => {
+    const { playbooks } = await readPlaybooksFile(demoClientDir);
+    expect(playbooks.map((p) => p.name)).toEqual(['credentialing-expirations', 'knowledge-sync']);
+    for (const playbook of playbooks) {
+      expect(playbook).toMatchObject({
+        timezone: 'America/New_York',
+        principal: 'svc-playbooks',
+        deliver: 'none',
+        cost_cap_usd: 0.5,
+        timeout_s: 300,
+      });
+    }
+
+    const f = await hostFixture(db, { trajectory: [] });
+    // Identity, loaded the way main.ts loads it: the static plug-in over the demo's own file.
+    f.host.identity = await loadIdentity('@harness/identity-static', {
+      env: {},
+      log: f.host.log,
+      clientDir: demoClientDir,
+    });
+    // Skills, loaded the way main.ts loads them — the kernel's own directory first, then the
+    // shipped pack's. `knowledge-sync` lives in the first and `credentialing-expirations` in the
+    // second, so a catalogue built from either alone would fail one of these two playbooks.
+    f.host.skills = await readSkillCatalogue([kernelSkillsDir(), ...testKernelConfig(db).packs.skillsDirs()]);
+
+    for (const playbook of playbooks) {
+      const result = await preflightPlaybook(
+        f.host,
+        row({
+          name: playbook.name,
+          skill: playbook.skill,
+          principalId: playbook.principal,
+          surface: playbook.surface ?? null,
+          costCapUsd: playbook.cost_cap_usd,
+        }),
+      );
+      expect(result, playbook.name).toMatchObject({ ok: true });
+    }
+  });
+```
+
+Rename the `describe` to `'the shipped demo playbooks (I1)'` and add `kernelSkillsDir` to that
+file's import from `../skills.js`.
+
+- [ ] **Step 6b: Prove the shipped knowledge documents, the way the shipped playbook is proved**
+
+Spec section 10's exit criterion for this plan names `clients/demo-practice/knowledge/` by path.
+Task 6's tool tests use a `mkdtemp` folder, so without this nothing reads the documents that
+actually ship, and a typo in one of their frontmatter blocks would first be noticed by a person
+demonstrating the product. This is the same move Plan 9 made for `playbooks.yaml`.
+
+Create `harness/core-tools/src/domain/knowledge/shipped-documents.test.ts`:
+
+```ts
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { describe, expect, it } from 'vitest';
+import { readKnowledgeFolder } from './document.js';
+
+// src/domain/knowledge -> src/domain -> src -> core-tools -> harness -> the repository root.
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../../..');
+
+describe('the shipped demo knowledge folder', () => {
+  it('parses, and the two documents sit at the two levels the demo script relies on', async () => {
+    const docs = await readKnowledgeFolder(path.join(repoRoot, 'clients', 'demo-practice', 'knowledge'));
+    expect(docs.map((d) => [d.path, d.minLevel, d.minRank])).toEqual([
+      ['escalation-and-billing.md', 'lead', 2],
+      ['front-desk.md', 'member', 0],
+    ]);
+    // The whole demo turns on this pair: a member's search reaches the first document and not the
+    // second, which is what makes "the assistant says it does not have that" a true answer rather
+    // than a coincidence. The practice manager is named on the closed one by id.
+    const [escalation, frontDesk] = docs;
+    expect(escalation.principals).toEqual(['u-practice-manager']);
+    expect(frontDesk.principals).toEqual([]);
+    expect(frontDesk.title).toBe('Front desk hours and messages');
+    expect(escalation.body).toContain('duty lead');
+  });
+});
+```
+
+`readKnowledgeFolder` walks in path order, which is why `escalation-and-billing.md` is first.
+
+- [ ] **Step 6c: Run the two tests that read the shipped files**
+
+Run:
+
+```bash
+pnpm --filter @harness/host exec vitest run src/domain/playbooks/preflight.test.ts
+pnpm --filter @harness/core-tools exec vitest run src/domain/knowledge/shipped-documents.test.ts
+```
+
+Expected: PASS both. If the first still fails on the skill, `app/main.ts`'s `kernelSkillsDir()`
+went in at step 3 but the test's own catalogue did not — they are two separate call sites and both
+have to name it.
+
 - [ ] **Step 7: Tell the persona where an answer comes from**
 
 In `clients/demo-practice/SOUL.md`, add a tenth hard rule, after rule 9:
@@ -5265,6 +5504,8 @@ Expected: all green. `git status --short docs/architecture` shows `compose-surfa
 ```bash
 git add harness/compose/docker-compose.yml docs/architecture/compose-surface.yaml \
   harness/host/skills harness/host/src/domain/skills.ts harness/host/src/domain/skills.test.ts \
+  harness/host/src/domain/playbooks/preflight.test.ts \
+  harness/core-tools/src/domain/knowledge/shipped-documents.test.ts \
   harness/host/src/app/main.ts harness/host/src/index.ts clients/demo-practice \
   scripts/src/domain/scaffold.ts scripts/src/domain/scaffold.test.ts
 git commit -m "feat(demo): ship a knowledge folder, schedule its sync, and publish the run API in Compose"
@@ -5366,7 +5607,7 @@ a card — and give each caller an `http:` entry in `identity.yaml`.
 | --- | --- |
 | `POST /v1/runs` | `{ surface, conversation, userId, text, attachments? }` → `202` and a Server-Sent Events stream: `run` with the run id, then the runtime's events, then `result` |
 | `POST /v1/runs/:id/cancel?surface=&userId=` | `{ run_id, cancelled }`; `cancelled` is false when the run had already ended |
-| `GET /v1/threads/:id?surface=&userId=` | that thread and its messages, oldest last, at most 200 |
+| `GET /v1/threads/:id?surface=&userId=` | that thread and its **most recent** messages, newest last, at most 200 — the tail of a long thread, not its beginning |
 | `GET /v1/status` | the client, the loaded surfaces, the runs in flight, and the scheduler's status |
 
 ```bash
@@ -5382,8 +5623,10 @@ the run's result is on the thread either way. An approval raised during an API r
 approval card goes: the primary surface.
 
 **Limits.** A 1 MiB body, 10,000 characters of text, ten attachments, each a path inside
-`<storage>/incoming` (checked before the run opens). One run at a time per thread: a second request
-on the same conversation waits for the first, exactly as a second message on a surface does.
+`<storage>/incoming` (checked before the run opens). A thread read returns at most 200 messages,
+and they are the most recent 200 — a longer thread is truncated at the front, never at the end.
+One run at a time per thread: a second request on the same conversation waits for the first,
+exactly as a second message on a surface does.
 
 **What the answers mean.** `401` is a bad or missing token. `403` is a good token naming a surface
 user the identity plug-in does not know. `404` is "no such run" or "no such thread" — and it is
@@ -5609,10 +5852,20 @@ git commit -m "docs: document the knowledge base, the run API and the upgrade fr
 | 8, invariant 10: no restricted value in `knowledge_chunks` or a run event | Task 4 (the sync skips such a document) + Task 9 (the stream's `safe()` on `text` and `done`) |
 | 8, invariant 11: no client, domain, surface, provider or framework vocabulary in kernel, host or the new adapter | Task 8 extends the scan to `surfaces/http/src`; the empty allowlist stays empty |
 | 8, invariant 12: a cancelled run stops within one model call and records `cancelled` | unchanged from Plan 8/9; Task 9's cancel test drives it through the API |
-| 10 row 10, "a cited answer from `clients/demo-practice/knowledge/` at the caller's level" | Task 6's tool tests (member sees one document, lead sees both, each hit carrying path and title) + Task 10's demo folder + Task 11's demo script |
+| 10 row 10, "a cited answer from `clients/demo-practice/knowledge/` at the caller's level" | Task 6's tool tests (member sees one document, lead sees both, each hit carrying path and title) + Task 10's demo folder, whose two shipped documents are parsed and their levels asserted by `shipped-documents.test.ts` (Task 10 step 6b), so the path the criterion names is read by the suite and not only by a person following Task 11's demo script |
 | 10 row 10, "a run driven over HTTP streams and cancels" | Task 9's `server.test.ts`, on a real socket at `127.0.0.1:0` |
 
 **Carried items from Plan 9, both closed:** `claimDuePlaybooks({ limit })` loses the option for a constant (Task 7, decision 17); the scheduler's status reaches an operator through `GET /v1/status` (Task 9, decision 16). The third — spec 5.3's "memory from a group thread never lands in a private scope" — stays out of scope: the run API adds no direct-or-group flag to `MessageEvent`, so nothing here changes what Plan 9 recorded as a deferral.
+
+**Amendments to the spec, both deliberate and both recorded at the decision that makes them:**
+section 5.3's "catalogue from the loaded packs' `skillsDir`s" becomes the kernel's own directory
+and then the packs' (decision 20), because a playbook that refreshes a knowledge base must name a
+skill no product area owns; and section 5.8's two variables gain `HARNESS_HOST_PORT` beside them
+plus the Compose-only `HARNESS_HOST_PUBLISHED_PORT` (decision 12), because a bind address alone
+does not name a socket and `APPROVALS_HEALTH_BIND` / `_PORT` / `_HOST_PORT` is the same triple one
+service along in the same file. Section 5.8 names three routes and this plan serves four; the
+fourth, `GET /v1/status`, is decision 16 and is where the scheduler's status finally reaches an
+operator.
 
 **Not covered, deliberately:** nothing in section 5.7 or 5.8 is left out. Section 11 (Weave) is out of scope by the spec's own words.
 
