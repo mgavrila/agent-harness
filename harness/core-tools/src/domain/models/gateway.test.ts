@@ -6,6 +6,7 @@ import { ModelOutputError, ToolError } from '@harness/shared';
 import { makeTestDeps, useTestDb, startFakeGateway, type FakeGateway, type TestDepsOverrides } from '../../testing.js';
 import type { ToolDeps } from '../tooling/types.js';
 import { callModel, callModelJson, gatewayFromEnv } from './gateway.js';
+import { EMBED_ROUTE } from './types.js';
 
 const db = useTestDb();
 let gateway: FakeGateway;
@@ -101,6 +102,16 @@ describe('callModel', () => {
     await expect(callModel(deps(), { route: 'extract', messages: [{ role: 'user', content: 'go' }] })).rejects.toThrow(
       /daily budget/,
     );
+  });
+
+  it('refuses the embed route, which is not a chat deployment', async () => {
+    gateway.calls.length = 0;
+    await expect(
+      callModel(deps(), { route: EMBED_ROUTE, messages: [{ role: 'user', content: 'hi' }] }),
+    ).rejects.toThrow('the "embed" route is an embeddings deployment; call embedTexts, not callModel');
+    // Refused before the request is built: posting a `messages` array to an embeddings deployment
+    // is what this guard exists to stop, so nothing may reach the gateway at all.
+    expect(gateway.calls).toEqual([]);
   });
 
   it('does not record a model_calls row when the gateway refuses', async () => {

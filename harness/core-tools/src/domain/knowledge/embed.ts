@@ -25,10 +25,7 @@ interface EmbeddingsResponse {
  * routinely quotes the input back, and this message reaches `audit_log.error` and the agent.
  */
 function embedError(status: number, body: string): ToolError {
-  // A 429 as well as the word, unlike `callModel`'s reader: LiteLLM refuses a deployment that is
-  // over `max_budget` with a 429 whose body does not always say so, and the body is the one thing
-  // this message may not quote back.
-  if (status === 429 || /budget/i.test(body)) {
+  if (/budget/i.test(body)) {
     return new ToolError(
       `model route "${EMBED_ROUTE}" is over its daily budget; raise it in clients/<name>/routing.yaml`,
     );

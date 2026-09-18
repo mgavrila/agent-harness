@@ -75,16 +75,27 @@ describe('embedTexts', () => {
     );
   });
 
-  it('refuses a short answer and a gateway failure, naming the route and never the body', async () => {
+  it('refuses a short answer, an exhausted budget and a rate limit, naming the route and never the body', async () => {
     const { deps, fake } = await onFakeGateway();
     fake.setEmbeddingResponder(() => ({ vectors: [Array.from({ length: 16 }, () => 0.1)] }));
     await expect(embedTexts(deps, ['one', 'two'])).rejects.toThrow('returned 1 vector(s) for 2 text(s)');
-    fake.setEmbeddingResponder(() => ({ status: 429, errorBody: { error: { message: 'secret prompt echo' } } }));
-    const failure = (await embedTexts(deps, ['one']).catch((err: unknown) => err as Error)) as Error;
-    expect(failure.message).toBe(
+
+    fake.setEmbeddingResponder(() => ({
+      status: 429,
+      errorBody: { error: { message: 'Budget has been exceeded: secret prompt echo' } },
+    }));
+    const overBudget = (await embedTexts(deps, ['one']).catch((err: unknown) => err as Error)) as Error;
+    expect(overBudget.message).toBe(
       'model route "embed" is over its daily budget; raise it in clients/<name>/routing.yaml',
     );
-    expect(failure.message).not.toContain('secret prompt echo');
+    expect(overBudget.message).not.toContain('secret prompt echo');
+
+    // A 429 whose body does not say "budget" is a rate limit, not an exhausted budget: the same
+    // reading `callModel` does, so neither sends an operator to raise a budget that is not the
+    // problem.
+    fake.setEmbeddingResponder(() => ({ status: 429, errorBody: { error: { message: 'rate limited' } } }));
+    const throttled = (await embedTexts(deps, ['one']).catch((err: unknown) => err as Error)) as Error;
+    expect(throttled.message).toBe('model route "embed" failed at the gateway (HTTP 429)');
   });
 
   it('embeds nothing for no texts, and makes no call', async () => {
