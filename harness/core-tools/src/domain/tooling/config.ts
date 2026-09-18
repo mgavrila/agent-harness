@@ -15,11 +15,13 @@ import { DEFAULT_CONFIDENCE_THRESHOLD } from './types.js';
 /**
  * Where the form templates live.
  *
- * The pack owns them, so `packs.formsDir()` — the first pack named in `HARNESS_PACKS` — is the
- * answer for every deployment that has not said otherwise, and swapping the pack swaps the
- * templates with it. `HARNESS_FORMS_DIR` is an explicit override for a deployment that keeps
- * its templates somewhere else; set, it wins and is resolved against the process working
- * directory, exactly as it did before the registry existed.
+ * The pack owns them, so the primary pack's own directory — the first pack named in
+ * `HARNESS_PACKS` — is the answer for every deployment that has not said otherwise, and swapping
+ * the pack swaps the templates with it. `HARNESS_FORMS_DIR` is an explicit override for a
+ * deployment that keeps its templates somewhere else; set, it wins and is resolved against the
+ * process working directory, exactly as it did before the registry existed. The directory is read
+ * off the pack here rather than through `registry.formsDir()`, which answers a stricter question —
+ * *that* pack's directory or a `ConfigError` — and so has no answer to start a deployment with.
  *
  * `formsDir` is optional on the pack contract, and a primary pack that declares none — or no
  * primary pack at all, which is a client with no pack — leaves nothing to answer with. The
