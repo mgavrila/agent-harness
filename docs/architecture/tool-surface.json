@@ -1681,6 +1681,199 @@
     }
   },
   {
+    "name": "playbooks_list",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "derived_from": {
+          "description": "audit_log ids of earlier results these arguments were built from",
+          "maxItems": 50,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          }
+        }
+      }
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "ok",
+            "pending"
+          ]
+        },
+        "approval_id": {
+          "type": "string"
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "playbooks": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "schedule": {
+                    "type": "string"
+                  },
+                  "timezone": {
+                    "type": "string"
+                  },
+                  "skill": {
+                    "type": "string"
+                  },
+                  "principal_id": {
+                    "type": "string"
+                  },
+                  "surface": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "conversation": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "deliver": {
+                    "type": "string"
+                  },
+                  "cost_cap_usd": {
+                    "type": "number"
+                  },
+                  "timeout_s": {
+                    "type": "number"
+                  },
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "next_run_at": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "last_run_at": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "last_status": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "name",
+                  "schedule",
+                  "timezone",
+                  "skill",
+                  "principal_id",
+                  "surface",
+                  "conversation",
+                  "deliver",
+                  "cost_cap_usd",
+                  "timeout_s",
+                  "enabled",
+                  "next_run_at",
+                  "last_run_at",
+                  "last_status"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "playbooks"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "status"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "playbooks_run_now",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+        },
+        "derived_from": {
+          "description": "audit_log ids of earlier results these arguments were built from",
+          "maxItems": 50,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          }
+        }
+      },
+      "required": [
+        "name"
+      ]
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "ok",
+            "pending"
+          ]
+        },
+        "approval_id": {
+          "type": "string"
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "playbook_run_id": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string",
+              "const": "requested"
+            }
+          },
+          "required": [
+            "playbook_run_id",
+            "status"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "status"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
     "name": "providers_confirm_field",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",

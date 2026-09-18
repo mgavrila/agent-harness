@@ -87,6 +87,8 @@ const RECORDED_TOOLS = [
   'memory_add',
   'memory_list',
   'memory_remove',
+  'playbooks_list',
+  'playbooks_run_now',
   'providers_confirm_field',
   'providers_get',
   'providers_list_pending',
@@ -103,7 +105,7 @@ describe('the four places Plan 6 moved the tool surface', () => {
   const recorded = async (): Promise<ToolSurfaceEntry[]> =>
     JSON.parse(await readFile(path.join(architecture, 'tool-surface.json'), 'utf8')) as ToolSurfaceEntry[];
 
-  it('publishes the twenty-two tools of Plan 6 less harness_set_context, plus the memory tools of Plan 9', async () => {
+  it('publishes the twenty-two tools of Plan 6 less harness_set_context, plus the memory and playbook tools of Plan 9', async () => {
     expect((await recorded()).map((tool) => tool.name)).toEqual(RECORDED_TOOLS);
   });
 

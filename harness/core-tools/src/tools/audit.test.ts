@@ -103,6 +103,8 @@ describe('audit_query', () => {
       'memory_add',
       'memory_list',
       'memory_remove',
+      'playbooks_list',
+      'playbooks_run_now',
       'providers_confirm_field',
       'providers_get',
       'providers_list_pending',

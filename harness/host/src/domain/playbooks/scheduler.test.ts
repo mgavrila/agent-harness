@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { auditLog, decrypt, messages, playbookRuns, playbooks, runs, threads, toolEffects, type Db } from '@harness/db';
+import { requestPlaybookRun } from '@harness/core-tools';
 import { RUN_FAILED_MESSAGE, type RunEvent, type RuntimeSession } from '@harness/runtime-api';
 import { hostFixture, testKernelConfig, useTestDb, type HostFixture } from '../../testing.js';
 import { readSkillCatalogue } from '../skills.js';
@@ -355,5 +356,28 @@ describe('the scheduler', () => {
     }
     expect((await db.select().from(playbookRuns))[0].status).toBe('done');
     expect(await db.select().from(runs)).toHaveLength(1);
+  });
+
+  it('claims a run requested through playbooks_run_now on its next tick, ahead of the schedule', async () => {
+    const f = await hostFixture(db, { trajectory: [{ say: 'ok' }] });
+    // Synced but not due: tomorrow's 07:00.
+    await syncPlaybooks(db, { client: 'test', now: f.host.now() }, [{ ...NIGHTLY, skill: 'sample-skill' }]);
+    const [playbook] = await db.select().from(playbooks);
+    const requested = await requestPlaybookRun(db, {
+      playbookId: playbook.id,
+      now: f.host.now(),
+      requestedBy: 'u-practice-manager',
+    });
+    const scheduler = startScheduler(f.host, { tickMs: 3_600_000 });
+    try {
+      expect(await scheduler.tick()).toEqual({ claimed: 1, done: 1, failed: 0, preflightFailed: 0 });
+    } finally {
+      await scheduler.stop();
+    }
+    const [firing] = await db.select().from(playbookRuns);
+    expect(firing).toMatchObject({ id: requested.id, status: 'done', attempts: 1, requestedBy: 'u-practice-manager' });
+    expect(firing.runId).not.toBeNull();
+    // The schedule itself was not consumed.
+    expect((await db.select().from(playbooks))[0].nextRunAt?.toISOString()).toBe('2026-09-16T07:00:00.000Z');
   });
 });

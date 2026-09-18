@@ -9,6 +9,7 @@ import { deadlineTools } from './deadlines.js';
 import { documentTools } from './documents.js';
 import { harnessTools } from './harness.js';
 import { memoryTools } from './memory.js';
+import { playbookTools } from './playbooks.js';
 import { GENERIC_RECORD_TOOLS, recordTools } from './records.js';
 
 /**
@@ -25,6 +26,7 @@ export function kernelTools(packs: PackRegistry): AnyToolDef[] {
     ...approvalTools,
     ...harnessTools,
     ...memoryTools,
+    ...playbookTools,
     ...documentTools(packs),
   ];
 }
