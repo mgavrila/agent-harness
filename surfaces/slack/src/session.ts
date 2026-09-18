@@ -99,6 +99,11 @@ export function createSlackSession(transport: SlackTransport, config: SlackConfi
       const res = await guarded('chat.postMessage', () =>
         api.chat.postMessage({ channel: conversation, text, thread_ts: opts.replyTo?.id }),
       );
+      // The assistant has now spoken in that thread, so a later reply there is addressed to it
+      // with no mention. The id names the message being answered rather than the thread's root;
+      // the transport resolves one to the other. A notice is the host talking about a message it
+      // will not answer, and a thread it claimed would turn one refusal into every refusal.
+      if (opts.replyTo && opts.kind !== 'notice') transport.notePostedIn(conversation, opts.replyTo.id);
       // A text reply is never written to a row and nothing sweeps it, so an accepted post
       // without a timestamp is still a success: an empty id here only means "no reference".
       // Raising would make the outbox retry an already-delivered message.
@@ -186,6 +191,10 @@ export function createSlackSession(transport: SlackTransport, config: SlackConfi
 
     startStream(conversation, opts = {}) {
       assertConversation(conversation);
+      // Noted when the stream opens rather than when its first delta lands: this is the moment
+      // the thread becomes a conversation with the assistant, and a stream that ends up posting
+      // nothing leaves behind one key that costs nothing.
+      if (opts.replyTo) transport.notePostedIn(conversation, opts.replyTo.id);
       return createEditStream({ api, conversation, threadTs: opts.replyTo?.id });
     },
 

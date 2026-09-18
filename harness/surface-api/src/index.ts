@@ -29,6 +29,7 @@ export type {
   MessageEvent,
   MessageRef,
   NotePart,
+  PostKind,
   StreamHandle,
   Surface,
   SurfaceCapabilities,

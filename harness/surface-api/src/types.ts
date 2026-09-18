@@ -174,6 +174,17 @@ export interface MessageEvent {
   mentioned: boolean;
 }
 
+/**
+ * Why a text is being posted, for a surface whose behaviour turns on it.
+ *
+ * `reply` is a turn's own answer and is the default. `notice` is something the host says *about* a
+ * message rather than in answer to it — that the writer is not authorised, say. The difference
+ * matters where a surface treats a thread the assistant has spoken in as addressed to it: a reply
+ * makes the thread a conversation, a notice must not, or the person it refused would be answered
+ * with another notice for every line they write there afterwards.
+ */
+export type PostKind = 'reply' | 'notice';
+
 /** A reply being written as it is produced. `end` posts what is left and returns the message. */
 export interface StreamHandle {
   append(delta: string): void;
@@ -215,7 +226,7 @@ export interface SurfaceSession {
   postCard(conversation: string, card: Card): Promise<MessageRef>;
   /** Rejects with a `SurfaceError` when `capabilities.update` is false. */
   updateCard(ref: MessageRef, card: Card): Promise<void>;
-  postText(conversation: string, text: string, opts?: { replyTo?: MessageRef }): Promise<MessageRef>;
+  postText(conversation: string, text: string, opts?: { replyTo?: MessageRef; kind?: PostKind }): Promise<MessageRef>;
   /** Rejects with a `SurfaceError` when `capabilities.privateReply` is false. */
   postPrivate(conversation: string, userId: string, text: string): Promise<void>;
   uploadFile(conversation: string, file: UploadRequest): Promise<{ filename: string }>;

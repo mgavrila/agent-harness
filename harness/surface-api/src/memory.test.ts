@@ -197,7 +197,7 @@ describe('MemorySurface', () => {
     expect(surface.streams).toEqual([{ conversation: 'memory', text: 'Hello', ended: false, replyTo: null }]);
     const ref = await stream.end();
     expect(surface.streams[0].ended).toBe(true);
-    expect(surface.texts).toEqual([{ conversation: 'memory', text: 'Hello', replyTo: null }]);
+    expect(surface.texts).toEqual([{ conversation: 'memory', text: 'Hello', replyTo: null, kind: 'reply' }]);
     expect(ref).toEqual({ surface: 'memory', conversation: 'memory', id: 'm1' });
   });
 

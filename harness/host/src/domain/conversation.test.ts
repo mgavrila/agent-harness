@@ -41,7 +41,9 @@ describe('a message on a surface', () => {
     attachMessageHandlers(f.host);
     await f.surface.say('U012', 'Anything stale?');
 
-    expect(f.surface.texts).toEqual([{ conversation: 'memory', text: 'Nothing was stale.', replyTo: null }]);
+    expect(f.surface.texts).toEqual([
+      { conversation: 'memory', text: 'Nothing was stale.', replyTo: null, kind: 'reply' },
+    ]);
     const [thread] = await db.select().from(threads);
     expect(thread).toMatchObject({
       client: 'test',
@@ -88,7 +90,9 @@ describe('a message on a surface', () => {
     attachMessageHandlers(f.host);
     await f.surface.say('U012', 'What do you remember?');
 
-    expect(f.surface.texts).toEqual([{ conversation: 'memory', text: 'Nothing is remembered yet.', replyTo: null }]);
+    expect(f.surface.texts).toEqual([
+      { conversation: 'memory', text: 'Nothing is remembered yet.', replyTo: null, kind: 'reply' },
+    ]);
     const [run] = await db.select().from(runs);
     expect(run.status).toBe('done');
     const [audit] = await db.select().from(auditLog).where(eq(auditLog.tool, 'memory_list'));
@@ -99,7 +103,11 @@ describe('a message on a surface', () => {
     const f = await hostFixture(db, { trajectory: [{ say: 'never' }] });
     attachMessageHandlers(f.host);
     await f.surface.say('U999', 'hello?');
-    expect(f.surface.texts).toEqual([{ conversation: 'memory', text: UNAUTHORISED_TEXT, replyTo: null }]);
+    // A notice, not a reply: a surface that reads a thread the assistant spoke in as addressed to
+    // it must not take this one as the start of a conversation with a sender it just refused.
+    expect(f.surface.texts).toEqual([
+      { conversation: 'memory', text: UNAUTHORISED_TEXT, replyTo: null, kind: 'notice' },
+    ]);
     expect(f.runtime.requests).toHaveLength(0);
     expect(await db.select().from(runs)).toHaveLength(0);
     const [audit] = await db.select().from(auditLog);
@@ -479,7 +487,7 @@ describe('where a turn delivers', () => {
     const f = await hostFixture(db, { trajectory: [{ say: 'Two renewals.' }], streaming: true });
     await turnOn(f, { surface: 'memory', conversation: 'C-ops' });
     expect(f.surface.streams).toEqual([]);
-    expect(f.surface.texts).toEqual([{ conversation: 'C-ops', text: 'Two renewals.', replyTo: null }]);
+    expect(f.surface.texts).toEqual([{ conversation: 'C-ops', text: 'Two renewals.', replyTo: null, kind: 'reply' }]);
   });
 
   it('a surface that is not loaded is refused before a run opens', async () => {

@@ -73,6 +73,29 @@ describe('the Slack session', () => {
     expect(api.posts[1]).toMatchObject({ channel: 'C0DEMO', text: 'decided', thread_ts: ref.id });
   });
 
+  it('records the thread it replied in, and claims nothing for a notice', async () => {
+    const { session, noted } = fakeSlackSession();
+    const replyTo = { surface: 'slack', conversation: 'C0DEMO', id: '1700000000.000100' };
+    await session.postText('C0DEMO', 'decided', { replyTo });
+    // A later reply in that thread is addressed to the assistant with no mention, which is what
+    // this record is for.
+    expect(noted).toEqual([{ channel: 'C0DEMO', threadTs: '1700000000.000100' }]);
+    await session.postText('C0DEMO', 'a top-level line', {});
+    // A notice the host writes about a message it will not answer is not a turn, and a thread it
+    // claimed would answer every later message in it with another notice.
+    await session.postText('C0DEMO', 'You are not authorised to use this assistant.', { replyTo, kind: 'notice' });
+    expect(noted).toHaveLength(1);
+  });
+
+  it('records the thread a stream opens in', async () => {
+    const { session, noted } = fakeSlackSession();
+    const replyTo = { surface: 'slack', conversation: 'C0DEMO', id: '1700000000.000200' };
+    session.startStream('C0DEMO', { replyTo });
+    expect(noted).toEqual([{ channel: 'C0DEMO', threadTs: '1700000000.000200' }]);
+    session.startStream('C0DEMO');
+    expect(noted).toHaveLength(1);
+  });
+
   it('sends a private note as an ephemeral message', async () => {
     const { session, api } = fakeSlackSession();
     await session.postPrivate('C0DEMO', 'U012', 'You are not an approver for this workspace.');
