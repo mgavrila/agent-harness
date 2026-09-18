@@ -1,10 +1,12 @@
 import type { Logger } from '@harness/shared';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { classifyInbound, classifyMessage, createThreadMemory, THREAD_MEMORY_LIMIT } from './bolt.js';
 import { FakeSlack } from './fake.js';
 import type { RawMessage } from './types.js';
 
 const BOT = 'UBOT';
+/** This app, as the lookup knows itself: its bot user, and the bot id Bolt puts on the context. */
+const SELF = { userId: BOT, botId: 'B_SELF' };
 
 /** A logger that keeps its warnings, so a test can count them. */
 function recordingLog(): Logger & { warnings: string[] } {
@@ -127,11 +129,36 @@ describe('the thread rule', () => {
     const api = new FakeSlack();
     const threads = createThreadMemory(api, recordingLog());
     threads.notePostedIn('C1', '1.1');
-    expect(await classifyInbound(reply(), BOT, threads)).toMatchObject({
+    expect(await classifyInbound(reply(), SELF, threads)).toMatchObject({
       text: 'who is your lead?',
       mentioned: true,
     });
     expect(api.repliesCalls).toEqual([]);
+  });
+
+  it("stops treating a thread as somebody else's once the assistant has posted in it", async () => {
+    const api = new FakeSlack();
+    api.replies['C1:1.1'] = [{ user: 'U012' }, { user: 'U999' }];
+    const threads = createThreadMemory(api, recordingLog());
+    // A human thread nobody has mentioned the bot in: the first reply caches its root as theirs.
+    expect(await classifyInbound(reply(), SELF, threads)).toMatchObject({ mentioned: false });
+    // Someone mentions the bot inside that thread. The transport is what sees the root the
+    // mention belongs to; the session only ever sees the mention's own timestamp.
+    threads.noteInbound('C1', '3.3', '1.1');
+    threads.notePostedIn('C1', '3.3');
+    // The assistant is a party to the thread now, and no second lookup is needed to know it.
+    expect(await classifyInbound(reply({ ts: '4.4' }), SELF, threads)).toMatchObject({ mentioned: true });
+    expect(api.repliesCalls).toEqual([{ channel: 'C1', ts: '1.1', limit: 50 }]);
+  });
+
+  it('clears a negative entry for a thread whose root it is handed directly', async () => {
+    const api = new FakeSlack();
+    api.replies['C1:1.1'] = [{ user: 'U012' }];
+    const threads = createThreadMemory(api, recordingLog());
+    expect(await classifyInbound(reply(), SELF, threads)).toMatchObject({ mentioned: false });
+    threads.notePostedIn('C1', '1.1');
+    expect(await classifyInbound(reply({ ts: '4.4' }), SELF, threads)).toMatchObject({ mentioned: true });
+    expect(api.repliesCalls).toHaveLength(1);
   });
 
   it('leaves a top-level channel message and a mention exactly as they were', async () => {
@@ -140,21 +167,21 @@ describe('the thread rule', () => {
     expect(
       await classifyInbound(
         { type: 'message', channel: 'C1', channel_type: 'channel', user: 'U012', text: 'chatter', ts: '1.1' },
-        BOT,
+        SELF,
         threads,
       ),
     ).toMatchObject({ mentioned: false });
     expect(
       await classifyInbound(
         { type: 'app_mention', channel: 'C1', user: 'U012', text: `<@${BOT}> hi`, ts: '1.1' },
-        BOT,
+        SELF,
         threads,
       ),
     ).toMatchObject({ text: 'hi', mentioned: true });
     expect(
       await classifyInbound(
         { type: 'message', channel: 'D1', channel_type: 'im', user: 'U012', text: 'hi', ts: '1.1' },
-        BOT,
+        SELF,
         threads,
       ),
     ).toMatchObject({ mentioned: true });
@@ -166,38 +193,90 @@ describe('the thread rule', () => {
     const api = new FakeSlack();
     api.replies['C1:1.1'] = [{ user: 'U012' }, { user: 'U999' }];
     const threads = createThreadMemory(api, recordingLog());
-    expect(await classifyInbound(reply(), BOT, threads)).toMatchObject({ mentioned: false });
-    expect(await classifyInbound(reply({ ts: '3.3' }), BOT, threads)).toMatchObject({ mentioned: false });
+    expect(await classifyInbound(reply(), SELF, threads)).toMatchObject({ mentioned: false });
+    expect(await classifyInbound(reply({ ts: '3.3' }), SELF, threads)).toMatchObject({ mentioned: false });
     expect(api.repliesCalls).toEqual([{ channel: 'C1', ts: '1.1', limit: 50 }]);
   });
 
-  it('takes a bot_id or the bot user id in the thread as the assistant, and caches that too', async () => {
+  it("takes this app's own bot id or its bot user in the thread as the assistant, and caches that too", async () => {
     const byBotId = new FakeSlack();
-    byBotId.replies['C1:1.1'] = [{ user: 'U012' }, { bot_id: 'B1' }];
+    byBotId.replies['C1:1.1'] = [{ user: 'U012' }, { bot_id: 'B_SELF' }];
     const first = createThreadMemory(byBotId, recordingLog());
-    expect(await classifyInbound(reply(), BOT, first)).toMatchObject({ mentioned: true });
-    expect(await classifyInbound(reply({ ts: '3.3' }), BOT, first)).toMatchObject({ mentioned: true });
+    expect(await classifyInbound(reply(), SELF, first)).toMatchObject({ mentioned: true });
+    expect(await classifyInbound(reply({ ts: '3.3' }), SELF, first)).toMatchObject({ mentioned: true });
     expect(byBotId.repliesCalls).toHaveLength(1);
 
     const byUserId = new FakeSlack();
     byUserId.replies['C1:1.1'] = [{ user: 'U012' }, { user: BOT }];
-    expect(await classifyInbound(reply(), BOT, createThreadMemory(byUserId, recordingLog()))).toMatchObject({
+    expect(await classifyInbound(reply(), SELF, createThreadMemory(byUserId, recordingLog()))).toMatchObject({
       mentioned: true,
     });
   });
 
-  it('takes a failed lookup as not addressed, warns once, and caches nothing', async () => {
+  it("does not take another bot's thread as the assistant's", async () => {
+    // A GitHub, PagerDuty or CI thread is one humans reply in at length. Answering there would be
+    // an unasked-for turn in a thread this assistant never joined.
+    const other = new FakeSlack();
+    other.replies['C1:1.1'] = [{ user: 'U012' }, { bot_id: 'B_GITHUB' }];
+    expect(await classifyInbound(reply(), SELF, createThreadMemory(other, recordingLog()))).toMatchObject({
+      mentioned: false,
+    });
+
+    // And with no bot id of its own to compare against, a bot message it cannot identify is not it.
+    const unknown = new FakeSlack();
+    unknown.replies['C1:1.1'] = [{ bot_id: 'B_GITHUB' }];
+    expect(await classifyInbound(reply(), { userId: BOT }, createThreadMemory(unknown, recordingLog()))).toMatchObject({
+      mentioned: false,
+    });
+  });
+
+  it('takes a failed lookup as not addressed, warns at most once a minute, and caches nothing', async () => {
     const api = new FakeSlack();
     const log = recordingLog();
     const threads = createThreadMemory(api, log);
     api.failWith = 'ratelimited';
-    expect(await classifyInbound(reply(), BOT, threads)).toMatchObject({ mentioned: false });
-    expect(await classifyInbound(reply({ ts: '3.3' }), BOT, threads)).toMatchObject({ mentioned: false });
+    expect(await classifyInbound(reply(), SELF, threads)).toMatchObject({ mentioned: false });
+    expect(await classifyInbound(reply({ ts: '3.3' }), SELF, threads)).toMatchObject({ mentioned: false });
     expect(log.warnings).toHaveLength(1);
     // A failure is not an answer, so nothing was remembered and the next lookup still runs.
     api.failWith = undefined;
-    api.replies['C1:1.1'] = [{ bot_id: 'B1' }];
-    expect(await classifyInbound(reply({ ts: '4.4' }), BOT, threads)).toMatchObject({ mentioned: true });
+    api.replies['C1:1.1'] = [{ bot_id: 'B_SELF' }];
+    expect(await classifyInbound(reply({ ts: '4.4' }), SELF, threads)).toMatchObject({ mentioned: true });
+  });
+
+  it('keeps warning through a sustained outage rather than falling silent after the first line', async () => {
+    // Every uncached thread reply is dropped while the lookup is failing, so an outage that says
+    // nothing after its first line is an outage nobody sees.
+    const api = new FakeSlack();
+    const log = recordingLog();
+    const threads = createThreadMemory(api, log);
+    api.failWith = 'ratelimited';
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date('2026-09-17T09:00:00Z'));
+      expect(await classifyInbound(reply(), SELF, threads)).toMatchObject({ mentioned: false });
+      expect(await classifyInbound(reply({ thread_ts: '7.7' }), SELF, threads)).toMatchObject({ mentioned: false });
+      expect(log.warnings).toHaveLength(1);
+      vi.setSystemTime(new Date('2026-09-17T09:01:00Z'));
+      expect(await classifyInbound(reply({ thread_ts: '3.3' }), SELF, threads)).toMatchObject({ mentioned: false });
+      expect(log.warnings).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('warns again as soon as a lookup has succeeded in between', async () => {
+    const api = new FakeSlack();
+    const log = recordingLog();
+    const threads = createThreadMemory(api, log);
+    api.failWith = 'ratelimited';
+    expect(await classifyInbound(reply(), SELF, threads)).toMatchObject({ mentioned: false });
+    api.failWith = undefined;
+    api.replies['C1:9.9'] = [{ user: 'U012' }];
+    expect(await classifyInbound(reply({ thread_ts: '9.9' }), SELF, threads)).toMatchObject({ mentioned: false });
+    api.failWith = 'ratelimited';
+    expect(await classifyInbound(reply({ thread_ts: '8.8' }), SELF, threads)).toMatchObject({ mentioned: false });
+    expect(log.warnings).toHaveLength(2);
   });
 
   it('remembers the most recent threads only', async () => {
@@ -205,10 +284,10 @@ describe('the thread rule', () => {
     const threads = createThreadMemory(api, recordingLog());
     for (let i = 0; i <= THREAD_MEMORY_LIMIT; i += 1) threads.notePostedIn('C1', `t${i}`);
     // The newest key is still there, and the oldest was pushed out by the one that overflowed.
-    expect(await classifyInbound(reply({ thread_ts: `t${THREAD_MEMORY_LIMIT}` }), BOT, threads)).toMatchObject({
+    expect(await classifyInbound(reply({ thread_ts: `t${THREAD_MEMORY_LIMIT}` }), SELF, threads)).toMatchObject({
       mentioned: true,
     });
-    expect(await classifyInbound(reply({ thread_ts: 't0' }), BOT, threads)).toMatchObject({ mentioned: false });
+    expect(await classifyInbound(reply({ thread_ts: 't0' }), SELF, threads)).toMatchObject({ mentioned: false });
     expect(api.repliesCalls).toEqual([{ channel: 'C1', ts: 't0', limit: 50 }]);
   });
 });

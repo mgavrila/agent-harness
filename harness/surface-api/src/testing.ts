@@ -6,6 +6,7 @@ import type {
   FormEvent,
   MessageEvent,
   MessageRef,
+  PostKind,
   StreamHandle,
   SurfaceCapabilities,
   SurfaceSession,
@@ -37,7 +38,7 @@ export class MemorySurface implements SurfaceSession {
   readonly defaultConversation: string;
 
   readonly cards: { ref: MessageRef; card: Card }[] = [];
-  readonly texts: { conversation: string; text: string; replyTo: MessageRef | null }[] = [];
+  readonly texts: { conversation: string; text: string; replyTo: MessageRef | null; kind: PostKind }[] = [];
   readonly privates: { conversation: string; userId: string; text: string }[] = [];
   readonly uploads: { conversation: string; filename: string; path: string; comment: string | null }[] = [];
   readonly forms: { trigger: string; form: Form }[] = [];
@@ -100,9 +101,13 @@ export class MemorySurface implements SurfaceSession {
     this.cards[found] = { ref: this.cards[found].ref, card };
   }
 
-  async postText(conversation: string, text: string, opts: { replyTo?: MessageRef } = {}): Promise<MessageRef> {
+  async postText(
+    conversation: string,
+    text: string,
+    opts: { replyTo?: MessageRef; kind?: PostKind } = {},
+  ): Promise<MessageRef> {
     this.guard();
-    this.texts.push({ conversation, text, replyTo: opts.replyTo ?? null });
+    this.texts.push({ conversation, text, replyTo: opts.replyTo ?? null, kind: opts.kind ?? 'reply' });
     return this.ref(conversation);
   }
 

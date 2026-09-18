@@ -20,6 +20,9 @@ export const THREAD_MEMORY_LIMIT = 1000;
 /** One page of a thread is enough to tell whose it is. */
 const THREAD_LOOKUP_LIMIT = 50;
 
+/** How long a failing lookup stays quiet after it has said so once. */
+const WARN_INTERVAL_MS = 60_000;
+
 /** What an inbound payload meant, before the thread rule had its say. */
 export interface Classified {
   userId: string;
@@ -85,69 +88,115 @@ export function classifyMessage(event: RawMessage, botUserId: string | undefined
   };
 }
 
-/** A bounded set of keys: insertion-ordered, and the oldest is what an overflow drops. */
-function boundedKeys(limit: number): { has: (key: string) => boolean; add: (key: string) => void } {
-  const keys = new Set<string>();
+/** A bounded store: insertion-ordered, and the oldest entry is what an overflow drops. */
+function boundedMap<V>(limit: number): {
+  get: (key: string) => V | undefined;
+  set: (key: string, value: V) => void;
+  delete: (key: string) => void;
+} {
+  const entries = new Map<string, V>();
   return {
-    has: (key) => keys.has(key),
-    add: (key) => {
-      if (keys.has(key)) return;
-      keys.add(key);
-      // A `Set` iterates in insertion order, so the first key is the least recently added one.
-      if (keys.size > limit) {
-        const oldest = keys.values().next();
-        if (!oldest.done) keys.delete(oldest.value);
+    get: (key) => entries.get(key),
+    set: (key, value) => {
+      if (entries.has(key)) return;
+      entries.set(key, value);
+      // A `Map` iterates in insertion order, so the first key is the oldest inserted one.
+      if (entries.size > limit) {
+        const oldest = entries.keys().next();
+        if (!oldest.done) entries.delete(oldest.value);
       }
+    },
+    delete: (key) => {
+      entries.delete(key);
     },
   };
 }
 
+/**
+ * This app, as the thread lookup knows itself: the user id it posts under and the bot id Slack
+ * stamps on its messages. Bolt puts both on the context; either may be missing, and a message
+ * matching neither was written by somebody else — another bot included.
+ */
+export interface BotIdentity {
+  userId?: string;
+  botId?: string;
+}
+
 /** Which threads the assistant has posted in, as far as this process can tell. */
 export interface ThreadMemory {
-  notePostedIn(channel: string, threadTs: string): void;
-  hasPosted(channel: string, threadTs: string, botUserId: string | undefined): Promise<boolean>;
+  /**
+   * Remember which thread an inbound message belongs to, so a reply addressed by that message's
+   * own timestamp can be recorded against the thread's root. The host hands a surface the
+   * message it is replying to, never the root, and for a reply the two are different strings.
+   */
+  noteInbound(channel: string, ts: string, threadTs: string): void;
+  /** `messageId` is whatever the reply named: a thread root, or a message inside one. */
+  notePostedIn(channel: string, messageId: string): void;
+  hasPosted(channel: string, threadTs: string, bot: BotIdentity): Promise<boolean>;
 }
 
 /**
  * The threads this process knows about, in two bounded sets of `<channel>:<thread ts>` keys: the
- * ones the assistant has posted in and the ones a lookup said it has not.
+ * ones the assistant has posted in and the ones a lookup said it has not. A third bounded store
+ * maps an inbound message's own timestamp to the root of the thread it arrived in, because that
+ * timestamp is the only handle the session has when it records a reply.
  *
  * Both sets are empty after a restart, and a thread the assistant answered yesterday is still its
  * thread, so a key in neither set is resolved by asking Slack for the thread once —
- * `conversations.replies`, covered by the `channels:history`, `groups:history` and `im:history`
+ * `conversations.replies`, covered by the `channels:history`, `groups:history` and `mpim:history`
  * scopes the app already holds. The answer is remembered either way, so a busy thread costs one
- * call rather than one per message. A message from the assistant is one carrying a `bot_id` or
- * written by the bot user; a thread rooted on such a message counts too, since the assistant is
- * just as much a party to it.
+ * call rather than one per message. A message from the assistant is one written by the bot user,
+ * or carrying this app's own bot id; another workspace bot's message is not, or every alert
+ * thread a person replies in would be answered as though the assistant had joined it. A thread
+ * rooted on one of the assistant's own messages counts too, since it is just as much a party.
  */
 export function createThreadMemory(api: Pick<SlackApi, 'conversations'>, log: Logger): ThreadMemory {
-  const ours = boundedKeys(THREAD_MEMORY_LIMIT);
-  const theirs = boundedKeys(THREAD_MEMORY_LIMIT);
-  let warned = false;
+  const ours = boundedMap<true>(THREAD_MEMORY_LIMIT);
+  const theirs = boundedMap<true>(THREAD_MEMORY_LIMIT);
+  const roots = boundedMap<string>(THREAD_MEMORY_LIMIT);
+  let warnedAt: number | null = null;
 
   return {
-    notePostedIn(channel, threadTs) {
-      ours.add(`${channel}:${threadTs}`);
+    noteInbound(channel, ts, threadTs) {
+      roots.set(`${channel}:${ts}`, threadTs);
     },
-    async hasPosted(channel, threadTs, botUserId) {
+    notePostedIn(channel, messageId) {
+      // A reply is addressed by the message it answers, which inside an existing thread is not
+      // that thread's root. Slack folds the reply into the root, so the root is the key a later
+      // follow-up arrives under, and recording anything else leaves the thread deaf.
+      const root = roots.get(`${channel}:${messageId}`) ?? messageId;
+      const key = `${channel}:${root}`;
+      ours.set(key, true);
+      // The thread was somebody else's until this post; a stale negative entry is consulted
+      // before any lookup, so leaving it there would answer for the life of the process.
+      theirs.delete(key);
+    },
+    async hasPosted(channel, threadTs, bot) {
       const key = `${channel}:${threadTs}`;
-      if (ours.has(key)) return true;
-      if (theirs.has(key)) return false;
+      if (ours.get(key)) return true;
+      if (theirs.get(key)) return false;
       let messages: SlackThreadMessage[];
       try {
         const res = await api.conversations.replies({ channel, ts: threadTs, limit: THREAD_LOOKUP_LIMIT });
         messages = res.messages ?? [];
       } catch (err) {
-        // Nothing is cached: a failure is not an answer, and the next message asks again. Logged
-        // once, because a thread that keeps talking would otherwise write this line every time.
-        if (!warned) {
-          warned = true;
+        // Nothing is cached: a failure is not an answer, and the next message asks again. Every
+        // uncached thread reply is dropped while this is failing, so the line repeats — rate
+        // limited to one a minute, because a busy thread would otherwise write it every time.
+        const now = Date.now();
+        if (warnedAt === null || now - warnedAt >= WARN_INTERVAL_MS) {
+          warnedAt = now;
           log.warn('could not read a Slack thread to see whether this assistant has posted in it', err);
         }
         return false;
       }
-      const posted = messages.some((m) => m.bot_id !== undefined || (botUserId !== undefined && m.user === botUserId));
-      (posted ? ours : theirs).add(key);
+      // Whatever the outage was, it is over: the next one gets its own first line.
+      warnedAt = null;
+      const posted = messages.some(
+        (m) =>
+          (bot.userId !== undefined && m.user === bot.userId) || (bot.botId !== undefined && m.bot_id === bot.botId),
+      );
+      (posted ? ours : theirs).set(key, true);
       return posted;
     },
   };
@@ -160,12 +209,12 @@ export function createThreadMemory(api: Pick<SlackApi, 'conversations'>, log: Lo
  */
 export async function classifyInbound(
   event: RawMessage,
-  botUserId: string | undefined,
+  bot: BotIdentity,
   threads: ThreadMemory,
 ): Promise<Classified | null> {
-  const classified = classifyMessage(event, botUserId);
+  const classified = classifyMessage(event, bot.userId);
   if (!classified || classified.mentioned || classified.threadTs === undefined) return classified;
-  if (!(await threads.hasPosted(event.channel, classified.threadTs, botUserId))) return classified;
+  if (!(await threads.hasPosted(event.channel, classified.threadTs, bot))) return classified;
   return { ...classified, mentioned: true };
 }
 
@@ -239,13 +288,18 @@ export function boltTransport(config: SlackConfig, log: Logger, storageDir: stri
     });
   });
 
-  const deliver = async (raw: RawMessage, botUserId: string | undefined): Promise<void> => {
+  const deliver = async (raw: RawMessage, bot: BotIdentity): Promise<void> => {
     if (!messageHandler) {
       log.warn('a Slack message arrived before a handler was registered');
       return;
     }
-    const classified = await classifyInbound(raw, botUserId, threads);
+    const classified = await classifyInbound(raw, bot, threads);
     if (!classified) return;
+    // The reply the host writes names this message, and only the transport sees which thread it
+    // belongs to: a mention inside an existing thread carries a root that is not its own
+    // timestamp. Recorded only for a message that will be answered, so ordinary channel chatter
+    // does not fill the store.
+    if (classified.mentioned) threads.noteInbound(raw.channel, raw.ts, raw.thread_ts ?? raw.ts);
     const files = await downloadAttachments(raw.ts, classified.files, { token: config.botToken, storageDir, log });
     await messageHandler({
       userId: classified.userId,
@@ -257,8 +311,12 @@ export function boltTransport(config: SlackConfig, log: Logger, storageDir: stri
       files,
     });
   };
-  bolt.event('message', async ({ event, context }) => deliver(event as unknown as RawMessage, context.botUserId));
-  bolt.event('app_mention', async ({ event, context }) => deliver(event as unknown as RawMessage, context.botUserId));
+  const identity = (context: { botUserId?: string; botId?: string }): BotIdentity => ({
+    userId: context.botUserId,
+    botId: context.botId,
+  });
+  bolt.event('message', async ({ event, context }) => deliver(event as unknown as RawMessage, identity(context)));
+  bolt.event('app_mention', async ({ event, context }) => deliver(event as unknown as RawMessage, identity(context)));
 
   const events: SlackEvents = {
     onAction(handler) {

@@ -22,6 +22,7 @@ export function fakeSlackSession(
   session: SurfaceSession;
   api: FakeSlack;
   events: FakeSlackEvents;
+  noted: { channel: string; threadTs: string }[];
 } {
   const api = new FakeSlack();
   const events = new FakeSlackEvents();
@@ -31,8 +32,16 @@ export function fakeSlackSession(
     defaultConversation: 'C0DEMO',
     ...over,
   };
-  // The thread memory lives in the real transport, which this wiring skips; a test that cares
-  // about the thread rule builds the memory itself, in `transport/bolt.test.ts`.
-  const transport = { api, events, notePostedIn: () => {} };
-  return { session: createSlackSession(transport, config), api, events };
+  // The thread memory itself lives in the real transport, which this wiring skips, and the rule
+  // it answers is tested against the real memory in `transport/bolt.test.ts`. What is recorded
+  // here is the other half: which posts claim a thread, which is the session's decision.
+  const noted: { channel: string; threadTs: string }[] = [];
+  const transport = {
+    api,
+    events,
+    notePostedIn: (channel: string, threadTs: string) => {
+      noted.push({ channel, threadTs });
+    },
+  };
+  return { session: createSlackSession(transport, config), api, events, noted };
 }

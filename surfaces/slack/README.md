@@ -52,12 +52,26 @@ an answer at a channel's top level, and a direct message needs no mention either
 `classifyMessage` stays pure and reports the thread a channel reply belongs to; `classifyInbound`
 decides. Behind it, `createThreadMemory` holds two bounded sets of `<channel>:<thread ts>` keys —
 the threads the assistant has posted in, which `session.ts` records through
-`SlackTransport.notePostedIn` whenever it replies in a thread or opens a stream in one, and the
-threads a lookup said are somebody else's. Both are empty after a restart, so a key in neither is
-resolved by reading the thread once (`conversations.replies`, 50 messages, covered by the
-`*:history` scopes already listed): a `bot_id` or the bot's own user id in it means the thread is
-the assistant's. Either answer is cached, so a busy thread costs one call; a failed lookup is
-cached as nothing, treated as not addressed, and logged once.
+`SlackTransport.notePostedIn` whenever a turn replies in a thread or opens a stream in one, and
+the threads a lookup said are somebody else's. Posting in a thread clears it from the second set
+as it enters the first; nothing else does, so a thread the assistant joins late stops being
+somebody else's at the moment it speaks there.
+
+`notePostedIn` is given the message a reply answers, which inside an existing thread is not that
+thread's root, and Slack keys every follow-up by the root. A third bounded store bridges the two:
+the transport records `ts → thread_ts ?? ts` for each addressed message as it arrives, and
+`notePostedIn` resolves the root through it, falling back to the id it was handed. A `notice` —
+the host's unauthorised refusal — is the one post that claims no thread; it is something said
+about a message rather than in answer to it, and a thread it claimed would answer the same sender
+with another refusal for every line they wrote there.
+
+Both sets are empty after a restart, so a key in neither is resolved by reading the thread once
+(`conversations.replies`, 50 messages, covered by the `*:history` scopes already listed): a
+message written by the bot user, or carrying this app's own `bot_id` (Bolt's `context.botId`),
+means the thread is the assistant's. Another workspace bot's message does not — a GitHub or
+PagerDuty thread is not a thread this assistant joined. Either answer is cached, so a busy thread
+costs one call; a failed lookup is cached as nothing, treated as not addressed, and logged at most
+once a minute for as long as it keeps failing.
 
 A file attached to a message is downloaded by `transport/files.ts` with the bot token into
 `<storageDir>/incoming/<message ts, dot replaced by a dash>-<file name, sanitised to

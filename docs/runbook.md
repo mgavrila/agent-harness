@@ -593,10 +593,13 @@ Subscribe the app to the `message.channels`, `message.groups`, `message.im`, `me
 to every channel it should answer messages in.
 
 **A reply inside a thread the bot has already posted in needs no mention**: the thread is the
-conversation, so a follow-up written there is answered as it stands. Mentioning the bot is still
-what starts a new thread or gets an answer at a channel's top level, and a direct message needs no
-mention anywhere; the `channels:history`, `groups:history` and `im:history` scopes above are what
-let the bot recognise its own threads again after a restart.
+conversation, so a follow-up written there is answered as it stands. It is the bot's *own* posts
+that make a thread its own — another app's messages in a thread, a GitHub or an alerting bot's,
+leave it somebody else's — and the refusal a sender the identity plug-in does not know is shown
+claims no thread either, so refusing somebody once does not refuse them for every line afterwards.
+Mentioning the bot is still what starts a new thread or gets an answer at a channel's top level,
+and a direct message needs no mention anywhere; the `channels:history`, `groups:history` and
+`mpim:history` scopes above are what let the bot recognise its own threads again after a restart.
 
 Compose's `host` service has no `env_file`: it gets an explicit `environment:` allowlist
 interpolated from `.env`, so nothing outside that list reaches the container. Who may decide an

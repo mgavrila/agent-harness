@@ -492,7 +492,13 @@ export async function handleMessage(host: Host, event: MessageEvent): Promise<vo
       decision: 'unauthorised',
     });
     try {
-      await surface.postText(event.conversation, UNAUTHORISED_TEXT, { replyTo: event.message ?? undefined });
+      // `notice`, not a reply: on a surface that treats a thread the assistant has spoken in as
+      // addressed to it, a refusal that claimed the thread would answer every later line the same
+      // sender writes there with another refusal and another audit row, at no cost to them.
+      await surface.postText(event.conversation, UNAUTHORISED_TEXT, {
+        replyTo: event.message ?? undefined,
+        kind: 'notice',
+      });
     } catch (err) {
       host.log.error('could not post the unauthorised notice', err);
     }

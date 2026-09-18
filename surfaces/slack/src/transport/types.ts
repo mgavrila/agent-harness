@@ -146,9 +146,11 @@ export interface SlackTransport {
   api: SlackApi;
   events: SlackEvents;
   /**
-   * Record that the assistant has posted into `<channel>:<threadTs>`. The session calls this
-   * wherever it replies inside a thread, and the transport counts a later reply in that thread
-   * as addressed to the assistant even when nobody mentions it.
+   * Record that the assistant has posted in the thread `messageId` belongs to. The session calls
+   * this wherever a turn replies inside a thread, and the transport counts a later reply there as
+   * addressed to the assistant even when nobody mentions it. `messageId` is the message being
+   * answered, which inside an existing thread is not that thread's root; resolving the two is the
+   * transport's job, since it is what saw the message arrive.
    */
-  notePostedIn(channel: string, threadTs: string): void;
+  notePostedIn(channel: string, messageId: string): void;
 }
