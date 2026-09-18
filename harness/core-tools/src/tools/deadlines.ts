@@ -66,4 +66,19 @@ const deadlinesUpcoming = defineTool({
   },
 });
 
+/**
+ * The deadline tool that needs a pack to do anything.
+ *
+ * `deadlines_compute` reads a record's attachments and schedules against the lead days its
+ * attachment kinds declare, all of which a pack supplies: with nothing loaded there is no kind
+ * to be handed and no record to be handed one, so the call can only fail — and a tool in the
+ * catalogue is a claim to the model that it can be called. The publication gate in
+ * `tools/catalog.ts` withholds it on the same condition as `documents_classify` and
+ * `documents_extract`.
+ *
+ * `deadlines_upcoming` is not here. It lists what has already been scheduled and answers an
+ * empty list, which is a true answer for a client with no records rather than a failure.
+ */
+export const PACK_DEADLINE_TOOLS = ['deadlines_compute'] as const;
+
 export const deadlineTools: AnyToolDef[] = [deadlinesCompute, deadlinesUpcoming];
