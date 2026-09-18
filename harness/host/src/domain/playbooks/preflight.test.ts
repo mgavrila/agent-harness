@@ -1,7 +1,8 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { loadIdentity, type PlaybookRow } from '@harness/core-tools';
+import { decide, loadIdentity, loadPolicy, type PlaybookRow } from '@harness/core-tools';
+import { createLogger } from '@harness/shared';
 import { COORDINATOR, PLAYBOOKS_PRINCIPAL, hostFixture, testKernelConfig, useTestDb } from '../../testing.js';
 import { kernelSkillsDir, readSkillCatalogue } from '../skills.js';
 import { preflightPlaybook } from './preflight.js';
@@ -135,5 +136,47 @@ describe('the shipped demo playbooks (I1)', () => {
       );
       expect(result, playbook.name).toMatchObject({ ok: true });
     }
+  });
+});
+
+describe('the shipped hf1-labs client', () => {
+  const clientDir = path.join(repoRoot, 'clients', 'hf1-labs');
+
+  it('schedules nothing yet, and says so in the form the host parses', async () => {
+    const { playbooks } = await readPlaybooksFile(clientDir);
+    expect(playbooks).toEqual([]);
+  });
+
+  it('declares its three admins and admits everyone else in the workspace as a member', async () => {
+    const log = createLogger('test');
+    const session = await loadIdentity('@harness/identity-static', { env: {}, log, clientDir });
+
+    const admins = await Promise.all(
+      ['U0C0KEB8W3X', 'U0C0Q8EU8BC', 'U0C0HQHGY8K'].map((userId) => session.resolve({ surface: 'slack', userId })),
+    );
+    expect(admins.map((p) => `${p?.id}:${p?.level}`)).toEqual(['u-andrei:admin', 'u-admin-2:admin', 'u-admin-3:admin']);
+
+    // Anyone else in the workspace: a member, under an id derived from their member id, so the
+    // same teammate is the same principal on Monday as on Friday.
+    const teammate = await session.resolve({ surface: 'slack', userId: 'U07NEWJOINER' });
+    expect(teammate).toMatchObject({ id: 'u-slack-u07newjoiner', kind: 'user', level: 'member' });
+    expect(await session.resolve({ surface: 'slack', userId: 'U07NEWJOINER' })).toEqual(teammate);
+
+    // The run API has no default: a caller the file does not name drives nothing.
+    expect(await session.resolve({ surface: 'http', userId: 'nobody' })).toBeNull();
+    expect((await session.resolve({ surface: 'http', userId: 'andrei' }))?.id).toBe('u-andrei');
+  });
+
+  it("parks a member's shared write for an admin, and lets an admin's through", async () => {
+    const policy = await loadPolicy(path.join(clientDir, 'policy.yaml'));
+    expect(decide('write.internal', 'member', policy)).toBe('approval');
+    expect(decide('write.internal', 'admin', policy)).toBe('auto');
+    // What the file itself says, over the kernel's defaults.
+    expect(decide('external', 'admin', policy)).toBe('approval');
+    // And the rule that surprises everyone once: `financial: blocked` in `classes` blocks a
+    // member, but the kernel gives lead and admin their own `financial` cell and a level cell
+    // always wins — so an admin's would be parked, not refused.
+    expect(decide('financial', 'member', policy)).toBe('blocked');
+    expect(decide('financial', 'admin', policy)).toBe('approval');
   });
 });

@@ -1,0 +1,56 @@
+# Who may act through this deployment, and as what. Read by @harness/identity-static — the
+# plug-in HARNESS_IDENTITY names — from this folder. A principal's id is what every audit row,
+# approval and run carries, so an id is stable and is never reused for someone else.
+#
+#   kind   user | service
+#   level  member < practitioner < lead < admin for a person; service for a scheduled job's
+#          or a process's own identity. A service is never "at least" a user level.
+#
+# Everyone in the HF1 Labs workspace who is not listed below is a `member` (see `defaults`):
+# they get their own memory and read access; a write to shared memory is parked for an admin.
+# A default admits an undeclared Slack user as `u-slack-<their member id>`, an id derived from
+# theirs rather than minted, so their audit trail is their own across restarts. A user level
+# only — `service` is a startup error — and a surface left out of `defaults`, `http` here,
+# goes on refusing everyone this file does not name.
+#
+# An `http:` entry is the id that principal is named by over the run API (docs/runbook.md, "The
+# run API"): any stable string, because the API resolves it here exactly as it resolves a Slack
+# member id. A principal with no `http:` entry cannot drive a run over the API, which is the
+# right default.
+defaults:
+  slack: member
+principals:
+  - id: u-andrei
+    kind: user
+    level: admin
+    displayName: Andrei
+    surfaces:
+      slack: U0C0KEB8W3X
+      http: andrei
+  - id: u-admin-2
+    kind: user
+    level: admin
+    displayName: HF1 Labs admin
+    surfaces:
+      slack: U0C0Q8EU8BC
+  - id: u-admin-3
+    kind: user
+    level: admin
+    displayName: HF1 Labs admin
+    surfaces:
+      slack: U0C0HQHGY8K
+  # The host's own identity (HARNESS_HOST_PRINCIPAL): reconciliation runs as it.
+  - id: svc-host
+    kind: service
+    level: service
+    displayName: Harness host
+  # The identity scheduled playbooks run as.
+  - id: svc-playbooks
+    kind: service
+    level: service
+    displayName: Scheduled playbooks
+  # The stdio server's default: the MCP inspector and the eval runner on an operator's machine.
+  - id: svc-local
+    kind: service
+    level: service
+    displayName: Local operator

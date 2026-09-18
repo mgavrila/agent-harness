@@ -1,0 +1,20 @@
+# Action-class policy for AMA (HF1 Labs). Read by @harness/core-tools through
+# HARNESS_POLICY_FILE. Any class left out keeps the built-in default, and a level cell the
+# kernel ships always wins over `classes` for that level: `write.internal: auto` below is the
+# default for practitioner and above, while a member's shared write stays parked for an admin
+# because DEFAULT_POLICY gives `member` its own cell. See docs/runbook.md, "Onboarding a client".
+#
+#   read           every query tool, including knowledge_search and memory_list
+#   write.internal every record-store write, and a write to shared memory
+#   external       anything that leaves the harness
+#   financial      nothing yet; blocked so a future tool cannot slip through — for a member.
+#                  The kernel gives lead and admin their own `financial` cell, and a level cell
+#                  wins over `classes`, so an admin's would be parked for approval, not refused.
+#                  Say `levels: { admin: { financial: blocked } }` here if that is not wanted.
+#   destructive    parked for a human
+classes:
+  read: auto
+  write.internal: auto
+  external: approval
+  financial: blocked
+  destructive: approval

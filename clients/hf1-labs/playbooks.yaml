@@ -1,0 +1,4 @@
+# Scheduled work for AMA, read by the host at startup into the `playbooks` table. None yet:
+# add an entry here (see clients/demo-practice/playbooks.yaml for the fields) and restart the
+# host. An empty list is a client with nothing scheduled, not a broken file.
+playbooks: []
