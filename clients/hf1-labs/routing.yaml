@@ -17,7 +17,7 @@ routes:
 
   # Multi-step planning.
   reason:
-    model: gemini/gemini-3-flash-preview
+    model: gemini/gemini-2.5-flash
     daily_budget_usd: 2
 
   # LLM-as-judge in evals. The same family as `extract`, because this deployment has one
