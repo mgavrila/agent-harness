@@ -10,7 +10,23 @@ export const PrincipalShape = z.object({
   id: z.string().regex(PRINCIPAL_ID_PATTERN, 'a principal id is u-<slug> for a person or svc-<slug> for a service'),
   kind: z.enum(['user', 'service']),
   level: z.enum(LEVELS),
-  displayName: z.string().min(1),
+  /**
+   * How a person is addressed. One line, trimmed, and short.
+   *
+   * Not cosmetic bounds. A runtime renders this string into the rules block it puts under the
+   * persona, so a name carrying a line break adds a line that reads as another kernel rule and
+   * is typographically indistinguishable from the real ones. `identity.yaml` is the operator's
+   * file rather than anything an end user writes, which is why the shape is refused here rather
+   * than quarantined further down — but nothing downstream can tell a name that was always two
+   * lines from a rule that was, so this is the one place that sees it whole and can say no.
+   * `.trim()` runs before the bounds, so the stored value is what the bounds describe.
+   */
+  displayName: z
+    .string()
+    .trim()
+    .min(1)
+    .max(80)
+    .regex(/^[^\p{Cc}\p{Cf}]+$/u, 'a display name is one line: no line break and no control character'),
   surfaces: z.record(z.string().regex(SURFACE_NAME_PATTERN), z.string().min(1)).default({}),
   attributes: z.record(z.string(), z.string()).default({}),
 });
