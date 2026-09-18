@@ -47,4 +47,14 @@ describe('threads', () => {
     const rows = await db.select().from(messages).where(eq(messages.threadId, t.id));
     expect(rows.map((r) => r.content)).toEqual([WITHHELD]);
   });
+
+  it('orders two turns written at one timestamp by insertion, not by their random ids', async () => {
+    const t = await findOrCreateThread(db, key);
+    const at = new Date('2026-09-15T12:00:00Z');
+    // Straight into the table with one clock value, which is what one transaction does.
+    for (const content of ['one', 'two', 'three', 'four', 'five', 'six']) {
+      await db.insert(messages).values({ threadId: t.id, role: 'user', principalId: 'u-1', content, createdAt: at });
+    }
+    expect((await recentHistory(db, t.id, 3)).map((m) => m.content)).toEqual(['four', 'five', 'six']);
+  });
 });

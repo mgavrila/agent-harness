@@ -85,6 +85,13 @@
       "when": 1789660422214,
       "tag": "0011_threads_and_messages",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1789684414015,
+      "tag": "0012_memory_and_playbooks",
+      "breakpoints": true
     }
   ]
 }

@@ -2,7 +2,17 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import { eq, sql } from 'drizzle-orm';
 import { TEST_DATABASE_URL, resetDatabase } from '../testing.js';
 import { createDb, type Db } from './client.js';
-import { records, auditLog, toolEffects, messages, runs, threads } from './schema.js';
+import {
+  records,
+  auditLog,
+  toolEffects,
+  messages,
+  memoryEntries,
+  playbookRuns,
+  playbooks,
+  runs,
+  threads,
+} from './schema.js';
 
 let db: Db;
 let close: () => Promise<void>;
@@ -140,6 +150,58 @@ describe('schema', () => {
       .returning();
     expect(row.derivedFrom).toEqual([effect.id]);
     expect(row.skill).toBe('credentialing-intake');
+  });
+
+  it('numbers every message, so two rows with one timestamp still have an order', async () => {
+    const [thread] = await db
+      .insert(threads)
+      .values({ client: 'test', surface: 'memory', conversation: 'memory', principalId: 'u-1' })
+      .returning();
+    const at = new Date('2026-09-15T12:00:00Z');
+    await db.insert(messages).values([
+      { threadId: thread.id, role: 'user', principalId: 'u-1', content: 'first', createdAt: at },
+      { threadId: thread.id, role: 'assistant', principalId: 'u-1', content: 'second', createdAt: at },
+    ]);
+    const rows = await db.select({ content: messages.content, seq: messages.seq }).from(messages).orderBy(messages.seq);
+    expect(rows.map((r) => r.content)).toEqual(['first', 'second']);
+    expect(rows[1].seq).toBeGreaterThan(rows[0].seq);
+  });
+
+  it('stores a memory entry and a playbook with one run', async () => {
+    const [entry] = await db
+      .insert(memoryEntries)
+      .values({ client: 'test', scope: 'principal', principalId: 'u-1', text: 'prefers bullets', createdBy: 'u-1' })
+      .returning();
+    expect(entry.threadId).toBeNull();
+    const [playbook] = await db
+      .insert(playbooks)
+      .values({
+        client: 'test',
+        name: 'nightly',
+        schedule: '0 7 * * *',
+        skill: 'a-skill',
+        prompt: 'run it',
+        principalId: 'svc-playbooks',
+        costCapUsd: 0.5,
+      })
+      .returning();
+    expect(playbook).toMatchObject({ timezone: 'UTC', deliver: 'none', timeoutS: 600, enabled: true, nextRunAt: null });
+    const [run] = await db
+      .insert(playbookRuns)
+      .values({ playbookId: playbook.id, scheduledAt: new Date('2026-09-16T07:00:00Z') })
+      .returning();
+    expect(run).toMatchObject({ status: 'requested', attempts: 0, runId: null, requestedBy: null });
+    await expect(
+      db.insert(playbooks).values({
+        client: 'test',
+        name: 'nightly',
+        schedule: '0 8 * * *',
+        skill: 'a-skill',
+        prompt: 'again',
+        principalId: 'svc-playbooks',
+        costCapUsd: 1,
+      }),
+    ).rejects.toThrow();
   });
 });
 
