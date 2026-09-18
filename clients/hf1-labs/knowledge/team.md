@@ -13,7 +13,7 @@ Who does what at HF1 Labs. Ask AMA "who owns X" and this is the page it cites.
 | Mark                | Leads all design, marketing and growth                                 |
 | Andrei Giura        | Product team                                                           |
 | Andrei Gavrila      | Product team                                                           |
-| Mihai Andrei Schiop | Product lead                                                           |
+| Mihai Alexandru Schiop | Product lead                                                           |
 | Bei Zhang           | Runs the San Francisco relationships, fundraising and strategic growth |
 | Artur Grigor        | CTO                                                                    |
 | Chris Steele        | CFO                                                                    |
