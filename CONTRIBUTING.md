@@ -52,7 +52,8 @@ is empty.
 4. Choose the action class honestly: `read`, `write.self`, `write.internal`, `write.assign`,
    `external`, `financial`, `destructive`, `admin`. What each does depends on the caller's
    level — `DEFAULT_POLICY` in `domain/tooling/policy.ts` is the table; `external` parks an
-   approval for everyone and `financial` is blocked below `lead`.
+   approval for everyone and `financial` is blocked below `lead`. A tool whose class depends on
+   its arguments sets `actionClassFor` as well; `memory_add` is the example.
 5. Throw `ToolError` for anything the caller can fix. Never `throw new Error` in `tools/` —
    its message is masked and the caller learns nothing.
 6. Never send anything from a handler. Stage it with `stageEffect` and let the dispatcher send it.
@@ -456,7 +457,15 @@ pnpm new-client --pack healthcare --name acme-clinic
 ```
 
 Then fill in `clients/acme-clinic/.env.example`, review `SOUL.md` and `policy.yaml`, declare the
-people and services in `identity.yaml`, and read "Onboarding a client" in `docs/runbook.md`.
+people and services in `identity.yaml` (including `svc-playbooks`), review `playbooks.yaml`, and
+read "Onboarding a client" in `docs/runbook.md`.
+
+## Adding a playbook
+
+Add an entry to `clients/<name>/playbooks.yaml` (the fields are documented in the demo's file
+and in the runbook's "Playbooks"), naming a skill of a loaded pack and a service principal
+from `identity.yaml`, and restart the host. Test it with `playbooks_run_now` from the MCP
+inspector as an `admin` principal, then read `playbook_runs`.
 
 ## Adding a migration
 

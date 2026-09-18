@@ -2,13 +2,13 @@
 
 The MCP server every agent talks to, and a **pack-agnostic kernel**: the tooling layer that
 applies policy, opens the transaction and writes the audit row; the domains that hold the
-actual work; the sixteen kernel tools that expose them; and the shared helpers the packages
+actual work; the twenty-two kernel tools that expose them; and the shared helpers the packages
 above this one import instead of copying.
 
 It knows about records, attachments, documents, deadlines, approvals, audit and effects, and
 nothing about any one area of the product. `src/kernel-vocabulary.test.ts` greps this package's
-own source for credentialing vocabulary and its allowlist is empty. The 22 tools a default
-deployment publishes are four of the sixteen plus the eighteen `@harness/pack-healthcare`
+own source for credentialing vocabulary and its allowlist is empty. The 28 tools a default
+deployment publishes are ten of the twenty-two plus the eighteen `@harness/pack-healthcare`
 contributes; ARCHITECTURE.md, "The kernel and a pack", is the why.
 
 ## Layout
@@ -16,8 +16,9 @@ contributes; ARCHITECTURE.md, "The kernel and a pack", is the why.
 ```
 src/shared/redaction/  patterns, names, text — domain knowledge; the generic env, errors, paths,
                        log, subprocess, jsonl and csv helpers live in @harness/shared instead
-src/domain/        tooling, approvals, audit, deadlines, documents, effects, files, identity, models, packs, records, session, storage
-src/tools/         the sixteen kernel defineTool blocks in 6 files, plus catalog.ts
+src/domain/        tooling, approvals, audit, deadlines, documents, effects, files, identity, memory, models, packs, playbooks, records, session, storage
+src/tools/         the twenty-two kernel defineTool blocks in 8 files (records, deadlines, audit,
+                   approvals, harness, memory, playbooks, documents), plus catalog.ts
 src/app/           server.ts (KernelConfig from the environment, the principal, one run), main.ts (stdio entrypoint), record-surface.ts
 src/index.ts       the public API
 src/testing.ts     ./testing: makeTestDeps, connectTools, resultOf, approvalIdOf, useTestDb, startFakeGateway, TEST_PRINCIPAL, TEST_CONTEXT
@@ -116,5 +117,5 @@ allowlist is empty. See CONTRIBUTING.md, "Adding a pack", step 6.
 
 What reaches MCP is not this list. `publishedTools` drops a kernel tool a loaded pack replaced,
 and drops the five generic `records_*` tools when every loaded record kind sets
-`genericTools: false`; `deps.kernelTools` still holds all sixteen by their kernel names, which
+`genericTools: false`; `deps.kernelTools` still holds all twenty-two by their kernel names, which
 is how a pack's wrapper calls the handler it took over.

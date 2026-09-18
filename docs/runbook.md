@@ -36,12 +36,13 @@ GRANT INSERT, SELECT ON TABLE audit_log TO harness_app;
 -- Everything else is read/write but never destructive.
 GRANT SELECT, INSERT, UPDATE ON TABLE
   records, documents, fields, attachments, deadlines,
-  approvals, runs, model_calls, tool_effects
+  approvals, runs, model_calls, tool_effects,
+  memory_entries, playbooks, playbook_runs, threads, messages
 TO harness_app;
 
 -- `deadlines_compute` retires deadlines whose attachment lost its expiry date,
--- so this one table also needs DELETE.
-GRANT DELETE ON TABLE deadlines TO harness_app;
+-- and `memory_remove` forgets an entry, so these two tables also need DELETE.
+GRANT DELETE ON TABLE deadlines, memory_entries TO harness_app;
 ```
 
 Do not add `GRANT ALL`, do not make `harness_app` the owner of any table, and do
@@ -185,8 +186,8 @@ erroring (check `/healthz` and the log), or the rows belong to a different
 ## Reconciliation
 
 `harness_reconcile` expires approvals past their TTL and parks stuck dispatches.
-It never re-sends anything. A scheduled watch beyond that loop — a job that
-checks reconciliation is actually happening — is Plan 9's, on the scheduler.
+It never re-sends anything. A scheduled watch beyond that loop can be a
+playbook (see "Playbooks"); none ships.
 
 **The deployed stack reconciles in one place only: the host's loop, every
 `RECONCILE_SECONDS` (default 300).** The MCP tool repairs **only the calling
@@ -221,8 +222,9 @@ column that says who a run acted as, and it always agrees with `audit_log.caller
 rows. A run whose principal the identity file does not declare never opens.
 
 Who is who in the demo: `svc-host` is the host's own identity (`HARNESS_HOST_PRINCIPAL`,
-default `svc-host`): reconciliation runs as it, and playbooks will from Plan 9. `svc-local` is
-the stdio server on an operator's machine (the default). The two humans are
+default `svc-host`): reconciliation runs as it. `svc-playbooks` is the identity the scheduled
+playbooks run as — each entry of `playbooks.yaml` names its own service principal, and the
+demo's names this one. `svc-local` is the stdio server on an operator's machine (the default). The two humans are
 `u-practice-manager` (`admin`) and `u-coordinator` (`lead`). On the host's own surfaces — the
 ones `HARNESS_SURFACES` names — every message from a person runs as that person's own
 principal: the identity plug-in resolves the surface user id before the turn starts, and an
@@ -271,6 +273,11 @@ harness does before every insert: a value that trips it is stored as
 posts the same marker to the surface instead of the model's own text when that text trips it
 (invariant 10). A row carrying that marker is not a bug to route around — it means something
 wrote a restricted-looking value where it should not have; read the audit row.
+
+`messages.seq` numbers every row in insertion order; `created_at` is the statement clock and two
+rows one transaction writes share it, so `seq` is the tiebreak the host and `session_search`
+order by. Playbook threads are `kind = 'playbook'`, one per playbook, conversation
+`playbook:<name>`, owned by the playbook's service principal.
 
 ## Writing migrations
 
@@ -591,8 +598,7 @@ network, and from nowhere else. A container-loopback bind would answer neither.
 Set `APPROVALS_HEALTH_BIND=127.0.0.1` only for a bare-metal run, where the
 process itself is the boundary.
 
-There are no watchdogs any more — a scheduled watch is Plan 9's, on the
-scheduler — so the manual check is:
+There are no watchdogs; the manual check is:
 
 ```bash
 curl http://127.0.0.1:8787/healthz
@@ -686,8 +692,7 @@ in order, with the stack down.
    `docker volume rm` its data volume once you no longer want that state: conversation history
    does not carry over, and threads start fresh. The `storage` volume is reused as is (already
    `1000:1000`), and the old approvals image is left dangling.
-7. **Expect these behaviour changes.** No nightly `credentialing-expirations` digest and no
-   watchdogs until Plan 9. An attachment is stored as `incoming/<ts>-<safe name>` rather than
+7. **Expect these behaviour changes.** No watchdogs. An attachment is stored as `incoming/<ts>-<safe name>` rather than
    under its original name. A reply lands in a Slack thread under the message that caused it, and
    a follow-up written in that thread, in a channel, has to mention the bot again. Every chat turn
    now runs as the writer's own principal and level, so a `member` who used to act through a
@@ -696,10 +701,141 @@ in order, with the stack down.
 8. **Health is unchanged.** `/healthz` still answers on `127.0.0.1:8787`; the two watchdog
    scripts that used to poll it are gone, so point your own probe at it.
 
+## Upgrading from Plan 8
+
+1. **Migrate the database.** `pnpm db:migrate` applies 0012: `memory_entries`, `playbooks`,
+   `playbook_runs`, and `messages.seq` (numbered for existing rows). Safe on live data. The
+   optional `runs.status` backfill from the Plan 7 upgrade still applies if you skipped it.
+2. **Declare `svc-playbooks`** in `clients/<name>/identity.yaml` (or whichever service id your
+   `playbooks.yaml` names) and add `clients/<name>/playbooks.yaml`; a client with no file has no
+   playbooks and starts fine, with one log line saying so.
+3. **Grant the application role** `SELECT, INSERT, UPDATE` on the three new tables and `DELETE`
+   on `memory_entries`, as under "Database roles".
+4. **Nothing new in `.env`.** This release reads no new environment variable: the scheduler's
+   tick, the memory caps and the search limit are constants in the code.
+5. **Retire the external cron.** The shell cron that used to fire the nightly
+   `credentialing-expirations` digest is gone with the Hermes runtime; the scheduler runs that
+   skill instead, as `svc-playbooks`, and the skill's silence gate is unchanged — it replies with
+   the line `Nothing to report.` and stages what the practice should see through
+   `harness_notify`.
+6. **Expect these behaviour changes.** The nightly digest is back, at the time and zone
+   `playbooks.yaml` says. The model can now remember facts between conversations; what it
+   remembers is per principal, and the practice-wide scope needs `lead` or above to write.
+
+## Memory
+
+`memory_entries` is the curated memory (spec 5.5): one row per fact, in scope `principal` (one
+principal's own notes, `principal_id` set) or `client` (shared, `principal_id` null). Caps are
+2,500 characters and 50 entries per principal scope, 4,000 and 50 for the client scope, 500
+characters per entry; `memory_add` past a cap is refused with the current entries and the space
+left, so the model consolidates with `memory_remove` in the same turn. Own-scope writes are
+`write.self` (auto at every level); client-scope writes and removals are `write.internal`
+(parked for a `member`, auto above). Every write runs the injection scan — instruction-shaped
+phrases, invisible Unicode — and the restricted-pattern check first; a refusal names the
+category and never repeats the text.
+
+The host renders what the caller can see into `RunRequest.memory` once, before the run starts
+(the runtime seeds it at `/memories/MEMORY.md`); a fact added during a turn is in the next
+turn's snapshot. `session_search` is full-text recall over `messages` of the caller's own
+threads, plus the playbook threads for `lead` and above, filtered by principal before ranking.
+
+**Leave `write.self` on `auto` in `policy.yaml`.** Parking it strands the write. A replay runs on
+the deciding principal's own dependencies, and a `write.self` handler files the entry under
+whoever replays it, so `approvals_execute` refuses every replay whose principal is not the one
+who asked —
+`a write to a principal's own memory can only be approved by the principal who asked for it` —
+and rolls the row back to `approved`. A decision always replays as the approver, never as the
+requester, so a member's own note parked this way can be approved by nobody and stays
+approved-unspent forever.
+
+Memory written from a conversation carries its `thread_id`. The spec's second half of that rule
+— a fact learned in a group conversation never lands in a private scope — is not enforced: no
+surface says yet whether a conversation is a group or a direct message. Read what a principal
+remembers with:
+
+```sql
+select scope, principal_id, text, created_by, created_at
+from memory_entries where client = 'demo-practice' order by created_at;
+```
+
 ## Playbooks
 
-The Hermes runtime was retired in Plan 8, taking its cron fleet, the nightly
-`credentialing-expirations` job, `pnpm demo:playbooks` and the two watchdogs with it. Scheduled
-work returns in Plan 9 as `playbooks.yaml` and a scheduler inside the host, running as a service
-principal. Until then, the `credentialing-expirations` skill stays in the pack, and a human can
-ask for it in a message.
+Scheduled work is `clients/<name>/playbooks.yaml`, read into the `playbooks` table when the host
+starts, and a scheduler loop inside the host that ticks every 30 seconds. The demo ships one
+playbook, `credentialing-expirations`, at 07:00 `America/New_York` as `svc-playbooks`.
+
+**The file.** One entry per playbook: `name` (the key), `schedule` (cron, five or six fields),
+`timezone` (IANA, default `UTC`), `skill`, `prompt`, `principal` (a `svc-…` id from
+`identity.yaml`), `deliver` (`none`, the default, or `conversation`), optional `surface` and
+`conversation`, `cost_cap_usd`, `timeout_s` (default 600), `enabled` (default true). The schedule
+is exactly five or six whitespace-separated fields that fire at least once: the wider forms the
+cron library would otherwise take — `@daily` and the rest of that family, seven fields, an ISO
+one-shot date — are rejected, and so is a calendar that can never come round again, such as
+`0 0 30 2 *`. The timezone is checked at parse time too. A malformed file stops the host at
+startup, naming the field. Edit the file and restart: a playbook removed from it is **disabled,
+not deleted**, so `playbook_runs` keeps its history, and a firing that was due while the host was
+down is **not replayed** — `next_run_at` is recomputed from the clock at every start.
+
+**A firing.** The scheduler claims due rows with `FOR UPDATE SKIP LOCKED` (two hosts on one
+database never both fire the same row), then for each: preflight — the skill is in a loaded
+pack, the principal is declared and is a service, the named surface is loaded, the cost cap is
+a positive number; a failure writes `playbook_runs.status = 'preflight_failed'` with the reason
+and posts one notice, and no model call is made. Then one turn on the playbook's own thread
+(`kind = 'playbook'`, conversation `playbook:<name>`), as its service principal, with the
+prompt as a host message, that one skill offered, `timeout_s` as the run's budget timeout.
+Under `deliver: none` the run's reply is recorded on the thread and posted nowhere; what the
+practice sees is whatever the skill staged through `harness_notify`, which is the silence
+doctrine in `SOUL.md`. Under `deliver: conversation` the reply is posted once to
+`surface`/`conversation` (defaults: the primary surface, its default conversation).
+
+The 30-second tick is a constant in the code, not a variable a deployment tunes. A tick that
+throws is logged at error and dropped — the claim is transactional, so the row it could not take
+is still due and the next tick takes it. The one way that happens in practice is a deadlock
+abort: a host starting up syncs the file while a tick is claiming, and with two or more playbooks
+of one client the two transactions can reach for the same rows in opposite orders. Postgres
+aborts one side. If the loser is the tick, the next one retries thirty seconds later; if it is
+the sync, host startup fails once and the answer is to start it again.
+
+**Retry and notice.** A firing whose runtime or transport failed (`the run failed; see the host
+log` — `RUN_FAILED_MESSAGE`, exported from `@harness/runtime-api` and emitted by the shipped
+runtime, so a custom runtime that wants the retry emits that exact text — or `the runtime failed;
+see the host log`, or the turn threw before the runtime answered) is retried once, as a second
+`runs` row; `attempts` counts them and `run_id` is the last. A run that was cancelled, timed out,
+spent its budget or passed its cost cap is not retried, and neither is a firing the host refused
+because it had begun shutting down: that one is recorded `failed` with
+`the host stopped before the run finished`, stages its notice like any other failure, and waits
+for the schedule to come round again. A firing that ends `failed` stages exactly one notice
+through the effects outbox — sink `surface_message`, idempotency key
+`<client>:playbook:<name>:<scheduled_at>` — to the playbook's surface and conversation, with
+one of two fixed sentences and nothing from the model. The dispatcher sends it on its next tick.
+
+**What `cost_cap_usd` bounds today.** The host sums the `usage.costUsd` the runtime reports
+and aborts the run past the cap; the shipped runtime reports `0` on every usage event (spend is
+attributed by the gateway, in `model_calls`, not by the runtime), so **the dollar cap cannot
+trip today**. What bounds a playbook run in practice is `timeout_s`,
+`HARNESS_RUN_MAX_MODEL_CALLS` and `HARNESS_RUN_MAX_TOOL_CALLS` (the runtime ends the run with
+`the run exceeded its budget`), the kernel's `HARNESS_GATEWAY_MAX_CALLS_PER_RUN` for model calls
+a tool makes, and LiteLLM's `daily_budget_usd` per route. The cap becomes live the day a runtime
+reads `x-litellm-response-cost` into `usage.costUsd`. Either host-side abort is a decision rather
+than a request: once the reported spend passes the cap, or the host's own timer fires, the run
+ends `error` with `the run exceeded its cost cap` or `the run exceeded its time budget` even if
+the runtime ignores the abort and answers anyway.
+
+**By hand.** `playbooks_list` (any level) shows every playbook with `next_run_at`, `last_run_at`
+and `last_status`. `playbooks_run_now` (`admin`) writes a `requested` row that the next tick —
+at most 30 seconds away — claims ahead of the schedule; it returns the `playbook_runs` id, and
+the run opens then, as the playbook's principal, never the caller's. A requested row whose
+playbook is disabled or dropped from the file before that tick arrives is closed by the startup
+sync, or by the claim itself, as `preflight_failed` with `playbook disabled` or
+`playbook removed`, `run_id` null and `attempts` 0. No notice is staged for it: it is visible
+only through `playbooks_list` and the `playbook_runs` table.
+
+```sql
+select p.name, r.scheduled_at, r.status, r.attempts, r.error, r.run_id
+from playbook_runs r join playbooks p on p.id = r.playbook_id
+order by r.scheduled_at desc limit 20;
+```
+
+A row stuck in `running` is a host that died mid-firing: the next start does not resume it;
+close it by hand (`update playbook_runs set status = 'failed', ended_at = now() where id = …`)
+and let the schedule fire again.

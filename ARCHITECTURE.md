@@ -209,11 +209,11 @@ sources may not publish, or replace, the same name. And a source that replaces a
 publish it: a name listed in `replaces` and missing from the catalogue the pack returns would
 otherwise delete the kernel's tool and leave nothing behind it.
 
-The kernel defines sixteen tools. A healthcare-only deployment therefore publishes four of
-them and eighteen of the pack's: twelve of those eighteen are wrappers that reproduce the
-pre-Plan-5 names and schemas byte for byte, and `docs/architecture/tool-surface.json` is what
-proves it. Load the stories pack beside it and the catalogue grows to twenty-seven, by the five
-`records_*` tools, because the `epic` kind wants them.
+The kernel defines twenty-two tools. A healthcare-only deployment therefore publishes ten of
+them and eighteen of the pack's — twenty-eight — and twelve of those eighteen are wrappers that
+reproduce the pre-Plan-5 names and schemas byte for byte; `docs/architecture/tool-surface.json`
+is what proves it. Load the stories pack beside it and the catalogue grows to thirty-three, by
+the five `records_*` tools, because the `epic` kind wants them.
 
 A wrapper that reshapes a result builds its **output schema from `deps`**. `replaces` is
 process-wide, so healthcare's `documents_get`, `documents_list` and `documents_extract` also see
@@ -413,8 +413,8 @@ over `/**` (invariant 9); a skill's body is seeded at `/skills/<name>/SKILL.md` 
 memory snapshot at `/memories/MEMORY.md` — read-only, re-seeded every turn (decision 5). The
 framework's own `memory` option is deliberately unused: it would let the model call `edit_file`
 to save what it learns, which this run neither offers nor permits; the kernel's own rules tell
-the model to `read_file` `/memories/MEMORY.md` instead, and memory _writes_ go through kernel
-tools starting Plan 9. `skill_activated` is a `read_file` under `/skills/`, which precedes the
+the model to `read_file` `/memories/MEMORY.md` instead, and memory _writes_ go through the
+kernel's `memory_add` and `memory_remove`. `skill_activated` is a `read_file` under `/skills/`, which precedes the
 tool call the skill's body causes (decision 6); the host has no `ToolDeps` at that point, so it
 stamps `deps.context.skill`/`skillVersion` on the run's own bag for the audit rows that follow
 (decision 6, Plan 7 deferral c). The fallback route is the framework's own model-fallback
@@ -444,8 +444,24 @@ continue.
 whatever a runtime checkpoints for itself (spec decision 9). `threads` keys on `(client, surface,
 conversation, principal_id)` with a `kind` (`chat` | `playbook`, decision 11); `messages` carries
 `role` (`user` | `assistant` | `host`), `principal_id`, `content`, and a generated `tsv` column
-with a GIN index for Plan 9's episodic search. The redaction guard runs before every insert
+with a GIN index, which is what `session_search` ranks on. The redaction guard runs before every insert
 (invariant 10, decision 20 of this plan).
+
+**Memory (Plan 9, spec 5.5).** `memory_entries` in core-tools' `domain/memory/`: two scopes,
+`principal` and `client`, fixed caps in characters and entries, and four tools — `memory_add`,
+`memory_remove` (each `write.self` in the caller's own scope and `write.internal` in the
+client's, through `ToolDef.actionClassFor`, the one place a tool's class follows its
+arguments), `memory_list` and `session_search` (`read`; full-text over the caller's own
+threads, plus playbook threads for `lead` and above, filtered before ranking — invariant 7).
+Every write passes the injection scan in `domain/memory/injection.ts` and the restricted-pattern
+check (invariant 8). The host renders `memorySnapshot` into `RunRequest.memory` once per run.
+
+**Playbooks (Plan 9, spec 5.6).** `clients/<name>/playbooks.yaml` is upserted into `playbooks` at
+host startup (`domain/playbooks/repository.ts`); `startScheduler` ticks every 30 seconds, claims
+due and requested rows skip-locked, preflights, runs each on its own `kind: 'playbook'` thread as
+the service principal the file names, retries once on a transport failure, and stages one failure
+notice keyed `playbook:<name>:<scheduled_at>` through the outbox. `playbooks_list` and
+`playbooks_run_now` in core-tools read and request; nothing in core-tools runs a playbook.
 
 **The group-chat rule is `mentioned`.** An adapter sets `MessageEvent.mentioned` true when the
 bot is addressed in a channel and for every direct message; the host's whole rule is to return
@@ -667,7 +683,7 @@ work. `pnpm lint:strict` shows the backlog.
 every run:
 
 - the MCP tool list, with each tool's input and output JSON Schema, against
-  `docs/architecture/tool-surface.json` — 22 tools today;
+  `docs/architecture/tool-surface.json` — 28 tools today;
 - every environment variable name the code reads, against `.env.example`;
 - the rendered Compose config, against `docs/architecture/compose-surface.yaml`.
 

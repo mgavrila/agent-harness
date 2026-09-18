@@ -14,7 +14,8 @@ import, and `pnpm arch` forbids a static edge from `harness/host/src` into any o
 | Runtime  | `HARNESS_RUNTIME`  | Which agent runtime drives the loop. Required, no default — a default here would name a specific plug-in's package in host source, the coupling `HARNESS_SURFACES` already avoids for the same reason; the demo's Compose service sets it. |
 
 The host's own identity is `HARNESS_HOST_PRINCIPAL` (default `svc-host`), a service principal
-declared in `identity.yaml`: reconciliation runs as it, and Plan 9's playbooks will too.
+declared in `identity.yaml`: reconciliation runs as it; a playbook runs as the service principal
+its entry in `playbooks.yaml` names.
 
 Per-run ceilings the host hands the runtime: `HARNESS_RUN_MAX_MODEL_CALLS` (30),
 `HARNESS_RUN_MAX_TOOL_CALLS` (60), `HARNESS_RUN_TIMEOUT_S` (600) — a run past any of them ends
@@ -32,8 +33,9 @@ a bind-mounted storage directory still has both.
   principal (an unknown sender gets one refusal, once, and one audit row), find or create their
   thread, and — when the surface says the message is addressed to it (`MessageEvent.mentioned`:
   true for a direct message or a mention, false for a channel message that is neither, in which
-  case the host returns without running) — run one turn (`runTurn`): append the turn, ask the
-  runtime, stream the reply as it arrives on a surface whose `capabilities.streaming` is true or
+  case the host returns without running) — run one turn (`runTurn`): append the turn, render the
+  caller's memory snapshot into the request, ask the runtime, stream the reply as it arrives on a
+  surface whose `capabilities.streaming` is true or
   post it once at `done` otherwise, append the answer, close the run. An inbound file is already
   downloaded into `<storageDir>/incoming/` by the surface before the host ever sees the message;
   `MessageEvent.attachments[].path` names it relative to that directory.
@@ -43,13 +45,20 @@ a bind-mounted storage directory still has both.
   principal, with `resumeText(outcome)` — a host-authored message reporting what already
   happened — as the input. An approval parked outside a thread (the stdio server, the eval
   runner) has nothing to resume.
+- **A playbook** (`executePlaybook`, driven by `startScheduler`'s tick every `SCHEDULER_TICK_MS`):
+  claim the due rows and the requested ones (`claimDuePlaybooks`, skip-locked), preflight each
+  (`preflightPlaybook`), open or reuse the playbook's own thread and run one turn as its service
+  principal with `deliver` from the file, its one skill, its timeout and its cost cap; retry once
+  on a transport failure; close the `playbook_runs` row; stage one failure notice
+  (`stagePlaybookNotice`) through the outbox. `syncPlaybooks` reads `playbooks.yaml` into the
+  table at startup.
 
 `openKernel`/`kernel.close` gives each run its own `ToolDeps` and in-process MCP client; the
 runtime never talks to Postgres or the kernel directly.
 
-Both flows go through `serialize`, which chains a thread's turns on `host.turns`: a second message
-in the same conversation, or a decision resuming a thread that is still mid-turn, waits for the
-turn in flight instead of running beside it. A runtime keeps its own state per thread — the Deep
+All three flows go through `serialize`, which chains a thread's turns on `host.turns`: a second
+message in the same conversation, a decision resuming a thread that is still mid-turn, or a
+playbook firing on its own thread waits for the turn in flight instead of running beside it. A runtime keeps its own state per thread — the Deep
 Agents checkpointer is keyed on the thread id — and two turns writing it at once leave only the
 one that finished last. The chain is per thread, so different conversations still run at once.
 
@@ -62,14 +71,21 @@ used to poll it are gone — on `APPROVALS_HEALTH_PORT`/`APPROVALS_HEALTH_BIND` 
 the names are unchanged from when `@harness/approvals` hosted its own process, because renaming
 them would touch Compose, the snapshot and the runbook for no behaviour.
 
+The scheduler is a fourth loop of the same shape; its status is on its handle and in the log, not
+on `/healthz`.
+
 ## Shutdown
 
 `app/main.ts` traps `SIGINT`/`SIGTERM` and closes everything in the reverse of startup order:
-`drainActive` first — it cancels every run still in `host.active` and waits, for at most ten
-seconds, until each turn has closed its run row and its kernel — then stop the runner, close the
-health server, stop every surface, stop the runtime, stop the identity plug-in, close the
-core-tools client, close the database pool. The drain comes first because everything after it
-takes away something a turn is still using: the runtime's `stop()` ends its checkpointer pool and
+`scheduler.stop()` first, so no further tick starts, though its promise is awaited only after the
+drain — the tick in flight is waiting on a turn that only the drain can abort. Then `drainActive`
+— it cancels every run still in `host.active` and waits, for at most ten seconds, until each turn
+has closed its run row and its kernel — and then the scheduler's own wait, under that same
+ten-second bound: a runtime that ignores its abort is logged and the process stops anyway rather
+than holding the shutdown open. Then stop the runner, close the health server, stop every surface,
+stop the runtime, stop the identity plug-in, close the core-tools client, close the database pool.
+The drain comes before all of those because each of them takes away something a turn is still
+using: the runtime's `stop()` ends its checkpointer pool and
 `closeDb()` the host's, and a turn that lost that race left its `runs` row `running` forever.
 Nothing sweeps such a row — `harness_reconcile` reads approvals and dispatches, never `runs`. The
 drain also sets `host.draining`, which is what keeps a turn still queued on a thread's chain from
@@ -88,6 +104,11 @@ src/domain/persona.ts          readPersona: SOUL.md
 src/domain/kernel.ts           openKernel: one run, one ToolDeps, one in-process MCP client
 src/domain/conversation.ts     runTurn, handleMessage, attachMessageHandlers, serialize, cancelRun, drainActive
 src/domain/resume.ts           resumeText, resumeOnDecision, decisionDeps: the onDecided hook
+src/domain/playbooks/schema.ts     PlaybookShape, parsePlaybooksFile, readPlaybooksFile, nextRunAfter
+src/domain/playbooks/repository.ts syncPlaybooks, claimDuePlaybooks, finishPlaybookRun
+src/domain/playbooks/preflight.ts  preflightPlaybook
+src/domain/playbooks/notice.ts     stagePlaybookNotice, playbookNoticeKey
+src/domain/playbooks/scheduler.ts  startScheduler, executePlaybook, SCHEDULER_TICK_MS
 src/app/main.ts                the composition root: env, the three plug-ins, the loops, health, shutdown
 src/index.ts                   the public API
 src/testing.ts                 ./testing: testKernelConfig, hostFixture, useTestDb
