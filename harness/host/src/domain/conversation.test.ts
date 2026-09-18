@@ -264,7 +264,7 @@ describe('a message on a surface', () => {
     const f = await hostFixture(db, { trajectory: [{ sleep: 10_000 }, { say: 'never' }] });
     attachMessageHandlers(f.host);
     const turn = f.surface.say('U012', 'slow one');
-    await new Promise((r) => setTimeout(r, 50));
+    await waitFor(() => f.host.active.size === 1);
     const [run] = await db.select().from(runs);
     expect(cancelRun(f.host, run.id)).toBe(true);
     await turn;
@@ -357,7 +357,7 @@ describe('two turns on one thread', () => {
       f.surface.say('U012', 'in C1', { conversation: 'C1' }),
       f.surface.say('U012', 'in C2', { conversation: 'C2' }),
     ];
-    await new Promise((r) => setTimeout(r, 60));
+    await waitFor(() => f.runtime.requests.length >= 2);
     expect(f.runtime.requests.map((r) => r.input.text).sort()).toEqual(['in C1', 'in C2']);
     await Promise.all(turns);
     expect(await db.select().from(runs)).toHaveLength(2);
@@ -369,7 +369,7 @@ describe('drainActive', () => {
     const f = await hostFixture(db, { trajectory: [{ sleep: 10_000 }, { say: 'never' }] });
     attachMessageHandlers(f.host);
     const turn = f.surface.say('U012', 'slow one');
-    await new Promise((r) => setTimeout(r, 50));
+    await waitFor(() => f.host.active.size === 1);
     expect(f.host.active.size).toBe(1);
 
     await drainActive(f.host, 10_000);

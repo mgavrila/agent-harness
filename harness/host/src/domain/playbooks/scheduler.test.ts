@@ -54,6 +54,15 @@ async function due(f: HostFixture, definition: PlaybookDefinition = NIGHTLY): Pr
   await db.update(playbooks).set({ nextRunAt: f.host.now() }).where(eq(playbooks.name, definition.name));
 }
 
+/** Poll until `ready` holds, so a test waits on the signal it means rather than on a fixed delay. */
+async function waitFor(ready: () => boolean, timeoutMs = 2_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!ready()) {
+    if (Date.now() > deadline) throw new Error('timed out waiting for the condition');
+    await new Promise((r) => setTimeout(r, 5));
+  }
+}
+
 /** A runtime whose answer is scripted per request number. */
 function sequenced(...outcomes: (readonly RunEvent[])[]): RuntimeSession {
   let calls = 0;
@@ -354,7 +363,7 @@ describe('the scheduler', () => {
     await due(f, { ...NIGHTLY, skill: 'sample-skill' });
     const scheduler = startScheduler(f.host, { tickMs: 3_600_000 });
     const tick = scheduler.tick();
-    await new Promise((r) => setTimeout(r, 60));
+    await waitFor(() => f.host.active.size === 1);
     expect(f.host.active.size).toBe(1);
     // The shutdown begins while the turn is already running, unlike the refused-turn case above:
     // `drainActive` aborts it mid-flight, the same as a real shutdown racing a slow tool call.
@@ -384,7 +393,7 @@ describe('the scheduler', () => {
     await due(f, { ...NIGHTLY, skill: 'sample-skill' });
     const scheduler = startScheduler(f.host, { tickMs: 3_600_000 });
     const tick = scheduler.tick();
-    await new Promise((r) => setTimeout(r, 30));
+    await waitFor(() => scheduler.status().ticking);
     expect(scheduler.status().ticking).toBe(true);
     await scheduler.stop();
     // Before `await tick`: this is the state that exists the instant `stop()` resolves, so a
@@ -398,7 +407,7 @@ describe('the scheduler', () => {
     await due(f, { ...NIGHTLY, skill: 'sample-skill' });
     const scheduler = startScheduler(f.host, { tickMs: 20 });
     try {
-      await new Promise((r) => setTimeout(r, 120));
+      await waitFor(() => scheduler.status().lastOkAt !== null);
     } finally {
       await scheduler.stop();
     }
