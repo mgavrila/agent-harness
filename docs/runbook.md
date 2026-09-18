@@ -685,6 +685,11 @@ nothing to edit under `harness/compose/`:
 `pnpm demo:up` is the same command under the default project name; with `HARNESS_CLIENT` set
 in `.env` it starts that client.
 
+Two client folders ship, and they are worth reading side by side. `clients/demo-practice` names
+everyone who may act and schedules two playbooks; `clients/hf1-labs` names three admins, admits
+the rest of the workspace through `defaults`, schedules nothing and starts with an empty
+knowledge folder.
+
 `policy.yaml`'s `classes:` block sets the default for every level, but a level cell — the
 kernel's own `DEFAULT_POLICY` or a `levels:` block in the client's file — always wins over
 `classes` for that level, so `classes:` alone cannot loosen or tighten a level the kernel
