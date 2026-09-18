@@ -5,6 +5,7 @@ import { approvals, auditLog, memoryEntries, messages, runs, threads } from '@ha
 import { COORDINATOR, hostFixture, useTestDb, type HostFixture } from '../testing.js';
 import {
   COST_CAP_EXCEEDED,
+  RUNTIME_FAILED,
   TIMED_OUT,
   TIMEOUT_MARGIN_MS,
   UNAUTHORISED_TEXT,
@@ -620,7 +621,7 @@ describe('a watcher on a turn', () => {
       text: 'anything overdue?',
       attachments: [],
       replyTo: null,
-      observe: (event) => seen.push(event),
+      observe: (event) => void seen.push(event),
     });
 
     expect(seen[0]).toEqual({ type: 'run', runId: result.runId });
@@ -644,6 +645,7 @@ describe('a watcher on a turn', () => {
       principalId: COORDINATOR.id,
     });
     const seen: TurnEvent[] = [];
+    let cancelledFromEvent: boolean | null = null;
     const turn = runTurn(f.host, {
       thread,
       principal: COORDINATOR,
@@ -654,11 +656,15 @@ describe('a watcher on a turn', () => {
       observe: (event) => {
         seen.push(event);
         // The run id reaches the watcher before the runtime has produced anything, which is what
-        // lets the run API answer 202 with an id a caller can immediately cancel by.
-        if (event.type === 'run') expect(cancelRun(f.host, event.runId)).toBe(true);
+        // lets the run API answer 202 with an id a caller can immediately cancel by. The answer is
+        // captured and asserted below rather than here: an `expect` inside the watcher is swallowed
+        // by the same `catch` that keeps a watcher from failing a turn, so it could never fail this
+        // test.
+        if (event.type === 'run') cancelledFromEvent = cancelRun(f.host, event.runId);
       },
     });
     const result = await turn;
+    expect(cancelledFromEvent).toBe(true);
     expect(result.status).toBe('cancelled');
     expect(seen.at(-1)).toEqual({ type: 'result', status: 'cancelled', text: '', error: 'cancelled' });
   });
@@ -686,5 +692,75 @@ describe('a watcher on a turn', () => {
     // A watcher is watching, not taking part: a client that hung up mid-run must not turn a
     // finished run into a failed one.
     expect(result).toMatchObject({ status: 'done', text: 'fine', error: null });
+  });
+
+  it('is not failed by an async watcher that rejects, and leaves no unhandled rejection behind', async () => {
+    const f = await hostFixture(db, { trajectory: [{ say: 'fine' }] });
+    onTestFinished(() => f.close());
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown): void => void unhandled.push(reason);
+    process.on('unhandledRejection', onUnhandled);
+    onTestFinished(() => void process.off('unhandledRejection', onUnhandled));
+    const logged = vi.spyOn(f.host.log, 'error');
+    let calls = 0;
+    const result = await turnOn(f, 'none', {
+      // A watcher whose work is asynchronous: the rejection arrives a tick after the call returns,
+      // so only a turn that awaits it can catch it. Unawaited it is an unhandled rejection, which
+      // under Node's default takes the host down — a watcher ending the process it watches.
+      observe: () => (++calls === 2 ? Promise.reject(new Error('the socket went away')) : Promise.resolve()),
+    });
+    // Long enough for Node to have reported an unhandled rejection, had one escaped.
+    await new Promise((r) => setTimeout(r, 20));
+    expect(result).toMatchObject({ status: 'done', text: 'fine', error: null });
+    expect(unhandled).toEqual([]);
+    expect(logged.mock.calls.filter(([message]) => message.includes('the turn watcher threw'))).toHaveLength(1);
+  });
+
+  it('tells a watcher the outcome the host forced, not the one the runtime reported', async () => {
+    const f = await hostFixture(db, { trajectory: [{ say: 'unused' }] });
+    onTestFinished(() => f.close());
+    // A runtime that never reads `request.signal`: it answers past the cap as if nothing happened.
+    f.host.runtime = {
+      name: 'deaf',
+      run: () => ({
+        events: (async function* (): AsyncGenerator<RunEvent> {
+          yield { type: 'usage', inputTokens: 1, outputTokens: 1, costUsd: 0.75 };
+          yield { type: 'done', text: 'Here is the answer anyway.' };
+        })(),
+      }),
+      stop: async () => {},
+    };
+    const seen: TurnEvent[] = [];
+    const result = await turnOn(f, 'none', { costCapUsd: 0.5, observe: (event) => void seen.push(event) });
+
+    expect(result).toMatchObject({ status: 'error', error: COST_CAP_EXCEEDED });
+    // The runtime said `done`; the host had already stopped the run. Only `result` settles one.
+    expect(seen.map((event) => event.type)).toEqual(['run', 'usage', 'done', 'result']);
+    expect(seen.filter((event) => event.type === 'result')).toEqual([
+      { type: 'result', status: 'error', text: `The run stopped: ${COST_CAP_EXCEEDED}.`, error: COST_CAP_EXCEEDED },
+    ]);
+  });
+
+  it('tells a watcher the outcome even when the turn itself throws on its way out', async () => {
+    const f = await hostFixture(db, { trajectory: [{ say: 'never recorded' }] });
+    onTestFinished(() => f.close());
+    const original = threadsRepository.appendMessage;
+    const spy = vi.spyOn(threadsRepository, 'appendMessage').mockImplementation(async (dbArg, m) => {
+      if (m.role === 'assistant') throw new Error('simulated insert failure');
+      return original(dbArg, m);
+    });
+    onTestFinished(() => void spy.mockRestore());
+    const seen: TurnEvent[] = [];
+
+    // The turn still rejects: a watcher never changes what the caller is told.
+    await expect(turnOn(f, 'none', { observe: (event) => void seen.push(event) })).rejects.toThrow(
+      'simulated insert failure',
+    );
+    // A watcher has no `catch`. Without the outcome here it would be handed a run id, then the
+    // whole reply, and then silence — the one thing the run event's promise rules out.
+    expect(seen[0]).toMatchObject({ type: 'run' });
+    expect(seen.filter((event) => event.type === 'result')).toEqual([
+      { type: 'result', status: 'error', text: '', error: RUNTIME_FAILED },
+    ]);
   });
 });
