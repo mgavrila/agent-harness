@@ -65,9 +65,9 @@ is attributed to the person who answered.
 > Who expires in the next 90 days?
 
 `deadlines_upcoming` answers with no model call behind it: the date maths is
-deterministic. The same skill runs nightly from the scheduler as
-`svc-playbooks` (`clients/demo-practice/playbooks.yaml`); `playbooks_run_now`
-fires it on demand.
+deterministic. The `credentialing-expirations` skill runs nightly from the
+scheduler as `svc-playbooks` (`clients/demo-practice/playbooks.yaml`);
+`playbooks_run_now` fires it on demand.
 
 ### 4. Ask for the Aetna roster and approve it (90 seconds)
 

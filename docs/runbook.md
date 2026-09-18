@@ -703,6 +703,10 @@ in order, with the stack down.
 
 ## Upgrading from Plan 8
 
+An existing Plan 8 deployment hits all of these. Work through them in order, with the stack down,
+and start the host only at the end: `playbooks.yaml` is read into the `playbooks` table once, at
+startup, and a running host never re-reads it.
+
 1. **Migrate the database.** `pnpm db:migrate` applies 0012: `memory_entries`, `playbooks`,
    `playbook_runs`, and `messages.seq` (numbered for existing rows). Safe on live data. The
    optional `runs.status` backfill from the Plan 7 upgrade still applies if you skipped it.
@@ -718,17 +722,22 @@ in order, with the stack down.
    skill instead, as `svc-playbooks`, and the skill's silence gate is unchanged — it replies with
    the line `Nothing to report.` and stages what the practice should see through
    `harness_notify`.
-6. **Expect these behaviour changes.** The nightly digest is back, at the time and zone
+6. **Start the host.** The sync and the scheduler both happen at startup, so nothing in
+   `playbooks.yaml` takes effect until this step, and the grants of step 3 have to be in place
+   before it: the sync writes `playbooks` and closes stranded rows in `playbook_runs`. The log
+   line names how many playbooks were read and how many were disabled.
+7. **Expect these behaviour changes.** The nightly digest is back, at the time and zone
    `playbooks.yaml` says. The model can now remember facts between conversations; what it
-   remembers is per principal, and the practice-wide scope needs `lead` or above to write.
+   remembers is per principal, and a write to the practice-wide scope is `write.internal` —
+   parked for approval for a `member`, automatic for a practitioner and above.
 
 ## Memory
 
 `memory_entries` is the curated memory (spec 5.5): one row per fact, in scope `principal` (one
 principal's own notes, `principal_id` set) or `client` (shared, `principal_id` null). Caps are
 2,500 characters and 50 entries per principal scope, 4,000 and 50 for the client scope, 500
-characters per entry; `memory_add` past a cap is refused with the current entries and the space
-left, so the model consolidates with `memory_remove` in the same turn. Own-scope writes are
+characters per entry; `memory_add` past a cap is refused with the current entries and how much of
+the scope they use, so the model consolidates with `memory_remove` in the same turn. Own-scope writes are
 `write.self` (auto at every level); client-scope writes and removals are `write.internal`
 (parked for a `member`, auto above). Every write runs the injection scan — instruction-shaped
 phrases, invisible Unicode — and the restricted-pattern check first; a refusal names the
@@ -774,7 +783,8 @@ one-shot date — are rejected, and so is a calendar that can never come round a
 `0 0 30 2 *`. The timezone is checked at parse time too. A malformed file stops the host at
 startup, naming the field. Edit the file and restart: a playbook removed from it is **disabled,
 not deleted**, so `playbook_runs` keeps its history, and a firing that was due while the host was
-down is **not replayed** — `next_run_at` is recomputed from the clock at every start.
+down is **not replayed** (decision 13) — `next_run_at` is recomputed from the clock at every
+start.
 
 **A firing.** The scheduler claims due rows with `FOR UPDATE SKIP LOCKED` (two hosts on one
 database never both fire the same row), then for each: preflight — the skill is in a loaded
@@ -825,9 +835,9 @@ the runtime ignores the abort and answers anyway.
 and `last_status`. `playbooks_run_now` (`admin`) writes a `requested` row that the next tick —
 at most 30 seconds away — claims ahead of the schedule; it returns the `playbook_runs` id, and
 the run opens then, as the playbook's principal, never the caller's. A requested row whose
-playbook is disabled or dropped from the file before that tick arrives is closed by the startup
-sync, or by the claim itself, as `preflight_failed` with `playbook disabled` or
-`playbook removed`, `run_id` null and `attempts` 0. No notice is staged for it: it is visible
+playbook is disabled or dropped from the file before that tick arrives is closed
+`preflight_failed`, `run_id` null and `attempts` 0: by the startup sync, as `playbook removed` or
+`playbook disabled`, or by the claim itself, as `playbook disabled`. No notice is staged for it: it is visible
 only through `playbooks_list` and the `playbook_runs` table.
 
 ```sql

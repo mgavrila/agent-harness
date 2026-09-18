@@ -66,8 +66,7 @@ The framework's own `memory` option is deliberately not used: it inlines the fil
 prompt and tells the model to save what it learns with `edit_file`, a tool this run neither offers
 nor permits. `KERNEL_RULES` tells the model to open `/memories/MEMORY.md` with `read_file` instead.
 The kernel's rules block tells the model to call `memory_add`, `memory_remove` and
-`session_search` for the writes and the recall; the host renders the snapshot from
-`memory_entries` before every run.
+`session_search` instead; the host renders the snapshot from `memory_entries` before every run.
 
 A `read_file` of a path under `/skills/<name>/` is what `skill_activated` means here.
 
