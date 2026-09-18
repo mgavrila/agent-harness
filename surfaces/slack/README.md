@@ -125,8 +125,9 @@ as a marker and never rewritten.
 Emphasis is one left-to-right scan rather than one regex, so a bold span can hold an italic one
 (`**bold *and emphatic*, too**`) and nothing the scan has converted is re-read as another marker.
 Two rules are narrower than Markdown's, both because of Slack: a lone `*…*` is italic only around a
-single word or inside a `**…**` span, since `*two words*` is exactly what this function emits for
-bold and re-reading it would flip a bold phrase to italic; and `__…__` is bold only between
+single word, inside a `**…**` span, or around one (`*italic **and strong** too*`), since a plain
+`*two words*` is exactly what this function emits for bold and re-reading it would flip a bold
+phrase to italic; and `__…__` is bold only between
 non-word characters and around more than one word, so `__init__`, `__main__` and `MY__VAR__NAME`
 keep their underscores. Everything but the escaping round-trips, and the one asterisk-wrapped
 single word that does not is pinned by a test.

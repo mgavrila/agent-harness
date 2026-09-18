@@ -40,6 +40,28 @@ describe('toMrkdwn', () => {
     expect(toMrkdwn('a **b *c* d** e')).toBe('a *b _c_ d* e');
   });
 
+  it('converts an italic span that holds a bold one', () => {
+    expect(toMrkdwn('*italic **and strong** too*')).toBe('_italic *and strong* too_');
+    expect(toMrkdwn('*a **b** c* and *d*')).toBe('_a *b* c_ and _d_');
+  });
+
+  it('is idempotent on an italic span that holds a bold one', () => {
+    // The bold inside is more than one word, so it has no lone-asterisk twin to be re-read as
+    // italic; a one-word `*b*` inside falls under the documented exception pinned below.
+    const once = toMrkdwn('*italic **and strong** too*');
+    expect(once).toBe('_italic *and strong* too_');
+    expect(toMrkdwn(once)).toBe(once);
+  });
+
+  it('converts a long adversarial run of unmatched stars quickly', () => {
+    const text = '*a**b'.repeat(16_000);
+    expect(text.length).toBe(80_000);
+    const started = performance.now();
+    toMrkdwn(text);
+    const elapsed = performance.now() - started;
+    expect(elapsed).toBeLessThan(100);
+  });
+
   it('converts adjacent emphasis spans', () => {
     expect(toMrkdwn('**one** and **two** and *three*')).toBe('*one* and *two* and _three_');
     expect(toMrkdwn('**one**, __two words__ and *three*.')).toBe('*one*, *two words* and _three_.');

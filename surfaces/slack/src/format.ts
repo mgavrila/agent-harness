@@ -24,8 +24,9 @@
  * converted is never re-read as another marker. The one real ambiguity is a single asterisk:
  * Markdown's `*x*` is italic, but Slack's `*x*` is bold — the same two characters mean opposite
  * things on either side of this function. A lone `*…*` is read as Markdown italic when it wraps a
- * single word, or when it sits inside a `**…**` span that has already proved the text is Markdown;
- * `*two words*` at the top level is left alone, because that is exactly what this function
+ * single word, when it sits inside a `**…**` span that has already proved the text is Markdown, or
+ * when it wraps such a span itself (`*italic **and strong** too*` -> `_italic *and strong* too_`);
+ * a plain `*two words*` at the top level is left alone, because that is exactly what this function
  * produces for `**two words**` and re-reading it would flip a bold phrase to italic on a second
  * call. `__…__` is bold only when non-word characters flank it and it wraps more than one word, so
  * `__init__`, `__main__` and `MY__VAR__NAME` — identifiers a model writes about code outside a
@@ -61,6 +62,11 @@ const HEADING_RE = /^#{1,6}[ \t]+(.+)$/gm;
 const ITALIC_OPEN = /[\s([{"']/;
 const ITALIC_CLOSE = /[\s)\]}"'.,!?;:]/;
 const WORD = /[A-Za-z0-9_]/;
+
+// A lone `*…*` is a phrase, not a chapter. The search for its closing star gives up after this
+// many characters, which is what keeps a message dense with unmatched stars linear: without it,
+// every star would walk the rest of the message looking for a partner it never finds.
+const ITALIC_SPAN_LIMIT = 500;
 
 /** A one-off placeholder vault: swap text out for a token now, put it back verbatim later. */
 function createVault() {
@@ -187,22 +193,38 @@ function findStrong(text: string, open: number, to: number, marker: string): num
 
 /**
  * The closing `*` of an italic span that opens at `open`, or -1. Outside a bold span the content
- * has to be a single word — a multi-word `*…*` is what this function emits for `**…**`, and
- * re-reading it would flip a bold phrase to italic.
+ * has to be a single word, or to wrap a `**…**` span of its own — a plain multi-word `*…*` is what
+ * this function emits for `**…**`, and re-reading it would flip a bold phrase to italic, while
+ * `*italic **and strong** too*` is unambiguously Markdown and nothing here ever produces it.
  */
 function findItalic(text: string, open: number, to: number, nested: boolean): number {
   const before = open === 0 ? undefined : text[open - 1];
   if (before !== undefined && !ITALIC_OPEN.test(before)) return -1;
   const start = open + 1;
   if (start >= to || /\s/.test(text[start])) return -1;
-  for (let j = start + 1; j < to; j += 1) {
-    if (text[j] !== '*') {
-      if (/\s/.test(text[j]) && (!nested || (text[j] === '\n' && text[j + 1] === '\n'))) return -1;
+  const limit = Math.min(to, start + ITALIC_SPAN_LIMIT);
+  let spaced = false;
+  let strong = false;
+  for (let j = start + 1; j < limit; j += 1) {
+    const ch = text[j];
+    if (ch !== '*') {
+      if (/\s/.test(ch)) {
+        if (ch === '\n' && text[j + 1] === '\n') return -1;
+        spaced = true;
+      }
+      continue;
+    }
+    const inner = findStrong(text, j, to, '*');
+    if (inner !== -1) {
+      // A bold span inside: step over it whole, and let it settle what the single stars mean.
+      strong = true;
+      j = inner + 1;
       continue;
     }
     if (/\s/.test(text[j - 1])) return -1;
     const after = j + 1 >= to ? undefined : text[j + 1];
-    return after === undefined || ITALIC_CLOSE.test(after) ? j : -1;
+    if (after !== undefined && !ITALIC_CLOSE.test(after)) return -1;
+    return nested || strong || !spaced ? j : -1;
   }
   return -1;
 }
