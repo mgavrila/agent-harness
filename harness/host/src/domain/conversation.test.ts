@@ -6,6 +6,7 @@ import { approvals, auditLog, memoryEntries, messages, runs, threads } from '@ha
 import { COORDINATOR, hostFixture, useTestDb, type HostFixture } from '../testing.js';
 import {
   COST_CAP_EXCEEDED,
+  EMPTY_REPLY,
   RUNTIME_FAILED,
   TIMED_OUT,
   TIMEOUT_MARGIN_MS,
@@ -140,6 +141,54 @@ describe('a message on a surface', () => {
     expect(g.surface.texts.at(-1)?.text).toBe('(withheld: it did not pass the redaction check)');
     const rows = await db.select().from(messages);
     expect(rows.some((r) => r.content.includes('123-45'))).toBe(false);
+  });
+
+  it('answers with a fixed sentence when the run ends done with nothing to say, and warns with the tool count', async () => {
+    // Two live runs ended `done` after tool calls with an empty final text, and the person who
+    // had asked saw no reply at all. Silence is the one outcome a turn may not have.
+    const warnings: string[] = [];
+    const f = await hostFixture(db, { trajectory: [{ tool: 'memory_list', args: {} }, { say: '' }] });
+    f.host.log = { info() {}, error() {}, warn: (message) => warnings.push(message) };
+    attachMessageHandlers(f.host);
+    await f.surface.say('U012', 'anything?');
+
+    expect(f.surface.texts).toEqual([{ conversation: 'memory', text: EMPTY_REPLY, replyTo: null, kind: 'reply' }]);
+    const [run] = await db.select().from(runs);
+    expect(run.status).toBe('done');
+    // Recorded as the assistant's turn too, so the next turn's history says what was said rather
+    // than skipping a turn the person can see.
+    const rows = await db.select().from(messages).orderBy(messages.createdAt);
+    expect(rows.map((r) => [r.role, r.content])).toEqual([
+      ['user', 'anything?'],
+      ['assistant', EMPTY_REPLY],
+    ]);
+    expect(warnings).toContain(`run ${run.id}: the runtime returned no text after 1 tool calls`);
+  });
+
+  it('says the same thing on a streaming surface, where a run that ends with no say step streamed nothing', async () => {
+    const f = await hostFixture(db, {
+      trajectory: [
+        { tool: 'memory_list', args: {} },
+        { tool: 'memory_list', args: {} },
+      ],
+      streaming: true,
+    });
+    attachMessageHandlers(f.host);
+    await f.surface.say('U012', 'anything?');
+    // The sentence reaches the human however the surface takes it: appended to the stream when
+    // one was opened, posted on its own when none was.
+    const said = [...f.surface.streams.map((s) => s.text), ...f.surface.texts.map((t) => t.text)];
+    expect(said).toContain(EMPTY_REPLY);
+    const [run] = await db.select().from(runs);
+    expect(run.status).toBe('done');
+  });
+
+  it('leaves a non-empty reply alone, streamed or posted', async () => {
+    // The guard above reads the final text only; it must not touch a run that answered.
+    const f = await hostFixture(db, { trajectory: [{ say: '  spaced out  ' }] });
+    attachMessageHandlers(f.host);
+    await f.surface.say('U012', 'go');
+    expect(f.surface.texts.at(-1)?.text).toBe('  spaced out  ');
   });
 
   it('carries the prior turns of the thread as history, trimmed, and the attachments on the input', async () => {

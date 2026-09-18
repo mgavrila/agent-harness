@@ -12,6 +12,18 @@ import { HISTORY_MAX_CHARS, trimHistory } from './threads/trim.js';
 export const UNAUTHORISED_TEXT = 'You are not authorised to use this assistant.';
 
 /**
+ * What the host answers with when a run ends `done` and the runtime had nothing to say.
+ *
+ * Two runs in the first live session ended that way after a handful of tool calls, and the
+ * person who had asked read nothing back: no reply, no notice, no sign the assistant had even
+ * seen the message. A run that finished is owed a sentence whatever the model produced, and the
+ * sentence says the one thing the human can act on — ask again, differently. The warn line
+ * beside it is where the missing answer is diagnosed, because the text is gone by then and only
+ * the run's events say what it had been doing.
+ */
+export const EMPTY_REPLY = 'I finished without an answer; ask again and I will try a different way.';
+
+/**
  * The production value of `budget.timeoutMarginMs`: how long after the run's own budget the host's
  * abort fires. A runtime arms its timeout on `budget.timeoutMs` exactly, so without a margin the
  * two timers race and the human reads whichever won — this host's `TIMED_OUT`, which knows only
@@ -285,6 +297,9 @@ export async function runTurn(host: Host, turn: TurnInput): Promise<TurnResult> 
       error = null;
       let stream: StreamHandle | null = null;
       let spentUsd = 0;
+      // Only for the warn line below: what the runtime had been doing instead of answering is
+      // the one thing that makes an empty reply diagnosable after the fact.
+      let toolCalls = 0;
       const recipient = turn.principal.surfaces[turn.thread.surface] ?? '';
       try {
         for await (const event of host.runtime.run(request).events) {
@@ -295,6 +310,9 @@ export async function runTurn(host: Host, turn: TurnInput): Promise<TurnResult> 
                 stream ??= replyTarget(target.session, target.conversation, turn.replyTo, recipient);
                 stream?.append(event.delta);
               }
+              break;
+            case 'tool_call':
+              toolCalls += 1;
               break;
             case 'usage':
               // What the cap bounds today is whatever the runtime reports; see the runbook's
@@ -351,11 +369,25 @@ export async function runTurn(host: Host, turn: TurnInput): Promise<TurnResult> 
         text = `The run stopped: ${forced}.`;
       }
 
+      // A run that finished is owed a sentence. A `done` turn whose final text is empty or
+      // nothing but whitespace posted nothing at all in the first live session, so the person
+      // who asked could not tell a finished run from a lost message. This is checked after the
+      // forced outcome above, so a timed-out or capped run keeps its own account of itself.
+      const answeredNothing = status === 'done' && text.trim() === '';
+      if (answeredNothing) {
+        host.log.warn(`run ${runId}: the runtime returned no text after ${toolCalls} tool calls`);
+        text = EMPTY_REPLY;
+      }
+
       // Invariant 10 on the final post: a reply that trips the check is withheld, not sent.
       const safeText = containsRestrictedPattern(text) ? WITHHELD : text;
       try {
         if (stream && target) {
           if (safeText === WITHHELD) stream.append(`\n${WITHHELD}`);
+          // A stream opened on an empty delta and then closed shows the human an empty message,
+          // which is the silence this guard exists to remove — so the sentence is appended to
+          // the stream it would otherwise have ended without.
+          else if (answeredNothing) stream.append(safeText);
           const streamedRef = await stream.end();
           // The deltas already streamed cannot carry a notice that only shows up once the
           // runtime is done; a stream that ends in error still owes the human that notice, as a
