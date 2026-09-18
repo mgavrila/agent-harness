@@ -692,12 +692,16 @@ in order, with the stack down.
    `docker volume rm` its data volume once you no longer want that state: conversation history
    does not carry over, and threads start fresh. The `storage` volume is reused as is (already
    `1000:1000`), and the old approvals image is left dangling.
-7. **Expect these behaviour changes.** No watchdogs. An attachment is stored as `incoming/<ts>-<safe name>` rather than
-   under its original name. A reply lands in a Slack thread under the message that caused it, and
-   a follow-up written in that thread, in a channel, has to mention the bot again. Every chat turn
-   now runs as the writer's own principal and level, so a `member` who used to act through a
-   service principal at `service` level is parked for `write.internal` unless the client's
-   `policy.yaml` says otherwise (the demo's says `auto`).
+7. **Expect these behaviour changes.** No watchdogs. An attachment is stored as
+   `incoming/<ts>-<safe name>` rather than under its original name. A reply lands in a Slack
+   thread under the message that caused it, and a follow-up written in that thread, in a channel,
+   has to mention the bot again. Every chat turn now runs as the writer's own principal and level,
+   so a `member` who used to act through a service principal at `service` level is parked for
+   `write.internal`. Only a `levels.member` cell in the client's `policy.yaml` lifts that:
+   `decide` reads the level cell before the class default, and `mergePolicy` keeps the kernel's
+   own `member` cell through an override to `classes:`. The demo's file sets
+   `write.internal: auto` under `classes:` and declares no `levels:` block, so a demo `member` is
+   parked all the same.
 8. **Health is unchanged.** `/healthz` still answers on `127.0.0.1:8787`; the two watchdog
    scripts that used to poll it are gone, so point your own probe at it.
 
