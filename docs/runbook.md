@@ -664,7 +664,12 @@ nothing to edit under `harness/compose/`:
 2. Declare the people and services in `clients/<slug>/identity.yaml`: `svc-host` for the
    container, `svc-local` for the operator, and one `u-…` principal per human with their level
    and their Slack member id ("Finding a Slack member id" above). A container whose principal
-   is missing from the file refuses to start.
+   is missing from the file refuses to start. For a deployment that serves a whole team rather
+   than a named few, add the optional `defaults:` block — `defaults: { slack: member }` — and
+   anyone the file does not list is admitted on that surface at that level, as
+   `u-slack-<their member id>`, an id derived from theirs so their audit trail is their own
+   across restarts. It takes a user level only (`service` is a startup error), and a surface
+   with no default goes on refusing everyone the file does not name.
 3. Create one Slack app as described under **Slack credentials** above and paste its tokens and
    the approvals channel id.
 4. Review `clients/<slug>/SOUL.md` and `policy.yaml` before the first run, and the markdown in

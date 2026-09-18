@@ -9,6 +9,11 @@
 # Replace the two Slack member ids with the real ones before the first run; see the runbook's
 # onboarding section for how to read a member id.
 #
+# `defaults:` is optional and this client does not use it: a surface named there
+# (`defaults: { slack: member }`) admits anyone the file does not list, at that level, under an id
+# derived from their surface user id. A user level only — never `service`. A surface with no
+# default refuses an unknown user, which is what every principal below relies on.
+#
 # An `http:` entry is the id that principal is named by over the run API (docs/runbook.md, "The
 # run API"): any stable string, because the API resolves it here exactly as it resolves a Slack
 # member id. A principal with no `http:` entry cannot drive a run over the API, which is the

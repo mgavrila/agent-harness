@@ -9,5 +9,15 @@
  */
 export { LEVELS, USER_LEVELS, type Level } from '@harness/shared';
 export { defineIdentityProvider, levelAtLeast } from './identity.js';
-export { IdentityFileShape, PRINCIPAL_ID_PATTERN, PrincipalShape, parseIdentityFile } from './principals.js';
+export {
+  IdentityDefaultsShape,
+  IdentityFileShape,
+  PRINCIPAL_ID_PATTERN,
+  PrincipalShape,
+  parseIdentityFile,
+  parseIdentityFileWithDefaults,
+  principalFromDefault,
+  type IdentityFile,
+  type UserLevel,
+} from './principals.js';
 export type { IdentityDeps, IdentityModule, IdentityProvider, IdentitySession, Principal } from './types.js';

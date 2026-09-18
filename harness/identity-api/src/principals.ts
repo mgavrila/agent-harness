@@ -1,6 +1,9 @@
 import * as z from 'zod/v4';
-import { ConfigError, LEVELS, SURFACE_NAME_PATTERN } from '@harness/shared';
+import { ConfigError, LEVELS, SURFACE_NAME_PATTERN, USER_LEVELS } from '@harness/shared';
 import type { Principal } from './types.js';
+
+/** The four levels a person may hold. A `service` level belongs to a declared service, never to a default. */
+export type UserLevel = (typeof USER_LEVELS)[number];
 
 /** `u-` for a person, `svc-` for a service, then a lowercase slug. */
 export const PRINCIPAL_ID_PATTERN = /^(u|svc)-[a-z0-9][a-z0-9-]*$/;
@@ -36,17 +39,42 @@ export const PrincipalShape = z.object({
   attributes: z.record(z.string(), z.string()).default({}),
 });
 
+/**
+ * `defaults:` in `clients/<name>/identity.yaml`: the level a surface gives someone nobody
+ * declared. A surface with no entry here refuses an unknown user, which is the right default for
+ * a deployment whose members are all named in the file.
+ *
+ * User levels only. `service` is the level of a scheduled job's own identity, and a default is by
+ * definition what a person who walked in gets, so the two can never be the same thing.
+ */
+export const IdentityDefaultsShape = z.record(
+  z.string().regex(SURFACE_NAME_PATTERN),
+  z.enum(USER_LEVELS, { error: 'a surface default is a user level: member, practitioner, lead or admin' }),
+);
+
 export const IdentityFileShape = z.object({
+  defaults: IdentityDefaultsShape.default({}),
   principals: z.array(PrincipalShape).min(1),
 });
 
-/**
- * Read the principals out of a parsed `identity.yaml`, then apply the four rules zod cannot say:
- * ids are unique, a user has a `u-` id and a user level, a service has a `svc-` id and the
- * `service` level, and no surface user id is claimed twice — `resolve()` has to answer with one
- * principal or none, never a guess.
- */
+/** A parsed `identity.yaml`: who is declared, and what each surface gives everyone else. */
+export interface IdentityFile {
+  principals: Principal[];
+  defaults: Record<string, UserLevel>;
+}
+
+/** The principals alone, for the callers that never wanted anything else. */
 export function parseIdentityFile(raw: unknown): Principal[] {
+  return parseIdentityFileWithDefaults(raw).principals;
+}
+
+/**
+ * Read a parsed `identity.yaml`, then apply the four rules zod cannot say: ids are unique, a user
+ * has a `u-` id and a user level, a service has a `svc-` id and the `service` level, and no
+ * surface user id is claimed twice — `resolve()` has to answer with one principal or none, never
+ * a guess. The `defaults` table comes back beside the principals, for the plug-in that reads it.
+ */
+export function parseIdentityFileWithDefaults(raw: unknown): IdentityFile {
   const parsed = IdentityFileShape.safeParse(raw);
   if (!parsed.success) throw new ConfigError(`identity file is invalid: ${z.prettifyError(parsed.error)}`);
   const seen = new Set<string>();
@@ -78,5 +106,23 @@ export function parseIdentityFile(raw: unknown): Principal[] {
       claims.set(key, p.id);
     }
   }
-  return parsed.data.principals;
+  return { principals: parsed.data.principals, defaults: parsed.data.defaults };
+}
+
+/**
+ * The principal a surface's `defaults` level gives someone who is not in the file.
+ *
+ * The id is derived, never random, so the same person is the same principal across restarts and
+ * across processes: every audit row, approval and run they leave behind is theirs tomorrow too.
+ * The surface user id is lowercased and everything an id may not carry becomes a hyphen. Null
+ * when no id can be derived — an empty user id, or a surface name that is not one — because a
+ * caller that cannot be named is a caller that runs nothing.
+ */
+export function principalFromDefault(surface: string, userId: string, level: UserLevel): Principal | null {
+  if (!SURFACE_NAME_PATTERN.test(surface)) return null;
+  const slug = userId.toLowerCase().replaceAll(/[^a-z0-9-]/g, '-');
+  if (slug === '') return null;
+  const id = `u-${surface}-${slug}`;
+  if (!PRINCIPAL_ID_PATTERN.test(id)) return null;
+  return { id, kind: 'user', level, displayName: userId, surfaces: { [surface]: userId }, attributes: {} };
 }

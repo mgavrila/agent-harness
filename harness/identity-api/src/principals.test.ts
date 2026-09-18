@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { ConfigError } from '@harness/shared';
-import { PRINCIPAL_ID_PATTERN, parseIdentityFile } from './principals.js';
+import {
+  PRINCIPAL_ID_PATTERN,
+  parseIdentityFile,
+  parseIdentityFileWithDefaults,
+  principalFromDefault,
+} from './principals.js';
 
 const manager = {
   id: 'u-practice-manager',
@@ -101,5 +106,63 @@ describe('parseIdentityFile', () => {
     expect(() => parseIdentityFile({ principals: [{ ...manager, surfaces: { Slack: 'U1' } }] })).toThrow(
       /identity file is invalid/,
     );
+  });
+});
+
+describe('parseIdentityFileWithDefaults', () => {
+  it('reads an empty default table when the file has no defaults, and the same principals', () => {
+    const file = parseIdentityFileWithDefaults({ principals: [manager, nightly] });
+    expect(file.defaults).toEqual({});
+    expect(file.principals.map((p) => p.id)).toEqual(['u-practice-manager', 'svc-playbooks']);
+    expect(parseIdentityFile({ principals: [manager, nightly] })).toEqual(file.principals);
+  });
+
+  it('reads a level per surface', () => {
+    expect(parseIdentityFileWithDefaults({ defaults: { memory: 'member' }, principals: [manager] }).defaults).toEqual({
+      memory: 'member',
+    });
+  });
+
+  it('refuses "service" as a default, because a default is what an unknown person gets', () => {
+    expect(() => parseIdentityFileWithDefaults({ defaults: { memory: 'service' }, principals: [manager] })).toThrow(
+      ConfigError,
+    );
+    expect(() => parseIdentityFileWithDefaults({ defaults: { memory: 'service' }, principals: [manager] })).toThrow(
+      /defaults/,
+    );
+  });
+
+  it('refuses a surface name that is not a surface name, as `surfaces` does', () => {
+    expect(() => parseIdentityFileWithDefaults({ defaults: { Memory: 'member' }, principals: [manager] })).toThrow(
+      /identity file is invalid/,
+    );
+  });
+});
+
+describe('principalFromDefault', () => {
+  it('mints a stable id from the surface and the surface user id', () => {
+    expect(principalFromDefault('memory', 'U0123ABCD', 'member')).toEqual({
+      id: 'u-memory-u0123abcd',
+      kind: 'user',
+      level: 'member',
+      displayName: 'U0123ABCD',
+      surfaces: { memory: 'U0123ABCD' },
+      attributes: {},
+    });
+    expect(principalFromDefault('memory', 'U0123ABCD', 'member')).toEqual(
+      principalFromDefault('memory', 'U0123ABCD', 'member'),
+    );
+  });
+
+  it('replaces every character an id may not carry, and keeps the level it was given', () => {
+    const minted = principalFromDefault('ms-teams', 'A.User@Example', 'lead');
+    expect(minted?.id).toBe('u-ms-teams-a-user-example');
+    expect(minted?.level).toBe('lead');
+    expect(PRINCIPAL_ID_PATTERN.test(minted?.id ?? '')).toBe(true);
+  });
+
+  it('answers null rather than an id no principal could have', () => {
+    expect(principalFromDefault('memory', '', 'member')).toBeNull();
+    expect(principalFromDefault('Memory', 'U1', 'member')).toBeNull();
   });
 });

@@ -1,9 +1,78 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { parse as parseYaml } from 'yaml';
-import { defineIdentityProvider, parseIdentityFile, type IdentityProvider } from '@harness/identity-api';
+import {
+  defineIdentityProvider,
+  parseIdentityFileWithDefaults,
+  principalFromDefault,
+  type IdentityProvider,
+  type IdentitySession,
+  type Principal,
+  type UserLevel,
+} from '@harness/identity-api';
 import { StaticIdentity } from '@harness/identity-api/testing';
-import { ConfigError, describeError, optionalEnv } from '@harness/shared';
+import { ConfigError, describeError, optionalEnv, type Logger } from '@harness/shared';
+
+/**
+ * The declared principals, plus the `defaults` rule for everyone else.
+ *
+ * A surface named in `defaults` admits someone the file never mentions, at the level the file
+ * chose, under an id derived from theirs — `principalFromDefault` derives it, so the same person
+ * is the same principal tomorrow and in the next process. A surface with no default refuses an
+ * unknown user exactly as this plug-in always has: null is "not authorised", never a guest.
+ *
+ * `list()` stays the file's own answer, because that is the question preflight and the
+ * scaffolder's check are asking: who does this deployment declare. `get()` does answer for a
+ * minted principal, because an approval or an audit row that carries its id has to resolve.
+ */
+class IdentityWithDefaults implements IdentitySession {
+  readonly name: string;
+
+  private readonly declared: StaticIdentity;
+  private readonly defaults: Readonly<Record<string, UserLevel>>;
+  private readonly log: Logger;
+  /** Minted principals, keyed by their own id, so each one is logged and derived once. */
+  private readonly minted = new Map<string, Principal>();
+
+  constructor(declared: StaticIdentity, defaults: Readonly<Record<string, UserLevel>>, log: Logger) {
+    this.declared = declared;
+    this.defaults = defaults;
+    this.log = log;
+    this.name = declared.name;
+  }
+
+  async resolve(ref: { surface: string; userId: string }): Promise<Principal | null> {
+    const declared = await this.declared.resolve(ref);
+    if (declared) return declared;
+    const level = this.defaults[ref.surface];
+    if (level === undefined) return null;
+    const minted = principalFromDefault(ref.surface, ref.userId, level);
+    if (!minted) return null;
+    const already = this.minted.get(minted.id);
+    if (already) return already;
+    // A derived id that a declared principal already holds would hand one person another's
+    // history. Refuse: the file is wrong, and nobody should run until it is fixed.
+    if (await this.declared.get(minted.id)) {
+      this.log.warn(`static identity: derived id "${minted.id}" is already declared; refusing the caller`);
+      return null;
+    }
+    this.minted.set(minted.id, minted);
+    this.log.info(`static identity: "${minted.id}" is not declared on ${ref.surface}; acting at level ${level}`);
+    return minted;
+  }
+
+  async get(principalId: string): Promise<Principal | null> {
+    return (await this.declared.get(principalId)) ?? this.minted.get(principalId) ?? null;
+  }
+
+  async list(): Promise<Principal[]> {
+    return this.declared.list();
+  }
+
+  async stop(): Promise<void> {
+    await this.declared.stop();
+  }
+}
 
 /**
  * Principals from a file in the client folder.
@@ -27,8 +96,12 @@ export const identity: IdentityProvider = defineIdentityProvider({
         `cannot read the identity file ${file} (${describeError(err)}); every client folder needs an identity.yaml`,
       );
     }
-    const principals = parseIdentityFile(parseYaml(text));
-    deps.log.info(`static identity: ${principals.length} principals from ${file}`);
-    return new StaticIdentity(principals, 'static');
+    const { principals, defaults } = parseIdentityFileWithDefaults(parseYaml(text));
+    const surfaces = Object.keys(defaults);
+    deps.log.info(
+      `static identity: ${principals.length} principals from ${file}` +
+        (surfaces.length > 0 ? `, and a default level on ${surfaces.join(', ')}` : ''),
+    );
+    return new IdentityWithDefaults(new StaticIdentity(principals, 'static'), defaults, deps.log);
   },
 });
