@@ -28,13 +28,12 @@ const RESTRICTED_REASON = 'it contains a restricted identifier; remove it from t
 /**
  * Why a document did not make it past the embedder.
  *
- * A `ToolError` from the embed route is safe to repeat: `embed.ts` builds it from the route name
- * and the HTTP status and never from the text that was sent, for this reason. Anything else is a
- * bug rather than a gateway answer, so it is reported as a category and nothing more.
+ * The gateway's own words are repeated, and they are safe to repeat: `embed.ts` builds a
+ * `ToolError` from the route name and the HTTP status and never from the text that was sent,
+ * precisely so the message can travel this far.
  */
-function embedFailureReason(err: unknown): string {
-  const cause = err instanceof ToolError ? `: ${err.message}` : '';
-  return `it could not be embedded${cause}; the document was left as it was and the next sync will try it again`;
+function embedFailureReason(err: ToolError): string {
+  return `it could not be embedded, so it was left exactly as it was and the next sync will try it again: ${err.message}`;
 }
 
 /**
@@ -113,7 +112,7 @@ export async function syncKnowledge(deps: ToolDeps, opts: { dir?: string } = {})
     seen.push(doc.path);
     const chunks = chunkText(doc.body);
     if (isRestricted(doc, chunks)) {
-      result.skipped.push({ path: doc.path, reason: RESTRICTED_REASON });
+      result.skipped.push({ path: doc.path, kind: 'restricted', reason: RESTRICTED_REASON });
       continue;
     }
     if (isUnchanged(await findDocumentState(deps.db, sourceId, doc.path), doc)) {
@@ -125,7 +124,12 @@ export async function syncKnowledge(deps: ToolDeps, opts: { dir?: string } = {})
     try {
       vectors = await embedTexts(deps, chunks);
     } catch (err) {
-      result.skipped.push({ path: doc.path, reason: embedFailureReason(err) });
+      // Only the gateway's own refusal is a skip. Anything else — a bug in this package, a
+      // database that would not take the attribution row — is not something the next sync will
+      // heal, and reporting it as a skipped document would hand an operator a line saying to
+      // wait for a retry that fixes nothing. It comes out of the sync instead.
+      if (!(err instanceof ToolError)) throw err;
+      result.skipped.push({ path: doc.path, kind: 'embed_failed', reason: embedFailureReason(err) });
       continue;
     }
 

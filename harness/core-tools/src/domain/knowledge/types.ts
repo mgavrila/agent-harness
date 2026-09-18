@@ -70,7 +70,24 @@ export interface KnowledgeHit {
   score: number;
 }
 
-/** What one `knowledge_sync` did. `skipped` names a document that was refused, and why. */
+/**
+ * Why one document did not sync.
+ *
+ * The two are not the same kind of news and a caller should not have to read prose to tell them
+ * apart. `restricted` is a refusal: the folder will keep refusing that file until a human edits
+ * it. `embed_failed` is the gateway not answering: nothing is wrong with the file, the previous
+ * row and chunks are untouched, and the next sync picks it up by itself.
+ */
+export type KnowledgeSkipKind = 'restricted' | 'embed_failed';
+
+/** One document the sync passed over, named with the kind of trouble and a sentence for a human. */
+export interface KnowledgeSkip {
+  path: string;
+  kind: KnowledgeSkipKind;
+  reason: string;
+}
+
+/** What one `knowledge_sync` did. `skipped` names a document that did not sync, and why. */
 export interface KnowledgeSyncResult {
   source: string;
   scanned: number;
@@ -80,5 +97,5 @@ export interface KnowledgeSyncResult {
   removed: number;
   /** Chunks written this run, across added and updated documents. */
   chunks: number;
-  skipped: { path: string; reason: string }[];
+  skipped: KnowledgeSkip[];
 }

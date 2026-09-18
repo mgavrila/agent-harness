@@ -1,9 +1,12 @@
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { eq } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { knowledgeChunks, knowledgeDocuments } from '@harness/db';
+import { ToolError } from '@harness/shared';
 import { makeTestDeps, startFakeGateway, useTestDb, type FakeGateway } from '../../testing.js';
 import type { ToolDeps } from '../tooling/types.js';
 import { syncKnowledge } from './sync.js';
@@ -122,7 +125,7 @@ describe('syncKnowledge', () => {
 
     const result = await syncKnowledge(deps);
     expect(result).toMatchObject({ scanned: 2, added: 1, chunks: 1 });
-    expect(result.skipped).toEqual([{ path: 'leaky.md', reason: RESTRICTED }]);
+    expect(result.skipped).toEqual([{ path: 'leaky.md', kind: 'restricted', reason: RESTRICTED }]);
     const rows = await db.select().from(knowledgeDocuments);
     expect(rows.map((r) => r.path)).toEqual(['fine.md']);
   });
@@ -136,7 +139,7 @@ describe('syncKnowledge', () => {
 
     const result = await syncKnowledge(deps);
     expect(result).toMatchObject({ scanned: 1, added: 0, updated: 0, chunks: 0 });
-    expect(result.skipped).toEqual([{ path: 'cases/case-123-45-6789.md', reason: RESTRICTED }]);
+    expect(result.skipped).toEqual([{ path: 'cases/case-123-45-6789.md', kind: 'restricted', reason: RESTRICTED }]);
     expect(await db.$count(knowledgeDocuments)).toBe(0);
   });
 
@@ -159,7 +162,12 @@ describe('syncKnowledge', () => {
     // The one document that embedded is complete; neither of the others is counted as synced,
     // and neither is tombstoned — their files are on disk, they simply did not get through.
     expect(failed).toMatchObject({ scanned: 3, added: 0, updated: 1, unchanged: 0, removed: 0, chunks: 1 });
-    expect(failed.skipped.map((s) => s.path)).toEqual(['second.md', 'third.md']);
+    expect(failed.skipped.map((s) => [s.path, s.kind])).toEqual([
+      ['second.md', 'embed_failed'],
+      ['third.md', 'embed_failed'],
+    ]);
+    // The reason repeats the gateway's own refusal, which names the route and the status and
+    // never the text that was sent.
     for (const skip of failed.skipped) expect(skip.reason).toContain('could not be embedded');
 
     // `second.md` keeps its previous row *and* its previous chunks: the new hash is not stored
@@ -177,6 +185,33 @@ describe('syncKnowledge', () => {
     expect(healed).toMatchObject({ scanned: 3, added: 1, updated: 1, unchanged: 1, chunks: 2, skipped: [] });
     const secondHealed = await db.select().from(knowledgeChunks).where(eq(knowledgeChunks.documentId, secondAfter.id));
     expect(secondHealed.map((c) => c.text)).toEqual(['# Second\n\nsecond, with a marker']);
+  });
+
+  it('lets an error that is not a gateway refusal out of the sync rather than calling it a skip', async () => {
+    const { deps, write } = await clientFolder();
+    await write('a.md', '# A\n\none\n');
+    // A 200 whose body is not JSON is a bug somewhere, not a refusal the next sync can retry.
+    // `embedTexts` turns every answer it understands into a ToolError, so anything else reaching
+    // this point is one of ours and has to fail loudly instead of being listed as a document an
+    // operator might wait for.
+    const broken = createServer((_req, res) => {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end('not json at all');
+    });
+    await new Promise<void>((resolve) => broken.listen(0, '127.0.0.1', resolve));
+    onTestFinished(
+      () =>
+        new Promise<void>((resolve, reject) => {
+          broken.closeAllConnections();
+          broken.close((err) => (err ? reject(err) : resolve()));
+        }),
+    );
+    deps.gateway = { ...deps.gateway, baseUrl: `http://127.0.0.1:${(broken.address() as AddressInfo).port}` };
+
+    const error: unknown = await syncKnowledge(deps).catch((err: unknown) => err);
+    expect(error).toBeInstanceOf(Error);
+    expect(error).not.toBeInstanceOf(ToolError);
+    expect(await db.$count(knowledgeDocuments)).toBe(0);
   });
 
   it('is an empty sync, not an error, for a client with no knowledge folder', async () => {

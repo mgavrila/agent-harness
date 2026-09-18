@@ -72,6 +72,8 @@ export {
   SERVICE_RANK,
   levelRank,
   type KnowledgeHit,
+  type KnowledgeSkip,
+  type KnowledgeSkipKind,
   type KnowledgeSyncResult,
   type ParsedKnowledgeDocument,
 } from './domain/knowledge/types.js';
