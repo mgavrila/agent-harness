@@ -2832,7 +2832,6 @@ async function synced(): Promise<(level: Level, id?: string) => ToolDeps> {
   const depsFor = (level: Level, id = 'u-reader'): ToolDeps =>
     makeTestDeps(db, {
       clientDir,
-      embedDims: 64,
       gateway: { baseUrl: fake.url, apiKey: 'sk-test', timeoutMs: 5_000, maxCallsPerRun: 200 },
       principal: {
         id,
@@ -2889,7 +2888,6 @@ describe('searchKnowledge access', () => {
     const deps = depsFor('admin');
     const elsewhere = makeTestDeps(db, {
       clientDir: deps.clientDir,
-      embedDims: 64,
       gateway: deps.gateway,
       client: 'other-client',
       principal: deps.principal,
