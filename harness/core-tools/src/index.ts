@@ -48,6 +48,7 @@ export { allTools, createCoreToolsServer, kernelTools, publishedTools } from './
 // --- Domains ------------------------------------------------------------------------------
 export { closeRun, openRun, type OpenRunInput, type RunStatus } from './domain/session/repository.js';
 export { createOrReuseApproval } from './domain/approvals/repository.js';
+export { assertNoInjection, findInjection, type InjectionCategory } from './domain/memory/injection.js';
 export { executeApproval, type ExecutedApproval } from './domain/approvals/execute.js';
 export {
   URGENCY_BUCKETS,
