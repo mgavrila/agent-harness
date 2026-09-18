@@ -7,7 +7,6 @@ import { assertNoInjection } from './injection.js';
 import {
   MEMORY_CAPS,
   MEMORY_ENTRY_MAX_CHARS,
-  MEMORY_SCOPES,
   type MemoryEntry,
   type MemoryScope,
   type MemoryUsage,
@@ -72,17 +71,18 @@ export async function findMemoryEntry(
 }
 
 export function memoryUsage(entries: readonly MemoryEntry[]): MemoryUsage {
-  const usage = {} as MemoryUsage;
-  for (const scope of MEMORY_SCOPES) {
+  const usageOf = (scope: MemoryScope): ScopeUsage => {
     const own = entries.filter((e) => e.scope === scope);
-    usage[scope] = {
+    return {
       used_chars: own.reduce((n, e) => n + e.text.length, 0),
       cap_chars: MEMORY_CAPS[scope].chars,
       entries: own.length,
       cap_entries: MEMORY_CAPS[scope].entries,
     };
-  }
-  return usage;
+  };
+  // Named rather than looped over `MEMORY_SCOPES`: the record is complete by construction, which
+  // is what an accumulator could only promise with a cast.
+  return { principal: usageOf('principal'), client: usageOf('client') };
 }
 
 /**

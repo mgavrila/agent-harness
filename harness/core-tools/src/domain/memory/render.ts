@@ -17,8 +17,9 @@ const SECTIONS: readonly { title: string; scope: MemoryScope }[] = [
  *
  * Bounded by the two caps, and worth the arithmetic because a runtime budgets on it: 6,500
  * characters of text (2,500 + 4,000), 100 entries each carrying 45 characters of list
- * punctuation and id (`- ` + ` (id: ` + a 36-character uuid + `)`), 99 newlines between those
- * lines, two headings of 31 and 30, and 13 more for `# Memory`, the blank line under it, the
+ * punctuation and id (`- ` + ` (id: ` + a 36-character uuid + `)`), 100 newlines inside the two
+ * sections — one under each heading and one between the lines — two headings of 31 and 30, and
+ * 13 more for `# Memory`, the blank line under it, the
  * separator between the sections and the trailing newline. That is 11,174 at both caps, which
  * is why the test asserts 12,000 rather than the 11,000 an earlier draft claimed.
  */
