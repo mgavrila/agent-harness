@@ -40,7 +40,13 @@ const knowledgeSync = defineTool({
     'chunked and embedded again, and a document whose file is gone stops being searchable. Reports how many ' +
     'documents were scanned, added, updated, left alone and removed, how many passages were written, and any ' +
     'document that was skipped, with its kind of trouble and the reason.',
-  actionClass: 'admin',
+  // `write.internal`, not `admin`: this rewrites the knowledge tables from files a human already
+  // controls, which is a write to the record store, while `admin` is "changes who may do what" and
+  // is `blocked` for every level but `admin` — including `service`, the level every scheduled job
+  // runs at. A sync that only an admin could call is a sync no playbook could ever perform, and
+  // the nightly refresh is the whole point of the folder. Under the default matrix this lands
+  // parked for a member and automatic for a practitioner and above and for a service principal.
+  actionClass: 'write.internal',
   input: z.object({}),
   output: z.object({
     source: z.string(),

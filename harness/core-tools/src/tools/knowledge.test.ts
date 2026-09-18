@@ -3,12 +3,12 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import type { Level } from '@harness/shared';
-import { connectTestClient, makeTestDeps, resultOf, startFakeGateway, textOf, useTestDb } from '../testing.js';
+import { approvalIdOf, connectTestClient, makeTestDeps, resultOf, startFakeGateway, useTestDb } from '../testing.js';
 import { createCoreToolsServer } from './catalog.js';
 
 const db = useTestDb();
 
-async function client(level: Level, id = 'u-reader') {
+async function client(level: Level, id = 'u-reader', kind: 'user' | 'service' = 'user') {
   const fake = await startFakeGateway();
   onTestFinished(() => fake.close());
   const clientDir = await mkdtemp(path.join(tmpdir(), 'harness-client-'));
@@ -26,7 +26,7 @@ async function client(level: Level, id = 'u-reader') {
     gateway: { baseUrl: fake.url, apiKey: 'sk-test', timeoutMs: 5_000, maxCallsPerRun: 200 },
     principal: {
       id,
-      kind: 'user',
+      kind,
       level,
       displayName: 'Reader',
       surfaces: {},
@@ -37,7 +37,7 @@ async function client(level: Level, id = 'u-reader') {
 }
 
 describe('knowledge_sync', () => {
-  it('is an admin tool: an admin syncs the folder and gets the counts back', async () => {
+  it('is a write.internal tool: an admin syncs the folder and gets the counts back', async () => {
     const { tools } = await client('admin');
     const result = resultOf<{ source: string; scanned: number; added: number; chunks: number }>(
       await tools.callTool({ name: 'knowledge_sync', arguments: {} }),
@@ -46,11 +46,24 @@ describe('knowledge_sync', () => {
     expect(result.chunks).toBe(2);
   });
 
-  it('is refused for a lead, because it rewrites what everyone can read', async () => {
-    const { tools } = await client('lead');
-    const refused = await tools.callTool({ name: 'knowledge_sync', arguments: {} });
-    expect(refused.isError).toBe(true);
-    expect(textOf(refused)).toContain('blocked');
+  // The pairing the shipped playbook depends on. `write.internal` is `auto` for `service` under the
+  // default matrix, so a scheduled refresh runs unattended; it is `approval` for a member, so the
+  // one level that cannot be trusted to rewrite what everyone else reads gets a human first.
+  it('runs unattended for a service principal, which is what the nightly playbook is', async () => {
+    const { tools } = await client('service', 'svc-playbooks', 'service');
+    const result = resultOf<{ source: string; scanned: number; added: number; chunks: number }>(
+      await tools.callTool({ name: 'knowledge_sync', arguments: {} }),
+    );
+    expect(result).toMatchObject({ source: 'client-folder', scanned: 2, added: 2 });
+    expect(result.chunks).toBe(2);
+  });
+
+  it('is parked for a member, rather than refused, because it rewrites what everyone can read', async () => {
+    const { tools } = await client('member');
+    const parked = await tools.callTool({ name: 'knowledge_sync', arguments: {} });
+    expect(parked.isError).toBeFalsy();
+    expect(parked.structuredContent).toMatchObject({ status: 'pending' });
+    expect(approvalIdOf(parked)).toEqual(expect.any(String));
   });
 });
 

@@ -1,15 +1,32 @@
-import { describe, expect, it } from 'vitest';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { describe, expect, it, onTestFinished } from 'vitest';
 import { eq } from 'drizzle-orm';
-import { auditLog, decrypt, messages, playbookRuns, playbooks, runs, threads, toolEffects, type Db } from '@harness/db';
-import { requestPlaybookRun } from '@harness/core-tools';
+import {
+  auditLog,
+  decrypt,
+  knowledgeDocuments,
+  messages,
+  playbookRuns,
+  playbooks,
+  runs,
+  threads,
+  toolEffects,
+  type Db,
+} from '@harness/db';
+import { loadPolicy, requestPlaybookRun } from '@harness/core-tools';
 import { RUN_FAILED_MESSAGE, type RunEvent, type RuntimeSession } from '@harness/runtime-api';
+import { startFakeGateway } from '@harness/runtime-api/testing';
 import { hostFixture, testKernelConfig, useTestDb, type HostFixture } from '../../testing.js';
 import { drainActive } from '../conversation.js';
-import { readSkillCatalogue } from '../skills.js';
+import { kernelSkillsDir, readSkillCatalogue } from '../skills.js';
 import { stagePlaybookNotice } from './notice.js';
 import { syncPlaybooks } from './repository.js';
-import type { PlaybookDefinition } from './schema.js';
+import { readPlaybooksFile, type PlaybookDefinition } from './schema.js';
 import { SCHEDULER_TICK_MS, startScheduler } from './scheduler.js';
+
+// src/domain/playbooks -> src -> host -> harness -> <repo>. The same resolution main.ts uses.
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../../..');
 
 const db = useTestDb();
 
@@ -410,5 +427,76 @@ describe('the scheduler', () => {
     expect(firing.runId).not.toBeNull();
     // The schedule itself was not consumed.
     expect((await db.select().from(playbooks))[0].nextRunAt?.toISOString()).toBe('2026-09-16T07:00:00.000Z');
+  });
+});
+
+/**
+ * The end of the chain the shipped demo actually runs, over the shipped files rather than fixtures.
+ *
+ * `preflightPlaybook` asks whether the skill, the principal and the surface exist; it never asks
+ * whether policy will let the run's tool call through. So a playbook can pass preflight, start on
+ * schedule, have its one tool call refused, and — with `deliver: none` — tell nobody. That is
+ * exactly what `knowledge_sync` did while it was an `admin`-class tool, because `admin` is
+ * `blocked` for `service` and `service` is the level every scheduled job runs at.
+ *
+ * This ties the three shipped files together: the playbook entry from `playbooks.yaml`, the policy
+ * from `policy.yaml`, and the knowledge folder the sync reads. It fails if any one of them moves
+ * out from under the other two.
+ */
+describe('the shipped knowledge-sync playbook (I1)', () => {
+  const demoClientDir = path.join(repoRoot, 'clients', 'demo-practice');
+
+  it('runs its sync unattended as svc-playbooks, with the shipped policy deciding auto', async () => {
+    // The embedder the sync calls. Nothing else in this test reaches the gateway.
+    const fake = await startFakeGateway();
+    onTestFinished(() => fake.close());
+
+    const { playbooks: shipped } = await readPlaybooksFile(demoClientDir);
+    const definition = shipped.find((p) => p.name === 'knowledge-sync');
+    expect(definition, 'clients/demo-practice/playbooks.yaml must still ship knowledge-sync').toBeDefined();
+
+    const f = await hostFixture(db, {
+      trajectory: [
+        { skill: 'knowledge-sync', version: '1.0.0' },
+        { tool: 'knowledge_sync', args: {} },
+        { say: 'Nothing to report.' },
+      ],
+      // Built the way main.ts builds it, because the skill this playbook names is the kernel's own.
+      skills: await readSkillCatalogue([kernelSkillsDir(), ...testKernelConfig(db).packs.skillsDirs()]),
+    });
+    // The deployment's own policy and its own knowledge folder, so the decision under test is the
+    // one a deployment makes rather than the fixture default.
+    f.host.config = {
+      ...f.host.config,
+      policy: await loadPolicy(path.join(demoClientDir, 'policy.yaml')),
+      clientDir: demoClientDir,
+      gateway: { ...f.host.config.gateway, baseUrl: fake.url },
+    };
+
+    await due(f, definition);
+    const scheduler = startScheduler(f.host, { tickMs: 3_600_000 });
+    try {
+      expect(await scheduler.tick()).toEqual({ claimed: 1, done: 1, failed: 0, preflightFailed: 0 });
+    } finally {
+      await scheduler.stop();
+    }
+
+    const [run] = await db.select().from(runs);
+    expect(run).toMatchObject({ principalId: 'svc-playbooks', status: 'done' });
+    // The assertion that would have failed before the class moved: `auto`, not `blocked`.
+    const [audit] = await db.select().from(auditLog).where(eq(auditLog.tool, 'knowledge_sync'));
+    expect(audit).toMatchObject({
+      caller: 'svc-playbooks',
+      runId: run.id,
+      decision: 'auto',
+      actionClass: 'write.internal',
+      skill: 'knowledge-sync',
+      error: null,
+    });
+    // And it did the work, rather than merely being permitted to: both shipped documents indexed.
+    const indexed = await db.select().from(knowledgeDocuments);
+    expect(indexed.map((d) => d.path).sort()).toEqual(['escalation-and-billing.md', 'front-desk.md']);
+    // deliver: none — recorded, posted nowhere, exactly as the silence doctrine requires.
+    expect(f.surface.texts).toEqual([]);
   });
 });
