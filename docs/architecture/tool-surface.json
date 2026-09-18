@@ -1385,6 +1385,214 @@
     }
   },
   {
+    "name": "knowledge_search",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 500
+        },
+        "k": {
+          "default": 5,
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20
+        },
+        "derived_from": {
+          "description": "audit_log ids of earlier results these arguments were built from",
+          "maxItems": 50,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          }
+        }
+      },
+      "required": [
+        "query"
+      ]
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "ok",
+            "pending"
+          ]
+        },
+        "approval_id": {
+          "type": "string"
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "hits": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "chunk_id": {
+                    "type": "string"
+                  },
+                  "document_id": {
+                    "type": "string"
+                  },
+                  "path": {
+                    "type": "string"
+                  },
+                  "title": {
+                    "type": "string"
+                  },
+                  "updated_at": {
+                    "type": "string"
+                  },
+                  "ordinal": {
+                    "type": "number"
+                  },
+                  "text": {
+                    "type": "string"
+                  },
+                  "score": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "chunk_id",
+                  "document_id",
+                  "path",
+                  "title",
+                  "updated_at",
+                  "ordinal",
+                  "text",
+                  "score"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "hits"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "status"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "knowledge_sync",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "derived_from": {
+          "description": "audit_log ids of earlier results these arguments were built from",
+          "maxItems": 50,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          }
+        }
+      }
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "ok",
+            "pending"
+          ]
+        },
+        "approval_id": {
+          "type": "string"
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "source": {
+              "type": "string"
+            },
+            "scanned": {
+              "type": "number"
+            },
+            "added": {
+              "type": "number"
+            },
+            "updated": {
+              "type": "number"
+            },
+            "unchanged": {
+              "type": "number"
+            },
+            "removed": {
+              "type": "number"
+            },
+            "chunks": {
+              "type": "number"
+            },
+            "skipped": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "restricted",
+                      "embed_failed"
+                    ]
+                  },
+                  "reason": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path",
+                  "kind",
+                  "reason"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "source",
+            "scanned",
+            "added",
+            "updated",
+            "unchanged",
+            "removed",
+            "chunks",
+            "skipped"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "status"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
     "name": "memory_add",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",

@@ -67,6 +67,7 @@ describe('public surface', () => {
  * bound by whoever opens the session, so there is no tool to set them.
  *
  * Plan 9 adds the four memory tools of spec 5.5 (Task 3) and the two playbook tools of spec 5.6 (Task 7).
+ * Plan 10 adds the two knowledge tools of spec 5.7 (Task 6).
  */
 const RECORDED_TOOLS = [
   'approvals_execute',
@@ -84,6 +85,8 @@ const RECORDED_TOOLS = [
   'forms_roster',
   'harness_notify',
   'harness_reconcile',
+  'knowledge_search',
+  'knowledge_sync',
   'memory_add',
   'memory_list',
   'memory_remove',
@@ -105,7 +108,7 @@ describe('the four places Plan 6 moved the tool surface', () => {
   const recorded = async (): Promise<ToolSurfaceEntry[]> =>
     JSON.parse(await readFile(path.join(architecture, 'tool-surface.json'), 'utf8')) as ToolSurfaceEntry[];
 
-  it('publishes the twenty-two tools of Plan 6 less harness_set_context, plus the memory and playbook tools of Plan 9', async () => {
+  it('publishes the twenty-two tools of Plan 6 less harness_set_context, plus the memory, playbook and knowledge tools of Plans 9 and 10', async () => {
     expect((await recorded()).map((tool) => tool.name)).toEqual(RECORDED_TOOLS);
   });
 
