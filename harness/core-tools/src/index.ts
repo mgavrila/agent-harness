@@ -89,6 +89,7 @@ export {
   upsertDocument,
   type DocumentChange,
 } from './domain/knowledge/repository.js';
+export { fuseByReciprocalRank, searchKnowledge, type KnowledgeCandidate } from './domain/knowledge/search.js';
 export { syncKnowledge } from './domain/knowledge/sync.js';
 export {
   PLAYBOOK_RUN_STATUSES,
