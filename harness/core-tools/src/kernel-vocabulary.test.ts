@@ -77,6 +77,11 @@ const DEPLOYMENT_FORBIDDEN = /demo-practice|hermes/i;
  *
  * `minFiles` guards against the one way this test can lie: a scan that reached nothing passes.
  *
+ * `surfaces/http/src` is scanned for all four lists, unlike the other adapters. `surfaces/slack`
+ * is exempt from the messaging list because it *is* the messaging vendor; this one is a plain
+ * transport that belongs to nobody, and an HTTP adapter that had learned a product area, a
+ * messaging vendor or a framework would be exactly the coupling the surface contract removes.
+ *
  * **The allowlist is empty and must stay empty.** A word that has to appear belongs in a pack or
  * in an adapter, or the comment that carries it should say what the kernel actually means: a
  * model *vendor*, a *record*, a *file*, a *surface*. Adding an entry here is a decision to write
@@ -214,6 +219,34 @@ const SCANNED = [
     root: 'runtimes/deepagents/src',
     forbidden: DEPLOYMENT_FORBIDDEN,
     minFiles: 5,
+    skip: [/\.test\.ts$/],
+  },
+  {
+    what: 'credentialing vocabulary',
+    root: 'surfaces/http/src',
+    forbidden: DOMAIN_FORBIDDEN,
+    minFiles: 1,
+    skip: [/\.test\.ts$/],
+  },
+  {
+    what: 'messaging vocabulary',
+    root: 'surfaces/http/src',
+    forbidden: MESSAGING_FORBIDDEN,
+    minFiles: 1,
+    skip: [/\.test\.ts$/],
+  },
+  {
+    what: 'framework and vendor vocabulary',
+    root: 'surfaces/http/src',
+    forbidden: FRAMEWORK_FORBIDDEN,
+    minFiles: 1,
+    skip: [/\.test\.ts$/],
+  },
+  {
+    what: 'deployment vocabulary',
+    root: 'surfaces/http/src',
+    forbidden: DEPLOYMENT_FORBIDDEN,
+    minFiles: 1,
     skip: [/\.test\.ts$/],
   },
   {
