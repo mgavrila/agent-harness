@@ -170,7 +170,17 @@ async function shutdown(signal: string): Promise<void> {
     // goes away: `runtime.stop()` ends the runtime's own pool and `closeDb()` the host's, and a
     // turn that loses that race leaves its `runs` row `running` with nothing to sweep it.
     await drainActive(host, SHUTDOWN_DRAIN_MS);
-    await schedulerStopped;
+    // Under the same bound, and for the same reason: the tick is waiting on a turn the drain has
+    // just aborted, and a runtime that ignores an abort would otherwise hold the whole shutdown
+    // here with nothing to time it out — until the container's grace period kills the process and
+    // leaves behind exactly the `running` rows the bounded drain exists to avoid.
+    await Promise.race([
+      schedulerStopped,
+      new Promise<void>((resolve) => setTimeout(resolve, SHUTDOWN_DRAIN_MS).unref()),
+    ]);
+    if (scheduler.status().ticking) {
+      log.warn(`the scheduler tick had not finished ${SHUTDOWN_DRAIN_MS}ms after the drain; stopping anyway`);
+    }
     await runner.stop();
     await health.close();
     for (const session of surfaces.all) await session.stop();

@@ -1,3 +1,4 @@
+import { RUN_FAILED_MESSAGE } from '@harness/runtime-api';
 import { describeError } from '@harness/shared';
 import { RUNTIME_FAILED, runTurn, serialize, type TurnDelivery, type TurnResult } from '../conversation.js';
 import type { Host } from '../host.js';
@@ -17,14 +18,18 @@ export const MAX_ATTEMPTS = 2;
  * while answering. Not the run's own verdicts — cancelled, timed out, over budget, over the cost
  * cap — which a second attempt would only repeat at the same price.
  */
-const RETRYABLE = new Set<string>(['the run failed; see the host log', RUNTIME_FAILED]);
+const RETRYABLE = new Set<string>([RUN_FAILED_MESSAGE, RUNTIME_FAILED]);
+
+/** The host's own message for a turn that threw before the runtime answered. */
+const TURN_THREW = 'the turn failed before the runtime answered; see the host log';
 
 /**
- * The host's own message for a turn that never produced a result: it threw before the runtime
- * answered, or the host had begun draining and `serialize` refused to start it. Both mean no
- * model ran, so both read the same way in `playbook_runs.error` and in the notice.
+ * The host's own message for a firing `serialize` refused because the process had begun draining.
+ * Its own sentence rather than `TURN_THREW`: nothing broke, the host was stopping, and the
+ * schedule fires the playbook again — which is what an operator reading `playbook_runs.error`, or
+ * the notice, needs to be able to tell apart from a turn that crashed.
  */
-const TURN_THREW = 'the turn failed before the runtime answered; see the host log';
+const HOST_STOPPED = 'the host stopped before the run finished';
 
 export interface TickResult {
   claimed: number;
@@ -137,7 +142,7 @@ export async function executePlaybook(
     // never retried, which is the one difference between a shutdown and a transport failure.
     if (outcome === undefined) {
       host.log.info(`playbook "${playbook.name}": the host was draining; the firing was not started`);
-      lastError = TURN_THREW;
+      lastError = HOST_STOPPED;
       break;
     }
     const result = outcome;
@@ -236,7 +241,7 @@ export function startScheduler(host: Host, opts: { tickMs: number }): SchedulerH
           // A tick that fails is not a process that failed: the claim is transactional, the row
           // it could not take is still due, and the next tick takes it. Warned once, kept in
           // `status`, never rethrown — an unhandled rejection here would end the interval.
-          host.log.warn(`scheduler tick failed: ${status.lastError}`);
+          host.log.error(`scheduler tick failed: ${status.lastError}`);
           return { claimed: 0, done: 0, failed: 0, preflightFailed: 0 };
         },
       )

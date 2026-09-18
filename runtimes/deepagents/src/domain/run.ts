@@ -3,7 +3,7 @@ import type { BaseCheckpointSaver } from '@langchain/langgraph';
 import { createDeepAgent, createFilesystemMiddleware } from 'deepagents';
 import { modelFallbackMiddleware } from 'langchain';
 import type { Logger } from '@harness/shared';
-import type { RunEvent, RunRequest } from '@harness/runtime-api';
+import { RUN_FAILED_MESSAGE, type RunEvent, type RunRequest } from '@harness/runtime-api';
 import { bridgeTools } from './bridge.js';
 import type { EventQueue } from './events.js';
 import { inputText, seedFiles } from './files.js';
@@ -16,7 +16,8 @@ export interface RunContext {
 }
 
 const BUDGET_MESSAGE = 'the run exceeded its budget';
-const FAILED_MESSAGE = 'the run failed; see the host log';
+/** The contract's own word for a loop that broke, which is what the host retries once. */
+const FAILED_MESSAGE = RUN_FAILED_MESSAGE;
 
 /** A skill activation is a `read_file` under `/skills/<name>/`; the version is the host's. */
 const SKILL_PATH = /^\/skills\/([^/]+)\//;

@@ -8,6 +8,15 @@ import type { EnvSource, Level, Logger } from '@harness/shared';
  * client, and nothing else.
  */
 
+/**
+ * The message a runtime puts on its `error` event when the loop itself broke — it threw, or the
+ * transport under it did — rather than when the run reached a verdict of its own such as a
+ * cancel, a timeout or a spent budget. The host retries a firing that ends this way exactly once,
+ * so the string is part of the contract and lives here, where the runtime that emits it and the
+ * host that reads it both import the one copy instead of keeping two that can drift apart.
+ */
+export const RUN_FAILED_MESSAGE = 'the run failed; see the host log';
+
 /** What the runtime learns as it runs. `error.message` is safe to post: never a payload value. */
 export type RunEvent =
   | { type: 'text'; delta: string }

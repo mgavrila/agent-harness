@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { eq } from 'drizzle-orm';
-import { auditLog, messages, playbookRuns, playbooks, runs, threads, toolEffects, type Db } from '@harness/db';
-import type { RunEvent, RuntimeSession } from '@harness/runtime-api';
+import { auditLog, decrypt, messages, playbookRuns, playbooks, runs, threads, toolEffects, type Db } from '@harness/db';
+import { RUN_FAILED_MESSAGE, type RunEvent, type RuntimeSession } from '@harness/runtime-api';
 import { hostFixture, testKernelConfig, useTestDb, type HostFixture } from '../../testing.js';
 import { readSkillCatalogue } from '../skills.js';
 import { stagePlaybookNotice } from './notice.js';
@@ -178,7 +178,7 @@ describe('the scheduler', () => {
   it('retries once when the runtime fails, and records both runs', async () => {
     const f = await hostFixture(db, { trajectory: [{ say: 'unused' }] });
     f.host.runtime = sequenced(
-      [{ type: 'error', message: 'the run failed; see the host log' }],
+      [{ type: 'error', message: RUN_FAILED_MESSAGE }],
       [
         { type: 'text', delta: 'Nothing to report.' },
         { type: 'done', text: 'Nothing to report.' },
@@ -222,7 +222,7 @@ describe('the scheduler', () => {
 
   it('gives up after the second failure with one notice, not two', async () => {
     const f = await hostFixture(db, { trajectory: [{ say: 'unused' }] });
-    f.host.runtime = sequenced([{ type: 'error', message: 'the run failed; see the host log' }]);
+    f.host.runtime = sequenced([{ type: 'error', message: RUN_FAILED_MESSAGE }]);
     await due(f, { ...NIGHTLY, skill: 'sample-skill' });
     const scheduler = startScheduler(f.host, { tickMs: 3_600_000 });
     try {
@@ -259,14 +259,18 @@ describe('the scheduler', () => {
   it('keeps the loop when a tick throws, logging it once, so the next tick claims normally', async () => {
     const f = await hostFixture(db, { trajectory: [{ say: 'ok' }] });
     await due(f, { ...NIGHTLY, skill: 'sample-skill' });
-    const warnings: string[] = [];
-    f.host.log = { info() {}, warn: (message: string) => warnings.push(message), error() {} };
+    const errors: string[] = [];
+    f.host.log = { info() {}, warn() {}, error: (message: string) => errors.push(message) };
     f.host.db = deadlockOnce(db);
     const scheduler = startScheduler(f.host, { tickMs: 3_600_000 });
     try {
       expect(await scheduler.tick()).toEqual({ claimed: 0, done: 0, failed: 0, preflightFailed: 0 });
-      expect(scheduler.status()).toMatchObject({ lastError: 'deadlock detected', ticking: false });
-      expect(warnings).toEqual(['scheduler tick failed: deadlock detected']);
+      expect(scheduler.status()).toMatchObject({
+        lastError: 'deadlock detected',
+        lastErrorAt: '2026-09-15T12:00:00.000Z',
+        ticking: false,
+      });
+      expect(errors).toEqual(['scheduler tick failed: deadlock detected']);
       expect(await scheduler.tick()).toEqual({ claimed: 1, done: 1, failed: 0, preflightFailed: 0 });
     } finally {
       await scheduler.stop();
@@ -274,6 +278,56 @@ describe('the scheduler', () => {
     // A tick that works again clears the error it kept, and the firing the failed tick never claimed ran.
     expect(scheduler.status().lastError).toBe(null);
     expect((await db.select().from(playbookRuns))[0].status).toBe('done');
+  });
+
+  it('retries exactly the transport failure the runtime contract names, and no other error', async () => {
+    const f = await hostFixture(db, { trajectory: [{ say: 'unused' }] });
+    f.host.runtime = sequenced([{ type: 'error', message: RUN_FAILED_MESSAGE }], [{ type: 'done', text: 'ok' }]);
+    await due(f, { ...NIGHTLY, skill: 'sample-skill' });
+    const scheduler = startScheduler(f.host, { tickMs: 3_600_000 });
+    try {
+      expect(await scheduler.tick()).toMatchObject({ done: 1 });
+      // A message that is not the contract's own is the run's verdict, whatever it resembles.
+      f.host.runtime = sequenced([{ type: 'error', message: `${RUN_FAILED_MESSAGE}, reworded` }]);
+      await db.update(playbooks).set({ nextRunAt: f.host.now() });
+      expect(await scheduler.tick()).toMatchObject({ failed: 1 });
+    } finally {
+      await scheduler.stop();
+    }
+    const firings = await db.select().from(playbookRuns);
+    expect(firings.map((r) => [r.status, r.attempts]).sort()).toEqual([
+      ['done', 2],
+      ['failed', 1],
+    ]);
+    expect(await db.select().from(runs)).toHaveLength(3);
+  });
+
+  it('records a firing the host refused because it had begun draining, and never retries it', async () => {
+    const f = await hostFixture(db, { trajectory: [{ say: 'unused' }] });
+    await due(f, { ...NIGHTLY, skill: 'sample-skill' });
+    // The shutdown has started: `serialize` refuses the turn, so no run opens and no model is called.
+    f.host.draining = true;
+    const scheduler = startScheduler(f.host, { tickMs: 3_600_000 });
+    try {
+      expect(await scheduler.tick()).toEqual({ claimed: 1, done: 0, failed: 1, preflightFailed: 0 });
+    } finally {
+      await scheduler.stop();
+    }
+    expect(f.runtime.requests).toHaveLength(0);
+    expect(await db.select().from(runs)).toHaveLength(0);
+    const [firing] = await db.select().from(playbookRuns);
+    expect(firing).toMatchObject({
+      status: 'failed',
+      attempts: 1,
+      runId: null,
+      error: 'the host stopped before the run finished',
+    });
+    // The one notice says what happened, in the shutdown's own words rather than a crash's.
+    const effects = await db.select().from(toolEffects);
+    expect(effects).toHaveLength(1);
+    expect(JSON.parse(decrypt(effects[0].payloadEncrypted, f.host.config.encryptionKey))).toMatchObject({
+      text: 'Playbook "nightly" scheduled for 2026-09-15T12:00:00.000Z failed after 1 attempt(s): the host stopped before the run finished. See the host log and the playbook_runs table.',
+    });
   });
 
   it('stop() waits for the tick in flight, so a shutdown never leaves a firing half-recorded', async () => {
@@ -284,8 +338,10 @@ describe('the scheduler', () => {
     await new Promise((r) => setTimeout(r, 30));
     expect(scheduler.status().ticking).toBe(true);
     await scheduler.stop();
-    expect(await tick).toMatchObject({ claimed: 1, done: 1 });
+    // Before `await tick`: this is the state that exists the instant `stop()` resolves, so a
+    // `stop()` that did not wait for the tick in flight fails here rather than passing by luck.
     expect((await db.select().from(playbookRuns))[0].status).toBe('done');
+    expect(await tick).toMatchObject({ claimed: 1, done: 1 });
   });
 
   it('fires from its interval too', async () => {

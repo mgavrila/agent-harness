@@ -14,15 +14,16 @@ export function playbookNoticeKey(name: string, scheduledAt: Date): string {
  * sentences and carries nothing from the model. A second stage under the same key is a no-op.
  */
 export async function stagePlaybookNotice(
-  host: Pick<Host, 'db' | 'config' | 'identity' | 'servicePrincipal' | 'log'>,
+  host: Pick<Host, 'db' | 'config' | 'servicePrincipal' | 'log'>,
   notice: { playbook: PlaybookRow; scheduledAt: Date; runId: string | null; threadId: string | null; text: string },
 ): Promise<{ effect_id: string; staged: boolean }> {
-  // The row is stamped with the playbook's own principal when the identity plug-in knows it,
-  // and the host's otherwise (a preflight that failed on the principal still owes a notice).
-  const principal = (await host.identity.get(notice.playbook.principalId).catch(() => null)) ?? host.servicePrincipal;
+  // The host's own principal, not the playbook's: `stageEffect` writes no principal to
+  // `tool_effects`, so asking the identity plug-in for one would be a round-trip per notice whose
+  // answer nothing reads — and a preflight that failed *on* the principal has no answer to give.
+  // The firing's own row names the playbook, which is where the ownership question is answered.
   const deps = depsForRun(host.config, {
     db: host.db,
-    principal,
+    principal: host.servicePrincipal,
     context: {
       runId: notice.runId,
       threadId: notice.threadId,
