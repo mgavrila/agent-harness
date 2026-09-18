@@ -3207,7 +3207,6 @@ async function client(level: Level, id = 'u-reader') {
   );
   const deps = makeTestDeps(db, {
     clientDir,
-    embedDims: 64,
     gateway: { baseUrl: fake.url, apiKey: 'sk-test', timeoutMs: 5_000, maxCallsPerRun: 200 },
     principal: {
       id,
