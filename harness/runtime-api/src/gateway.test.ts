@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, onTestFinished } from 'vitest';
 import { startFakeGateway, type FakeGateway } from './gateway.js';
 
 let gateway: FakeGateway;
@@ -117,5 +117,78 @@ describe('startFakeGateway', () => {
     await gateway.close();
     expect(await pending).toBe('closed');
     gateway = await startFakeGateway();
+  });
+});
+
+describe('the fake gateway embeddings endpoint', () => {
+  it('answers deterministic unit vectors at the width the caller asked for, and records the call', async () => {
+    const fake = await startFakeGateway();
+    onTestFinished(() => fake.close());
+
+    const response = await fetch(`${fake.url}/v1/embeddings`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: 'Bearer sk-test' },
+      body: JSON.stringify({
+        model: 'embed',
+        input: ['the office closes at five', 'the office closes at five'],
+        dimensions: 8,
+        user: 'u-1',
+      }),
+    });
+    expect(response.status).toBe(200);
+    const payload = (await response.json()) as {
+      object: string;
+      model: string;
+      data: { object: string; index: number; embedding: number[] }[];
+      usage: { prompt_tokens: number; total_tokens: number };
+    };
+    expect(payload.object).toBe('list');
+    expect(payload.model).toBe('embed');
+    expect(payload.data.map((d) => d.index)).toEqual([0, 1]);
+    expect(payload.data[0].embedding).toHaveLength(8);
+    // The same text always embeds the same, which is what makes a retrieval test assertable.
+    expect(payload.data[0].embedding).toEqual(payload.data[1].embedding);
+    // And it is a unit vector, so a cosine distance is a cosine distance.
+    const norm = Math.sqrt(payload.data[0].embedding.reduce((n, x) => n + x * x, 0));
+    expect(norm).toBeCloseTo(1, 10);
+    expect(payload.usage.prompt_tokens).toBeGreaterThan(0);
+
+    expect(fake.embeddings).toHaveLength(1);
+    expect(fake.embeddings[0]).toMatchObject({
+      model: 'embed',
+      dimensions: 8,
+      user: 'u-1',
+      authorization: 'Bearer sk-test',
+    });
+    expect(fake.embeddings[0].input).toHaveLength(2);
+    // Chat calls and embedding calls are recorded separately: a suite asserting on one must not
+    // have to filter the other out.
+    expect(fake.calls).toEqual([]);
+  });
+
+  it('gives different text different directions, and lets a responder force an error or a width', async () => {
+    const fake = await startFakeGateway();
+    onTestFinished(() => fake.close());
+    const embed = async (input: string[]): Promise<Response> =>
+      fetch(`${fake.url}/v1/embeddings`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ model: 'embed', input, dimensions: 16 }),
+      });
+
+    const both = (await (await embed(['alpha beta', 'gamma delta'])).json()) as {
+      data: { embedding: number[] }[];
+    };
+    const dot = both.data[0].embedding.reduce((n, x, i) => n + x * both.data[1].embedding[i], 0);
+    expect(dot).toBeCloseTo(0, 10);
+
+    fake.setEmbeddingResponder(() => ({ dimensions: 4 }));
+    const narrow = (await (await embed(['alpha'])).json()) as { data: { embedding: number[] }[] };
+    expect(narrow.data[0].embedding).toHaveLength(4);
+
+    fake.setEmbeddingResponder(() => ({ status: 429, errorBody: { error: { message: 'over budget' } } }));
+    const refused = await embed(['alpha']);
+    expect(refused.status).toBe(429);
+    expect(await refused.text()).toContain('over budget');
   });
 });

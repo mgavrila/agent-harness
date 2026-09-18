@@ -4,6 +4,7 @@ import {
   DEFAULT_POLICY,
   MASKED,
   PACK_KERNEL,
+  clientDirFor,
   createCoreToolsServer,
   loadPacks,
   localParser,
@@ -215,6 +216,10 @@ export async function openPipeline(opts: OpenPipelineOptions): Promise<PipelineH
     confidenceThreshold,
     gateway: opts.gateway,
     storageDir: opts.storageDir,
+    // The same derivation the host and the stdio server use, so a pipeline measures the client
+    // folder a deployment would read rather than one this file invented.
+    clientDir: clientDirFor(client),
+    embedDims: 1_024,
     parser: localParser(opts.storageDir),
     // The pipeline under test reads documents; it fills no forms. The measured pack's shipped
     // templates directory is still the honest value: a tool that did reach for one would find

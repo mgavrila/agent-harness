@@ -4,6 +4,7 @@ import { config as loadEnv } from 'dotenv';
 import { serveStdio } from '@modelcontextprotocol/server/stdio';
 import { createLogger } from '@harness/shared';
 import { createCoreToolsServer } from '../tools/catalog.js';
+import { assertEmbedDims } from '../domain/knowledge/embed.js';
 import { reconcile } from '../domain/tooling/reconcile.js';
 import { writeAudit, hashArgs } from '../domain/tooling/audit.js';
 import { buildDepsFromEnv } from './server.js';
@@ -15,6 +16,10 @@ const log = createLogger('core-tools');
 loadEnv({ path: path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../../.env'), quiet: true });
 
 const { deps, close } = await buildDepsFromEnv();
+
+// Before anything is served: a deployment whose HARNESS_EMBED_DIMS does not match the column
+// would fail on the first knowledge write, halfway through a sync, with rows already inserted.
+await assertEmbedDims(deps.db, deps.embedDims);
 
 try {
   const repaired = await reconcile(deps.db, { now: deps.now });

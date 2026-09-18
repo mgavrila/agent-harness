@@ -13,7 +13,7 @@
  * the "no test imported by production" architecture rule matches on the name.
  */
 import { randomBytes } from 'node:crypto';
-import { DEFAULT_POLICY, PACK_KERNEL, localParser, registryOf, type ToolDeps } from '@harness/core-tools';
+import { DEFAULT_POLICY, PACK_KERNEL, clientDirFor, localParser, registryOf, type ToolDeps } from '@harness/core-tools';
 import { createDb } from '@harness/db';
 import { pack as healthcarePack } from '@harness/pack-healthcare';
 import { EVALS_DATABASE_URL } from './corpus.test-helpers.js';
@@ -56,6 +56,9 @@ export function openJudgeDeps(opts: { gatewayUrl: string; storageDir: string }):
       confidenceThreshold: 0.85,
       gateway: { baseUrl: opts.gatewayUrl, apiKey: 'sk-eval', timeoutMs: 10_000, maxCallsPerRun: 100 },
       storageDir: opts.storageDir,
+      // The judge reaches for neither, and gets the pipeline's own values rather than a stub.
+      clientDir: clientDirFor('evals'),
+      embedDims: 1_024,
       parser: localParser(opts.storageDir),
       formsDir: packs.all[0].formsDir ?? opts.storageDir,
       restrictedToModel: false,

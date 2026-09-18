@@ -51,6 +51,8 @@ export async function surfaceDeps(): Promise<ToolDeps> {
     confidenceThreshold: DEFAULT_CONFIDENCE_THRESHOLD,
     gateway: { baseUrl: 'http://127.0.0.1:1', apiKey: 'unused', timeoutMs: 1_000, maxCallsPerRun: 1 },
     storageDir: '/nonexistent/surface',
+    clientDir: '/nonexistent/surface',
+    embedDims: 1_024,
     parser: localParser('/nonexistent/surface'),
     formsDir: '/nonexistent/surface',
     restrictedToModel: false,

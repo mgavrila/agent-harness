@@ -12,7 +12,7 @@ import {
   startRunner,
   surfaceSinks,
 } from '@harness/approvals';
-import { buildKernelConfig, loadIdentity } from '@harness/core-tools';
+import { assertEmbedDims, buildKernelConfig, loadIdentity } from '@harness/core-tools';
 import { outRoot } from '@harness/core-tools/storage';
 import { createDb } from '@harness/db';
 import { ConfigError, createLogger, envOrDefault, numberFromEnv, requiredEnv } from '@harness/shared';
@@ -49,7 +49,12 @@ const config = await buildKernelConfig(process.env);
 // node.Dockerfile, but an operator who mounts a bare directory instead still gets both.
 await mkdir(path.join(config.storageDir, 'incoming'), { recursive: true });
 await mkdir(outRoot(config.storageDir), { recursive: true });
-const clientDir = path.join(repoRoot, 'clients', config.client);
+// Derived by the kernel from HARNESS_CLIENT (spec section 7), so the host and core-tools cannot
+// disagree about where a client's files are.
+const clientDir = config.clientDir;
+// The knowledge tables' embedding width is fixed by migration 0013; refuse to start rather than
+// fail halfway through the first sync.
+await assertEmbedDims(db, config.embedDims);
 
 // The three plug-ins, by name. Identity first: the host's own principal has to be declared.
 const identity = await loadIdentity(envOrDefault('HARNESS_IDENTITY', '@harness/identity-static'), {

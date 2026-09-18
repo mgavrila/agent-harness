@@ -95,6 +95,19 @@ export interface ToolDeps {
    */
   storageDir: string;
   /**
+   * The client's own folder: `clients/<HARNESS_CLIENT>/`, where its persona, policy, identity,
+   * playbooks and `knowledge/` live. Derived, never configured — spec section 7 fixes the layout
+   * — and resolved from the repository root, which is the image's working directory too.
+   */
+  clientDir: string;
+  /**
+   * How wide an embedding vector this deployment stores, from `HARNESS_EMBED_DIMS`. It does not
+   * *decide* the width: `knowledge_chunks.embedding` was created at a fixed width by migration
+   * 0013, and `assertEmbedDims` refuses to start when the two disagree. It is here so that
+   * `embedTexts` asks the gateway for that width and refuses anything else.
+   */
+  embedDims: number;
+  /**
    * What turns a document under `storageDir` into text. `localParser(storageDir)` in tests and on
    * bare metal; `remoteParser(HARNESS_FILES_URL, storageDir)` in Compose, where the parsing
    * happens in a process that holds no key. Constructed, not configuration — the one member

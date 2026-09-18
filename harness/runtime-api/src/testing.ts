@@ -1,6 +1,11 @@
 /** What a test of a runtime, or of the host, reaches for. */
 export {
+  FAKE_EMBED_DIMENSIONS,
+  fakeEmbedding,
   startFakeGateway,
+  type EmbeddingResponder,
+  type FakeEmbeddingCall,
+  type FakeEmbeddingReply,
   type FakeGateway,
   type FakeGatewayCall,
   type FakeGatewayMessage,
