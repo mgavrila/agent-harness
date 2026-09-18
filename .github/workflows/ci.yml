@@ -16,8 +16,10 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        # The image Plan 10 will need for pgvector; a plain Postgres 16 until then.
-        image: pgvector/pgvector:pg16
+        # Pinned to the same explicit pgvector version Compose runs, not the floating `pg16` tag:
+        # knowledge search sets `hnsw.iterative_scan`, which pgvector added in 0.8.0, and a
+        # floating tag that moved back below that floor would break search at query time.
+        image: pgvector/pgvector:0.8.1-pg16
         env:
           POSTGRES_USER: harness
           POSTGRES_PASSWORD: harness
