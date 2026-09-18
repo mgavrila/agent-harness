@@ -106,6 +106,20 @@ async function callerOf(host: Host, ref: { surface: string; userId: string }): P
 }
 
 /**
+ * The same caller, named in the query string, for the two routes that address one thing by id.
+ *
+ * A missing parameter becomes the empty string rather than a special case: `callerOf` already
+ * refuses both an empty user id and a surface name that is not one, with the message it would
+ * give a request body that left them out.
+ */
+async function callerFromQuery(host: Host, url: URL): Promise<Caller> {
+  return callerOf(host, {
+    surface: url.searchParams.get('surface') ?? '',
+    userId: url.searchParams.get('userId') ?? '',
+  });
+}
+
+/**
  * Open a run and stream it (spec 5.8).
  *
  * `deliver: 'none'` (decision 14): the reply is recorded on the thread and posted nowhere, because
@@ -201,10 +215,7 @@ async function openRunRoute(host: Host, req: IncomingMessage, res: ServerRespons
 
 /** Cancel a run of the caller's own (spec 5.8). Another principal's run is "no such run" (decision 18). */
 async function cancelRoute(host: Host, url: URL, res: ServerResponse, runId: string): Promise<void> {
-  const caller = await callerOf(host, {
-    surface: url.searchParams.get('surface') ?? '',
-    userId: url.searchParams.get('userId') ?? '',
-  });
+  const caller = await callerFromQuery(host, url);
   if (!caller.ok) return json(res, caller.status, { error: caller.error });
   if (!UUID.test(runId)) return json(res, 404, { error: 'no such run' });
   const run = await findRunFor(host.db, { client: host.client, principalId: caller.principal.id, runId });
@@ -216,10 +227,7 @@ async function cancelRoute(host: Host, url: URL, res: ServerResponse, runId: str
 
 /** A thread of the caller's own, most recent messages, newest last (spec 5.8). */
 async function threadRoute(host: Host, url: URL, res: ServerResponse, threadId: string): Promise<void> {
-  const caller = await callerOf(host, {
-    surface: url.searchParams.get('surface') ?? '',
-    userId: url.searchParams.get('userId') ?? '',
-  });
+  const caller = await callerFromQuery(host, url);
   if (!caller.ok) return json(res, caller.status, { error: caller.error });
   if (!UUID.test(threadId)) return json(res, 404, { error: 'no such thread' });
   const found = await readThreadFor(host.db, {
