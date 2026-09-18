@@ -34,6 +34,7 @@ describe('renderLiteLlmConfig', () => {
       'extract',
       'reason',
       'judge',
+      'embed',
     ]);
   });
 

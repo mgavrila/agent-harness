@@ -37,13 +37,20 @@ GRANT INSERT, SELECT ON TABLE audit_log TO harness_app;
 GRANT SELECT, INSERT, UPDATE ON TABLE
   records, documents, fields, attachments, deadlines,
   approvals, runs, model_calls, tool_effects,
-  memory_entries, playbooks, playbook_runs, threads, messages
+  memory_entries, playbooks, playbook_runs, threads, messages,
+  knowledge_sources, knowledge_documents, knowledge_chunks
 TO harness_app;
 
 -- `deadlines_compute` retires deadlines whose attachment lost its expiry date,
--- and `memory_remove` forgets an entry, so these two tables also need DELETE.
-GRANT DELETE ON TABLE deadlines, memory_entries TO harness_app;
+-- `memory_remove` forgets an entry, and `knowledge_sync` replaces a document's
+-- passages, so these tables also need DELETE. It never deletes a document row:
+-- a document whose file is gone is tombstoned with `deleted_at`.
+GRANT DELETE ON TABLE deadlines, memory_entries, knowledge_chunks TO harness_app;
 ```
+
+Creating an extension is the owner's right, not the application role's: `runMigrations` issues
+`CREATE EXTENSION IF NOT EXISTS vector` and runs as the migrating owner, exactly as the migrator
+does.
 
 Do not add `GRANT ALL`, do not make `harness_app` the owner of any table, and do
 not grant it `SUPERUSER` or `BYPASSRLS`. Verify after a deploy:
@@ -292,6 +299,16 @@ migration file without advancing the snapshot, so drizzle-kit does not know
 the schema changed. Migration `0003` needed its snapshot patched by hand
 because of exactly this mistake. `--custom` is only for a migration with no
 corresponding `schema.ts` change (e.g. a one-off data backfill).
+
+`drizzle-kit generate` writes tables, columns and indexes. It does **not** write
+`CREATE EXTENSION`, and there is no configuration that makes it — `extensionsFilters` takes only
+`postgis` and only filters introspection. An extension the schema needs therefore goes in
+`EXTENSIONS` in `harness/db/src/domain/migrate.ts`, which `runMigrations` installs before the
+migrator, idempotently, on every call. Do not hand-edit a generated `.sql` to add one: the rule
+that `generate` twice prints "No schema changes" is what keeps the snapshot and the migrations
+honest, and a hand-edited file is invisible to it. `migration-0013.test.ts` asserts both halves —
+that the shipped SQL fails with `type "vector" does not exist` on its own, and that
+`runMigrations` on a bare database leaves the extension installed and the tables created.
 
 ### Migration 0008 and the record model
 
@@ -624,8 +641,8 @@ wrote a restricted-looking value where it should not be; read the audit row.
 ## Onboarding a client
 
 `pnpm new-client --pack <pack> --name <slug>` scaffolds `clients/<slug>/` — `SOUL.md`,
-`identity.yaml`, `policy.yaml`, `routing.yaml` and an `.env.example`: a client is content and
-configuration, never code. Compose derives every client path from `HARNESS_CLIENT`, so there is
+`identity.yaml`, `policy.yaml`, `routing.yaml`, `playbooks.yaml`, a `knowledge/` folder of markdown
+and an `.env.example`: a client is content and configuration, never code. Compose derives every client path from `HARNESS_CLIENT`, so there is
 nothing to edit under `harness/compose/`:
 
 1. `cp clients/<slug>/.env.example .env` and fill it in, with `HARNESS_CLIENT=<slug>` and a
@@ -636,8 +653,13 @@ nothing to edit under `harness/compose/`:
    is missing from the file refuses to start.
 3. Create one Slack app as described under **Slack credentials** above and paste its tokens and
    the approvals channel id.
-4. Review `clients/<slug>/SOUL.md` and `policy.yaml` before the first run.
-5. Start it under its own Compose project so it does not collide with another client's
+4. Review `clients/<slug>/SOUL.md` and `policy.yaml` before the first run, and the markdown in
+   `clients/<slug>/knowledge/`, which the scaffolder copied from the template with the client's
+   name rewritten — it is the demo practice's content until somebody replaces it. Delete the folder
+   if this client has no knowledge base; nothing requires one.
+5. Review `clients/<slug>/routing.yaml`, whose `embed` route came from the template like every
+   other route, and check its width once with the `curl` under "Knowledge" before the first sync.
+6. Start it under its own Compose project so it does not collide with another client's
    containers and volumes:
    `COMPOSE_PROJECT_NAME=<slug> docker compose --env-file .env -f harness/compose/docker-compose.yml --profile demo up -d --build`.
 
@@ -735,6 +757,55 @@ startup, and a running host never re-reads it.
    remembers is per principal, and a write to the practice-wide scope is `write.internal` —
    parked for approval for a `member`, automatic for a practitioner and above.
 
+## Upgrading from Plan 9
+
+An existing Plan 9 deployment hits all of these. Work through them in order, with the stack down,
+and start the host last.
+
+1. **Recreate Postgres on the pgvector image.** `harness/compose/docker-compose.yml` now runs
+   `pgvector/pgvector:0.8.1-pg16` instead of `postgres:16`. It is the same major version and the
+   same data directory layout, so the existing `pgdata` volume is reused as it is: `pnpm db:up`
+   fetches the image if it is not already local and recreates the container on the same data.
+   **Do not delete the volume.**
+   The version is pinned rather than floating on `pg16` because knowledge search sets
+   `hnsw.iterative_scan`, which pgvector added in 0.8.0; anything older fails the vector half of
+   every search. On bare metal, install a `vector` extension of 0.8 or newer for your Postgres 16 —
+   the `postgresql-16-pgvector` package on Debian and Ubuntu.
+2. **Migrate.** `pnpm db:migrate` now issues `CREATE EXTENSION IF NOT EXISTS vector` before the
+   migrator and then applies 0013: `knowledge_sources`, `knowledge_documents` and
+   `knowledge_chunks`, with an HNSW index on the embedding and GIN indexes on the generated
+   `tsvector` and on `principals`. The extension statement needs a role that may create one, which
+   means `CREATE` on the database — the migrating owner already has it, as under "Database roles" —
+   or the extension installed for you beforehand by somebody who does. Skip step 1 and it fails with
+   `extension "vector" is not available`, and nothing is applied.
+3. **Grant the application role** `SELECT, INSERT, UPDATE` on the three new tables and `DELETE` on
+   `knowledge_chunks`, as under "Database roles". The sync replaces a document's passages; it never
+   deletes a document row, because a document whose file is gone is tombstoned instead.
+4. **Add the `embed` route** to `clients/<name>/routing.yaml` and run `pnpm gateway:config`, then
+   restart the gateway. The route is required: a file without it fails the render with
+   `routing.yaml is invalid:` and the missing key, and nothing is written. Check the width once
+   with the `curl` under "Knowledge" before the first sync.
+5. **New environment variables**, all optional, and these five are the whole list:
+   `HARNESS_EMBED_DIMS` (default 1024, read by the kernel's configuration, and it must match the
+   column), `HARNESS_HOST_TOKEN` (**unset means no run API**), `HARNESS_HOST_BIND` (default
+   `127.0.0.1`, `0.0.0.0` inside Compose), `HARNESS_HOST_PORT` (default 8788) — the last three read
+   by the host's `app/main.ts` — and `HARNESS_HOST_PUBLISHED_PORT` (default 8788), which Compose
+   reads to map the published port and no TypeScript reads at all.
+6. **Optional: turn the run API on.** Set `HARNESS_HOST_TOKEN`, add `@harness/surface-http` to
+   `HARNESS_SURFACES` after your primary surface, and add an `http:` entry to each principal in
+   `identity.yaml` who may call it. With the token set and the surface left out of
+   `HARNESS_SURFACES` the listener still starts, and a request naming it is refused `400`,
+   `surface "http" is not loaded`.
+7. **Optional: add a knowledge folder.** Put markdown in `clients/<name>/knowledge/` and either
+   call `knowledge_sync` once as a practitioner or above, or add the `knowledge-sync` playbook to
+   `playbooks.yaml`, which the demo's file now shows. A client with no folder syncs nothing and
+   starts fine.
+8. **Expect these behaviour changes.** The host now offers one skill of its own, `knowledge-sync`,
+   read before the packs' so none of them can shadow it. The published tool count is 30 in the
+   default deployment and 35 with both packs loaded. `claimDuePlaybooks` no longer takes a `limit`;
+   the batch is the `CLAIM_BATCH` constant, at the same value of 10. And the host's `listening` line
+   gained one more field, `runApi=on` or `runApi=off (set HARNESS_HOST_TOKEN)`.
+
 ## Memory
 
 `memory_entries` is the curated memory (spec 5.5): one row per fact, in scope `principal` (one
@@ -771,14 +842,177 @@ select scope, principal_id, text, created_by, created_at
 from memory_entries where client = 'demo-practice' order by created_at;
 ```
 
+## Knowledge
+
+`clients/<name>/knowledge/` is a folder of markdown. `knowledge_sync` walks it into
+`knowledge_documents` and `knowledge_chunks`; `knowledge_search` reads it back, filtered by who is
+asking. The demo ships two documents and a nightly `knowledge-sync` playbook at 06:30
+`America/New_York`. The folder is optional: a client without one syncs nothing and starts fine.
+
+**Who may sync.** `knowledge_sync` is `write.internal`, so under the default matrix it runs
+automatically for a `practitioner`, a `lead`, an `admin` and a **service** principal, and is
+**parked for approval** for a `member` — a member who asks for a refresh gets an approval card,
+not a sync. It is deliberately not `admin`: `admin` is `blocked` for every level but `admin`,
+including `service`, so a nightly playbook could never call it. `knowledge_search` is `read`.
+
+**A document.** Optional frontmatter between two `---` lines: `title` (default: the first `#`
+heading, else the file name without its extension), `min_level` (`member`, `practitioner`, `lead`
+or `admin`; default `member`), and `principals` (a list of principal ids, each `u-<slug>` or
+`svc-<slug>`, at most 50). Everything below the frontmatter is the body. `service` is not a
+document level, because a service is not on the level ladder and is named by id or not at all.
+
+A document with an unknown frontmatter key, an unknown level, a malformed principal id or **no
+body at all** is a `ConfigError` naming the file — `knowledge document "policies/front-desk.md" is
+empty` — and it stops the whole sync before anything is written. That is the opposite of the two
+skips below, and deliberately so: a file the parser cannot read is a mistake somebody made in the
+last minute, and syncing the rest of the folder around it would hide it.
+
+**Who reads what.** `client = <this client> AND deleted_at IS NULL AND (min_rank <= <the caller's
+rank> OR principals @> ARRAY[<the caller's id>])`, in the `WHERE` clause of both rankings, so a
+passage the caller may not see is never ranked and never counted toward `k` (invariant 7). The
+ranks are `member` 0, `practitioner` 1, `lead` 2, `admin` 3, and **`service` is −1**: a scheduled
+job reads a knowledge document only when the document names it in `principals`.
+
+**A sync.** `sha256` of the whole file, frontmatter included, decides whether a document is
+re-chunked and re-embedded, so raising a `min_level` re-indexes the document and moves the new
+level onto every passage. A file that has disappeared is **tombstoned**, not deleted: the row
+keeps `deleted_at` so an operator can see what went and when, and its passages are deleted so
+nothing can retrieve it. Two kinds of trouble are reported per document in the result's `skipped`
+list, each entry carrying `path`, `kind` and `reason`, and neither stops the folder from syncing:
+
+| `kind` | What happened | What to do |
+| --- | --- | --- |
+| `restricted` | the document's path, title or text trips the restricted-pattern check, so it contributes no passages and its row is left exactly as it was — not added, not updated, not tombstoned (invariant 10) | edit the file; it will be skipped again every night until somebody does |
+| `embed_failed` | the gateway refused or could not be reached, so the previous row and the previous passages are untouched and the stored hash is unmoved | nothing; the next sync retries that document by itself |
+
+Anything else — a bug in the harness, a database that would not take a row — is **not** a skip. It
+comes out of the sync as an error, because reporting it per document would promise a retry that
+fixes nothing.
+
+**When the gateway refuses.** The `embed` route follows the chat route's rule: the message names
+the route and the HTTP status and never the text that was sent. "over its daily budget" is
+reported only when the gateway's own body says budget; a bare 429 is
+`model route "embed" failed at the gateway (HTTP 429)`. A 401 or 403 says to check
+`LITELLM_MASTER_KEY`.
+
+**Chunking.** 1,000 characters with 200 of overlap, broken on paragraphs first, then lines,
+sentences, words and finally characters. A passage can reach 1,200 characters, because the overlap
+is cut at a space so a passage never starts mid-word.
+
+**Searching.** `knowledge_search` embeds the query, runs a cosine top-k over the HNSW index and a
+`ts_rank_cd` top-k over the GIN one — both already filtered — and fuses them by reciprocal rank.
+`k` defaults to 5 and is capped at 20. There is no distance threshold: a nearest-neighbour search
+always answers with its nearest rows however far away they are, which is why the tool tells the
+model that a hit is the nearest passage and not an answer. The embedding is not optional: a broken
+`embed` route fails the search loudly rather than quietly halving its recall.
+
+**pgvector 0.8 or newer is required.** The vector half of the search sets
+`hnsw.iterative_scan = 'relaxed_order'`, which pgvector added in 0.8.0, so that a caller who may
+read only a small part of the corpus still gets `k` visible passages instead of whatever survived
+the first `ef_search` candidates. An older server fails that half of every search with an error
+naming the setting. Compose pins `pgvector/pgvector:0.8.1-pg16` for exactly this reason, and so
+does CI.
+
+**Embeddings.** Route `embed` in `clients/<name>/routing.yaml`, called at `POST /v1/embeddings` on
+the gateway, up to 64 passages per request, one `model_calls` row per request on route `embed`
+(with `output_tokens` 0, because an embeddings deployment produces no completion tokens). The
+column is `vector(1024)` and `HARNESS_EMBED_DIMS` is checked against it at startup: they disagree
+and the process refuses to start —
+`HARNESS_EMBED_DIMS is 768 but knowledge_chunks.embedding stores 1024-dimension vectors; a deployment cannot change its embedding width in place`
+— because a migration is static SQL and pgvector will not widen a column under an HNSW index.
+Changing the width is a new deployment: drop and recreate the three knowledge tables, or start a
+new database, and sync the folder again. **Check the route once before the first sync**, since a
+deployment whose model answers at another width is refused per request rather than at startup, and
+since the demo's `embed` model is a proposal nobody has measured:
+
+```bash
+curl -s http://127.0.0.1:4000/v1/embeddings \
+  -H "Authorization: Bearer $LITELLM_MASTER_KEY" -H 'content-type: application/json' \
+  -d '{"model":"embed","input":["hello"],"dimensions":1024}' \
+  | python3 -c 'import json,sys; print(len(json.load(sys.stdin)["data"][0]["embedding"]))'
+```
+
+It must print `1024`.
+
+**The nightly refresh.** The `knowledge-sync` playbook names a skill the **host itself** ships, in
+`harness/host/skills/`, rather than a pack's: refreshing a knowledge base is no product area's
+business, and a deployment that swapped its pack would otherwise lose the skill. The host's own
+directory is read before every pack's, so a pack cannot shadow it. The skill calls
+`knowledge_sync` once, replies `Nothing to report.` when nothing was skipped, and stages one
+`harness_notify` notice listing each skipped path and its reason when something was.
+
+**Reading the tables.**
+
+```sql
+select d.path, d.title, d.min_level, d.principals, d.updated_at, d.deleted_at, count(c.id) as chunks
+from knowledge_documents d left join knowledge_chunks c on c.document_id = d.id
+where d.client = 'demo-practice' group by d.id order by d.path;
+```
+
+## The run API
+
+Four routes in the host, on `HARNESS_HOST_BIND:HARNESS_HOST_PORT` (default `127.0.0.1:8788`),
+behind `Authorization: Bearer $HARNESS_HOST_TOKEN`, compared in constant time. **With no token
+there is no listener**: nothing is bound, and the host's `listening` line says so with
+`runApi=off (set HARNESS_HOST_TOKEN)`.
+
+Who a run acts as is the identity plug-in's answer, never the caller's: every route names a loaded
+`surface` and that surface's own user id, which is resolved exactly as an adapter's message is, so
+a caller cannot name a principal. Load `@harness/surface-http` in `HARNESS_SURFACES` — **after**
+your primary surface, because the first entry is where approval cards go and that one cannot post
+a card — and give each caller an `http:` entry in `identity.yaml`.
+
+| Route | What it does |
+| --- | --- |
+| `POST /v1/runs` | `{ surface, conversation, userId, text, attachments? }` → `202` and a Server-Sent Events stream: `run` with the run id, then the runtime's events, then `result` |
+| `POST /v1/runs/:id/cancel?surface=&userId=` | `{ run_id, cancelled }`; `cancelled` is false when the run had already ended |
+| `GET /v1/threads/:id?surface=&userId=` | that thread and its **most recent** messages, newest last, at most 200 — the tail of a long thread, not its beginning |
+| `GET /v1/status` | six fields: `client`, `surfaces`, `primary_surface`, `runs_in_flight`, `draining` and `scheduler` — the scheduler's own status (`lastTickAt`, `lastOkAt`, `lastError`, `lastErrorAt`, `ticking`), which has nowhere else to be read |
+
+```bash
+curl -N http://127.0.0.1:8788/v1/runs -H "Authorization: Bearer $HARNESS_HOST_TOKEN" \
+  -H 'content-type: application/json' \
+  -d '{"surface":"http","conversation":"api","userId":"coordinator","text":"What are the front desk hours?"}'
+```
+
+**What it does not do.** The reply is recorded on the thread and posted to no surface (`deliver:
+'none'`): the caller is the one waiting for it, and putting the same answer into the named
+conversation would be a message nobody there asked for. The stream is the reply. Hanging up does
+not cancel the run — use the cancel route — and the run's result is on the thread either way. An
+approval raised during an API run goes where every approval card goes: the primary surface.
+
+**Limits.** A 1 MiB body, 10,000 characters of text, ten attachments, each a path inside
+`<storage>/incoming` (checked before the run opens). A thread read returns at most 200 messages,
+and they are the most recent 200 — a longer thread is truncated at the front, never at the end.
+One run at a time per thread: a second request on the same conversation waits for the first,
+exactly as a second message on a surface does. Every one of these is a constant in the code, not a
+setting.
+
+**What the answers mean.** `401` is a bad or missing token. `403` is a good token naming a surface
+user the identity plug-in does not know. `400` is a body that is not JSON, a field that does not
+parse, a surface that is not loaded, or an attachment outside the incoming directory. `404` is "no
+such run", "no such thread" or "no such route" — and the first two are also the answer for a run or
+thread belonging to **another** principal, on purpose: the API never confirms that someone else's
+row exists. `413` is a body over the cap.
+
+The 413 is written first and the socket is destroyed once it has flushed. A client that keeps
+uploading long past the cap may therefore see a connection reset instead of the refusal; that is
+the bandwidth bound working, and around a megabyte is read past the cap before the teardown lands.
+
+**Restricted values.** Every text frame is checked on its way out, and the closing `result` frame
+carries the whole reply already withheld if it tripped — the same guarantee a streamed Slack reply
+has. A pattern split across two deltas is caught by that final check, not by the deltas. An idle
+stream writes a keep-alive comment every 15 seconds so a proxy in between does not close it.
+
 ## Playbooks
 
 Scheduled work is `clients/<name>/playbooks.yaml`, read into the `playbooks` table when the host
-starts, and a scheduler loop inside the host that ticks every 30 seconds. The demo ships one
-playbook, `credentialing-expirations`, at 07:00 `America/New_York` as `svc-playbooks`.
+starts, and a scheduler loop inside the host that ticks every 30 seconds. The demo ships two
+playbooks as `svc-playbooks`: `credentialing-expirations` at 07:00 `America/New_York`, and
+`knowledge-sync` at 06:30 in the same zone.
 
 **The file.** One entry per playbook: `name` (the key), `schedule` (cron, five or six fields),
-`timezone` (IANA, default `UTC`), `skill`, `prompt`, `principal` (a `svc-…` id from
+`timezone` (IANA, default `UTC`), `skill` (the host's own or a loaded pack's), `prompt`, `principal` (a `svc-…` id from
 `identity.yaml`), `deliver` (`none`, the default, or `conversation`), optional `surface` and
 `conversation`, `cost_cap_usd`, `timeout_s` (default 600), `enabled` (default true). The schedule
 is exactly five or six whitespace-separated fields that fire at least once: the wider forms the
@@ -791,8 +1025,8 @@ down is **not replayed** (decision 13) — `next_run_at` is recomputed from the 
 start.
 
 **A firing.** The scheduler claims due rows with `FOR UPDATE SKIP LOCKED` (two hosts on one
-database never both fire the same row), then for each: preflight — the skill is in a loaded
-pack, the principal is declared and is a service, the named surface is loaded, the cost cap is
+database never both fire the same row), then for each: preflight — the skill is one the host
+offers (one of its own in `harness/host/skills/`, or a loaded pack's), the principal is declared and is a service, the named surface is loaded, the cost cap is
 a positive number; a failure writes `playbook_runs.status = 'preflight_failed'` with the reason
 and posts one notice, and no model call is made. Then one turn on the playbook's own thread
 (`kind = 'playbook'`, conversation `playbook:<name>`), as its service principal, with the

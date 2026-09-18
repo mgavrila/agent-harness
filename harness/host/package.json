@@ -22,6 +22,7 @@
     "@harness/runtime-deepagents": "workspace:*",
     "@harness/shared": "workspace:*",
     "@harness/surface-api": "workspace:*",
+    "@harness/surface-http": "workspace:*",
     "@harness/surface-memory": "workspace:*",
     "@harness/surface-slack": "workspace:*",
     "@modelcontextprotocol/client": "^2.0.0",

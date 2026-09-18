@@ -12,10 +12,12 @@ import {
   startRunner,
   surfaceSinks,
 } from '@harness/approvals';
-import { buildKernelConfig, loadIdentity } from '@harness/core-tools';
+import { assertEmbedDims, buildKernelConfig, loadIdentity } from '@harness/core-tools';
 import { outRoot } from '@harness/core-tools/storage';
 import { createDb } from '@harness/db';
-import { ConfigError, createLogger, envOrDefault, numberFromEnv, requiredEnv } from '@harness/shared';
+import { ConfigError, createLogger, envOrDefault, numberFromEnv, optionalEnv, requiredEnv } from '@harness/shared';
+import { startRunApi } from '../domain/api/server.js';
+import { DEFAULT_HOST_BIND, DEFAULT_HOST_PORT } from '../domain/api/types.js';
 import { SHUTDOWN_DRAIN_MS, TIMEOUT_MARGIN_MS, attachMessageHandlers, drainActive } from '../domain/conversation.js';
 import type { Host } from '../domain/host.js';
 import { readPersona } from '../domain/persona.js';
@@ -24,7 +26,7 @@ import { readPlaybooksFile } from '../domain/playbooks/schema.js';
 import { SCHEDULER_TICK_MS, startScheduler } from '../domain/playbooks/scheduler.js';
 import { decisionDeps } from '../domain/resume.js';
 import { loadRuntime } from '../domain/runtime/registry.js';
-import { readSkillCatalogue } from '../domain/skills.js';
+import { kernelSkillsDir, readSkillCatalogue } from '../domain/skills.js';
 
 const log = createLogger('host');
 
@@ -49,7 +51,12 @@ const config = await buildKernelConfig(process.env);
 // node.Dockerfile, but an operator who mounts a bare directory instead still gets both.
 await mkdir(path.join(config.storageDir, 'incoming'), { recursive: true });
 await mkdir(outRoot(config.storageDir), { recursive: true });
-const clientDir = path.join(repoRoot, 'clients', config.client);
+// Derived by the kernel from HARNESS_CLIENT (spec section 7), so the host and core-tools cannot
+// disagree about where a client's files are.
+const clientDir = config.clientDir;
+// The knowledge tables' embedding width is fixed by migration 0013; refuse to start rather than
+// fail halfway through the first sync.
+await assertEmbedDims(db, config.embedDims);
 
 // The three plug-ins, by name. Identity first: the host's own principal has to be declared.
 const identity = await loadIdentity(envOrDefault('HARNESS_IDENTITY', '@harness/identity-static'), {
@@ -103,7 +110,12 @@ const host: Host = {
   surfaces,
   runtime,
   persona: await readPersona(clientDir),
-  skills: await readSkillCatalogue(config.packs.skillsDirs()),
+  // The kernel's own skills first, then every pack's. `preflightPlaybook` resolves a playbook's
+  // skill name against this list with `find`, so the kernel's entry is the one it lands on. That
+  // is not a shadowing rule: `readSkillCatalogue` refuses a duplicate directory name within one
+  // directory and not across two, so a pack shipping a `knowledge-sync` directory of its own would
+  // still add a second entry of that name to the catalogue the runtime is offered.
+  skills: await readSkillCatalogue([kernelSkillsDir(), ...config.packs.skillsDirs()]),
   model: { baseUrl: config.gateway.baseUrl, apiKey: config.gateway.apiKey, route: 'chat', fallbackRoute: 'reason' },
   budget: {
     maxModelCalls: numberFromEnv('HARNESS_RUN_MAX_MODEL_CALLS', 30, { min: 1, max: 1_000, integer: true }),
@@ -154,9 +166,25 @@ const health = startHealthServer({
   snapshot: () => collectHealth(db, config.client, runner, host.now),
 });
 
+// The run API (spec 5.8). No bearer secret, no listener: a control plane that opened a socket with
+// no bearer secret because a variable was missing is the failure this avoids (decision 13). The
+// scheduler's handle goes in so `GET /v1/status` can report it, which is the one place that
+// status is reachable from.
+const hostToken = (optionalEnv('HARNESS_HOST_TOKEN') ?? '').trim();
+const runApi =
+  hostToken === ''
+    ? null
+    : startRunApi(host, {
+        token: hostToken,
+        bind: envOrDefault('HARNESS_HOST_BIND', DEFAULT_HOST_BIND),
+        port: port('HARNESS_HOST_PORT', DEFAULT_HOST_PORT),
+        scheduler,
+      });
+if (runApi) await runApi.ready;
+
 for (const session of surfaces.all) await session.start();
 log.info(
-  `listening (client=${config.client}, principal=${servicePrincipal.id}, runtime=${runtime.name}, identity=${identity.name}, surfaces=${surfaces.all.map((s) => s.name).join(',')}, primary=${surfaces.primary.name} on ${surfaces.primary.defaultConversation}, skills=${host.skills.length}, playbooks=${synced.upserted})`,
+  `listening (client=${config.client}, principal=${servicePrincipal.id}, runtime=${runtime.name}, identity=${identity.name}, surfaces=${surfaces.all.map((s) => s.name).join(',')}, primary=${surfaces.primary.name} on ${surfaces.primary.defaultConversation}, skills=${host.skills.length}, playbooks=${synced.upserted}, runApi=${runApi ? 'on' : 'off (set HARNESS_HOST_TOKEN)'})`,
 );
 
 async function shutdown(signal: string): Promise<void> {
@@ -166,6 +194,9 @@ async function shutdown(signal: string): Promise<void> {
     // drain below to abort the turn that tick is waiting on — so it is created first and awaited
     // after.
     const schedulerStopped = scheduler.stop();
+    // Before the drain: nothing new is accepted while the turns in flight unwind, and the open
+    // event streams are closed rather than holding the shutdown for as long as a caller listens.
+    await runApi?.close();
     // Abort the turns in flight and wait for them, bounded, before anything they are still using
     // goes away: `runtime.stop()` ends the runtime's own pool and `closeDb()` the host's, and a
     // turn that loses that race leaves its `runs` row `running` with nothing to sweep it.

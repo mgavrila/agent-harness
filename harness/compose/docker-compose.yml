@@ -20,7 +20,14 @@ name: agent-harness
 
 services:
   postgres:
-    image: postgres:16
+    # Postgres 16 with pgvector (spec section 7): migration 0013 declares `embedding vector(1024)`
+    # and `runMigrations` installs the extension before migrating, which a plain postgres:16
+    # cannot answer. Same major version, same data directory layout, so an existing pgdata volume
+    # is reused as it is — see "Upgrading from Plan 9" in docs/runbook.md.
+    # Pinned to an explicit pgvector version, not the floating `pg16` tag: knowledge search sets
+    # `hnsw.iterative_scan`, which pgvector added in 0.8.0, and a floating tag that moved back
+    # below that floor would break search at query time rather than at startup.
+    image: pgvector/pgvector:0.8.1-pg16
     environment:
       POSTGRES_USER: harness
       POSTGRES_PASSWORD: harness
@@ -148,7 +155,10 @@ services:
       HARNESS_CLIENT: '${HARNESS_CLIENT:-demo-practice}'
       HARNESS_STORAGE_DIR: '/srv/harness-storage'
       HARNESS_PACKS: '${HARNESS_PACKS:-@harness/pack-healthcare}'
-      HARNESS_SURFACES: '${HARNESS_SURFACES:-@harness/surface-slack}'
+      # The run API surface is loaded beside the primary one so a headless caller has a surface
+      # to name. It is never first: the first entry is where approval cards are posted, and this
+      # one cannot post a card.
+      HARNESS_SURFACES: '${HARNESS_SURFACES:-@harness/surface-slack,@harness/surface-http}'
       HARNESS_IDENTITY: '${HARNESS_IDENTITY:-@harness/identity-static}'
       HARNESS_RUNTIME: '${HARNESS_RUNTIME:-@harness/runtime-deepagents}'
       HARNESS_HOST_PRINCIPAL: '${HARNESS_HOST_PRINCIPAL:-svc-host}'
@@ -163,6 +173,14 @@ services:
       HARNESS_RUN_MAX_TOOL_CALLS: '${HARNESS_RUN_MAX_TOOL_CALLS:-60}'
       HARNESS_RUN_TIMEOUT_S: '${HARNESS_RUN_TIMEOUT_S:-600}'
       HARNESS_HISTORY_MAX_MESSAGES: '${HARNESS_HISTORY_MAX_MESSAGES:-40}'
+      # The run API (spec 5.8). Unset HARNESS_HOST_TOKEN means no listener at all.
+      HARNESS_HOST_TOKEN: '${HARNESS_HOST_TOKEN:-}'
+      # Every interface inside the container, for the reason APPROVALS_HEALTH_BIND is: a
+      # container-loopback listener answers neither the published port nor another container.
+      HARNESS_HOST_BIND: '${HARNESS_HOST_BIND:-0.0.0.0}'
+      HARNESS_HOST_PORT: '8788'
+      # The width knowledge_chunks.embedding was created at. Changing it means a new database.
+      HARNESS_EMBED_DIMS: '${HARNESS_EMBED_DIMS:-1024}'
       # The one Slack app: chat and approvals.
       SLACK_BOT_TOKEN: '${SLACK_BOT_TOKEN:-}'
       SLACK_APP_TOKEN: '${SLACK_APP_TOKEN:-}'
@@ -174,6 +192,7 @@ services:
       APPROVALS_HEALTH_BIND: '${APPROVALS_HEALTH_BIND:-0.0.0.0}'
     ports:
       - '127.0.0.1:${APPROVALS_HEALTH_HOST_PORT:-8787}:8787'
+      - '127.0.0.1:${HARNESS_HOST_PUBLISHED_PORT:-8788}:8788'
     volumes:
       - storage:/srv/harness-storage
       - ../../packs:/srv/agent-harness/packs:ro

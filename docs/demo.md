@@ -69,6 +69,30 @@ deterministic. The `credentialing-expirations` skill runs nightly from the
 scheduler as `svc-playbooks` (`clients/demo-practice/playbooks.yaml`);
 `playbooks_run_now` fires it on demand.
 
+### A cited answer, at the asker's level
+
+The demo ships two knowledge documents in `clients/demo-practice/knowledge/`. Sync them once, as
+the practice manager (an `admin`, so the sync runs rather than parking for approval):
+
+```
+@assistant refresh the knowledge base
+```
+
+Then ask, as the coordinator (a `lead`):
+
+```
+@assistant how do we escalate something urgent?
+```
+
+The answer quotes `escalation-and-billing.md` and names it. Add a `member` to `identity.yaml` and
+ask the same thing as them and the assistant says it does not have that and offers to ask a lead:
+`knowledge_search` returned only `front-desk.md`, because the escalation document is
+`min_level: lead`. Nothing about the second document leaks into the refusal — the member's search
+never ranked it.
+
+The nightly `knowledge-sync` playbook does the same refresh at 06:30 `America/New_York`, as
+`svc-playbooks`, and says nothing unless a document was skipped.
+
 ### 4. Ask for the Aetna roster and approve it (90 seconds)
 
 > Build the Aetna roster for Dr. Reyes and Dr. Lin.
@@ -131,6 +155,7 @@ Run this before the demo. Each line either passes or tells you what is wrong.
 - [ ] `pnpm test` passes and `pnpm typecheck` is clean.
 - [ ] `docker compose --env-file .env -f harness/compose/docker-compose.yml --profile demo ps` shows `postgres`, `litellm`, `files` and `host` up.
 - [ ] `curl http://127.0.0.1:8787/healthz` answers `"ok": true`.
+- [ ] `psql "$DATABASE_URL" -c "select path, min_level from knowledge_documents order by path"` shows the two demo documents, if you are demonstrating the knowledge base.
 - [ ] `docker compose --env-file .env -f harness/compose/docker-compose.yml --profile demo exec host printenv SLACK_APP_TOKEN` prints the one token.
 - [ ] A direct message to the bot is answered.
 - [ ] A mention in a channel is answered, and an unmentioned message in that channel is not.

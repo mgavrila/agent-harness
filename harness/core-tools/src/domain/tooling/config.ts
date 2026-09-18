@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { loadKey } from '@harness/db';
 import { booleanFromEnv, envOrDefault, numberFromEnv, optionalEnv, type EnvSource } from '@harness/shared';
 import { localParser, remoteParser } from '../documents/parser.js';
@@ -44,6 +45,16 @@ export function parserFromEnv(storageDir: string, filesUrl?: string): DocumentPa
   return filesUrl ? remoteParser(filesUrl, storageDir) : localParser(storageDir);
 }
 
+// src/domain/tooling -> src/domain -> src -> core-tools -> harness -> the repository root. The
+// same root the image has: node.Dockerfile sets WORKDIR /srv/agent-harness and copies `clients`
+// under it, so this resolves to the client folder in a checkout and in a container alike.
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../../..');
+
+/** `clients/<name>/`, the folder spec section 7 lays out. */
+export function clientDirFor(client: string): string {
+  return path.join(repoRoot, 'clients', client);
+}
+
 /**
  * Everything every run shares, read and loaded once per process. Nothing here is per run:
  * the database handle, the principal and the run context arrive through `depsForRun`.
@@ -52,8 +63,9 @@ export async function buildKernelConfig(env: EnvSource): Promise<KernelConfig> {
   const packs = await loadPacks(packNames(env));
   // One root for the whole file store, required and with no default (see storageRoot).
   const storageDir = storageRoot();
+  const client = envOrDefault('HARNESS_CLIENT', 'default', env);
   return {
-    client: envOrDefault('HARNESS_CLIENT', 'default', env),
+    client,
     policy: await loadPolicy(),
     encryptionKey: loadKey(),
     now: () => new Date(),
@@ -61,6 +73,10 @@ export async function buildKernelConfig(env: EnvSource): Promise<KernelConfig> {
     confidenceThreshold: numberFromEnv('CONFIDENCE_THRESHOLD', DEFAULT_CONFIDENCE_THRESHOLD, { min: 0, max: 1 }, env),
     gateway: gatewayFromEnv(),
     storageDir,
+    clientDir: clientDirFor(client),
+    // 1,024 is what migration 0013 created the column at; `assertEmbedDims` is what proves a
+    // deployment has not drifted from it. The ceiling is pgvector's own HNSW limit.
+    embedDims: numberFromEnv('HARNESS_EMBED_DIMS', 1_024, { min: 8, max: 2_000, integer: true }, env),
     parser: parserFromEnv(storageDir, optionalEnv('HARNESS_FILES_URL', env)),
     formsDir: formsDirFrom(packs, optionalEnv('HARNESS_FORMS_DIR', env)),
     restrictedToModel: booleanFromEnv('HARNESS_RESTRICTED_TO_MODEL', env),

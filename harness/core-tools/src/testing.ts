@@ -86,6 +86,10 @@ export function makeTestDeps(db: Db, overrides: TestDepsOverrides = {}): ToolDep
     confidenceThreshold: DEFAULT_CONFIDENCE_THRESHOLD,
     gateway: { baseUrl: 'http://127.0.0.1:1', apiKey: 'sk-test', timeoutMs: 5_000, maxCallsPerRun: 100 },
     storageDir,
+    // Not a real directory: a test that syncs knowledge passes its own, and one that does not
+    // gets a path that simply holds no `knowledge/` folder, which is an empty sync and not an error.
+    clientDir: path.join(storageDir, 'client'),
+    embedDims: 1_024,
     parser: localParser(storageDir),
     formsDir: TEST_PACKS.formsDir(),
     restrictedToModel: false,

@@ -92,6 +92,13 @@
       "when": 1789684414015,
       "tag": "0012_memory_and_playbooks",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1789732396724,
+      "tag": "0013_knowledge",
+      "breakpoints": true
     }
   ]
 }

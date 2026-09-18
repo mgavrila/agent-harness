@@ -1,6 +1,11 @@
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, it, expect } from 'vitest';
 import type { ActionClass, Behavior, Level } from '@harness/pack-api';
 import { DEFAULT_POLICY, decide, loadPolicy, mergePolicy, parsePolicy } from './policy.js';
+
+// src/domain/tooling -> src/domain -> src -> core-tools -> harness -> the repository root.
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../../..');
 
 /** Spec 4.4's table, cell for cell. Rows are action classes, columns the five levels. */
 const TABLE: Record<ActionClass, Record<Level, Behavior>> = {
@@ -97,5 +102,33 @@ describe('parsePolicy', () => {
     delete process.env.HARNESS_POLICY_FILE;
     expect(await loadPolicy()).toEqual(DEFAULT_POLICY);
     if (saved !== undefined) process.env.HARNESS_POLICY_FILE = saved;
+  });
+});
+
+/**
+ * The shipped file, read off disk rather than the copy above, because the pairing this pins is one
+ * a deployment actually runs and a hand copy can drift away from it.
+ *
+ * The nightly `knowledge-sync` playbook in `clients/demo-practice/playbooks.yaml` calls one tool,
+ * `knowledge_sync`, as `svc-playbooks`, which `identity.yaml` declares at `level: service`.
+ * Nothing before this asked whether policy would let that call through: `preflightPlaybook` checks
+ * the skill, the principal and the surface, never the class. When `knowledge_sync` was `admin` the
+ * answer was `blocked`, so the refresh was refused every night with `deliver: none` and nobody
+ * heard about it.
+ */
+describe('the shipped demo policy, against the principal the shipped playbook runs as', () => {
+  const demoPolicy = () => loadPolicy(path.join(repoRoot, 'clients', 'demo-practice', 'policy.yaml'));
+
+  it('lets a service principal run a write.internal tool unattended', async () => {
+    expect(decide('write.internal', 'service', await demoPolicy())).toBe('auto');
+  });
+
+  it('still parks that class for a member and blocks admin for a service, which is why the class moved', async () => {
+    const policy = await demoPolicy();
+    // The class-level `write.internal: auto` in the demo file does not reach a member: `decide`
+    // reads the level cell first, and `mergePolicy` keeps the default matrix's `member` override.
+    expect(decide('write.internal', 'member', policy)).toBe('approval');
+    // The reason `knowledge_sync` could not stay `admin`: no service principal can ever call one.
+    expect(decide('admin', 'service', policy)).toBe('blocked');
   });
 });

@@ -1,7 +1,7 @@
 import { hashArgs, memorySnapshot, writeAudit, type RunStatus } from '@harness/core-tools';
 import { containsRestrictedPattern } from '@harness/core-tools/redaction';
 import type { Principal } from '@harness/identity-api';
-import type { RunRequest, RunSkill } from '@harness/runtime-api';
+import type { RunEvent, RunRequest, RunSkill } from '@harness/runtime-api';
 import { describeError } from '@harness/shared';
 import type { MessageEvent, MessageRef, StreamHandle, SurfaceSession } from '@harness/surface-api';
 import type { Host } from './host.js';
@@ -68,6 +68,25 @@ const FORCED_OUTCOME: Partial<Record<AbortReason, string>> = {
  */
 export type TurnDelivery = 'thread' | 'none' | { surface: string; conversation: string };
 
+/**
+ * What a watcher of a turn sees, in order: the run id as soon as the run is open, every event the
+ * runtime produced, and the turn's own outcome once the host has had its say.
+ *
+ * The middle is the runtime's events **unfiltered** — the same deltas a streamed surface reply
+ * gets today, restricted-pattern check and all still to come. A watcher that sends them outside
+ * this process is the one that applies the check, which is what the run API's writer does; the
+ * closing `result` carries the whole reply already withheld if it tripped.
+ *
+ * The guarantee is exactly-once from the `run` event on: a watcher that has been handed the run
+ * id is told the outcome once, whether the turn returns it or throws on its way there. A
+ * `runTurn` that rejects *before* the run is open — an unloaded surface, a kernel that would not
+ * open — calls the watcher not at all, because there is no run to report. Only `result` settles a
+ * run: on a forced outcome the watcher sees the runtime's own `error` frame first and the host's
+ * verdict after it.
+ */
+export type TurnEvent =
+  { type: 'run'; runId: string } | RunEvent | { type: 'result'; status: RunStatus; text: string; error: string | null };
+
 export interface TurnInput {
   thread: ThreadRow;
   principal: Principal;
@@ -84,6 +103,16 @@ export interface TurnInput {
   timeoutMs?: number;
   /** Abort once the runtime's reported spend passes this. Undefined: no cap beyond the call ceilings. */
   costCapUsd?: number;
+  /**
+   * Somebody watching this turn as it happens: the run API's stream, and nothing else today. It
+   * is told the run id first, so a caller can cancel a run it has not seen a word of yet.
+   *
+   * A returned promise is awaited, so a watcher that rejects is logged like one that throws
+   * rather than becoming an unhandled rejection that would take the host down. Being awaited is
+   * also why a watcher should stay synchronous in practice: the turn waits for it between runtime
+   * events, so one that waits on network input/output back-pressures the runtime's own loop.
+   */
+  observe?: (event: TurnEvent) => void | Promise<void>;
 }
 
 export interface TurnResult {
@@ -163,6 +192,33 @@ export async function runTurn(host: Host, turn: TurnInput): Promise<TurnResult> 
     finish = resolve;
   });
   host.active.set(runId, { controller, done: finished });
+  /**
+   * A watcher is watching, not taking part: its failure is logged and dropped. An HTTP client that
+   * hung up mid-run must not turn a finished run into a failed one, and must not skip the
+   * `finally` that closes the run row either.
+   *
+   * The call is awaited so that an `observe` written `async` is caught here too. Unawaited, its
+   * rejection would land nowhere and take the process down under Node's default — the one failure
+   * mode this `try` exists to rule out, arriving a tick too late for it to see.
+   */
+  const emit = async (event: TurnEvent): Promise<void> => {
+    if (!turn.observe) return;
+    try {
+      await turn.observe(event);
+    } catch (err) {
+      host.log.error(`run ${runId}: the turn watcher threw`, err);
+    }
+  };
+  // The outcome is emitted from two places — the settled return below and the inner `catch` that
+  // rethrows — and a watcher is promised exactly one. This latch is what makes the second of them
+  // a no-op, so a throw from anywhere after the happy path has already reported cannot report a
+  // second, contradictory ending.
+  let outcomeEmitted = false;
+  const emitOutcome = async (outcome: { status: RunStatus; text: string; error: string | null }): Promise<void> => {
+    if (outcomeEmitted) return;
+    outcomeEmitted = true;
+    await emit({ type: 'result', ...outcome });
+  };
   const timeoutMs = turn.timeoutMs ?? host.budget.timeoutMs;
   const timer = setTimeout(() => abort('timeout'), timeoutMs + host.budget.timeoutMarginMs);
 
@@ -179,6 +235,13 @@ export async function runTurn(host: Host, turn: TurnInput): Promise<TurnResult> 
   let error: string | null = RUNTIME_FAILED;
   let text = '';
   try {
+    // After `host.active.set`, deliberately. `cancelRun` looks the run up in `host.active` and
+    // answers false when it is not there, so a watcher told the run id any earlier would be handed
+    // an id it cannot cancel — and a caller that cancels the instant it reads the first frame is
+    // exactly what the run API's stream invites. Inside the outer `try` so that the one thing that
+    // could still throw here, the log call `emit` falls back on, cannot leave the run row open and
+    // `drainActive` waiting out its bound.
+    await emit({ type: 'run', runId });
     try {
       await appendMessage(host.db, {
         threadId: turn.thread.id,
@@ -225,6 +288,7 @@ export async function runTurn(host: Host, turn: TurnInput): Promise<TurnResult> 
       const recipient = turn.principal.surfaces[turn.thread.surface] ?? '';
       try {
         for await (const event of host.runtime.run(request).events) {
+          await emit(event);
           switch (event.type) {
             case 'text':
               if (target?.ownThread) {
@@ -316,10 +380,18 @@ export async function runTurn(host: Host, turn: TurnInput): Promise<TurnResult> 
           content: text,
         });
       }
+      // After the forced outcome and the redaction guard, so a watcher is told what the run
+      // actually ended as and reads the text the human would have been sent.
+      await emitOutcome({ status, text: safeText, error });
       return { runId, status, text: safeText, error };
     } catch (err) {
       status = 'error';
       error ??= RUNTIME_FAILED;
+      // The turn is about to reject, so its caller learns the outcome by catching. A watcher has
+      // no `catch`: without this it would be handed a run id, possibly a whole reply, and then
+      // silence. The text is empty rather than `text`, because the redaction guard runs further
+      // down the path that threw and an unchecked reply is not a watcher's to read.
+      await emitOutcome({ status, text: '', error });
       throw err;
     }
   } finally {

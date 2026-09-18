@@ -1,5 +1,6 @@
 import { readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { parse as parseYaml } from 'yaml';
 import type { RunSkill } from '@harness/runtime-api';
 import { ConfigError } from '@harness/shared';
@@ -18,13 +19,32 @@ function requireString(value: unknown, field: string): string {
   return value;
 }
 
+// src/domain -> src -> the package root. `skills/` sits beside `src/`, so it ships in the image
+// (node.Dockerfile copies the whole `harness` tree) without being compiled.
+const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+
 /**
- * Every skill's `SKILL.md`, read off the packs' own `skillsDir`s. Each directory is walked in
- * name order, so the catalogue a runtime sees is deterministic across a process's whole life,
- * not whatever order the filesystem happened to hand back. A skill's frontmatter `name` must
- * match its directory name — the one thing this reads that a pack's own tests do not already
- * check — because a mismatch would let a skill file move without moving the runtime handle
- * that names it, or let two skills collide silently on one activation name.
+ * The skills the kernel itself ships, as opposed to a pack's.
+ *
+ * Exactly one today: `knowledge-sync`, which the knowledge sync playbook names. It cannot live in
+ * a pack — refreshing a knowledge base is not a product area's business, and a deployment that
+ * loaded a different pack would lose it — and `preflightPlaybook` requires a playbook's skill to
+ * be one the host offers, so the host has to offer it. A second one belongs here too; a third
+ * probably means this directory wants its own reason for existing, written down.
+ */
+export function kernelSkillsDir(): string {
+  return path.join(packageRoot, 'skills');
+}
+
+/**
+ * Every skill's `SKILL.md`, read off each directory it is handed — the kernel's own `skills/`
+ * first and then every loaded pack's `skillsDir`, which is the order `app/main.ts` passes them
+ * in. Each directory is walked in name order, so the catalogue a runtime sees is deterministic
+ * across a process's whole life, not whatever order the filesystem happened to hand back. A
+ * skill's frontmatter `name` must match its directory name — the one thing this reads that a
+ * pack's own tests do not already check — because a mismatch would let a skill file move without
+ * moving the runtime handle that names it, or let two skills collide silently on one activation
+ * name.
  */
 export async function readSkillCatalogue(dirs: readonly string[]): Promise<RunSkill[]> {
   const skills: RunSkill[] = [];

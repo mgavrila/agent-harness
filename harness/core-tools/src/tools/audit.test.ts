@@ -100,6 +100,8 @@ describe('audit_query', () => {
       'forms_roster',
       'harness_notify',
       'harness_reconcile',
+      'knowledge_search',
+      'knowledge_sync',
       'memory_add',
       'memory_list',
       'memory_remove',

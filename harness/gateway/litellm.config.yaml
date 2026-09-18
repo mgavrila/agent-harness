@@ -38,6 +38,12 @@ model_list:
       api_key: os.environ/GROQ_API_KEY
       max_budget: 1
       budget_duration: 1d
+  - model_name: embed
+    litellm_params:
+      model: gemini/gemini-embedding-001
+      api_key: os.environ/GEMINI_API_KEY
+      max_budget: 1
+      budget_duration: 1d
 router_settings:
   fallbacks:
     - chat:

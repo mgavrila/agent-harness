@@ -1,12 +1,16 @@
 import * as z from 'zod/v4';
 
 /**
- * The four named routes from spec section 4.2. Callers ask for a *job*
- * (`extract`), never a provider, so a routing change is a config change.
- * This is the single definition; @harness/core-tools imports it through the
- * `@harness/gateway/routing` subpath.
+ * The five named routes. Callers ask for a *job* (`extract`, `embed`), never a vendor, so a
+ * routing change is a config change. This is the single definition; @harness/core-tools imports
+ * it through the `@harness/gateway/routing` subpath.
+ *
+ * `embed` is the odd one: it is an embeddings deployment, not a chat one, so `callModel` refuses
+ * it and `embedTexts` in @harness/core-tools calls `POST /v1/embeddings` instead. It is a route
+ * like the others here because everything a route *is* to this file — a model, fallbacks, a
+ * daily budget, a rendered LiteLLM deployment — is the same for it.
  */
-export const ROUTES = ['chat', 'extract', 'reason', 'judge'] as const;
+export const ROUTES = ['chat', 'extract', 'reason', 'judge', 'embed'] as const;
 export type Route = (typeof ROUTES)[number];
 
 export const RouteSpec = z
@@ -33,6 +37,7 @@ export const RoutingFile = z.object({
       extract: RouteSpec,
       reason: RouteSpec,
       judge: RouteSpec,
+      embed: RouteSpec,
     })
     .strict(),
   defaults: z

@@ -11,7 +11,7 @@ export { type Host, type HostBudget } from './domain/host.js';
 export { loadRuntime } from './domain/runtime/registry.js';
 export { WITHHELD, appendMessage, findOrCreateThread, recentHistory } from './domain/threads/repository.js';
 export { HISTORY_MAX_CHARS, trimHistory } from './domain/threads/trim.js';
-export { readSkillCatalogue } from './domain/skills.js';
+export { kernelSkillsDir, readSkillCatalogue } from './domain/skills.js';
 export { readPersona } from './domain/persona.js';
 export { openKernel } from './domain/kernel.js';
 export {
@@ -26,6 +26,7 @@ export {
   serialize,
   type AbortReason,
   type TurnDelivery,
+  type TurnEvent,
   type TurnInput,
   type TurnResult,
 } from './domain/conversation.js';
@@ -40,7 +41,13 @@ export {
   readPlaybooksFile,
   type PlaybookDefinition,
 } from './domain/playbooks/schema.js';
-export { claimDuePlaybooks, finishPlaybookRun, syncPlaybooks, type ClaimedRun } from './domain/playbooks/repository.js';
+export {
+  CLAIM_BATCH,
+  claimDuePlaybooks,
+  finishPlaybookRun,
+  syncPlaybooks,
+  type ClaimedRun,
+} from './domain/playbooks/repository.js';
 export { preflightPlaybook, type PreflightResult } from './domain/playbooks/preflight.js';
 export { playbookNoticeKey, stagePlaybookNotice } from './domain/playbooks/notice.js';
 export {
@@ -53,3 +60,16 @@ export {
   type SchedulerStatus,
   type TickResult,
 } from './domain/playbooks/scheduler.js';
+export {
+  API_MAX_ATTACHMENTS,
+  API_MAX_BODY_BYTES,
+  API_MAX_TEXT_CHARS,
+  API_THREAD_MESSAGES,
+  DEFAULT_HOST_BIND,
+  DEFAULT_HOST_PORT,
+  SSE_KEEPALIVE_MS,
+  type RunApiOptions,
+  type RunApiServer,
+} from './domain/api/types.js';
+export { startRunApi } from './domain/api/server.js';
+export { bearerOk, handleApiRequest } from './domain/api/routes.js';

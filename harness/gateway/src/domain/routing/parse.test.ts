@@ -4,8 +4,8 @@ import { ROUTING } from './routing.test-helpers.js';
 import { ROUTES } from './types.js';
 
 describe('routing.schema', () => {
-  it('names exactly the four spec routes', () => {
-    expect([...ROUTES]).toEqual(['chat', 'extract', 'reason', 'judge']);
+  it('names exactly the five spec routes', () => {
+    expect([...ROUTES]).toEqual(['chat', 'extract', 'reason', 'judge', 'embed']);
   });
 
   it('parses a routing file', () => {
@@ -13,6 +13,11 @@ describe('routing.schema', () => {
     expect(r.routes.chat.model).toBe('gemini/gemini-3-flash-preview');
     expect(r.routes.chat.fallbacks).toEqual(['groq/openai/gpt-oss-120b']);
     expect(r.routes.judge.daily_budget_usd).toBe(1);
+  });
+
+  it('requires the embed route, which knowledge_search and knowledge_sync call', () => {
+    expect(() => parseRouting(ROUTING.replace(/\n {2}embed:\n[\s\S]*$/, '\n'))).toThrow(/embed/);
+    expect(parseRouting(ROUTING).routes.embed.model).toBe('gemini/gemini-embedding-001');
   });
 
   it('rejects a file missing a route', () => {

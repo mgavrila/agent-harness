@@ -8,7 +8,7 @@ how-to.
 ```bash
 pnpm install
 cp .env.example .env            # then set HARNESS_ENCRYPTION_KEY=$(openssl rand -base64 32)
-pnpm db:up                      # Postgres 16 on 127.0.0.1:15432, databases harness and harness_test
+pnpm db:up                      # Postgres 16 with pgvector on 127.0.0.1:15432, databases harness and harness_test
 pnpm db:migrate
 pnpm test
 ```
@@ -457,14 +457,16 @@ pnpm new-client --pack healthcare --name acme-clinic
 ```
 
 Then fill in `clients/acme-clinic/.env.example`, review `SOUL.md` and `policy.yaml`, declare the
-people and services in `identity.yaml` (including `svc-playbooks`), review `playbooks.yaml`, and
-read "Onboarding a client" in `docs/runbook.md`.
+people and services in `identity.yaml` (including `svc-playbooks`), review `playbooks.yaml` and the
+markdown the scaffolder copied into `knowledge/`, and read "Onboarding a client" in
+`docs/runbook.md`.
 
 ## Adding a playbook
 
 Add an entry to `clients/<name>/playbooks.yaml` (the fields are documented in the demo's file
-and in the runbook's "Playbooks"), naming a skill of a loaded pack and a service principal
-from `identity.yaml`, and restart the host. Test it with `playbooks_run_now` from the MCP
+and in the runbook's "Playbooks"), naming a skill the host offers — one of a loaded pack's, or one
+of the host's own in `harness/host/skills/`, which is where `knowledge-sync` lives — and a service
+principal from `identity.yaml`, and restart the host. Test it with `playbooks_run_now` from the MCP
 inspector as an `admin` principal, then read `playbook_runs`.
 
 ## Adding a migration
@@ -478,6 +480,12 @@ pnpm drizzle-kit generate   # run it twice; the second run must print "No schema
 
 **Plain `generate`, never `--custom`.** A custom migration is not reflected in the snapshot,
 so the next generate re-emits the change and the two diverge silently.
+
+**An extension is not a migration.** `generate` writes tables, columns and indexes and never
+`CREATE EXTENSION`; do not hand-edit a generated `.sql` to add one, because a hand-edited file is
+invisible to the rule that `generate` twice prints "No schema changes". Add the extension to
+`EXTENSIONS` in `harness/db/src/domain/migrate.ts`, which `runMigrations` installs before the
+migrator on every call. `vector`, for the knowledge tables, is the one entry today.
 
 ## Adding an environment variable
 

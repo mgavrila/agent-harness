@@ -32,7 +32,7 @@ export {
 export { expireApprovals, parkStuckDispatches, reconcile, type ReconcileResult } from './domain/tooling/reconcile.js';
 export { connectInProcess } from './domain/tooling/in-process.js';
 export { depsForRun, type KernelConfig, type RunDeps } from './domain/tooling/deps.js';
-export { buildKernelConfig } from './domain/tooling/config.js';
+export { buildKernelConfig, clientDirFor } from './domain/tooling/config.js';
 export {
   DEFAULT_CONFIDENCE_THRESHOLD,
   type AnyToolDef,
@@ -62,6 +62,35 @@ export {
 export { addMemory, findMemoryEntry, listMemory, memoryUsage, removeMemory } from './domain/memory/repository.js';
 export { memorySnapshot, renderMemorySnapshot } from './domain/memory/render.js';
 export { searchSessions } from './domain/memory/search.js';
+export { EMBED_BATCH, assertEmbedDims, embedTexts } from './domain/knowledge/embed.js';
+export {
+  KNOWLEDGE_DEFAULT_K,
+  KNOWLEDGE_SEARCH_LIMIT,
+  KNOWLEDGE_SOURCE_KIND,
+  KNOWLEDGE_SOURCE_NAME,
+  RRF_K,
+  SERVICE_RANK,
+  levelRank,
+  type KnowledgeHit,
+  type KnowledgeSkip,
+  type KnowledgeSkipKind,
+  type KnowledgeSyncResult,
+  type ParsedKnowledgeDocument,
+} from './domain/knowledge/types.js';
+export { CHUNK_OVERLAP, CHUNK_SIZE, chunkText } from './domain/knowledge/chunk.js';
+export { parseKnowledgeDocument, readKnowledgeFolder } from './domain/knowledge/document.js';
+export {
+  findDocumentState,
+  findOrCreateSource,
+  isUnchanged,
+  replaceChunks,
+  tombstoneMissing,
+  touchSource,
+  upsertDocument,
+  type DocumentChange,
+} from './domain/knowledge/repository.js';
+export { fuseByReciprocalRank, searchKnowledge, type KnowledgeCandidate } from './domain/knowledge/search.js';
+export { syncKnowledge } from './domain/knowledge/sync.js';
 export {
   PLAYBOOK_RUN_STATUSES,
   type PlaybookRow,
@@ -107,6 +136,7 @@ export { loadPacks, registryOf } from './domain/packs/registry.js';
 export { type PackRegistry, type ResolvedTarget } from './domain/packs/types.js';
 export { callModel, callModelJson, gatewayFromEnv, httpGateway } from './domain/models/gateway.js';
 export {
+  EMBED_ROUTE,
   ROUTES,
   type GatewayConfig,
   type JsonSchemaSpec,

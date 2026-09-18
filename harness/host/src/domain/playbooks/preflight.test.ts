@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { loadIdentity, type PlaybookRow } from '@harness/core-tools';
 import { COORDINATOR, PLAYBOOKS_PRINCIPAL, hostFixture, testKernelConfig, useTestDb } from '../../testing.js';
-import { readSkillCatalogue } from '../skills.js';
+import { kernelSkillsDir, readSkillCatalogue } from '../skills.js';
 import { preflightPlaybook } from './preflight.js';
 import { readPlaybooksFile } from './schema.js';
 
@@ -94,21 +94,21 @@ describe('preflightPlaybook', () => {
   });
 });
 
-describe('the shipped demo playbook (I1)', () => {
+describe('the shipped demo playbooks (I1)', () => {
   const demoClientDir = path.join(repoRoot, 'clients', 'demo-practice');
 
-  it('is a valid entry, and passes preflight against the shipped skills and identity', async () => {
+  it('are valid entries, and pass preflight against the shipped skills and identity', async () => {
     const { playbooks } = await readPlaybooksFile(demoClientDir);
-    expect(playbooks).toHaveLength(1);
-    const [playbook] = playbooks;
-    expect(playbook).toMatchObject({
-      name: 'credentialing-expirations',
-      timezone: 'America/New_York',
-      principal: 'svc-playbooks',
-      deliver: 'none',
-      cost_cap_usd: 0.5,
-      timeout_s: 300,
-    });
+    expect(playbooks.map((p) => p.name)).toEqual(['credentialing-expirations', 'knowledge-sync']);
+    for (const playbook of playbooks) {
+      expect(playbook).toMatchObject({
+        timezone: 'America/New_York',
+        principal: 'svc-playbooks',
+        deliver: 'none',
+        cost_cap_usd: 0.5,
+        timeout_s: 300,
+      });
+    }
 
     const f = await hostFixture(db, { trajectory: [] });
     // Identity, loaded the way main.ts loads it: the static plug-in over the demo's own file.
@@ -117,19 +117,23 @@ describe('the shipped demo playbook (I1)', () => {
       log: f.host.log,
       clientDir: demoClientDir,
     });
-    // Skills, loaded the way main.ts loads them: the shipped pack's own skills directory.
-    f.host.skills = await readSkillCatalogue(testKernelConfig(db).packs.skillsDirs());
+    // Skills, loaded the way main.ts loads them — the kernel's own directory first, then the
+    // shipped pack's. `knowledge-sync` lives in the first and `credentialing-expirations` in the
+    // second, so a catalogue built from either alone would fail one of these two playbooks.
+    f.host.skills = await readSkillCatalogue([kernelSkillsDir(), ...testKernelConfig(db).packs.skillsDirs()]);
 
-    const result = await preflightPlaybook(
-      f.host,
-      row({
-        name: playbook.name,
-        skill: playbook.skill,
-        principalId: playbook.principal,
-        surface: playbook.surface ?? null,
-        costCapUsd: playbook.cost_cap_usd,
-      }),
-    );
-    expect(result.ok).toBe(true);
+    for (const playbook of playbooks) {
+      const result = await preflightPlaybook(
+        f.host,
+        row({
+          name: playbook.name,
+          skill: playbook.skill,
+          principalId: playbook.principal,
+          surface: playbook.surface ?? null,
+          costCapUsd: playbook.cost_cap_usd,
+        }),
+      );
+      expect(result, playbook.name).toMatchObject({ ok: true });
+    }
   });
 });

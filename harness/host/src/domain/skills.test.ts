@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { pack as healthcarePack } from '@harness/pack-healthcare';
-import { readSkillCatalogue } from './skills.js';
+import { kernelSkillsDir, readSkillCatalogue } from './skills.js';
 
 let dir: string;
 beforeEach(async () => {
@@ -44,5 +44,12 @@ describe('readSkillCatalogue', () => {
       'credentialing-intake',
       'credentialing-roster',
     ]);
+  });
+
+  it('reads the one skill the host itself ships, beside the packs’', async () => {
+    const skills = await readSkillCatalogue([kernelSkillsDir()]);
+    expect(skills.map((s) => s.name)).toEqual(['knowledge-sync']);
+    expect(skills[0]).toMatchObject({ version: '1.0.0' });
+    expect(skills[0].description).toContain('knowledge');
   });
 });

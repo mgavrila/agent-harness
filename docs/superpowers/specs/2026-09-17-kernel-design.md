@@ -409,7 +409,7 @@ text, tsv, embedding vector(N), min_level, principals text[])` where N is `HARNE
 characters with 200 overlap, written in `domain/knowledge/chunk.ts`. `knowledge_search(query, k)`
 (`read`) runs cosine top-k and `ts_rank_cd` top-k, both with `WHERE client = $1 AND
 (min_level <= $level OR principals @> ARRAY[$principal])`, fused by reciprocal rank, and returns
-chunks with `path`, `title`, `updated_at` so the model cites them. `knowledge_sync` (`admin`)
+chunks with `path`, `title`, `updated_at` so the model cites them. `knowledge_sync` (`write.internal`; amended during Plan 10 — `admin` is blocked for the `service` principal the sync playbook runs as)
 walks `clients/<name>/knowledge/**/*.md` (frontmatter `title`, `min_level`, `principals`),
 upserts by `sha256`, tombstones removed files, and is scheduled as a playbook.
 

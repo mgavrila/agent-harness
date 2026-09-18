@@ -26,6 +26,11 @@ async function scaffold(): Promise<void> {
     "playbooks:\n  - name: nightly\n    schedule: '0 7 * * *'\n    skill: demo-practice-skill\n    prompt: Run it for Demo Practice.\n    principal: svc-playbooks\n    cost_cap_usd: 0.5\n",
   );
   await writeFile(path.join(template, '.env.example'), 'HARNESS_CLIENT=demo-practice\n');
+  await mkdir(path.join(template, 'knowledge'), { recursive: true });
+  await writeFile(
+    path.join(template, 'knowledge', 'front-desk.md'),
+    '---\ntitle: Front desk\nmin_level: member\n---\n\nDemo Practice answers the telephone until five.\n',
+  );
 }
 
 beforeEach(async () => {
@@ -48,7 +53,15 @@ describe('newClient', () => {
     const out = await newClient({ pack: 'healthcare', name: 'river-clinic', root });
     expect(out.dir).toBe(path.join(root, 'clients', 'river-clinic'));
     expect(out.files.sort()).toEqual(
-      ['.env.example', 'SOUL.md', 'identity.yaml', 'playbooks.yaml', 'policy.yaml', 'routing.yaml'].sort(),
+      [
+        '.env.example',
+        'SOUL.md',
+        'identity.yaml',
+        'knowledge/front-desk.md',
+        'playbooks.yaml',
+        'policy.yaml',
+        'routing.yaml',
+      ].sort(),
     );
     expect(out.skipped).toEqual([]);
 
@@ -73,8 +86,23 @@ describe('newClient', () => {
     const out = await newClient({ pack: 'healthcare', name: 'river-clinic', root });
     expect(out.skipped).toEqual(['routing.yaml']);
     expect(out.files.sort()).toEqual(
-      ['.env.example', 'SOUL.md', 'identity.yaml', 'playbooks.yaml', 'policy.yaml'].sort(),
+      ['.env.example', 'SOUL.md', 'identity.yaml', 'knowledge/front-desk.md', 'playbooks.yaml', 'policy.yaml'].sort(),
     );
+  });
+
+  it('copies the knowledge folder, rewriting the client name inside each document', async () => {
+    const out = await newClient({ pack: 'healthcare', name: 'river-clinic', root });
+    const document = await readFile(path.join(out.dir, 'knowledge', 'front-desk.md'), 'utf8');
+    expect(document).toContain('River Clinic answers the telephone until five.');
+    expect(document).toContain('min_level: member');
+    expect(document).not.toContain('Demo Practice');
+  });
+
+  it('reports a missing knowledge folder as skipped rather than failing', async () => {
+    await rm(path.join(root, 'clients', 'demo-practice', 'knowledge'), { recursive: true, force: true });
+    const out = await newClient({ pack: 'healthcare', name: 'river-clinic', root });
+    expect(out.skipped).toEqual(['knowledge/']);
+    expect(out.files).not.toContain('knowledge/front-desk.md');
   });
 
   it('refuses a slug that is not a safe directory name', async () => {

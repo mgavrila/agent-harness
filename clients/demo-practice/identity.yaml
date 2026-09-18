@@ -8,6 +8,11 @@
 #
 # Replace the two Slack member ids with the real ones before the first run; see the runbook's
 # onboarding section for how to read a member id.
+#
+# An `http:` entry is the id that principal is named by over the run API (docs/runbook.md, "The
+# run API"): any stable string, because the API resolves it here exactly as it resolves a Slack
+# member id. A principal with no `http:` entry cannot drive a run over the API, which is the
+# right default.
 principals:
   - id: u-practice-manager
     kind: user
@@ -15,12 +20,14 @@ principals:
     displayName: Practice manager
     surfaces:
       slack: U0123ABCD
+      http: practice-manager
   - id: u-coordinator
     kind: user
     level: lead
     displayName: Credentialing coordinator
     surfaces:
       slack: U0456EFGH
+      http: coordinator
   # The host's own identity (HARNESS_HOST_PRINCIPAL): reconciliation runs as it.
   - id: svc-host
     kind: service

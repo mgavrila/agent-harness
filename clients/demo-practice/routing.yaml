@@ -39,6 +39,14 @@ routes:
     model: groq/openai/gpt-oss-120b
     daily_budget_usd: 1
 
+  # Embeddings for the knowledge base (spec 5.7). Called by knowledge_sync, once per batch of
+  # chunks, and by knowledge_search, once per query. The harness asks for
+  # HARNESS_EMBED_DIMS dimensions on every request and refuses a vector of any other width, so
+  # check this deployment once before the first sync — see "Knowledge" in docs/runbook.md.
+  embed:
+    model: gemini/gemini-embedding-001
+    daily_budget_usd: 1
+
 defaults:
   daily_budget_usd: 1
   num_retries: 2

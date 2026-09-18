@@ -17,11 +17,23 @@ The host's own identity is `HARNESS_HOST_PRINCIPAL` (default `svc-host`), a serv
 declared in `identity.yaml`: reconciliation runs as it; a playbook runs as the service principal
 its entry in `playbooks.yaml` names.
 
+The host also ships one skill of its own, in `skills/`: `knowledge-sync`, which the knowledge
+refresh playbook names. It is offered beside every pack's, and the host's directory is read first,
+so a pack cannot shadow it. Refreshing a knowledge base is no product area's business, which is
+why it cannot live in a pack — and `preflightPlaybook` requires a playbook's skill to be one the
+host offers, so the host has to offer it.
+
 Per-run ceilings the host hands the runtime: `HARNESS_RUN_MAX_MODEL_CALLS` (30),
 `HARNESS_RUN_MAX_TOOL_CALLS` (60), `HARNESS_RUN_TIMEOUT_S` (600) — a run past any of them ends
 with an error the human sees, and LiteLLM's own daily budget is the other half of this — and
 `HARNESS_HISTORY_MAX_MESSAGES` (40), how many prior turns of a thread the runtime is handed
 (also capped at 24,000 characters; the runtime's own checkpoint carries the rest).
+
+The run API's own variables are `HARNESS_HOST_TOKEN` (no default; unset means no listener),
+`HARNESS_HOST_BIND` (`127.0.0.1`) and `HARNESS_HOST_PORT` (8788). Before any of that, `main.ts`
+calls `assertEmbedDims`, which compares `HARNESS_EMBED_DIMS` against the width
+`knowledge_chunks.embedding` was created at and refuses to start when they disagree — better than
+failing halfway through the first knowledge sync.
 
 At startup the host also `mkdir -p`s `<storageDir>/incoming` and `<storageDir>/out` — a belt to
 `node.Dockerfile`'s own braces, which already give the image that layout — so a bare-metal run or
@@ -71,14 +83,58 @@ used to poll it are gone — on `APPROVALS_HEALTH_PORT`/`APPROVALS_HEALTH_BIND` 
 the names are unchanged from when `@harness/approvals` hosted its own process, because renaming
 them would touch Compose, the snapshot and the runbook for no behaviour.
 
-The scheduler is a fourth loop of the same shape; its status is on its handle and in the log, not
-on `/healthz`.
+The scheduler is a fourth loop of the same shape; its status is on its handle and in the log, and
+on the run API's `GET /v1/status`, never on `/healthz`.
+
+## The run API
+
+An HTTP way in, in `src/domain/api/`, for a caller with no messaging surface (spec 5.8). It is the
+host's, not a surface's: the request says which loaded surface a run belongs to, so one listener
+drives a run on any of them.
+
+| Route                                       | What it answers                                                                                                                |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `POST /v1/runs`                             | `202` and a Server-Sent Events stream: `run` with the run id, the runtime's own events, then `result`                          |
+| `POST /v1/runs/:id/cancel?surface=&userId=` | `{ run_id, cancelled }`                                                                                                        |
+| `GET /v1/threads/:id?surface=&userId=`      | the thread and its most recent 200 messages, newest last                                                                       |
+| `GET /v1/status`                            | the client, the loaded surfaces, the primary one, the runs in flight, whether the host is draining, and the scheduler's status |
+
+Every route is behind `Authorization: Bearer $HARNESS_HOST_TOKEN`, compared in constant time, the
+status route included. **No token, no listener at all**: `app/main.ts` starts nothing and the
+`listening` line ends `runApi=off (set HARNESS_HOST_TOKEN)`. The bearer secret says the caller may
+use the API; it never says who they are acting as. That stays the identity plug-in's answer, from
+the `surface` and `userId` the request names, resolved exactly as an adapter's message is. A run or
+a thread belonging to another principal answers `404`, the same as one that does not exist.
+
+The turn runs with `deliver: 'none'` — the stream is the reply, and nothing is posted to the named
+surface — and the listener is closed before the drain at shutdown, so an open stream does not hold
+the process up.
+
+## Watching a turn
+
+`TurnInput.observe` is the one hook `runTurn` grew for the run API, and the only thing that uses it
+today. A watcher is handed the run id first — before the first runtime event, so a caller can
+cancel a run it has not seen a word of — then every event the runtime produced, unfiltered, then
+exactly one outcome. Exactly one on every path: the turn returning, the runtime failing, or a throw
+on the way there, which reports `status: 'error'` with the reason the turn had already settled on
+or `the runtime failed; see the host log`. A `runTurn` that rejects before the run is open calls the
+watcher not at all, because there is no run to report.
+
+A watcher is watching, not taking part. One that throws, or whose promise rejects, is logged once
+for that event and changes nothing about the outcome or the run row. Its call is awaited, which is
+what catches an `async` watcher's rejection — and also why a watcher should stay synchronous: the
+turn waits for it between runtime events, so one that waits on network input/output
+back-pressures the runtime's own loop. The run API's writer is where the restricted-pattern check
+is applied on the way out; the events themselves are unfiltered.
 
 ## Shutdown
 
 `app/main.ts` traps `SIGINT`/`SIGTERM` and closes everything in the reverse of startup order:
 `scheduler.stop()` first, so no further tick starts, though its promise is awaited only after the
-drain — the tick in flight is waiting on a turn that only the drain can abort. Then `drainActive`
+drain — the tick in flight is waiting on a turn that only the drain can abort. Then the run API's
+listener, before the drain and with its open connections closed, so nothing new is accepted while
+the turns in flight unwind and a caller still listening to a stream does not hold the shutdown
+open. Then `drainActive`
 — it cancels every run still in `host.active` and waits, for at most ten seconds, until each turn
 has closed its run row and its kernel — and then the scheduler's own wait, under that same
 ten-second bound: a runtime that ignores its abort is logged and the process stops anyway rather
@@ -99,7 +155,7 @@ src/domain/host.ts             the Host type: everything a flow takes, built onc
 src/domain/runtime/registry.ts loadRuntime: HARNESS_RUNTIME, the same three failure modes as loadIdentity
 src/domain/threads/repository.ts findOrCreateThread, appendMessage (with the redaction guard), recentHistory
 src/domain/threads/trim.ts     trimHistory: the newest turns under a message and a character budget
-src/domain/skills.ts           readSkillCatalogue: name, version, description off every SKILL.md
+src/domain/skills.ts           kernelSkillsDir, readSkillCatalogue: name, version, description off every SKILL.md
 src/domain/persona.ts          readPersona: SOUL.md
 src/domain/kernel.ts           openKernel: one run, one ToolDeps, one in-process MCP client
 src/domain/conversation.ts     runTurn, handleMessage, attachMessageHandlers, serialize, cancelRun, drainActive
@@ -109,6 +165,12 @@ src/domain/playbooks/repository.ts syncPlaybooks, claimDuePlaybooks, finishPlayb
 src/domain/playbooks/preflight.ts  preflightPlaybook
 src/domain/playbooks/notice.ts     stagePlaybookNotice, playbookNoticeKey
 src/domain/playbooks/scheduler.ts  startScheduler, executePlaybook, SCHEDULER_TICK_MS
+src/domain/api/types.ts        the run API's limits and defaults: the body, text and attachment caps
+src/domain/api/sse.ts          the Server-Sent Events writer: 202, the three headers, the keep-alive
+src/domain/api/routes.ts       bearerOk, readBody, callerOf, the four routes
+src/domain/api/repository.ts   findRunFor, readThreadFor: this principal's row or nothing
+src/domain/api/server.ts       startRunApi: the node:http listener
+skills/knowledge-sync/         the one skill the host itself ships
 src/app/main.ts                the composition root: env, the three plug-ins, the loops, health, shutdown
 src/index.ts                   the public API
 src/testing.ts                 ./testing: testKernelConfig, hostFixture, useTestDb

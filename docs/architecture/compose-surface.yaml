@@ -81,11 +81,15 @@ services:
       DATABASE_URL: postgres://harness:harness@postgres:5432/harness
       EFFECTS_DISPATCH_SECONDS: ${EFFECTS_DISPATCH_SECONDS:-5}
       HARNESS_CLIENT: ${HARNESS_CLIENT:-demo-practice}
+      HARNESS_EMBED_DIMS: ${HARNESS_EMBED_DIMS:-1024}
       HARNESS_ENCRYPTION_KEY: ${HARNESS_ENCRYPTION_KEY:-}
       HARNESS_FILES_URL: http://files:8790
       HARNESS_GATEWAY_URL: http://litellm:4000
       HARNESS_HISTORY_MAX_MESSAGES: ${HARNESS_HISTORY_MAX_MESSAGES:-40}
+      HARNESS_HOST_BIND: ${HARNESS_HOST_BIND:-0.0.0.0}
+      HARNESS_HOST_PORT: "8788"
       HARNESS_HOST_PRINCIPAL: ${HARNESS_HOST_PRINCIPAL:-svc-host}
+      HARNESS_HOST_TOKEN: ${HARNESS_HOST_TOKEN:-}
       HARNESS_IDENTITY: ${HARNESS_IDENTITY:-@harness/identity-static}
       HARNESS_PACKS: ${HARNESS_PACKS:-@harness/pack-healthcare}
       HARNESS_POLICY_FILE: /srv/agent-harness/clients/${HARNESS_CLIENT:?set HARNESS_CLIENT in .env}/policy.yaml
@@ -94,7 +98,7 @@ services:
       HARNESS_RUN_TIMEOUT_S: ${HARNESS_RUN_TIMEOUT_S:-600}
       HARNESS_RUNTIME: ${HARNESS_RUNTIME:-@harness/runtime-deepagents}
       HARNESS_STORAGE_DIR: /srv/harness-storage
-      HARNESS_SURFACES: ${HARNESS_SURFACES:-@harness/surface-slack}
+      HARNESS_SURFACES: ${HARNESS_SURFACES:-@harness/surface-slack,@harness/surface-http}
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?set LITELLM_MASTER_KEY in .env}
       RECONCILE_SECONDS: ${RECONCILE_SECONDS:-300}
       SLACK_APP_TOKEN: ${SLACK_APP_TOKEN:-}
@@ -106,6 +110,7 @@ services:
       files: null
     ports:
       - 127.0.0.1:${APPROVALS_HEALTH_HOST_PORT:-8787}:8787
+      - 127.0.0.1:${HARNESS_HOST_PUBLISHED_PORT:-8788}:8788
     profiles:
       - demo
     restart: unless-stopped
@@ -179,7 +184,7 @@ services:
         - CMD-SHELL
         - pg_isready -U harness -d harness
       timeout: 3s
-    image: postgres:16
+    image: pgvector/pgvector:0.8.1-pg16
     networks:
       default: null
     ports:

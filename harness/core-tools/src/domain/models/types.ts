@@ -2,6 +2,13 @@ import { ROUTES, type Route } from '@harness/gateway/routing';
 
 export { ROUTES, type Route };
 
+/**
+ * The one route that is an embeddings deployment rather than a chat one. `callModel` refuses it
+ * — it would post a `messages` array to an endpoint that takes `input` — and `embedTexts` in
+ * `domain/knowledge/embed.ts` is its only caller.
+ */
+export const EMBED_ROUTE: Route = 'embed';
+
 export interface GatewayConfig {
   /** Origin of the LiteLLM proxy, no trailing slash. */
   baseUrl: string;

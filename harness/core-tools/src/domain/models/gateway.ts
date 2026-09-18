@@ -4,6 +4,7 @@ import { modelCalls } from '@harness/db';
 import { ModelOutputError, ToolError, requiredEnv } from '@harness/shared';
 import type { ToolDeps } from '../tooling/types.js';
 import {
+  EMBED_ROUTE,
   ROUTES,
   type GatewayConfig,
   type JsonSchemaSpec,
@@ -120,6 +121,9 @@ export function httpGateway(config: GatewayConfig): ModelGateway {
 
 export async function callModel(deps: ToolDeps, opts: ModelCallOptions): Promise<ModelCallResult> {
   if (!ROUTES.includes(opts.route)) throw new ToolError(`unknown model route "${opts.route}"`);
+  if (opts.route === EMBED_ROUTE) {
+    throw new ToolError(`the "${EMBED_ROUTE}" route is an embeddings deployment; call embedTexts, not callModel`);
+  }
 
   // The breaker only binds when there is a run to count against. A call with no
   // run id is a one-off (the eval judge, a manual probe) and is left to the

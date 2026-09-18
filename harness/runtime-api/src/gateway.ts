@@ -44,10 +44,81 @@ export interface FakeReply {
 
 export type Responder = (call: FakeGatewayCall) => FakeReply | Promise<FakeReply>;
 
+export interface FakeEmbeddingCall {
+  model: string;
+  input: string[];
+  /** The width the caller asked for, when it asked. */
+  dimensions: number | undefined;
+  user: string | undefined;
+  authorization: string | undefined;
+}
+
+export interface FakeEmbeddingReply {
+  /** The width to answer at. Defaults to the request's `dimensions`, then to 1,024. */
+  dimensions?: number;
+  /** Exact vectors, one per input, in place of the deterministic ones. */
+  vectors?: number[][];
+  /** Non-2xx to exercise the error path. Defaults to 200. */
+  status?: number;
+  errorBody?: unknown;
+  promptTokens?: number;
+  /** Value for the `x-litellm-response-cost` header. Omit to send no header. */
+  costHeader?: string;
+  /** Value for the response's `model` field. Defaults to the requested model. */
+  modelName?: string;
+}
+
+export type EmbeddingResponder = (call: FakeEmbeddingCall) => FakeEmbeddingReply | Promise<FakeEmbeddingReply>;
+
+/** The width the fake answers at when neither the request nor the responder says. */
+export const FAKE_EMBED_DIMENSIONS = 1_024;
+
+/**
+ * A deterministic unit vector for a string.
+ *
+ * Each word is hashed (FNV-1a) into one bucket and adds one there; the vector is then normalised.
+ * That gives a retrieval test everything it needs from an embedding and nothing a model would
+ * give it: the same text always embeds the same, two texts sharing words point the same way, two
+ * sharing none are orthogonal, and every vector has length 1 so a cosine distance is comparable.
+ * Text with no words at all becomes the first basis vector rather than a zero vector, which
+ * pgvector's cosine distance cannot order.
+ */
+export function fakeEmbedding(text: string, dimensions: number): number[] {
+  const vector = new Array<number>(dimensions).fill(0);
+  const tokens = text
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((token) => token !== '');
+  for (const token of tokens) {
+    let hash = 2166136261;
+    for (let i = 0; i < token.length; i += 1) {
+      hash ^= token.charCodeAt(i);
+      hash = Math.imul(hash, 16777619);
+    }
+    vector[Math.abs(hash) % dimensions] += 1;
+  }
+  const norm = Math.sqrt(vector.reduce((sum, x) => sum + x * x, 0));
+  if (norm === 0) {
+    vector[0] = 1;
+    return vector;
+  }
+  return vector.map((x) => x / norm);
+}
+
+interface EmbeddingRequestBody {
+  model: string;
+  input?: string | string[];
+  dimensions?: number;
+  user?: string;
+}
+
 export interface FakeGateway {
   url: string;
   calls: FakeGatewayCall[];
+  /** Embedding requests, recorded apart from `calls` so a suite asserting on one ignores the other. */
+  embeddings: FakeEmbeddingCall[];
   setResponder(responder: Responder): void;
+  setEmbeddingResponder(responder: EmbeddingResponder): void;
   close(): Promise<void>;
 }
 
@@ -58,6 +129,31 @@ function readBody(req: IncomingMessage): Promise<string> {
     req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
     req.on('error', reject);
   });
+}
+
+const JSON_HEADERS = { 'content-type': 'application/json' };
+
+/**
+ * A body that is not JSON is a test's mistake, not a crash: answered 400 here, it stays a failed
+ * request the caller can assert on rather than an unhandled rejection that takes the whole suite
+ * down from inside the request handler.
+ */
+function writeNotJson(res: ServerResponse): void {
+  res.writeHead(400, JSON_HEADERS);
+  res.end(JSON.stringify({ error: { message: 'the request body is not JSON', type: 'invalid_request_error' } }));
+}
+
+/** The non-2xx a responder asked for, with the body a suite that named none gets. */
+function writeError(res: ServerResponse, status: number, errorBody: unknown): void {
+  res.writeHead(status, JSON_HEADERS);
+  res.end(JSON.stringify(errorBody ?? { error: { message: 'boom', type: 'test_error' } }));
+}
+
+/** JSON, plus the cost header when the reply named one and no header at all when it did not. */
+function replyHeaders(costHeader: string | undefined): Record<string, string> {
+  const headers: Record<string, string> = { ...JSON_HEADERS };
+  if (costHeader !== undefined) headers['x-litellm-response-cost'] = costHeader;
+  return headers;
 }
 
 interface RequestBody {
@@ -200,6 +296,8 @@ function writeStream(
 export async function startFakeGateway(responder: Responder = () => ({})): Promise<FakeGateway> {
   const calls: FakeGatewayCall[] = [];
   let respond = responder;
+  const embeddings: FakeEmbeddingCall[] = [];
+  let respondToEmbedding: EmbeddingResponder = () => ({});
   let seq = 0;
   const nextId = (): string => {
     seq += 1;
@@ -213,19 +311,61 @@ export async function startFakeGateway(responder: Responder = () => ({})): Promi
 
   const server: Server = createServer((req, res) => {
     void (async () => {
-      if (req.method !== 'POST' || !req.url?.endsWith('/chat/completions')) {
+      if (req.method !== 'POST') {
         res.writeHead(404).end('{}');
         return;
       }
-      // A body that is not JSON is a test's mistake, not a crash: answered 400 here, it stays a
-      // failed request the caller can assert on rather than an unhandled rejection that takes the
-      // whole suite down from inside this handler.
+      if (req.url?.endsWith('/embeddings')) {
+        let body: EmbeddingRequestBody;
+        try {
+          body = JSON.parse(await readBody(req)) as EmbeddingRequestBody;
+        } catch {
+          writeNotJson(res);
+          return;
+        }
+        // LiteLLM's own schema takes a string or a list; the harness always sends a list, and
+        // accepting both here keeps the fake honest about what the real endpoint does.
+        const input = typeof body.input === 'string' ? [body.input] : (body.input ?? []);
+        const call: FakeEmbeddingCall = {
+          model: body.model,
+          input,
+          dimensions: body.dimensions,
+          user: body.user,
+          authorization: req.headers.authorization,
+        };
+        embeddings.push(call);
+        const reply = await respondToEmbedding(call);
+        if (reply.status && reply.status >= 400) {
+          writeError(res, reply.status, reply.errorBody);
+          return;
+        }
+        const dimensions = reply.dimensions ?? body.dimensions ?? FAKE_EMBED_DIMENSIONS;
+        const headers = replyHeaders(reply.costHeader);
+        const promptTokens = reply.promptTokens ?? input.reduce((n, text) => n + Math.ceil(text.length / 4), 0);
+        // `vectors` replaces the whole answer, not one entry of it: a responder that hands over
+        // fewer vectors than there were inputs is how a suite exercises a gateway that answered
+        // short, which a per-index fallback would quietly fill back in.
+        const vectors = reply.vectors ?? input.map((text) => fakeEmbedding(text, dimensions));
+        res.writeHead(200, headers);
+        res.end(
+          JSON.stringify({
+            object: 'list',
+            model: reply.modelName ?? body.model,
+            data: vectors.map((embedding, index) => ({ object: 'embedding', index, embedding })),
+            usage: { prompt_tokens: promptTokens, total_tokens: promptTokens },
+          }),
+        );
+        return;
+      }
+      if (!req.url?.endsWith('/chat/completions')) {
+        res.writeHead(404).end('{}');
+        return;
+      }
       let body: RequestBody;
       try {
         body = JSON.parse(await readBody(req)) as RequestBody;
       } catch {
-        res.writeHead(400, { 'content-type': 'application/json' });
-        res.end(JSON.stringify({ error: { message: 'the request body is not JSON', type: 'invalid_request_error' } }));
+        writeNotJson(res);
         return;
       }
       const call: FakeGatewayCall = {
@@ -241,12 +381,10 @@ export async function startFakeGateway(responder: Responder = () => ({})): Promi
 
       const reply = await respond(call);
       if (reply.status && reply.status >= 400) {
-        res.writeHead(reply.status, { 'content-type': 'application/json' });
-        res.end(JSON.stringify(reply.errorBody ?? { error: { message: 'boom', type: 'test_error' } }));
+        writeError(res, reply.status, reply.errorBody);
         return;
       }
-      const headers: Record<string, string> = { 'content-type': 'application/json' };
-      if (reply.costHeader !== undefined) headers['x-litellm-response-cost'] = reply.costHeader;
+      const headers = replyHeaders(reply.costHeader);
       const ids: Ids = { completion: nextId, call: nextCallId };
       if (call.stream) writeStream(res, body, reply, headers, ids);
       else writeJson(res, body, reply, headers, ids);
@@ -259,8 +397,12 @@ export async function startFakeGateway(responder: Responder = () => ({})): Promi
   return {
     url: `http://127.0.0.1:${port}`,
     calls,
+    embeddings,
     setResponder(next) {
       respond = next;
+    },
+    setEmbeddingResponder(next) {
+      respondToEmbedding = next;
     },
     close: () =>
       new Promise<void>((resolve, reject) => {
