@@ -62,6 +62,9 @@ harness/host        the one process per client: loads the runtime, the surfaces 
                     resumes a thread when an approval is decided.
 surfaces/slack      the Slack adapter: Block Kit, Bolt in Socket Mode, the Web API slice.
 surfaces/memory     the in-process adapter: no transport, used by the suite and for local runs.
+surfaces/http       the surface a headless caller speaks as; opens no socket, posts nothing, and
+                    exists so a run driven over the run API has a thread key and an identity
+                    namespace.
 identities/static   the identity plug-in that reads clients/<name>/identity.yaml.
 runtimes/deepagents the Deep Agents JS runtime, behind the runtime contract: the only place
                     deepagents, langchain and langgraph may be spelled.
@@ -354,6 +357,50 @@ duplicate id, a user without a `u-` id or a service without `svc-`, a user at le
 and two principals claiming one surface user id. `CONTRIBUTING.md`, "Adding an identity
 provider", is the worked how-to.
 
+## Knowledge
+
+`knowledge_documents` is one row per markdown file of `clients/<name>/knowledge/`, keyed by its
+path within the source; `knowledge_chunks` is one row per retrievable passage, with a generated
+`tsvector` and a `vector(1024)` embedding from the gateway's `embed` route.
+
+A chunk carries a **copy** of its document's `min_level`, `min_rank` and `principals`. That
+denormalisation is the design, not an oversight: the access filter has to sit in the same `WHERE`
+clause as the ranking, so a passage the caller may not see is never ranked and never counted
+toward `k` (invariant 7). A join to the document for every candidate row would apply it one step
+too late.
+
+`min_rank` is the level's place on the ladder — `member` 0 through `admin` 3 — because Postgres
+cannot order level names, and `min_level` is kept beside it because a human reads the table too.
+**A `service` principal's rank is −1**: `levelAtLeast('service', 'member')` is false, so a
+scheduled job reads a knowledge document only when the document names its principal id.
+
+`knowledge_search` runs a cosine top-k over the HNSW index and a `ts_rank_cd` top-k over the GIN
+one, both already filtered, and fuses them by reciprocal rank — each list contributes
+`1 / (60 + rank)`. Ranks rather than scores, because a cosine distance and a cover-density rank are
+not comparable; the one thing the two rankings agree on is order. The vector half runs inside a
+transaction that sets `hnsw.iterative_scan` first, so the index keeps walking until `k` rows have
+survived the filter rather than stopping at its first candidates — which is why pgvector 0.8 is the
+floor and why the Compose image is pinned to a version, not to `pg16`.
+
+The chunker is ours, thirty lines in `domain/knowledge/chunk.ts`, because the kernel-vocabulary
+test forbids naming a framework in that package and what the splitter does is thirty lines.
+
+## The run API
+
+Four routes in `@harness/host`, not a surface: spec 5.8 puts the listener in the host, and the
+request body names which surface a run belongs to, so the API drives a run on _any_ loaded surface
+and names none itself. `@harness/surface-http` is what a headless caller names — it supplies a
+`threads.surface` value, a namespace for the identity plug-in to resolve `(surface, userId)` in,
+and a loaded session for `runTurn` to find — and it opens no socket of its own.
+
+The API's turn is `deliver: 'none'`: the reply is recorded on the thread and posted nowhere,
+because the caller is the one waiting for it. The stream is the reply. Everything the caller sees
+comes through `TurnInput.observe`, the one hook `runTurn` grew for this: the run id first, then the
+runtime's events, then the turn's outcome. The guarantee is exactly-once from the `run` event on —
+a watcher handed a run id is told the outcome exactly once, whether the turn returns it or throws
+on its way there — and a watcher that throws is logged and dropped, because it is watching, not
+taking part.
+
 ## The host and the runtime
 
 `@harness/host` is the one long-running process per client. It holds no transport and no agent
@@ -542,6 +589,14 @@ executing tool's name on it, which is the one field that changes during a call. 
 the one constructed object on the bag, because the choice between parsing here and parsing in
 the files worker is the deployment's (`HARNESS_FILES_URL`) and the domain cannot make it from a
 URL alone.
+
+Two more arrived with Plan 10, and both are configuration in the same sense `storageDir` is.
+**`clientDir`** is `clients/<HARNESS_CLIENT>/`, derived from the client name rather than
+configured, because spec section 7 fixes that layout; it is where the persona, the policy, the
+identity file, the playbooks and the `knowledge/` folder live. **`embedDims`** is
+`HARNESS_EMBED_DIMS`, and it does not decide anything: `knowledge_chunks.embedding` was created at
+a fixed width by migration 0013 and `assertEmbedDims` refuses to start when the two disagree. It is
+on the bag so `embedTexts` can ask the gateway for that width and refuse a vector of any other.
 
 Three members exist for the **packs** rather than for the kernel, and a kernel handler should
 never reach for them:

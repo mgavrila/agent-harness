@@ -2,23 +2,24 @@
 
 The MCP server every agent talks to, and a **pack-agnostic kernel**: the tooling layer that
 applies policy, opens the transaction and writes the audit row; the domains that hold the
-actual work; the twenty-two kernel tools that expose them; and the shared helpers the packages
+actual work; the twenty-four kernel tools that expose them; and the shared helpers the packages
 above this one import instead of copying.
 
-It knows about records, attachments, documents, deadlines, approvals, audit and effects, and
-nothing about any one area of the product. `src/kernel-vocabulary.test.ts` greps this package's
-own source for credentialing vocabulary and its allowlist is empty. The 28 tools a default
-deployment publishes are ten of the twenty-two plus the eighteen `@harness/pack-healthcare`
-contributes; ARCHITECTURE.md, "The kernel and a pack", is the why.
+It knows about records, attachments, documents, deadlines, approvals, audit, effects and the
+knowledge base, and nothing about any one area of the product. `src/kernel-vocabulary.test.ts`
+greps this package's own source for credentialing vocabulary and its allowlist is empty. The 30
+tools a default deployment publishes are twelve of the twenty-four plus the eighteen
+`@harness/pack-healthcare` contributes; ARCHITECTURE.md, "The kernel and a pack", is the why.
 
 ## Layout
 
 ```
 src/shared/redaction/  patterns, names, text — domain knowledge; the generic env, errors, paths,
                        log, subprocess, jsonl and csv helpers live in @harness/shared instead
-src/domain/        tooling, approvals, audit, deadlines, documents, effects, files, identity, memory, models, packs, playbooks, records, session, storage
-src/tools/         the twenty-two kernel defineTool blocks in 8 files (records, deadlines, audit,
-                   approvals, harness, memory, playbooks, documents), plus catalog.ts
+src/domain/        tooling, approvals, audit, deadlines, documents, effects, files, identity, knowledge, memory, models, packs, playbooks, records, session, storage
+src/domain/knowledge/  the chunker, the frontmatter reader, the repository, the sync and the fused search
+src/tools/         the twenty-four kernel defineTool blocks in 9 files (records, deadlines, audit,
+                   approvals, harness, knowledge, memory, playbooks, documents), plus catalog.ts
 src/app/           server.ts (KernelConfig from the environment, the principal, one run), main.ts (stdio entrypoint), record-surface.ts
 src/index.ts       the public API
 src/testing.ts     ./testing: makeTestDeps, connectTools, resultOf, approvalIdOf, useTestDb, startFakeGateway, TEST_PRINCIPAL, TEST_CONTEXT
@@ -81,6 +82,13 @@ variable out of range now reports `must be an integer between …` for a count o
 `must be a number between …` for a threshold, with the unit appended where there is one, instead
 of one shared wording for both.
 
+`HARNESS_EMBED_DIMS` (default 1024) is how wide an embedding this deployment stores. It does not
+decide the width: `knowledge_chunks.embedding` was created at a fixed width by migration 0013, and
+`assertEmbedDims` — which both composition roots call at startup — refuses to start when the two
+disagree. It reaches a handler as `ToolDeps.embedDims`, and `embedTexts` asks the gateway
+for exactly that width and refuses a vector of any other. `ToolDeps.clientDir` arrives the same
+way, derived from `HARNESS_CLIENT` rather than configured.
+
 `HARNESS_FORMS_DIR` is an override, not a requirement: unset, the forms directory comes from the
 first pack named in `HARNESS_PACKS`, so changing the pack changes the templates with it.
 
@@ -108,6 +116,18 @@ See CONTRIBUTING.md. In one line: the logic goes in a domain, the `defineTool` b
 `src/tools/<area>.ts` and into that file's exported array, and `kernelTools(packs)` in
 `src/tools/catalog.ts` already spreads it.
 
+## The knowledge base
+
+`domain/knowledge/` is the client's own markdown, chunked, embedded and retrievable by whoever the
+document's frontmatter lets read it (spec 5.7): `chunk.ts` (a recursive splitter of our own, 1,000
+characters with 200 of overlap), `document.ts` (the frontmatter reader and the folder walk),
+`repository.ts` (the source, document and chunk rows), `sync.ts` (one pass over the folder) and
+`search.ts` (the two rankings and the reciprocal-rank fusion). Two tools expose it:
+`knowledge_search` (`read`) and `knowledge_sync` (`write.internal`, so it is parked for a `member`
+and automatic for a practitioner and above and for a service principal — `admin` would be `blocked`
+for the service principal every nightly refresh runs as). `docs/runbook.md`, "Knowledge", is the
+operator's side.
+
 ### A kernel tool or a pack tool?
 
 A kernel tool is one that would make sense for any area of the product: it names records,
@@ -117,5 +137,5 @@ allowlist is empty. See CONTRIBUTING.md, "Adding a pack", step 6.
 
 What reaches MCP is not this list. `publishedTools` drops a kernel tool a loaded pack replaced,
 and drops the five generic `records_*` tools when every loaded record kind sets
-`genericTools: false`; `deps.kernelTools` still holds all twenty-two by their kernel names, which
+`genericTools: false`; `deps.kernelTools` still holds all twenty-four by their kernel names, which
 is how a pack's wrapper calls the handler it took over.

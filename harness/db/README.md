@@ -18,15 +18,19 @@ src/testing.ts          ./testing: TEST_DATABASE_URL, resetDatabase, useTestDb
 
 The tables `schema.ts` declares, in the order it declares them:
 
-| Table                               | What it holds                                                                                                                        |
-| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `records`                           | one row per thing a pack stores, keyed by `pack` and `kind`. Client-scoped.                                                          |
-| `documents`                         | an ingested file, its hash, its page count, and the record it belongs to                                                             |
-| `attachments`                       | what hangs off a record: a kind, an issuer, dates, an encrypted number, `properties`                                                 |
-| `fields`                            | one name/value per record, plaintext or encrypted, with a confidence and a status                                                    |
-| `deadlines`                         | one row per attachment and deadline kind, with its due date                                                                          |
-| `approvals`, `runs`, `tool_effects` | the parked actions, the runs that produced them (each with the principal it acted as, and where it was started from), and the outbox |
-| `model_calls`, `audit_log`          | what was asked of a model, and what every tool call did. `audit_log` is append-only.                                                 |
+| Table                                                          | What it holds                                                                                                                                              |
+| -------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `records`                                                      | one row per thing a pack stores, keyed by `pack` and `kind`. Client-scoped.                                                                                |
+| `documents`                                                    | an ingested file, its hash, its page count, and the record it belongs to                                                                                   |
+| `attachments`                                                  | what hangs off a record: a kind, an issuer, dates, an encrypted number, `properties`                                                                       |
+| `fields`                                                       | one name/value per record, plaintext or encrypted, with a confidence and a status                                                                          |
+| `deadlines`                                                    | one row per attachment and deadline kind, with its due date                                                                                                |
+| `approvals`, `runs`, `tool_effects`                            | the parked actions, the runs that produced them (each with the principal it acted as, and where it was started from), and the outbox                       |
+| `model_calls`, `audit_log`                                     | what was asked of a model, and what every tool call did. `audit_log` is append-only.                                                                       |
+| `memory_entries`                                               | one curated fact per row, in a principal's own scope or the client's                                                                                       |
+| `playbooks`, `playbook_runs`                                   | the scheduled work read from `playbooks.yaml`, and one row per firing                                                                                      |
+| `threads`, `messages`                                          | one thread per conversation, and the turns on it                                                                                                           |
+| `knowledge_sources`, `knowledge_documents`, `knowledge_chunks` | the client's knowledge folder: one source, one row per markdown file, one row per retrievable passage with its `tsvector` and its `vector(1024)` embedding |
 
 There is no `providers` table and no `credentials` table: migration `0008` replaced them with
 `records` and `attachments`, so one pair of tables serves every loaded pack and a pack ships no
@@ -52,7 +56,9 @@ pnpm --filter @harness/db test
 ```
 
 Tests run against the real Postgres on `127.0.0.1:15432`, database `harness_test`, and
-truncate between tests. Do not source `.env` into your shell first: `crypto.test.ts` asserts
+truncate between tests. The server needs pgvector 0.8 or newer — `knowledge_chunks` declares a
+`vector` column, and knowledge search sets `hnsw.iterative_scan`, which 0.8.0 added — which is
+what `pnpm db:up`'s `pgvector/pgvector:0.8.1-pg16` gives you. Do not source `.env` into your shell first: `crypto.test.ts` asserts
 the behaviour of an unset `HARNESS_ENCRYPTION_KEY`.
 
 ## Migrations
@@ -60,6 +66,16 @@ the behaviour of an unset `HARNESS_ENCRYPTION_KEY`.
 Edit `src/domain/schema.ts`, then from this directory run `pnpm drizzle-kit generate` twice.
 The second run must print "No schema changes". Never `--custom`: a hand-written migration is
 absent from the snapshot and the next generate re-emits the same change forever.
+
+`drizzle-kit generate` never writes `CREATE EXTENSION`, and no configuration makes it:
+`extensionsFilters` takes only `postgis` and only filters introspection. An extension the schema
+needs goes in `EXTENSIONS` in `src/domain/migrate.ts` instead, which `runMigrations` installs
+before the migrator, idempotently, on every call — `vector` is the one entry, and migration 0013
+declares `embedding vector(1024)`, which fails with `type "vector" does not exist` without it.
+That statement needs a role that may create an extension, which the migrating owner is and the
+application role must not be. `src/domain/migration-0013.test.ts` asserts both halves: the shipped
+SQL fails on its own against a bare database, and `runMigrations` over the same database leaves
+the extension installed and the three tables created.
 
 `0008_generic_records` is the one migration with a hand-written data section, and the one with
 no down migration. `docs/runbook.md`, "Migration 0008 and the record model", says why and what
