@@ -49,6 +49,34 @@ export function containsRestrictedPattern(text: string): boolean {
 export const WITHHELD = '(withheld: it did not pass the redaction check)';
 
 /**
+ * Replace each restricted shape in `text` with `WITHHELD` and say how many were replaced.
+ *
+ * The other way to apply the rule is the host's: one shape anywhere and the whole message becomes
+ * the sentence. That is right for a message, which is one thing a person either reads or does
+ * not. It is wrong for a page of a document, because the check is shape-only and over-reports by
+ * design — the DEA shape is any two letters followed by seven digits, which is also a form code,
+ * a claim number and half the reference numbers ever printed — so blanking wholesale loses the
+ * pages that were asked for on one false positive, and the caller cannot tell that from a page
+ * whose text really is that sentence.
+ *
+ * The count is what closes that gap: a caller reading `withheld: 0` knows it has the page, and
+ * one reading `withheld: 2` knows exactly how much of it is missing. `WITHHELD` carries no digit
+ * and no two-letter-then-seven-digit run, so replacing one shape cannot manufacture another for
+ * the next pattern in the list to find.
+ */
+export function withholdRestrictedPatterns(text: string): { text: string; withheld: number } {
+  let withheld = 0;
+  let out = text;
+  for (const re of SHAPE_PATTERNS) {
+    out = out.replace(new RegExp(re.source, 'g'), () => {
+      withheld += 1;
+      return WITHHELD;
+    });
+  }
+  return { text: out, withheld };
+}
+
+/**
  * Refuse an agent-supplied argument that looks like a restricted identifier, in the one wording
  * every staging tool uses.
  *

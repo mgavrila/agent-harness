@@ -41,6 +41,12 @@ export interface DocumentsReadResult {
   to: number;
   /** True when the text was cut at `max_chars`; ask for the next range to see the rest. */
   truncated: boolean;
+  /**
+   * How many spans of the returned text were replaced because they still looked like a restricted
+   * identifier. Zero means the pages came back whole, which is the fact a caller needs and could
+   * not have inferred: the replacement sentence is itself something a page could have said.
+   */
+  withheld: number;
   text: string;
 }
 

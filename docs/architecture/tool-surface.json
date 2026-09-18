@@ -981,6 +981,10 @@
             "truncated": {
               "type": "boolean"
             },
+            "withheld": {
+              "type": "number",
+              "description": "How many spans were replaced because they looked like a restricted identifier"
+            },
             "text": {
               "type": "string"
             }
@@ -991,6 +995,7 @@
             "from",
             "to",
             "truncated",
+            "withheld",
             "text"
           ],
           "additionalProperties": false

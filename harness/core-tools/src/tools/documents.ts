@@ -96,7 +96,8 @@ const documentsRead = defineTool({
   description:
     'Return the text of a document on file, so it can be read, quoted or summarised. ' +
     'Defaults to every page and the first 20,000 characters; pass page_from/page_to to walk a long document ' +
-    'and read the rest. Restricted identifiers are redacted before the text is returned.',
+    'and read the rest. Anything that looks like a restricted identifier is replaced before the text is returned, ' +
+    'and `withheld` counts how many times that happened.',
   actionClass: 'read',
   input: z.object({
     id: z.string().uuid(),
@@ -116,6 +117,7 @@ const documentsRead = defineTool({
     from: z.number(),
     to: z.number(),
     truncated: z.boolean(),
+    withheld: z.number().describe('How many spans were replaced because they looked like a restricted identifier'),
     text: z.string(),
   }),
   handler: async (args, deps) => readDocumentText(deps, args),

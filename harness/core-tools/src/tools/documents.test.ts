@@ -383,6 +383,7 @@ describe('documents_read', () => {
     from: number;
     to: number;
     truncated: boolean;
+    withheld: number;
     text: string;
   }
 
@@ -456,18 +457,55 @@ describe('documents_read', () => {
     expect(out.text).toBe('First');
   });
 
-  it('withholds text that does not pass the restricted-pattern check', async () => {
+  it('withholds a restricted value in place and keeps the rest of the page', async () => {
     // Text is written to disk redacted, so this is a last gate rather than the first one: a file
     // that predates the redaction pass, or one a later change leaves unredacted, must not reach
     // a model through this tool.
+    //
+    // In place, not wholesale. The check is shape-only and its own module says it over-reports:
+    // the DEA shape is any two letters and seven digits, which occurs freely on ordinary
+    // paperwork. Blanking the whole reply on one such string would lose the pages a caller asked
+    // for and tell them nothing about why.
     const client = await connect();
     await writePdf(storageDir, 'incoming/unredacted.pdf', ['Request for Taxpayer Identification']);
     const id = await ingest(client, 'incoming/unredacted.pdf');
-    await storeText(id, 'incoming/unredacted.pdf', ['Name: Ada Lovelace\nSSN: 123-45-6789']);
+    await storeText(id, 'incoming/unredacted.pdf', ['Name: Ada Lovelace\nSSN: 123-45-6789\nStatus: Active']);
 
     const out = resultOf<ReadOut>(await client.callTool({ name: 'documents_read', arguments: { id } }));
-    expect(out.text).toBe(WITHHELD);
     expect(out.text).not.toContain('123-45-6789');
+    expect(out.text).toContain(WITHHELD);
+    expect(out.text).toContain('Name: Ada Lovelace');
+    expect(out.text).toContain('Status: Active');
+    expect(out.withheld).toBe(1);
+  });
+
+  it('counts every value it withheld, and reports none when there was nothing to withhold', async () => {
+    const client = await connect();
+    await writePdf(storageDir, 'incoming/two-values.pdf', ['Request for Taxpayer Identification']);
+    const id = await ingest(client, 'incoming/two-values.pdf');
+    await storeText(id, 'incoming/two-values.pdf', ['SSN: 123-45-6789 and 987-65-4321, both on one line']);
+
+    const out = resultOf<ReadOut>(await client.callTool({ name: 'documents_read', arguments: { id } }));
+    expect(out.withheld).toBe(2);
+    expect(out.text).toContain('both on one line');
+
+    const plain = await ingest(client, 'incoming/license.pdf');
+    await storeText(plain, 'incoming/license.pdf', ['Nothing restricted here.']);
+    const clean = resultOf<ReadOut>(await client.callTool({ name: 'documents_read', arguments: { id: plain } }));
+    expect(clean.withheld).toBe(0);
+    expect(clean.text).toBe('Nothing restricted here.');
+  });
+
+  it('withholds before truncating, so max_chars cannot cut a value in half and let the front of it through', async () => {
+    const client = await connect();
+    await writePdf(storageDir, 'incoming/cut.pdf', ['Request for Taxpayer Identification']);
+    const id = await ingest(client, 'incoming/cut.pdf');
+    await storeText(id, 'incoming/cut.pdf', ['SSN: 123-45-6789']);
+
+    const out = resultOf<ReadOut>(await client.callTool({ name: 'documents_read', arguments: { id, max_chars: 12 } }));
+    expect(out.truncated).toBe(true);
+    expect(out.withheld).toBe(1);
+    expect(out.text).not.toContain('123-45-');
   });
 
   it('refuses a document another client owns, in the words documents_get uses', async () => {

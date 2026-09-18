@@ -11,7 +11,7 @@ import type {
   RecordKindSpec,
 } from '@harness/pack-api';
 import type { ToolDeps } from '../tooling/types.js';
-import { WITHHELD, containsRestrictedPattern } from '../../shared/redaction/patterns.js';
+import { withholdRestrictedPatterns } from '../../shared/redaction/patterns.js';
 import { assertRedacted, redactPages } from '../../shared/redaction/text.js';
 import { documentTextPath, toStorageRelative } from '../storage/layout.js';
 import { readDocumentBytes, resolveStoragePath, sha256File } from '../storage/file-store.js';
@@ -104,8 +104,9 @@ function renderDocumentText(pages: readonly PageText[]): string {
  * through the parser seam and redacted in this process, and nothing is written back: this is a
  * `read`, and the sidecar is the extraction's to produce.
  *
- * The check on the way out is the same one the host applies to a reply: text that still looks
- * like it carries a restricted identifier is replaced wholesale rather than handed over.
+ * The check on the way out is the host's, applied in place rather than wholesale: each span that
+ * still looks like a restricted identifier becomes the withheld sentence and `withheld` counts
+ * them, so one false positive costs a caller that span instead of the whole page.
  */
 export async function readDocumentText(
   deps: ToolDeps,
@@ -134,16 +135,18 @@ export async function readDocumentText(
   // parser is a hint: one that honours it returns those pages and one that ignores it returns
   // all of them, and this is what makes both answer the same thing.
   const selected = pages.filter((p) => p.num >= from && p.num <= last);
-  const joined = selected.map((p) => p.text).join('\n\n');
-  const truncated = joined.length > max_chars;
-  const text = truncated ? joined.slice(0, max_chars) : joined;
+  // Withheld before the text is cut, not after. A `max_chars` landing inside a restricted value
+  // would otherwise leave its first half in the reply with nothing left to match the shape.
+  const { text: safe, withheld } = withholdRestrictedPatterns(selected.map((p) => p.text).join('\n\n'));
+  const truncated = safe.length > max_chars;
   return {
     id,
     pages: total,
     from,
     to: last,
     truncated,
-    text: containsRestrictedPattern(text) ? WITHHELD : text,
+    withheld,
+    text: truncated ? safe.slice(0, max_chars) : safe,
   };
 }
 
