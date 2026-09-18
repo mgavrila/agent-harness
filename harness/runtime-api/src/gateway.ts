@@ -131,6 +131,31 @@ function readBody(req: IncomingMessage): Promise<string> {
   });
 }
 
+const JSON_HEADERS = { 'content-type': 'application/json' };
+
+/**
+ * A body that is not JSON is a test's mistake, not a crash: answered 400 here, it stays a failed
+ * request the caller can assert on rather than an unhandled rejection that takes the whole suite
+ * down from inside the request handler.
+ */
+function writeNotJson(res: ServerResponse): void {
+  res.writeHead(400, JSON_HEADERS);
+  res.end(JSON.stringify({ error: { message: 'the request body is not JSON', type: 'invalid_request_error' } }));
+}
+
+/** The non-2xx a responder asked for, with the body a suite that named none gets. */
+function writeError(res: ServerResponse, status: number, errorBody: unknown): void {
+  res.writeHead(status, JSON_HEADERS);
+  res.end(JSON.stringify(errorBody ?? { error: { message: 'boom', type: 'test_error' } }));
+}
+
+/** JSON, plus the cost header when the reply named one and no header at all when it did not. */
+function replyHeaders(costHeader: string | undefined): Record<string, string> {
+  const headers: Record<string, string> = { ...JSON_HEADERS };
+  if (costHeader !== undefined) headers['x-litellm-response-cost'] = costHeader;
+  return headers;
+}
+
 interface RequestBody {
   model: string;
   messages: FakeGatewayMessage[];
@@ -295,10 +320,7 @@ export async function startFakeGateway(responder: Responder = () => ({})): Promi
         try {
           body = JSON.parse(await readBody(req)) as EmbeddingRequestBody;
         } catch {
-          res.writeHead(400, { 'content-type': 'application/json' });
-          res.end(
-            JSON.stringify({ error: { message: 'the request body is not JSON', type: 'invalid_request_error' } }),
-          );
+          writeNotJson(res);
           return;
         }
         // LiteLLM's own schema takes a string or a list; the harness always sends a list, and
@@ -314,13 +336,11 @@ export async function startFakeGateway(responder: Responder = () => ({})): Promi
         embeddings.push(call);
         const reply = await respondToEmbedding(call);
         if (reply.status && reply.status >= 400) {
-          res.writeHead(reply.status, { 'content-type': 'application/json' });
-          res.end(JSON.stringify(reply.errorBody ?? { error: { message: 'boom', type: 'test_error' } }));
+          writeError(res, reply.status, reply.errorBody);
           return;
         }
         const dimensions = reply.dimensions ?? body.dimensions ?? FAKE_EMBED_DIMENSIONS;
-        const headers: Record<string, string> = { 'content-type': 'application/json' };
-        if (reply.costHeader !== undefined) headers['x-litellm-response-cost'] = reply.costHeader;
+        const headers = replyHeaders(reply.costHeader);
         const promptTokens = reply.promptTokens ?? input.reduce((n, text) => n + Math.ceil(text.length / 4), 0);
         // `vectors` replaces the whole answer, not one entry of it: a responder that hands over
         // fewer vectors than there were inputs is how a suite exercises a gateway that answered
@@ -341,15 +361,11 @@ export async function startFakeGateway(responder: Responder = () => ({})): Promi
         res.writeHead(404).end('{}');
         return;
       }
-      // A body that is not JSON is a test's mistake, not a crash: answered 400 here, it stays a
-      // failed request the caller can assert on rather than an unhandled rejection that takes the
-      // whole suite down from inside this handler.
       let body: RequestBody;
       try {
         body = JSON.parse(await readBody(req)) as RequestBody;
       } catch {
-        res.writeHead(400, { 'content-type': 'application/json' });
-        res.end(JSON.stringify({ error: { message: 'the request body is not JSON', type: 'invalid_request_error' } }));
+        writeNotJson(res);
         return;
       }
       const call: FakeGatewayCall = {
@@ -365,12 +381,10 @@ export async function startFakeGateway(responder: Responder = () => ({})): Promi
 
       const reply = await respond(call);
       if (reply.status && reply.status >= 400) {
-        res.writeHead(reply.status, { 'content-type': 'application/json' });
-        res.end(JSON.stringify(reply.errorBody ?? { error: { message: 'boom', type: 'test_error' } }));
+        writeError(res, reply.status, reply.errorBody);
         return;
       }
-      const headers: Record<string, string> = { 'content-type': 'application/json' };
-      if (reply.costHeader !== undefined) headers['x-litellm-response-cost'] = reply.costHeader;
+      const headers = replyHeaders(reply.costHeader);
       const ids: Ids = { completion: nextId, call: nextCallId };
       if (call.stream) writeStream(res, body, reply, headers, ids);
       else writeJson(res, body, reply, headers, ids);
