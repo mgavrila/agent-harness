@@ -93,6 +93,25 @@ describe('searchKnowledge access', () => {
     });
     expect((await searchKnowledge(elsewhere, { query: 'telephone', k: 10 })).hits).toEqual([]);
   });
+
+  it('applies the filter before ranking, so k never spends a slot on a chunk the caller may not read', async () => {
+    const depsFor = await synced();
+    // Every word of this query is in escalation.md and none of them is in front-desk.md, so both
+    // rankings put escalation.md first over the whole corpus. At k: 1 that is the only row either
+    // ranking returns, which is what separates the two designs: a filter over the ranked result
+    // answers nothing here, and the `WHERE` filter this code uses answers the one document the
+    // caller may read. That is decision 5's "never ranked, never counted toward k" (invariant 7),
+    // and it is the half of the invariant that a query with k at or above the fixture cannot see.
+    const member = await searchKnowledge(depsFor('member'), { query: 'duty lead escalate urgent', k: 1 });
+    expect(paths(member.hits)).toEqual(['front-desk.md']);
+    // The same at the other end of the access rule: a service clears nothing on level and reads
+    // billing.md only because it is named on it.
+    const service = await searchKnowledge(depsFor('service', 'svc-reports'), {
+      query: 'duty lead escalate urgent',
+      k: 1,
+    });
+    expect(paths(service.hits)).toEqual(['billing.md']);
+  });
 });
 
 describe('searchKnowledge results', () => {
