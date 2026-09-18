@@ -97,8 +97,12 @@ export interface TurnResult {
 interface DeliveryTarget {
   session: SurfaceSession;
   conversation: string;
-  /** Only the thread's own conversation is streamed; an explicit target is one post at the end. */
-  stream: boolean;
+  /**
+   * The thread's own conversation, rather than a target the caller named. Only this one is
+   * streamed — an explicit target is one post at the end — and only this one answers the message
+   * the turn came from, because `replyTo` is a reference on the thread's own surface.
+   */
+  ownThread: boolean;
 }
 
 /** Resolve `deliver` to a surface and a conversation, or null for `'none'`. A surface that is not loaded is an error before any run opens. */
@@ -109,11 +113,11 @@ function deliveryTarget(
   delivery: TurnDelivery,
 ): DeliveryTarget | null {
   if (delivery === 'none') return null;
-  if (delivery === 'thread') return { session: threadSurface, conversation: thread.conversation, stream: true };
+  if (delivery === 'thread') return { session: threadSurface, conversation: thread.conversation, ownThread: true };
   const session = host.surfaces.find(delivery.surface);
   if (!session)
     throw new Error(`turn on thread ${thread.id} delivers to surface "${delivery.surface}", which is not loaded`);
-  return { session, conversation: delivery.conversation, stream: false };
+  return { session, conversation: delivery.conversation, ownThread: false };
 }
 
 /** Where the reply goes: a stream when the surface has one, else one post at the end. */
@@ -141,8 +145,7 @@ function replyTarget(
 export async function runTurn(host: Host, turn: TurnInput): Promise<TurnResult> {
   const surface = host.surfaces.find(turn.thread.surface);
   if (!surface) throw new Error(`thread ${turn.thread.id} is on surface "${turn.thread.surface}", which is not loaded`);
-  const delivery = turn.deliver ?? 'thread';
-  const target = deliveryTarget(host, surface, turn.thread, delivery);
+  const target = deliveryTarget(host, surface, turn.thread, turn.deliver ?? 'thread');
   const kernel = await openKernel(host, {
     principal: turn.principal,
     threadId: turn.thread.id,
@@ -224,7 +227,7 @@ export async function runTurn(host: Host, turn: TurnInput): Promise<TurnResult> 
         for await (const event of host.runtime.run(request).events) {
           switch (event.type) {
             case 'text':
-              if (target?.stream) {
+              if (target?.ownThread) {
                 stream ??= replyTarget(target.session, target.conversation, turn.replyTo, recipient);
                 stream?.append(event.delta);
               }
@@ -298,7 +301,7 @@ export async function runTurn(host: Host, turn: TurnInput): Promise<TurnResult> 
           }
         } else if (target && safeText !== '') {
           await target.session.postText(target.conversation, safeText, {
-            replyTo: delivery === 'thread' ? (turn.replyTo ?? undefined) : undefined,
+            replyTo: target.ownThread ? (turn.replyTo ?? undefined) : undefined,
           });
         }
       } catch (err) {
