@@ -87,6 +87,8 @@ describe('searchSessions', () => {
     const deps = makeTestDeps(db);
     expect((await searchSessions(deps, { query: 'renewal', limit: 20 })).hits).toHaveLength(20);
     expect((await searchSessions(deps, { query: 'renewal', limit: 5 })).hits).toHaveLength(5);
+    // Clamped, not just capped: the tool's schema stops a zero, but a direct caller can pass one.
+    expect((await searchSessions(deps, { query: 'renewal', limit: 0 })).hits).toHaveLength(1);
     expect((await searchSessions(deps, { query: 'the of', limit: 20 })).hits).toEqual([]);
   });
 

@@ -14,6 +14,10 @@ import { SESSION_SEARCH_LIMIT, type SessionHit } from './types.js';
  * words alone is the empty query, which matches nothing. The snippet is `ts_headline` with
  * empty selectors: the matching window as plain text, from content that already passed the
  * redaction guard when it was stored.
+ *
+ * `limit` is clamped to 1..`SESSION_SEARCH_LIMIT` rather than only capped: the tool's schema
+ * already guarantees an integer in that range, but this function is exported from the package
+ * root and a direct caller passing 0 or a negative would otherwise reach Postgres with it.
  */
 export async function searchSessions(
   deps: ToolDeps,
@@ -34,7 +38,7 @@ export async function searchSessions(
     .innerJoin(threads, eq(threads.id, messages.threadId))
     .where(and(eq(threads.client, deps.client), visible, sql`${messages.tsv} @@ ${query}`))
     .orderBy(desc(rank), desc(messages.createdAt), desc(messages.seq))
-    .limit(Math.min(args.limit, SESSION_SEARCH_LIMIT));
+    .limit(Math.max(1, Math.min(Math.trunc(args.limit), SESSION_SEARCH_LIMIT)));
   return {
     hits: rows.map((r) => ({
       thread_id: r.threadId,

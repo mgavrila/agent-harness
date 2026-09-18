@@ -17,25 +17,35 @@ beforeEach(() => {
 const connectServer = () => connectTestClient(() => createCoreToolsServer(deps));
 
 /**
- * Every argument name a JSON Schema declares, nested objects and array items included.
+ * Every argument name a JSON Schema declares, at any depth.
  *
  * Names only, which is what invariant 1 is about: an enum *value* or a description that says
  * "principal" sets nothing, and since Plan 9 `memory_add` takes a `scope` whose two values are
- * exactly `principal` and `client`.
+ * exactly `principal` and `client`. An enum value is an array *element*, never an object key, so
+ * collecting keys is what draws the line.
+ *
+ * Every other value is walked blindly rather than by a list of the keywords that may hold a
+ * subschema. `anyOf` (what zod emits for `.nullable()` and `.union()`), `additionalProperties`
+ * (`z.record()`), `prefixItems`, `$defs`, `allOf` and the rest are then covered without this
+ * helper having to know their names — a walker that descended only `properties` and `items`
+ * would let the first tool taking a union declare `principal_id` inside it and stay green.
  */
 function argumentNames(schema: unknown): string[] {
   const names: string[] = [];
   const walk = (node: unknown): void => {
-    if (node === null || typeof node !== 'object') return;
-    const record = node as Record<string, unknown>;
-    const properties = record.properties;
-    if (properties !== null && typeof properties === 'object') {
-      for (const [name, child] of Object.entries(properties)) {
-        names.push(name);
-        walk(child);
-      }
+    if (Array.isArray(node)) {
+      node.forEach(walk);
+      return;
     }
-    walk(record.items);
+    if (node === null || typeof node !== 'object') return;
+    for (const [key, value] of Object.entries(node as Record<string, unknown>)) {
+      if ((key === 'properties' || key === 'patternProperties') && value !== null && typeof value === 'object') {
+        for (const [name, child] of Object.entries(value as Record<string, unknown>)) {
+          names.push(name);
+          walk(child);
+        }
+      } else walk(value);
+    }
   };
   walk(schema);
   return names;
@@ -64,6 +74,24 @@ describe('run context and lineage', () => {
         expect(name, `${tool.name}.${name}`).not.toMatch(/principal|run_id/);
       }
     }
+  });
+
+  it('finds an argument name the schema hides inside a union, and ignores an enum value', () => {
+    // The check above is only as good as the walker under it, and it passes today partly because
+    // no published schema has a union in it yet. These two synthetic schemas pin both halves:
+    // a name buried where zod puts a nullable object must be found, and `memory_add`'s `scope`
+    // enum — whose value really is the word — must not be.
+    const hidden = {
+      type: 'object',
+      properties: {
+        target: {
+          anyOf: [{ type: 'null' }, { type: 'object', properties: { principal_id: { type: 'string' } } }],
+        },
+      },
+    };
+    expect(argumentNames(hidden)).toContain('principal_id');
+    const enumOnly = { type: 'object', properties: { scope: { type: 'string', enum: ['principal', 'client'] } } };
+    for (const name of argumentNames(enumOnly)) expect(name).not.toMatch(/principal|run_id/);
   });
 
   it('stores derived_from on the audit row and strips it from handler args', async () => {

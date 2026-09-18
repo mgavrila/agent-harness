@@ -143,6 +143,10 @@ export async function addMemory(
 export async function removeMemory(deps: ToolDeps, id: string): Promise<{ removed: true; scope: MemoryScope }> {
   const entry = await findMemoryEntry(deps.db, deps.client, deps.principal.id, id);
   if (!entry) throw new ToolError(`no memory entry ${id} is visible to you`);
-  await deps.db.delete(memoryEntries).where(eq(memoryEntries.id, id));
+  // The same filter as the lookup, not the id alone: every access in this module is the query
+  // rather than something applied to a result, and a DELETE is an access like any other.
+  await deps.db
+    .delete(memoryEntries)
+    .where(and(...visibleTo(deps.client, deps.principal.id), eq(memoryEntries.id, id)));
   return { removed: true, scope: entry.scope };
 }

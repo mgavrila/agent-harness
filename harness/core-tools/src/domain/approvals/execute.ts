@@ -58,6 +58,17 @@ export async function executeApproval(deps: ToolDeps, approvalId: string): Promi
   if (decide(actionClass, parkedLevel ?? deps.principal.level, deps.policy) === 'blocked') {
     throw new ToolError(`approval ${approvalId} cannot execute: ${target.name} is now blocked by policy`);
   }
+  // A `write.self` write belongs to whoever asked for it. The replay runs on the *approver's*
+  // deps — Plan 8 opens the run as whoever decided — and a `write.self` handler takes its owner
+  // from `deps.principal.id`, so replaying someone else's would file their note in the approver's
+  // own scope: wrong owner, invisible to the requester, and silent. The approver cannot stand in
+  // for them, so the replay is refused rather than impersonating the requester. Throwing rolls
+  // the `executed` transition back to `approved`, leaving the approval for the requester to run.
+  if (actionClass === 'write.self' && row.requestedBy !== deps.principal.id) {
+    throw new ToolError(
+      `approval ${approvalId} cannot execute: a write to a principal's own memory can only be approved by the principal who asked for it`,
+    );
+  }
 
   // The replayed tool runs on this handler's deps, so it shares the open
   // transaction and the session context.

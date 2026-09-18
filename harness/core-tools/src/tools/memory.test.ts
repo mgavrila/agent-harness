@@ -63,6 +63,24 @@ describe('memory tools', () => {
     expect(listed.entries.map((e) => e.scope)).toEqual(['client']);
   });
 
+  it('filters memory_list by scope while still reporting the usage of both', async () => {
+    const lead = await connectAs(LEAD);
+    await lead.callTool({ name: 'memory_add', arguments: { text: 'mine' } });
+    await lead.callTool({ name: 'memory_add', arguments: { text: 'shared', scope: 'client' } });
+    type Listing = {
+      entries: { scope: string; text: string }[];
+      usage: { principal: { entries: number }; client: { entries: number } };
+    };
+    const clientOnly = resultOf<Listing>(await lead.callTool({ name: 'memory_list', arguments: { scope: 'client' } }));
+    expect(clientOnly.entries.map((e) => e.text)).toEqual(['shared']);
+    // Usage is the whole picture even when the listing is one scope: the model budgets on it.
+    expect(clientOnly.usage).toMatchObject({ principal: { entries: 1 }, client: { entries: 1 } });
+    const principalOnly = resultOf<Listing>(
+      await lead.callTool({ name: 'memory_list', arguments: { scope: 'principal' } }),
+    );
+    expect(principalOnly.entries.map((e) => e.text)).toEqual(['mine']);
+  });
+
   it('refuses an instruction-shaped write with a message that names the category, not the text (invariant 8)', async () => {
     const lead = await connectAs(LEAD);
     const res = await lead.callTool({
