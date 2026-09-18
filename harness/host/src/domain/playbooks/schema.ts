@@ -12,11 +12,22 @@ export const PLAYBOOK_NAME_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
 /** `none`: the run's reply is recorded and posted nowhere. `conversation`: posted once to `surface`/`conversation`. */
 export const DELIVERIES = ['none', 'conversation'] as const;
 
-/** Building a job with no callback holds no timer; it either parses or throws. */
+/**
+ * Five or six whitespace-separated fields (decision 12), and a pattern that fires at least once.
+ *
+ * The field count is checked before croner sees the string, because croner is wider than the
+ * decision: it also takes seven fields, the `@daily` family of nicknames and an ISO one-shot
+ * date, none of which a playbook may use. The `nextRun()` call catches the other half — croner
+ * builds an impossible calendar date such as `0 0 30 2 *` without complaint and only reports the
+ * impossibility when asked for a firing, which would otherwise be a startup crash inside
+ * `syncPlaybooks` rather than a parse error here. Building a job with no callback holds no timer,
+ * so both halves are pure computation.
+ */
 function validSchedule(schedule: string): boolean {
+  const fields = schedule.trim().split(/\s+/).length;
+  if (fields < 5 || fields > 6) return false;
   try {
-    new Cron(schedule);
-    return true;
+    return new Cron(schedule).nextRun() !== null;
   } catch {
     return false;
   }
@@ -35,7 +46,9 @@ function validTimezone(timezone: string): boolean {
 export const PlaybookShape = z
   .object({
     name: z.string().regex(PLAYBOOK_NAME_PATTERN, 'a playbook name is a lowercase slug of at most 64 characters'),
-    schedule: z.string().refine(validSchedule, 'schedule must be a cron expression of five or six fields'),
+    schedule: z
+      .string()
+      .refine(validSchedule, 'schedule must be a cron expression of five or six fields that fires at least once'),
     timezone: z
       .string()
       .refine(validTimezone, 'timezone must be an IANA zone name such as UTC or America/New_York')
@@ -92,9 +105,16 @@ export async function readPlaybooksFile(
   return { file, present: true, playbooks: parsePlaybooksFile(parseYaml(text)) };
 }
 
-/** The first firing strictly after `from`, in `timezone`. */
-export function nextRunAfter(schedule: string, timezone: string, from: Date): Date {
+/**
+ * The first firing strictly after `from`, in `timezone`. `where` names the playbook, and the file
+ * it came from, in the error: a schedule that fires no more is an operator's typo, and the cron
+ * string alone does not say which entry to go and fix.
+ */
+export function nextRunAfter(schedule: string, timezone: string, from: Date, where?: string): Date {
   const next = new Cron(schedule, { timezone }).nextRun(from);
-  if (!next) throw new ConfigError(`schedule "${schedule}" never fires after ${from.toISOString()}`);
+  if (!next) {
+    const subject = where === undefined ? `schedule "${schedule}"` : `${where}: schedule "${schedule}"`;
+    throw new ConfigError(`${subject} never fires after ${from.toISOString()}`);
+  }
   return next;
 }

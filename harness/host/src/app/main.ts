@@ -35,6 +35,7 @@ const seconds = (name: string, fallback: number): number =>
   numberFromEnv(name, fallback, { min: 1, max: 86_400, unit: 'seconds' });
 const port = (name: string, fallback: number): number =>
   numberFromEnv(name, fallback, { min: 1, max: 65_535, integer: true });
+const now = (): Date => new Date();
 const names = (raw: string): string[] =>
   raw
     .split(',')
@@ -62,6 +63,22 @@ if (!servicePrincipal || servicePrincipal.kind !== 'service') {
     `HARNESS_HOST_PRINCIPAL names "${servicePrincipalId}", which the identity plug-in "${identity.name}" does not declare as a service`,
   );
 }
+// The file into the table, once per start, and before a surface or the runtime connects: a
+// playbook edited, added or removed in clients/<name>/playbooks.yaml takes effect on the next
+// start, a firing missed while the process was down is not replayed (next_run_at is recomputed
+// from now), and a malformed file fails startup with no socket open and no message accepted.
+const playbooksFile = await readPlaybooksFile(clientDir);
+const synced = await syncPlaybooks(
+  db,
+  { client: config.client, now: now(), file: playbooksFile.file },
+  playbooksFile.playbooks,
+);
+log.info(
+  playbooksFile.present
+    ? `playbooks: ${synced.upserted} from ${playbooksFile.file}, ${synced.disabled} disabled`
+    : `playbooks: no playbooks.yaml in ${clientDir}; ${synced.disabled} disabled`,
+);
+
 const surfaces = await loadSurfaces(names(requiredEnv('HARNESS_SURFACES')), {
   env: process.env,
   log,
@@ -96,22 +113,11 @@ const host: Host = {
   },
   servicePrincipal,
   log,
-  now: () => new Date(),
+  now,
   active: new Map(),
   turns: new Map(),
   draining: false,
 };
-
-// The file into the table, once per start: a playbook edited, added or removed in
-// clients/<name>/playbooks.yaml takes effect on the next start, and a firing missed while the
-// process was down is not replayed (next_run_at is recomputed from now).
-const playbooksFile = await readPlaybooksFile(clientDir);
-const synced = await syncPlaybooks(db, { client: config.client, now: host.now() }, playbooksFile.playbooks);
-log.info(
-  playbooksFile.present
-    ? `playbooks: ${synced.upserted} from ${playbooksFile.file}, ${synced.disabled} disabled`
-    : `playbooks: no playbooks.yaml in ${clientDir}; ${synced.disabled} disabled`,
-);
 
 const core = createInProcessCoreToolsClient({ db, config, client: config.client, servicePrincipal });
 const deps = decisionDeps(host, core);

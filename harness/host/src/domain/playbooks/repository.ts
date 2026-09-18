@@ -15,6 +15,14 @@ export interface ClaimedRun {
 }
 
 /**
+ * Why a firing was closed before anything ran. A `preflight_failed` run made no model call
+ * (spec 3.3 step 2), which is exactly what happened here: the playbook stopped being one this
+ * host may run between the request and the tick.
+ */
+const PLAYBOOK_REMOVED = 'playbook removed';
+const PLAYBOOK_DISABLED = 'playbook disabled';
+
+/**
  * The file into the table (spec 5.6): every definition upserted by `(client, name)` with every
  * column from the file, `next_run_at` recomputed from `now` — so a firing missed while the host
  * was down is not replayed — and every row of this client that the file no longer names
@@ -23,9 +31,11 @@ export interface ClaimedRun {
  */
 export async function syncPlaybooks(
   db: Db,
-  opts: { client: string; now: Date },
+  opts: { client: string; now: Date; file?: string },
   definitions: readonly PlaybookDefinition[],
 ): Promise<SyncResult> {
+  const where = (name: string): string =>
+    opts.file === undefined ? `playbook "${name}"` : `playbook "${name}" in ${opts.file}`;
   return withTransaction(db, async (tx) => {
     for (const def of definitions) {
       const values = {
@@ -42,7 +52,7 @@ export async function syncPlaybooks(
         costCapUsd: def.cost_cap_usd,
         timeoutS: def.timeout_s,
         enabled: def.enabled,
-        nextRunAt: def.enabled ? nextRunAfter(def.schedule, def.timezone, opts.now) : null,
+        nextRunAt: def.enabled ? nextRunAfter(def.schedule, def.timezone, opts.now, where(def.name)) : null,
         updatedAt: opts.now,
       };
       await tx
@@ -62,8 +72,62 @@ export async function syncPlaybooks(
         ),
       )
       .returning({ id: playbooks.id });
+    await failStrandedRuns(
+      tx,
+      opts,
+      disabled.map((row) => row.id),
+    );
     return { upserted: definitions.length, disabled: disabled.length };
   });
+}
+
+/**
+ * Close the runs asked for by hand whose playbook this client's file no longer enables. The claim
+ * takes enabled playbooks only, so a firing left `requested` here would wait for a tick that never
+ * comes; it is closed as `preflight_failed` — nothing ran, no model was called — and never
+ * deleted, so the person who asked can see what became of it. `removed` names the playbooks this
+ * sync has just taken out of the file, which is the difference between "your playbook is gone" and
+ * "your playbook is switched off", and all the run row can say about either.
+ *
+ * The rows are locked with `SKIP LOCKED` and only the locked ones updated, so this never waits on a
+ * run row. A tick claiming right now holds its run row and is waiting for the playbook row this
+ * transaction already holds; waiting back would close that into a deadlock. The run the lock skips
+ * is exactly the one that claim is re-reading the playbook for, and the claim closes it there.
+ */
+async function failStrandedRuns(
+  tx: Db,
+  opts: { client: string; now: Date },
+  removed: readonly string[],
+): Promise<void> {
+  const off = await tx
+    .select({ id: playbooks.id })
+    .from(playbooks)
+    .where(and(eq(playbooks.client, opts.client), eq(playbooks.enabled, false)));
+  if (off.length === 0) return;
+  const stranded = await tx
+    .select({ id: playbookRuns.id, playbookId: playbookRuns.playbookId })
+    .from(playbookRuns)
+    .where(
+      and(
+        eq(playbookRuns.status, 'requested'),
+        inArray(
+          playbookRuns.playbookId,
+          off.map((row) => row.id),
+        ),
+      ),
+    )
+    .for('update', { skipLocked: true });
+  const gone = new Set(removed);
+  for (const reason of [PLAYBOOK_REMOVED, PLAYBOOK_DISABLED]) {
+    const ids = stranded
+      .filter((row) => (reason === PLAYBOOK_REMOVED) === gone.has(row.playbookId))
+      .map((row) => row.id);
+    if (ids.length === 0) continue;
+    await tx
+      .update(playbookRuns)
+      .set({ status: 'preflight_failed', error: reason, endedAt: opts.now })
+      .where(inArray(playbookRuns.id, ids));
+  }
 }
 
 /**
@@ -82,14 +146,33 @@ export async function claimDuePlaybooks(
   return withTransaction(db, async (tx) => {
     const claimed: ClaimedRun[] = [];
     const requested = await tx
-      .select({ run: playbookRuns, playbook: playbooks })
+      .select({ run: playbookRuns })
       .from(playbookRuns)
       .innerJoin(playbooks, eq(playbooks.id, playbookRuns.playbookId))
-      .where(and(eq(playbooks.client, opts.client), eq(playbookRuns.status, 'requested')))
+      .where(and(eq(playbooks.client, opts.client), eq(playbooks.enabled, true), eq(playbookRuns.status, 'requested')))
       .orderBy(asc(playbookRuns.scheduledAt))
       .limit(limit)
       .for('update', { of: playbookRuns, skipLocked: true });
-    for (const { run, playbook } of requested) {
+    for (const { run } of requested) {
+      // Read the playbook again under its own lock. The join above locks the run row only, so the
+      // playbook it matched is a snapshot taken without one: a sync committing between that select
+      // and this loop would otherwise hand the caller a stale prompt, skill or service principal,
+      // and the run would act as an identity the file no longer gives it.
+      const [playbook] = await tx
+        .select()
+        .from(playbooks)
+        .where(eq(playbooks.id, run.playbookId))
+        .limit(1)
+        .for('update');
+      if (!playbook || !playbook.enabled) {
+        // Disabled by a sync that committed while this tick was claiming. Closing it here is what
+        // `failStrandedRuns` could not do: it stepped over this row because the lock was held.
+        await tx
+          .update(playbookRuns)
+          .set({ status: 'preflight_failed', error: PLAYBOOK_DISABLED, endedAt: opts.now })
+          .where(eq(playbookRuns.id, run.id));
+        continue;
+      }
       const [started] = await tx
         .update(playbookRuns)
         .set({ status: 'running', startedAt: opts.now })
@@ -117,7 +200,7 @@ export async function claimDuePlaybooks(
       const [advanced] = await tx
         .update(playbooks)
         .set({
-          nextRunAt: nextRunAfter(playbook.schedule, playbook.timezone, opts.now),
+          nextRunAt: nextRunAfter(playbook.schedule, playbook.timezone, opts.now, `playbook "${playbook.name}"`),
           lastRunAt: opts.now,
           updatedAt: opts.now,
         })
