@@ -21,7 +21,7 @@ import { requireRecord, upsertRecord } from '../records/repository.js';
 import type { AttachmentInput, FieldInput } from '../records/types.js';
 import { MAX_PARSE_PAGES, pdfPageCount } from './text.js';
 import { buildClassificationSchema, buildExtractionSchema } from './schema.js';
-import { buildClassificationMessages, buildExtractionMessages } from './prompts.js';
+import { DOCUMENT_TEXT_IS_DATA, buildClassificationMessages, buildExtractionMessages } from './prompts.js';
 import { parseExtraction } from './parse.js';
 import type { DocumentsReadResult, ExtractedField, PageRange, PageText } from './types.js';
 
@@ -146,6 +146,10 @@ export async function readDocumentText(
     to: last,
     truncated,
     withheld,
+    // Carried in the result rather than left to the tool description, so the rule sits beside the
+    // text it is about every time the model reads one. The extraction tools fence their pages and
+    // spend a system turn on the same rule; a tool result has no system turn to spend.
+    note: DOCUMENT_TEXT_IS_DATA,
     text: truncated ? safe.slice(0, max_chars) : safe,
   };
 }
