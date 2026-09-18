@@ -47,11 +47,13 @@ describe('two packs in one process', () => {
     const deps = makeTestDeps(db, { packs });
     const names = publishedTools(deps).map((t) => t.name);
     expect(new Set(names).size).toBe(names.length);
-    // Twenty-four kernel tools (sixteen from Plan 7, four memory and two playbook tools from
-    // Plan 9, two knowledge tools from Plan 10), seven of them replaced by healthcare, plus
-    // healthcare's eighteen: 24 − 7 + 18 = 35. The five records_* survive because the stories
-    // pack's `epic` kind leaves genericTools true, so the publication gate does not drop them.
-    expect(names).toHaveLength(35);
+    // Twenty-five kernel tools (sixteen from Plan 7, four memory and two playbook tools from
+    // Plan 9, two knowledge tools from Plan 10, and `documents_read`), seven of them replaced by
+    // healthcare, plus healthcare's eighteen: 25 − 7 + 18 = 36. The five records_* survive
+    // because the stories pack's `epic` kind leaves genericTools true, so the publication gate
+    // does not drop them. `documents_read` is in neither pack's `replaces`, so it is published
+    // as the kernel defines it.
+    expect(names).toHaveLength(36);
     for (const name of ['providers_get', 'forms_fill', 'verify_nppes', 'deadlines_upcoming']) {
       expect(names).toContain(name);
     }

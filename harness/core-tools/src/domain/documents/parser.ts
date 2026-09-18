@@ -16,10 +16,12 @@ export function joinPages(pages: PageText[]): string {
  */
 export function localParser(storageDir: string): DocumentParser {
   return {
-    async extract(relPath) {
+    async extract(relPath, range) {
       const abs = await resolveStoragePath(storageDir, relPath);
-      const { pages, ocrUsed } = await extractDocumentText(abs);
-      return { pages, text: joinPages(pages), ocrUsed };
+      // No `text`: building it here is a second complete copy of the document beside the pages
+      // that were just returned, and nothing in this package reads it. A caller that wants one
+      // string calls `joinPages` on the pages it kept.
+      return extractDocumentText(abs, { range });
     },
   };
 }
@@ -64,7 +66,13 @@ export function remoteParser(baseUrl: string, storageDir: string, timeoutMs = RE
       }
       const parsed = RemoteReply.safeParse(await response.json().catch(() => null));
       if (!parsed.success) throw new ToolError('document parser answered with an unexpected shape');
-      return parsed.data;
+      // `text` is on the worker's wire shape and is checked above, then dropped: it is the pages
+      // over again and no caller here reads it. The page range is not sent — the worker's route
+      // takes a path and nothing else — so this parser returns the whole document and the range
+      // stays the hint it is declared to be. The worker refuses anything over its own page
+      // limit and the call is bounded by `REMOTE_PARSE_TIMEOUT_MS`, so ignoring the hint costs
+      // time rather than correctness: every caller selects on `num`.
+      return { pages: parsed.data.pages, ocrUsed: parsed.data.ocrUsed };
     },
   };
 }

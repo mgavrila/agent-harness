@@ -6,6 +6,7 @@ import { approvals, auditLog, memoryEntries, messages, runs, threads } from '@ha
 import { COORDINATOR, hostFixture, useTestDb, type HostFixture } from '../testing.js';
 import {
   COST_CAP_EXCEEDED,
+  EMPTY_REPLY,
   RUNTIME_FAILED,
   TIMED_OUT,
   TIMEOUT_MARGIN_MS,
@@ -71,6 +72,11 @@ describe('a message on a surface', () => {
     // The runtime was handed this run's kernel, the persona, the skills and the principal as the model user.
     const request = f.runtime.requests[0];
     expect(request.principal.id).toBe('u-coordinator');
+    // The caller's own name and level, as the identity plug-in resolved them. A runtime that has
+    // them can say who it is speaking with; one that has only the id reads a name out of it, which
+    // is what a live run did. This is the fact the prompt line in runtimes/deepagents renders.
+    expect(request.principal.displayName).toBe('Coordinator');
+    expect(request.principal.level).toBe('lead');
     expect(request.model).toMatchObject({ route: 'chat', fallbackRoute: 'reason', user: 'u-coordinator' });
     expect(request.persona).toBe('You are the test assistant.');
     expect(request.skills.map((s) => s.name)).toEqual(['sample-skill']);
@@ -142,6 +148,75 @@ describe('a message on a surface', () => {
     expect(rows.some((r) => r.content.includes('123-45'))).toBe(false);
   });
 
+  it('answers with a fixed sentence when the run ends done with nothing to say, and warns with the tool count', async () => {
+    // Two live runs ended `done` after tool calls with an empty final text, and the person who
+    // had asked saw no reply at all. Silence is the one outcome a turn may not have.
+    const warnings: string[] = [];
+    const f = await hostFixture(db, { trajectory: [{ tool: 'memory_list', args: {} }, { say: '' }] });
+    f.host.log = { info() {}, error() {}, warn: (message) => warnings.push(message) };
+    attachMessageHandlers(f.host);
+    await f.surface.say('U012', 'anything?');
+
+    expect(f.surface.texts).toEqual([{ conversation: 'memory', text: EMPTY_REPLY, replyTo: null, kind: 'reply' }]);
+    const [run] = await db.select().from(runs);
+    expect(run.status).toBe('done');
+    // Recorded as the assistant's turn too, so the next turn's history says what was said rather
+    // than skipping a turn the person can see.
+    const rows = await db.select().from(messages).orderBy(messages.createdAt);
+    expect(rows.map((r) => [r.role, r.content])).toEqual([
+      ['user', 'anything?'],
+      ['assistant', EMPTY_REPLY],
+    ]);
+    expect(warnings).toContain(`run ${run.id}: the runtime returned no text after 1 tool calls`);
+  });
+
+  it('appends the sentence to a stream that was opened and then had nothing to say', async () => {
+    // The trajectory has to emit *text* for a stream to exist at all: `stream` is assigned only
+    // in the `text` arm of the event loop, so a run of nothing but tool calls opens none and
+    // answers through `postText` — which is the case below, not this one. Whitespace opens a
+    // stream and still leaves the final text empty, which is the pair this branch is for.
+    const f = await hostFixture(db, {
+      trajectory: [{ tool: 'memory_list', args: {} }, { say: '   ' }],
+      streaming: true,
+    });
+    attachMessageHandlers(f.host);
+    await f.surface.say('U012', 'anything?');
+
+    // Asserted on the stream alone rather than on a pool of streams and posts: pooling the two
+    // is what let this case pass while the append it names never ran. The sentence is *in* the
+    // stream, after the whitespace the runtime did emit, which only the append puts there.
+    expect(f.surface.streams).toEqual([
+      { conversation: 'memory', text: `   ${EMPTY_REPLY}`, ended: true, replyTo: null },
+    ]);
+    // The memory surface materialises an ended stream as one post of its own; what matters here
+    // is that the host did not put a second one beside it.
+    expect(f.surface.texts).toHaveLength(1);
+    const [run] = await db.select().from(runs);
+    expect(run.status).toBe('done');
+  });
+
+  it('posts the sentence instead when the run emitted no text at all and so opened no stream', async () => {
+    const f = await hostFixture(db, {
+      trajectory: [
+        { tool: 'memory_list', args: {} },
+        { tool: 'memory_list', args: {} },
+      ],
+      streaming: true,
+    });
+    attachMessageHandlers(f.host);
+    await f.surface.say('U012', 'anything?');
+    expect(f.surface.streams).toEqual([]);
+    expect(f.surface.texts).toEqual([{ conversation: 'memory', text: EMPTY_REPLY, replyTo: null, kind: 'reply' }]);
+  });
+
+  it('leaves a non-empty reply alone, streamed or posted', async () => {
+    // The guard above reads the final text only; it must not touch a run that answered.
+    const f = await hostFixture(db, { trajectory: [{ say: '  spaced out  ' }] });
+    attachMessageHandlers(f.host);
+    await f.surface.say('U012', 'go');
+    expect(f.surface.texts.at(-1)?.text).toBe('  spaced out  ');
+  });
+
   it('carries the prior turns of the thread as history, trimmed, and the attachments on the input', async () => {
     const f = await hostFixture(db, { trajectory: [{ say: 'ok' }], budget: { maxHistoryMessages: 2 } });
     attachMessageHandlers(f.host);
@@ -189,7 +264,7 @@ describe('a message on a surface', () => {
     const f = await hostFixture(db, { trajectory: [{ sleep: 10_000 }, { say: 'never' }] });
     attachMessageHandlers(f.host);
     const turn = f.surface.say('U012', 'slow one');
-    await new Promise((r) => setTimeout(r, 50));
+    await waitFor(() => f.host.active.size === 1);
     const [run] = await db.select().from(runs);
     expect(cancelRun(f.host, run.id)).toBe(true);
     await turn;
@@ -282,7 +357,7 @@ describe('two turns on one thread', () => {
       f.surface.say('U012', 'in C1', { conversation: 'C1' }),
       f.surface.say('U012', 'in C2', { conversation: 'C2' }),
     ];
-    await new Promise((r) => setTimeout(r, 60));
+    await waitFor(() => f.runtime.requests.length >= 2);
     expect(f.runtime.requests.map((r) => r.input.text).sort()).toEqual(['in C1', 'in C2']);
     await Promise.all(turns);
     expect(await db.select().from(runs)).toHaveLength(2);
@@ -294,7 +369,7 @@ describe('drainActive', () => {
     const f = await hostFixture(db, { trajectory: [{ sleep: 10_000 }, { say: 'never' }] });
     attachMessageHandlers(f.host);
     const turn = f.surface.say('U012', 'slow one');
-    await new Promise((r) => setTimeout(r, 50));
+    await waitFor(() => f.host.active.size === 1);
     expect(f.host.active.size).toBe(1);
 
     await drainActive(f.host, 10_000);

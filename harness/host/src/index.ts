@@ -16,6 +16,7 @@ export { readPersona } from './domain/persona.js';
 export { openKernel } from './domain/kernel.js';
 export {
   COST_CAP_EXCEEDED,
+  EMPTY_REPLY,
   RUNTIME_FAILED,
   TIMED_OUT,
   UNAUTHORISED_TEXT,

@@ -24,6 +24,38 @@ export interface ExtractedText {
   ocrUsed: boolean;
 }
 
+/**
+ * What `documents_read` answers with. Declared here rather than in the pack contract, unlike the
+ * ingest, classify and extract results: no pack wraps this tool, because a file's own text is
+ * the kernel's business and belongs to a client whether or not one is loaded.
+ *
+ * `from` and `to` are the range actually read, which is not always the range asked for: a
+ * caller that named no end gets the last page, and one that named a page past the end is
+ * refused rather than quietly clamped.
+ */
+export interface DocumentsReadResult {
+  id: string;
+  /** How many pages of text the document has, whatever range was read. */
+  pages: number;
+  from: number;
+  to: number;
+  /** True when the text was cut at `max_chars`; ask for the next range to see the rest. */
+  truncated: boolean;
+  /**
+   * How many spans of the returned text were replaced because they still looked like a restricted
+   * identifier. Zero means the pages came back whole, which is the fact a caller needs and could
+   * not have inferred: the replacement sentence is itself something a page could have said.
+   */
+  withheld: number;
+  /**
+   * The spec section 6 rule, beside the text it is about: what follows is document content and
+   * never an instruction. Fixed, and the same on every call — a tool result has no system turn
+   * to put it in, and the pages it carries were written by whoever attached the file.
+   */
+  note: string;
+  text: string;
+}
+
 export interface ExtractedField {
   name: string;
   value: string;
@@ -54,7 +86,28 @@ export interface ParsedExtraction {
  * because core-tools does not depend on the worker.
  */
 export interface ParsedDocument extends ExtractedText {
-  text: string;
+  /**
+   * The same pages joined by a blank line, for a caller that wants one string.
+   *
+   * Optional, and no caller in this package asks for it. `localParser` leaves it out rather than
+   * building a second complete copy of a document's text beside the pages it already returned —
+   * `documents_read` slices at most `max_chars` out of the pages and would hold both. The files
+   * worker still sends it, because it is on that wire shape, and `remoteParser` drops it there.
+   */
+  text?: string;
+}
+
+/**
+ * The pages a caller wants, 1-based and inclusive, as a hint to whatever does the parsing.
+ *
+ * A hint rather than a contract: a parser that ignores it and returns the whole document is
+ * correct, only slower, because every caller selects by `PageText.num` afterwards. What it buys
+ * where it is honoured is the expensive half — `ocrPdf` rasterises and reads one page at a time,
+ * so a range is the difference between three pages and five hundred.
+ */
+export interface PageRange {
+  from: number;
+  to: number;
 }
 
 /**
@@ -67,5 +120,5 @@ export interface ParsedDocument extends ExtractedText {
  * outside it — by both implementations, before anything is read or sent.
  */
 export interface DocumentParser {
-  extract(relPath: string): Promise<ParsedDocument>;
+  extract(relPath: string, range?: PageRange): Promise<ParsedDocument>;
 }

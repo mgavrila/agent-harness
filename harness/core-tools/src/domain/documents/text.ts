@@ -3,12 +3,24 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { PDFParse } from 'pdf-parse';
 import { ToolError, runBounded } from '@harness/shared';
-import type { ExtractedText, PageText } from './types.js';
+import type { ExtractedText, PageRange, PageText } from './types.js';
 
-export type { ExtractedText, PageText };
+export type { ExtractedText, PageRange, PageText };
 
 /** Below this many characters a page is treated as having no usable text layer. */
 export const MIN_CHARS_PER_PAGE = 40;
+
+/**
+ * The most pages this process will parse in one call.
+ *
+ * The files worker has enforced the same number since it was written, and this module did not,
+ * so a deployment that ran the parser in-process — which is every bare-metal one, since
+ * `parserFromEnv` picks `localParser` whenever `HARNESS_FILES_URL` is unset — had no ceiling at
+ * all. Rasterising and reading is bounded per page and sequential, so with no ceiling the wall
+ * clock for one call is the page count times those bounds. The two numbers are deliberately
+ * equal: a document that Compose refuses must not be a document bare metal accepts.
+ */
+export const MAX_PARSE_PAGES = 500;
 
 /** Bounds for the child processes this module shells out to. All overridable per call so a hung process cannot block the pipeline indefinitely, and so tests can force a timeout without waiting for the real default. */
 const DEFAULT_ASSERT_TIMEOUT_MS = 10_000;
@@ -101,10 +113,15 @@ async function tesseractOnImage(imagePath: string, lang: string, timeoutMs: numb
 export async function ocrPdf(
   absPath: string,
   pageCount: number,
-  opts: { dpi?: number; lang?: string; rasteriseTimeoutMs?: number; timeoutMs?: number } = {},
+  opts: { dpi?: number; lang?: string; rasteriseTimeoutMs?: number; timeoutMs?: number; range?: PageRange } = {},
 ): Promise<PageText[]> {
   await assertBinary('pdftoppm');
   await assertBinary('tesseract');
+  // The range is why this loop is worth ranging at all: each turn of it is one `pdftoppm` and
+  // one `tesseract`, so reading page 3 of a long scan does three minutes of work instead of
+  // three minutes times the page count.
+  const first = Math.max(1, opts.range?.from ?? 1);
+  const last = Math.min(pageCount, opts.range?.to ?? pageCount);
   const dpi = opts.dpi ?? 300;
   const lang = opts.lang ?? 'eng';
   const rasteriseTimeoutMs = opts.rasteriseTimeoutMs ?? DEFAULT_RASTERISE_TIMEOUT_MS;
@@ -112,7 +129,7 @@ export async function ocrPdf(
   const scratch = await mkdtemp(path.join(tmpdir(), 'harness-ocr-'));
   try {
     const pages: PageText[] = [];
-    for (let num = 1; num <= pageCount; num += 1) {
+    for (let num = first; num <= last; num += 1) {
       const prefix = path.join(scratch, `p${num}`);
       const outcome = await runBounded(
         'pdftoppm',
@@ -148,7 +165,15 @@ export async function ocrImage(absPath: string, opts: { lang?: string; timeoutMs
  */
 export async function extractDocumentText(
   absPath: string,
-  opts: { minCharsPerPage?: number; dpi?: number; lang?: string; rasteriseTimeoutMs?: number; timeoutMs?: number } = {},
+  opts: {
+    minCharsPerPage?: number;
+    dpi?: number;
+    lang?: string;
+    rasteriseTimeoutMs?: number;
+    timeoutMs?: number;
+    /** Parse only these pages. What it saves is the OCR path, which works one page at a time. */
+    range?: PageRange;
+  } = {},
 ): Promise<ExtractedText> {
   const bytes = new Uint8Array(await readFile(absPath));
 
@@ -159,10 +184,27 @@ export async function extractDocumentText(
     return { pages: await ocrImage(absPath, opts), ocrUsed: true };
   }
 
+  // The text layer comes out of one pass over the file whatever range was asked for, so it is
+  // read whole and sliced afterwards. The decision below is per document on purpose — a range
+  // that saw only its own pages could call a document scanned when the rest of it is typed.
+  //
+  // `pdfPageCount` is deliberately not asked first: the PDF reader takes the byte buffer over and
+  // leaves it detached, so a count taken before this line makes the parse below fail on its own
+  // document.
   const layer = await extractPdfText(bytes);
+  const count = layer.length || (await pdfPageCount(bytes));
+  if (count > MAX_PARSE_PAGES) {
+    throw new ToolError(`${path.basename(absPath)} has ${count} pages, over the ${MAX_PARSE_PAGES}-page limit`);
+  }
+
   const total = layer.reduce((sum, p) => sum + p.text.trim().length, 0);
   const threshold = (opts.minCharsPerPage ?? MIN_CHARS_PER_PAGE) * Math.max(layer.length, 1);
-  if (total >= threshold) return { pages: layer, ocrUsed: false };
+  if (total >= threshold) return { pages: inRange(layer, opts.range), ocrUsed: false };
 
-  return { pages: await ocrPdf(absPath, layer.length || (await pdfPageCount(bytes)), opts), ocrUsed: true };
+  return { pages: await ocrPdf(absPath, count, opts), ocrUsed: true };
+}
+
+/** The pages of `range`, or all of them when none was asked for. */
+function inRange(pages: PageText[], range: PageRange | undefined): PageText[] {
+  return range === undefined ? pages : pages.filter((p) => p.num >= range.from && p.num <= range.to);
 }

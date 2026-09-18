@@ -94,6 +94,7 @@ describe('audit_query', () => {
       'documents_get',
       'documents_ingest',
       'documents_list',
+      'documents_read',
       'forms_fill',
       'forms_list_templates',
       'forms_release',

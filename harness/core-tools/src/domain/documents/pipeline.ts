@@ -1,4 +1,4 @@
-import { unlink, writeFile } from 'node:fs/promises';
+import { readFile, unlink, writeFile } from 'node:fs/promises';
 import { and, eq } from 'drizzle-orm';
 import * as z from 'zod/v4';
 import { documents } from '@harness/db';
@@ -11,6 +11,7 @@ import type {
   RecordKindSpec,
 } from '@harness/pack-api';
 import type { ToolDeps } from '../tooling/types.js';
+import { withholdRestrictedPatterns } from '../../shared/redaction/patterns.js';
 import { assertRedacted, redactPages } from '../../shared/redaction/text.js';
 import { documentTextPath, toStorageRelative } from '../storage/layout.js';
 import { readDocumentBytes, resolveStoragePath, sha256File } from '../storage/file-store.js';
@@ -18,11 +19,11 @@ import { callModelJson } from '../models/gateway.js';
 import type { ModelMessage } from '../models/types.js';
 import { requireRecord, upsertRecord } from '../records/repository.js';
 import type { AttachmentInput, FieldInput } from '../records/types.js';
-import { pdfPageCount } from './text.js';
+import { MAX_PARSE_PAGES, pdfPageCount } from './text.js';
 import { buildClassificationSchema, buildExtractionSchema } from './schema.js';
-import { buildClassificationMessages, buildExtractionMessages } from './prompts.js';
+import { DOCUMENT_TEXT_IS_DATA, buildClassificationMessages, buildExtractionMessages } from './prompts.js';
 import { parseExtraction } from './parse.js';
-import type { ExtractedField } from './types.js';
+import type { DocumentsReadResult, ExtractedField, PageRange, PageText } from './types.js';
 
 /** One document as the `documents_*` tools report it. */
 export function documentView(row: typeof documents.$inferSelect): DocumentRecordView {
@@ -67,6 +68,126 @@ export async function listDocuments(deps: ToolDeps, recordId?: string): Promise<
     .where(and(...conditions));
   rows.sort((a, b) => b.ingestedAt.getTime() - a.ingestedAt.getTime());
   return rows.map(documentView);
+}
+
+/**
+ * How much text `documents_read` returns when the caller names no ceiling of its own. Big enough
+ * that an ordinary attachment comes back whole, small enough that a long one cannot fill a run's
+ * context in a single call: past it the reply is cut and `truncated` says so, and the caller asks
+ * for the next page range.
+ */
+export const DOCUMENT_READ_MAX_CHARS = 20_000;
+
+/** Every page of a document's text file, in the format `renderDocumentText` below writes. */
+function pagesFromText(raw: string): PageText[] {
+  const parts = raw.split(/(?:^|\n\n)<<<PAGE (\d+)>>>\n/);
+  const pages: PageText[] = [];
+  for (let i = 1; i + 1 < parts.length; i += 2) {
+    pages.push({ num: Number(parts[i]), text: parts[i + 1] });
+  }
+  // A file with no heading in it at all is one page: the format is this module's own, but a
+  // caller asking to read a document is owed its text rather than an empty answer.
+  return pages.length > 0 ? pages : [{ num: 1, text: raw }];
+}
+
+/** The text file's contents. One function, so the writer and the reader above cannot drift apart. */
+function renderDocumentText(pages: readonly PageText[]): string {
+  return pages.map((p) => `<<<PAGE ${p.num}>>>\n${p.text}`).join('\n\n');
+}
+
+/**
+ * `documents_read`: hand back a document's redacted text, a page range at a time.
+ *
+ * Two sources, in order. A document that has been through `documents_extract` has its redacted
+ * text on disk already and it is read from there. One that has not — every document a client
+ * with no pack ingests, since extraction needs a pack to have somewhere to write — is read
+ * through the parser seam and redacted in this process, and nothing is written back: this is a
+ * `read`, and the sidecar is the extraction's to produce.
+ *
+ * The check on the way out is the host's, applied in place rather than wholesale: each span that
+ * still looks like a restricted identifier becomes the withheld sentence and `withheld` counts
+ * them, so one false positive costs a caller that span instead of the whole page.
+ */
+export async function readDocumentText(
+  deps: ToolDeps,
+  args: { id: string; page_from?: number; page_to?: number; max_chars: number },
+): Promise<DocumentsReadResult> {
+  const { id, max_chars } = args;
+  const row = await requireDocument(deps, id);
+  const stored = row.textPath === null ? null : await readStoredText(deps, row.textPath);
+  // How many pages there are to read: the stored text's own, which is what the extraction wrote,
+  // and otherwise the count `documents_ingest` recorded off the file. Asked before anything is
+  // parsed, so the range below can be settled without reading the document at all.
+  const total = stored?.length ?? row.pages ?? 1;
+
+  const from = args.page_from ?? 1;
+  const to = args.page_to ?? total;
+  // The end of the document is checked before the shape of the range, so that a `page_from` past
+  // the last page is told how long the document is rather than told its range runs backwards —
+  // which is what a caller that named no `page_to` would otherwise read, since the default end
+  // is the last page.
+  if (from > total) throw new ToolError(`document ${id} has ${total} page(s), so there is no page ${from} to read`);
+  if (to < from) throw new ToolError(`page_to ${to} is before page_from ${from}`);
+  const last = Math.min(to, total);
+
+  const pages = stored ?? (await parseForReading(deps, row, { from, to: last }));
+  // Selected on the page number rather than on position in the array. The range handed to the
+  // parser is a hint: one that honours it returns those pages and one that ignores it returns
+  // all of them, and this is what makes both answer the same thing.
+  const selected = pages.filter((p) => p.num >= from && p.num <= last);
+  // Withheld before the text is cut, not after. A `max_chars` landing inside a restricted value
+  // would otherwise leave its first half in the reply with nothing left to match the shape.
+  const { text: safe, withheld } = withholdRestrictedPatterns(selected.map((p) => p.text).join('\n\n'));
+  const truncated = safe.length > max_chars;
+  return {
+    id,
+    pages: total,
+    from,
+    to: last,
+    truncated,
+    withheld,
+    // Carried in the result rather than left to the tool description, so the rule sits beside the
+    // text it is about every time the model reads one. The extraction tools fence their pages and
+    // spend a system turn on the same rule; a tool result has no system turn to spend.
+    note: DOCUMENT_TEXT_IS_DATA,
+    text: truncated ? safe.slice(0, max_chars) : safe,
+  };
+}
+
+/** The redacted text already on disk. The stored path is checked against the root like any other. */
+async function readStoredText(deps: ToolDeps, textPath: string): Promise<PageText[]> {
+  const abs = await resolveStoragePath(deps.storageDir, textPath);
+  try {
+    return pagesFromText(await readFile(abs, 'utf8'));
+  } catch {
+    // The path came off the row, not off the caller, and naming it tells the agent nothing it
+    // could not read from `documents_get`.
+    throw new ToolError(`cannot read the text of document ${textPath}`);
+  }
+}
+
+/**
+ * A document with no text on file: parse it now and redact it here, writing nothing.
+ *
+ * Refused above the page cap rather than begun. Parsing a scan is one rasterise and one OCR pass
+ * per page, bounded per page and run in sequence, so the wall clock for the call is the page
+ * count times those bounds — and the count is on the row already, which means the size of the job
+ * is known before any of it is started. The same number the files worker refuses at, so a
+ * document Compose will not read is not one bare metal accepts.
+ */
+async function parseForReading(
+  deps: ToolDeps,
+  row: typeof documents.$inferSelect,
+  range: PageRange,
+): Promise<PageText[]> {
+  const count = row.pages ?? 1;
+  if (count > MAX_PARSE_PAGES) {
+    throw new ToolError(
+      `document ${row.id} has ${count} pages, over the ${MAX_PARSE_PAGES}-page limit for reading a document with no text on file`,
+    );
+  }
+  const { pages } = await deps.parser.extract(row.storagePath, range);
+  return redactPages(pages).pages;
 }
 
 /**
@@ -364,7 +485,7 @@ export async function extractDocument(
   // same document computes the same path and overwrites it. If the write
   // itself fails partway, remove whatever landed.
   try {
-    await writeFile(textAbs, redacted.map((p) => `<<<PAGE ${p.num}>>>\n${p.text}`).join('\n\n'), 'utf8');
+    await writeFile(textAbs, renderDocumentText(redacted), 'utf8');
   } catch (err) {
     await unlink(textAbs).catch(() => {});
     throw err;

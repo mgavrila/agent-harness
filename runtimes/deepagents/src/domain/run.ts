@@ -112,7 +112,7 @@ export async function runDeepAgent(request: RunRequest, ctx: RunContext, queue: 
     const agent = createDeepAgent({
       model,
       tools,
-      systemPrompt: systemPrompt(request.persona),
+      systemPrompt: systemPrompt(request.persona, request.principal),
       skills: ['/skills/'],
       // `memory` is deliberately not passed. It inlines the file into the system prompt along with
       // guidance telling the model to save what it learns with `edit_file` — a tool this run does
