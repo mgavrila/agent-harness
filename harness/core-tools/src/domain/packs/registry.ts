@@ -5,8 +5,16 @@ import type { PackRegistry, ResolvedTarget } from './types.js';
 
 const log = createLogger('packs');
 
-/** Shared between `loadPacks` and `registryOf`, which both refuse an empty pack list the same way. */
-const NO_PACKS_MESSAGE = 'HARNESS_PACKS names no pack; at least one is required';
+/**
+ * What the three primary-pack answers say when no pack is loaded at all.
+ *
+ * `HARNESS_PACKS=''` is a client with no pack — an internal team that wants the kernel's own
+ * tools and nothing else — so the empty list is a configuration and not a mistake. Everything a
+ * pack declares is then simply empty; only `manifest()`, `formsDir()` and an unclassified
+ * document's target need a pack there to answer at all, and each of them says so by name rather
+ * than reading `all[0]` off an empty array.
+ */
+const NO_PACKS = 'no pack is loaded';
 
 /**
  * A registry over packs that are already in hand. `makeTestDeps` and the surface recorder use
@@ -22,11 +30,9 @@ const NO_PACKS_MESSAGE = 'HARNESS_PACKS names no pack; at least one is required'
  * pack's matters too, because those rules decide what gets encrypted, so they belong to whoever
  * does the encrypting. A pack shipped against an older rule set fails here, at startup, named.
  *
- * Refuses an empty list up front: `manifest()` and `formsDir()` would otherwise answer for
- * `all[0]` of an empty array, throwing a raw `TypeError` that names no variable and no pack.
+ * An empty list is a registry over no pack, not a failure: see `NO_PACKS` above.
  */
 export function registryOf(all: Pack[]): PackRegistry {
-  if (all.length === 0) throw new ConfigError(NO_PACKS_MESSAGE);
   const records = all.flatMap((p) => p.records.map((r) => parseRecordKindSpec(r)));
   // Per pack as well as flattened: a resolved target offers the model exactly its own pack's
   // attachment kinds, and parsing them once here is what keeps `targetFor` free of zod.
@@ -128,7 +134,12 @@ export function registryOf(all: Pack[]): PackRegistry {
       // of `HARNESS_PACKS`, the same pack `manifest()` and `formsDir()` answer for. That one rule
       // is written out on `PackRegistry` in `./types.ts`, and it is what every pack used to get
       // for free from a `'*'` target before packs began claiming their kinds by name.
-      if (documentKind === undefined) return resolve(all[0], all[0].extraction.targets[0]);
+      if (documentKind === undefined && all.length > 0) return resolve(all[0], all[0].extraction.targets[0]);
+      // With no pack loaded there is no target for any document, classified or not: extraction is
+      // a pack's business and this client has none.
+      if (all.length === 0) {
+        throw new ToolError(`${NO_PACKS}; extracting a document needs one, so set HARNESS_PACKS`);
+      }
       // A kind that was declared and claimed by nobody is a real error, named: the pack that
       // declares the kind and the pack that extracts it have come apart, and silently routing the
       // document to some other pack's target would write it as the wrong record kind.
@@ -141,8 +152,19 @@ export function registryOf(all: Pack[]): PackRegistry {
       }
       throw new ToolError(`no loaded pack extracts documents into a "${kind}" record`);
     },
-    manifest: () => all[0].extraction,
+    manifest: () => {
+      if (all.length === 0) {
+        throw new ToolError(`${NO_PACKS}; classifying a document needs one, so set HARNESS_PACKS`);
+      }
+      return all[0].extraction;
+    },
+    // The requirement is the primary pack's: a pack that ships templates must say where they are.
+    // With no pack there is no such pack to ask, so nothing is checked and the deployment is told
+    // the one way it can still answer the question.
     formsDir: () => {
+      if (all.length === 0) {
+        throw new ConfigError(`${NO_PACKS}; set HARNESS_FORMS_DIR to say where the form templates are`);
+      }
       const dir = all[0].formsDir;
       if (!dir) throw new ConfigError(`pack "${all[0].name}" ships no forms directory`);
       return dir;
@@ -152,7 +174,7 @@ export function registryOf(all: Pack[]): PackRegistry {
 }
 
 /**
- * Load the packs `HARNESS_PACKS` names.
+ * Load the packs `HARNESS_PACKS` names, or none when it names none.
  *
  * The specifier is a variable, so this is the one place in core-tools that reaches a pack at
  * all, and it reaches it the way a plug-in host does: by name, at startup, with no build-time
@@ -179,7 +201,13 @@ export function registryOf(all: Pack[]): PackRegistry {
  * its defaults missing.
  */
 export async function loadPacks(names: string[]): Promise<PackRegistry> {
-  if (names.length === 0) throw new ConfigError(NO_PACKS_MESSAGE);
+  if (names.length === 0) {
+    // Every composition root reaches a pack through here, so this is the one line either of them
+    // logs about a client that has none. An operator reading it has the whole story: nothing
+    // failed to load, there was nothing to load.
+    log.info('no packs loaded; kernel tools only');
+    return registryOf([]);
+  }
   const all: Pack[] = [];
   for (const name of names) {
     let module: { pack?: Pack };

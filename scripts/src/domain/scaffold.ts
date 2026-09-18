@@ -2,6 +2,7 @@
  * Create a client folder from a pack's defaults.
  *
  *   pnpm new-client --pack healthcare --name river-clinic
+ *   pnpm new-client --name internal-team            # a client with no pack
  *
  * A client is content and configuration, never code: five files, an env example and a
  * knowledge folder.
@@ -43,7 +44,12 @@ const TEMPLATE_FILES = [
 const TEMPLATE_DIRS = ['knowledge'] as const;
 
 export interface NewClientOptions {
-  pack: string;
+  /**
+   * The pack the client serves, checked against `packs/` so a typo fails here rather than at the
+   * first start. Omitted for a client with no pack at all — `HARNESS_PACKS=''`, the kernel's own
+   * tools and no product area — which is a client like any other: a folder, not code.
+   */
+  pack?: string;
   name: string;
   /** Repository root. Defaults to the directory above this file. */
   root?: string;
@@ -103,8 +109,10 @@ export async function newClient(opts: NewClientOptions): Promise<NewClientResult
   }
   if (name === templateSlug) throw new Error(`name must differ from the template client "${templateSlug}"`);
 
-  const packDir = path.join(root, 'packs', pack);
-  if (!(await exists(packDir))) throw new Error(`no pack named "${pack}" in ${path.join(root, 'packs')}`);
+  if (pack !== undefined) {
+    const packDir = path.join(root, 'packs', pack);
+    if (!(await exists(packDir))) throw new Error(`no pack named "${pack}" in ${path.join(root, 'packs')}`);
+  }
 
   const templateDir = path.join(root, 'clients', templateSlug);
   if (!(await exists(templateDir))) throw new Error(`no template client at ${templateDir}`);

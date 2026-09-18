@@ -78,6 +78,12 @@ describe('parsePackFlag', () => {
 });
 
 describe('packNames', () => {
+  it('reads an empty HARNESS_PACKS as no pack, which an eval run then refuses by name', () => {
+    // A server may serve no pack; an eval run measures one, so `runEvals` exits 2 on this rather
+    // than quietly measuring the default.
+    expect(packNames('')).toEqual([]);
+  });
+
   it('splits HARNESS_PACKS, trims it, and falls back to the shipped pack', () => {
     expect(packNames(undefined)).toEqual(['@harness/pack-healthcare']);
     expect(packNames('@harness/pack-healthcare')).toEqual(['@harness/pack-healthcare']);

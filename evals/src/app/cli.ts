@@ -22,8 +22,10 @@ export function flagFrom(argv: readonly string[], name: string): string | undefi
  * Which packs this run loads.
  *
  * `HARNESS_PACKS` names them, exactly as it does for a server; `--pack` picks one of them when
- * several are. The default is the shipped pack, so a single-pack deployment needs neither flag
- * nor variable and behaves as it always did.
+ * several are. Unset, the default is the shipped pack, so a single-pack deployment needs neither
+ * flag nor variable and behaves as it always did. Set to the empty string it names no pack, which
+ * a server serves happily and an eval run cannot: `runEvals` refuses it below, because a run with
+ * nothing to measure has no report to write.
  */
 export function packNames(env: string | undefined): string[] {
   return (env ?? '@harness/pack-healthcare')
@@ -153,8 +155,14 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
 
   // Everything the run measures comes off the loaded pack, which is what makes this runner
   // pack-agnostic: it imports none, and `HARNESS_PACKS` names what it loads.
-  const names = packNames(optionalEnv('HARNESS_PACKS'));
+  // Read raw rather than through `optionalEnv`, which cannot tell an unset variable from an empty
+  // one — and here they mean different things: the shipped pack, or no pack at all.
+  const names = packNames(process.env.HARNESS_PACKS);
   const registry = await loadPacks(names);
+  if (registry.all.length === 0) {
+    process.stderr.write('HARNESS_PACKS names no pack; an eval run measures one, so name it there\n');
+    process.exit(2);
+  }
   const wanted = packFlag.pack;
   let measured: Pack;
   try {

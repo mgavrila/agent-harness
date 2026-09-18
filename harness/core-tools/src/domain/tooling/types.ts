@@ -115,7 +115,11 @@ export interface ToolDeps {
    * cannot make it from a URL alone.
    */
   parser: DocumentParser;
-  /** Directory holding the active pack's `templates.json` and its PDFs. */
+  /**
+   * Directory holding the active pack's `templates.json` and its PDFs. With no pack loaded it is
+   * `HARNESS_FORMS_DIR`, or the storage directory standing in for it: the forms tools belong to a
+   * pack, so a client with none has no reader for this.
+   */
   formsDir: string;
   /**
    * Whether restricted identifiers (SSN, EIN, DEA) may be sent to a model.

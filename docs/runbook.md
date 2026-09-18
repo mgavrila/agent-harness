@@ -640,13 +640,17 @@ wrote a restricted-looking value where it should not be; read the audit row.
 
 ## Onboarding a client
 
-`pnpm new-client --pack <pack> --name <slug>` scaffolds `clients/<slug>/` — `SOUL.md`,
+`pnpm new-client --name <slug> [--pack <pack>]` scaffolds `clients/<slug>/` — `SOUL.md`,
 `identity.yaml`, `policy.yaml`, `routing.yaml`, `playbooks.yaml`, a `knowledge/` folder of markdown
 and an `.env.example`: a client is content and configuration, never code. Compose derives every client path from `HARNESS_CLIENT`, so there is
 nothing to edit under `harness/compose/`:
 
 1. `cp clients/<slug>/.env.example .env` and fill it in, with `HARNESS_CLIENT=<slug>` and a
-   storage directory this client does not share.
+   storage directory this client does not share. `HARNESS_PACKS` names the product areas this
+   client serves; set it to the empty string for a client that has no pack at all, which serves
+   the kernel's own tools — memory, playbooks, knowledge, approvals and files — and nothing else.
+   Leaving the variable out entirely is not the same thing: unset falls back to the healthcare
+   pack, so a pack-less client sets it empty rather than deleting the line.
 2. Declare the people and services in `clients/<slug>/identity.yaml`: `svc-host` for the
    container, `svc-local` for the operator, and one `u-…` principal per human with their level
    and their Slack member id ("Finding a Slack member id" above). A container whose principal

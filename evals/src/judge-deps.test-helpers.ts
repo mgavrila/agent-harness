@@ -60,7 +60,7 @@ export function openJudgeDeps(opts: { gatewayUrl: string; storageDir: string }):
       clientDir: clientDirFor('evals'),
       embedDims: 1_024,
       parser: localParser(opts.storageDir),
-      formsDir: packs.all[0].formsDir ?? opts.storageDir,
+      formsDir: packs.all[0]?.formsDir ?? opts.storageDir,
       restrictedToModel: false,
       sinks: {},
       context: { runId: null, threadId: null, surface: null, conversation: null },

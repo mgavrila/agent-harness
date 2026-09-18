@@ -2,6 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { registryOf } from '@harness/core-tools';
 import { pack as healthcarePack } from '@harness/pack-healthcare';
 import { kernelSkillsDir, readSkillCatalogue } from './skills.js';
 
@@ -51,5 +52,15 @@ describe('readSkillCatalogue', () => {
     expect(skills.map((s) => s.name)).toEqual(['knowledge-sync']);
     expect(skills[0]).toMatchObject({ version: '1.0.0' });
     expect(skills[0].description).toContain('knowledge');
+  });
+
+  it('offers a client with no pack the kernel’s own skills and nothing else', async () => {
+    // The list `app/main.ts` builds, with `HARNESS_PACKS=''`: the kernel directory, then one
+    // `skillsDir` per loaded pack, of which there are none.
+    const packs = registryOf([]);
+    expect(packs.skillsDirs()).toEqual([]);
+    expect((await readSkillCatalogue([kernelSkillsDir(), ...packs.skillsDirs()])).map((s) => s.name)).toEqual([
+      'knowledge-sync',
+    ]);
   });
 });

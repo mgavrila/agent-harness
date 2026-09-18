@@ -25,11 +25,31 @@ const DocumentView = z.object({
 
 /**
  * `documents_ingest` is the one tool whose JSON Schema carries the document-kind list, so it is
- * the one definition built from the loaded packs rather than declared as a constant. The cast
- * is needed because `z.enum` wants a non-empty tuple: `definePack` and `loadPacks` both refuse
- * a pack with no kinds, so the array is never empty.
+ * the one definition built from the loaded packs rather than declared as a constant. The cast is
+ * needed because `z.enum` wants a non-empty tuple; `definePack` refuses a pack with no kinds, so
+ * a loaded pack always contributes at least one.
+ *
+ * A client with no pack has no kinds at all, and there the argument is left out of the schema
+ * altogether rather than published as an enum of nothing: `z.enum([])` renders as `{"not": {}}`,
+ * a property a caller can read and never satisfy. Nothing is lost — with no pack there is no
+ * kind to declare — and the file still ingests.
  */
 function documentsIngestFor(packs: PackRegistry) {
+  const kinds = packs.documentKinds();
+  const file = {
+    path: z.string().min(1).describe('Path relative to the harness storage directory, e.g. incoming/scan.pdf'),
+    record_id: z.string().uuid().optional(),
+  };
+  const input =
+    kinds.length === 0
+      ? z.object(file)
+      : z.object({
+          ...file,
+          kind: z
+            .enum(kinds as [string, ...string[]])
+            .optional()
+            .describe('Declare the kind when it is already known; otherwise documents_classify sets it'),
+        });
   return defineTool({
     name: 'documents_ingest',
     description:
@@ -37,14 +57,7 @@ function documentsIngestFor(packs: PackRegistry) {
       'Idempotent by content hash, so re-ingesting the same file returns the same document id. ' +
       'Does not read the text; call documents_extract for that.',
     actionClass: 'write.internal',
-    input: z.object({
-      path: z.string().min(1).describe('Path relative to the harness storage directory, e.g. incoming/scan.pdf'),
-      record_id: z.string().uuid().optional(),
-      kind: z
-        .enum(packs.documentKinds() as [string, ...string[]])
-        .optional()
-        .describe('Declare the kind when it is already known; otherwise documents_classify sets it'),
-    }),
+    input,
     output: z.object({
       document_id: z.string(),
       sha256: z.string(),

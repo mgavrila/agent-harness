@@ -9,8 +9,9 @@ const { values } = parseArgs({
     template: { type: 'string' },
   },
 });
-if (!values.pack || !values.name) {
-  console.error('usage: pnpm new-client --pack <pack> --name <client-slug> [--template <client-slug>]');
+if (!values.name) {
+  console.error('usage: pnpm new-client --name <client-slug> [--pack <pack>] [--template <client-slug>]');
+  console.error('       --pack is optional: a client with no pack serves the kernel’s own tools alone.');
   process.exit(2);
 }
 const result = await newClient({ pack: values.pack, name: values.name, template: values.template });
@@ -23,6 +24,11 @@ console.log(
   `  1. cp ${path.relative(process.cwd(), path.join(result.dir, '.env.example'))} .env   # then fill in the blanks`,
 );
 console.log(`     Set HARNESS_CLIENT=${values.name} and a storage directory this client does not share.`);
+console.log(
+  values.pack
+    ? `     HARNESS_PACKS names the packs this client serves; the template names the healthcare pack.`
+    : `     Set HARNESS_PACKS= (empty) — this client was scaffolded with no pack.`,
+);
 console.log('  2. Create one Slack app (Socket Mode and Interactivity on; see docs/runbook.md),');
 console.log("     paste its two tokens and the approvals channel id, and put the two humans'");
 console.log('     Slack member ids in identity.yaml.');

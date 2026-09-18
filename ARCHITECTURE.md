@@ -112,8 +112,9 @@ excluded, because a test names what it tests, and so is `shared/redaction/`, who
 allowlist is empty.** A word that has to appear belongs in a pack.
 
 At startup `app/server.ts` reads `HARNESS_PACKS` — comma-separated package names, default
-`@harness/pack-healthcare` — and `loadPacks` (`domain/packs/registry.ts`) imports each one
-dynamically into a `PackRegistry` on `ToolDeps`. No shipping module under
+`@harness/pack-healthcare`, and the empty string for a client with no pack at all — and
+`loadPacks` (`domain/packs/registry.ts`) imports each one dynamically into a `PackRegistry` on
+`ToolDeps`. No shipping module under
 `harness/core-tools/src/` names a pack: `pnpm arch` fails the build on a static
 `@harness/pack-*` import, with `src/testing.ts` and `*.test.ts` exempt because they need a
 registry synchronously. `evals/src` is held to the same rule, exempting `*.test.ts` and
@@ -189,8 +190,9 @@ one; then, **for a document with no kind at all**, the primary pack's first targ
 was declared and claimed by nobody is a `ToolError` from `documents_extract` naming the kind,
 not a document quietly written as the wrong record kind.
 
-The **primary pack** is the first entry of `HARNESS_PACKS`. It answers `manifest()`,
-`formsDir()` and that unclassified-document target, and nothing else depends on load order:
+The **primary pack** is the first entry of `HARNESS_PACKS`; a client with no pack has none, and
+those three answers then name what is missing rather than reading off an empty list. It answers
+`manifest()`, `formsDir()` and that unclassified-document target, and nothing else depends on load order:
 `registryOf` refuses two loaded packs that claim the same document kind, with `"*"` counted as a
 kind, so at most one exact claim and at most one catch-all can exist. No pack declares a
 catch-all today; healthcare claims its five kinds by name.

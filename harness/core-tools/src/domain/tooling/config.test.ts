@@ -1,6 +1,8 @@
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { formsDirFrom, parserFromEnv } from './config.js';
+import { pack as healthcarePack } from '@harness/pack-healthcare';
+import { registryOf } from '../packs/registry.js';
+import { formsDirFrom, packNames, parserFromEnv } from './config.js';
 
 /**
  * The forms directory belongs to the pack. `HARNESS_FORMS_DIR` is an override a deployment
@@ -8,12 +10,40 @@ import { formsDirFrom, parserFromEnv } from './config.js';
  * pack's templates without editing a second variable.
  */
 describe('formsDirFrom', () => {
-  const packs = { formsDir: () => '/packs/healthcare/forms' };
+  const packs = { all: [healthcarePack], formsDir: () => '/packs/healthcare/forms' };
 
   it('takes the pack forms directory when HARNESS_FORMS_DIR is unset, and the override when it is set', () => {
-    expect(formsDirFrom(packs, undefined)).toBe('/packs/healthcare/forms');
-    expect(formsDirFrom(packs, '/srv/elsewhere/forms')).toBe('/srv/elsewhere/forms');
-    expect(formsDirFrom(packs, './forms')).toBe(path.resolve('./forms'));
+    expect(formsDirFrom(packs, undefined, '/srv/storage')).toBe('/packs/healthcare/forms');
+    expect(formsDirFrom(packs, '/srv/elsewhere/forms', '/srv/storage')).toBe('/srv/elsewhere/forms');
+    expect(formsDirFrom(packs, './forms', '/srv/storage')).toBe(path.resolve('./forms'));
+  });
+
+  it('asks no pack for templates when none is loaded, and still honours the override', () => {
+    expect(formsDirFrom(registryOf([]), undefined, '/srv/storage')).toBe('/srv/storage');
+    expect(formsDirFrom(registryOf([]), '/srv/elsewhere/forms', '/srv/storage')).toBe('/srv/elsewhere/forms');
+  });
+});
+
+/**
+ * Unset and empty are two different answers: an existing deployment that says nothing keeps the
+ * pack it has always had, and a client that says "no pack" gets none. `optionalEnv` cannot tell
+ * them apart, which is why `packNames` reads the variable itself.
+ */
+describe('packNames', () => {
+  it('keeps the default when HARNESS_PACKS is unset', () => {
+    expect(packNames({})).toEqual(['@harness/pack-healthcare']);
+  });
+
+  it('reads an empty HARNESS_PACKS as a client with no pack', () => {
+    expect(packNames({ HARNESS_PACKS: '' })).toEqual([]);
+    expect(packNames({ HARNESS_PACKS: '  ' })).toEqual([]);
+  });
+
+  it('splits, trims and drops empty entries', () => {
+    expect(packNames({ HARNESS_PACKS: ' @harness/pack-healthcare , @harness/pack-stories ,' })).toEqual([
+      '@harness/pack-healthcare',
+      '@harness/pack-stories',
+    ]);
   });
 });
 

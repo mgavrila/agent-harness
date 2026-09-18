@@ -1,7 +1,7 @@
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import type { KernelConfig } from '@harness/core-tools';
+import type { KernelConfig, PackRegistry } from '@harness/core-tools';
 import { makeTestDeps, type TestDepsOverrides } from '@harness/core-tools/testing';
 import type { Db } from '@harness/db';
 import { surfacesOf } from '@harness/approvals';
@@ -88,6 +88,11 @@ export async function hostFixture(
     streaming?: boolean;
     /** The skills the host offers; default one fixture skill. A scheduler test passes the shipped catalogue. */
     skills?: readonly RunSkill[];
+    /**
+     * The packs this host serves; default the shipped one, as `makeTestDeps` has it. A test of a
+     * client with no pack passes `registryOf([])`, which is what `HARNESS_PACKS=''` loads.
+     */
+    packs?: PackRegistry;
   },
 ): Promise<HostFixture> {
   const surface = new MemorySurface({ capabilities: { streaming: opts.streaming ?? false } });
@@ -95,7 +100,10 @@ export async function hostFixture(
   const runtime = new ScriptedRuntime(opts.trajectory);
   const host: Host = {
     db,
-    config: testKernelConfig(db, { storageDir: mkdtempSync(path.join(tmpdir(), 'harness-host-')) }),
+    config: testKernelConfig(db, {
+      storageDir: mkdtempSync(path.join(tmpdir(), 'harness-host-')),
+      ...(opts.packs ? { packs: opts.packs } : {}),
+    }),
     client: 'test',
     identity,
     surfaces: surfacesOf([surface]),

@@ -198,8 +198,14 @@ export async function openPipeline(opts: OpenPipelineOptions): Promise<PipelineH
     throw new ConfigError('openPipeline needs either `packs` to load or an already-built `registry`');
   }
   const packs = opts.registry ?? (await loadPacks([...(opts.packs ?? [])]));
+  // A server may load no pack; a run that measures one may not. Said here, where the registry is
+  // in hand, rather than left to `all[0]` of an empty array a line later.
+  if (packs.all.length === 0) {
+    throw new ConfigError('an eval run measures a pack, and the registry it was given holds none');
+  }
   // `byName` throws a ConfigError naming the pack, which is the message the caller wants; for the
-  // default it cannot throw, because `registryOf` refuses an empty registry.
+  // default it cannot throw, because the pack it names is the first of a registry just checked to
+  // hold one.
   const measuredPack = packs.byName(opts.measured ?? packs.all[0].name);
   const tools = resolvePipelineTools(packs, measuredPack.name);
 

@@ -111,6 +111,14 @@ describe('newClient', () => {
     }
   });
 
+  it('scaffolds a client with no pack at all, which is what --pack is optional for', async () => {
+    // `HARNESS_PACKS=''`: a client that wants the kernel's own tools and no product area. The
+    // folder is the same folder; only the variable in its `.env.example` differs.
+    const out = await newClient({ name: 'internal-team', root });
+    expect(out.files).toContain('SOUL.md');
+    expect(out.dir).toBe(path.join(root, 'clients', 'internal-team'));
+  });
+
   it('refuses a pack that is not installed', async () => {
     await expect(newClient({ pack: 'dentistry', name: 'river-clinic', root })).rejects.toThrow(
       /no pack named "dentistry"/,

@@ -226,7 +226,9 @@ complete one; read it alongside this.
     say so in the commit; if it does not, the snapshot must not move.
 
 The first pack named in `HARNESS_PACKS` is the deployment's **primary** pack: it answers
-`deps.packs.manifest()`, `deps.packs.formsDir()` and the unclassified-document target.
+`deps.packs.manifest()`, `deps.packs.formsDir()` and the unclassified-document target. An empty
+`HARNESS_PACKS` loads no pack at all, and each of those three then throws naming what is missing;
+the kernel's own catalogue is what such a client serves.
 `documentKinds()`, `recordKinds()` and `attachmentKinds()` union them all. Nothing else depends
 on load order, because `registryOf` refuses two packs that claim the same document kind or
 declare the same record kind.
