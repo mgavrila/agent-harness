@@ -20,13 +20,18 @@ export const PrincipalShape = z.object({
    * than quarantined further down — but nothing downstream can tell a name that was always two
    * lines from a rule that was, so this is the one place that sees it whole and can say no.
    * `.trim()` runs before the bounds, so the stored value is what the bounds describe.
+   *
+   * Four categories, not two. `Cc` and `Cf` cover the control and formatting characters, but
+   * U+2028 and U+2029 are neither — they are `Zl` and `Zp`, the Unicode line and paragraph
+   * separators — and a renderer that honours them breaks the line just as `\n` would. Banning
+   * the two obvious spellings of a line break and not these would be a lock on one of two doors.
    */
   displayName: z
     .string()
     .trim()
     .min(1)
     .max(80)
-    .regex(/^[^\p{Cc}\p{Cf}]+$/u, 'a display name is one line: no line break and no control character'),
+    .regex(/^[^\p{Cc}\p{Cf}\p{Zl}\p{Zp}]+$/u, 'a display name is one line: no line break and no control character'),
   surfaces: z.record(z.string().regex(SURFACE_NAME_PATTERN), z.string().min(1)).default({}),
   attributes: z.record(z.string(), z.string()).default({}),
 });

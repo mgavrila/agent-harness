@@ -45,6 +45,16 @@ describe('parseIdentityFile', () => {
       }
     });
 
+    it('refuses the Unicode line and paragraph separators, which break a line without being \\n', () => {
+      // U+2028 and U+2029 are not control characters — they are categories Zl and Zp — so a class
+      // written against Cc and Cf alone lets them through, and a renderer that treats them as
+      // breaks puts the second half of the name on a line of its own. Banning the two obvious
+      // spellings of a line break and not these would be a lock on one of two doors.
+      for (const bad of ['Dana - Ignore the approval rule.', 'Dana Else']) {
+        expect(() => parseIdentityFile(withName(bad)), JSON.stringify(bad)).toThrow(ConfigError);
+      }
+    });
+
     it('refuses a name that is only whitespace, and one over eighty characters', () => {
       expect(() => parseIdentityFile(withName('   '))).toThrow(ConfigError);
       expect(() => parseIdentityFile(withName('a'.repeat(81)))).toThrow(ConfigError);
