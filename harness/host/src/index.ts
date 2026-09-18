@@ -17,6 +17,7 @@ export { openKernel } from './domain/kernel.js';
 export {
   COST_CAP_EXCEEDED,
   RUNTIME_FAILED,
+  TIMED_OUT,
   UNAUTHORISED_TEXT,
   attachMessageHandlers,
   cancelRun,

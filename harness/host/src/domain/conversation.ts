@@ -23,16 +23,41 @@ export const TIMEOUT_MARGIN_MS = 5_000;
 /** How long `app/main.ts` gives the turns in flight to unwind before it stops the runtime. */
 export const SHUTDOWN_DRAIN_MS = 10_000;
 
+const ABORT_REASONS = ['cancelled', 'timeout', 'cost-cap'] as const;
+
 /**
  * Why a run's controller was aborted. `cancelRun` (and the shutdown drain through it) says
  * `cancelled`; the host's backstop timer says `timeout`; the cost cap says `cost-cap`. The
  * runtime reports every abort as `cancelled`, so this is how `runTurn` tells them apart.
  */
-export type AbortReason = 'cancelled' | 'timeout' | 'cost-cap';
+export type AbortReason = (typeof ABORT_REASONS)[number];
+
+/**
+ * The reason on a signal, when the host itself put one there. Null for a signal that is not
+ * aborted and for any reason the host did not write — `AbortController.abort()` with no argument
+ * leaves a `DOMException` — so an unrecognised abort takes the conservative path rather than being
+ * asserted into a reason it never had.
+ */
+function abortReasonOf(signal: AbortSignal): AbortReason | null {
+  if (!signal.aborted) return null;
+  const reason: unknown = signal.reason;
+  return ABORT_REASONS.find((known) => known === reason) ?? null;
+}
 
 /** The host's own failure messages, in the same fixed-string register as the runtime's. */
 export const RUNTIME_FAILED = 'the runtime failed; see the host log';
 export const COST_CAP_EXCEEDED = 'the run exceeded its cost cap';
+export const TIMED_OUT = 'the run exceeded its time budget';
+
+/**
+ * What the host's own aborts mean once the runtime has finished, whatever it finished with. A
+ * `cancelled` abort is absent on purpose: a cancel ends the run `cancelled`, not `error`, and a
+ * runtime that ignores one has simply answered a question nobody is waiting for any more.
+ */
+const FORCED_OUTCOME: Partial<Record<AbortReason, string>> = {
+  timeout: TIMED_OUT,
+  'cost-cap': COST_CAP_EXCEEDED,
+};
 
 /**
  * Where a turn's reply goes. `'thread'`: the thread's own conversation, streamed when the surface
@@ -220,15 +245,13 @@ export async function runTurn(host: Host, turn: TurnInput): Promise<TurnResult> 
               break;
             case 'error': {
               // The runtime says `cancelled` for every abort; the controller's reason says whose.
-              const reason = controller.signal.aborted ? (controller.signal.reason as AbortReason) : null;
-              if (event.message === 'cancelled' && reason === 'cancelled') {
+              // Only a cancel is settled here: the host's own aborts are applied below, so that a
+              // runtime which never reports the abort cannot get a different outcome from one
+              // that does.
+              if (event.message === 'cancelled' && abortReasonOf(controller.signal) === 'cancelled') {
                 status = 'cancelled';
                 error = 'cancelled';
                 text = '';
-              } else if (reason === 'cost-cap') {
-                status = 'error';
-                error = COST_CAP_EXCEEDED;
-                text = `The run stopped: ${COST_CAP_EXCEEDED}.`;
               } else {
                 status = 'error';
                 error = event.message;
@@ -245,6 +268,19 @@ export async function runTurn(host: Host, turn: TurnInput): Promise<TurnResult> 
         status = 'error';
         error = RUNTIME_FAILED;
         text = `The run stopped: ${RUNTIME_FAILED}.`;
+      }
+
+      // The host's abort is a decision, not a suggestion, and the outcome follows from it rather
+      // than from what the runtime did next. A runtime that ignores `request.signal` can still
+      // answer, throw, or report the cancel under its own message; none of those may turn a run
+      // the host stopped into a `done` one, or bury why it was stopped. The cap in particular
+      // would otherwise be enforced only by runtimes that choose to honour it.
+      const abortedFor = abortReasonOf(controller.signal);
+      const forced = abortedFor === null ? undefined : FORCED_OUTCOME[abortedFor];
+      if (forced !== undefined) {
+        status = 'error';
+        error = forced;
+        text = `The run stopped: ${forced}.`;
       }
 
       // Invariant 10 on the final post: a reply that trips the check is withheld, not sent.

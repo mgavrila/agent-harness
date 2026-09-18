@@ -4,6 +4,8 @@ import type { RunEvent, RuntimeSession } from '@harness/runtime-api';
 import { approvals, auditLog, memoryEntries, messages, runs, threads } from '@harness/db';
 import { COORDINATOR, hostFixture, useTestDb, type HostFixture } from '../testing.js';
 import {
+  COST_CAP_EXCEEDED,
+  TIMED_OUT,
   TIMEOUT_MARGIN_MS,
   UNAUTHORISED_TEXT,
   attachMessageHandlers,
@@ -180,7 +182,8 @@ describe('a message on a surface', () => {
     const [run] = await db.select().from(runs);
     expect(run.status).toBe('error');
     expect(f.surface.texts).toHaveLength(1);
-    expect(f.surface.texts[0].text).toContain('cancelled');
+    // The backstop fired, so the human reads why the run stopped, not the runtime's "cancelled".
+    expect(f.surface.texts[0].text).toContain(TIMED_OUT);
   });
 
   it('closes the kernel and marks the run error, leaking neither the controller nor the run, when recording the reply fails', async () => {
@@ -215,7 +218,7 @@ describe('a message on a surface', () => {
     expect(f.surface.streams).toEqual([{ conversation: 'memory', text: 'Part one.', ended: true, replyTo: null }]);
     expect(f.surface.texts).toHaveLength(2);
     expect(f.surface.texts[0].text).toBe('Part one.');
-    expect(f.surface.texts[1].text).toContain('cancelled');
+    expect(f.surface.texts[1].text).toContain(TIMED_OUT);
     expect(f.surface.texts[1].replyTo).toEqual({ surface: 'memory', conversation: 'memory', id: 'm1' });
   });
 });
@@ -417,26 +420,27 @@ function spender(costUsd: number): RuntimeSession {
   };
 }
 
-describe('where a turn delivers', () => {
-  async function turnOn(f: HostFixture, deliver: TurnDelivery, extra: Partial<TurnInput> = {}) {
-    const thread = await findOrCreateThread(db, {
-      client: 'test',
-      surface: 'memory',
-      conversation: 'memory',
-      principalId: 'u-coordinator',
-    });
-    return runTurn(f.host, {
-      thread,
-      principal: COORDINATOR,
-      role: 'host',
-      text: 'go',
-      attachments: [],
-      replyTo: null,
-      deliver,
-      ...extra,
-    });
-  }
+/** One `runTurn` on a fresh thread, the way the scheduler will call it: no surface handler involved. */
+async function turnOn(f: HostFixture, deliver: TurnDelivery, extra: Partial<TurnInput> = {}) {
+  const thread = await findOrCreateThread(db, {
+    client: 'test',
+    surface: 'memory',
+    conversation: 'memory',
+    principalId: 'u-coordinator',
+  });
+  return runTurn(f.host, {
+    thread,
+    principal: COORDINATOR,
+    role: 'host',
+    text: 'go',
+    attachments: [],
+    replyTo: null,
+    deliver,
+    ...extra,
+  });
+}
 
+describe('where a turn delivers', () => {
   it("'none' records the reply and posts nothing, not even on a streaming surface", async () => {
     const f = await hostFixture(db, { trajectory: [{ say: 'Nothing to report.' }], streaming: true });
     const result = await turnOn(f, 'none');
@@ -497,5 +501,69 @@ describe('where a turn delivers', () => {
     };
     const result = await turnOn(f, 'none');
     expect(result).toMatchObject({ status: 'error', error: 'the run failed; see the host log' });
+  });
+});
+
+describe('an abort the runtime ignores', () => {
+  /**
+   * A runtime that never reads `request.signal`: it pauses, then yields these events whatever the
+   * host has decided in the meantime. What a runtime with a bug, or one that swallows the abort
+   * inside its own framework, looks like from here.
+   */
+  function deaf(events: readonly RunEvent[], pauseMs = 0): RuntimeSession {
+    return {
+      name: 'deaf',
+      run: () => ({
+        events: (async function* (): AsyncGenerator<RunEvent> {
+          for (const event of events) {
+            if (pauseMs > 0) await new Promise((r) => setTimeout(r, pauseMs));
+            yield event;
+          }
+        })(),
+      }),
+      stop: async () => {},
+    };
+  }
+
+  it('ends a run past its cost cap as an error, even when the runtime answers as if nothing happened', async () => {
+    const f = await hostFixture(db, { trajectory: [{ say: 'unused' }] });
+    f.host.runtime = deaf([
+      { type: 'usage', inputTokens: 1, outputTokens: 1, costUsd: 0.75 },
+      { type: 'done', text: 'Here is the answer anyway.' },
+    ]);
+    const result = await turnOn(f, 'none', { costCapUsd: 0.5 });
+    expect(result).toMatchObject({
+      status: 'error',
+      error: COST_CAP_EXCEEDED,
+      text: `The run stopped: ${COST_CAP_EXCEEDED}.`,
+    });
+    const [run] = await db.select().from(runs);
+    expect(run.status).toBe('error');
+    // The answer the runtime produced past the cap is not the thread's record of the turn.
+    expect((await db.select().from(messages)).map((m) => m.content)).not.toContain('Here is the answer anyway.');
+    expect(f.host.active.size).toBe(0);
+  });
+
+  it('ends a run the backstop timer aborted as an error, even when the runtime answers as if nothing happened', async () => {
+    const f = await hostFixture(db, {
+      trajectory: [{ say: 'unused' }],
+      budget: { timeoutMs: 20, timeoutMarginMs: 0 },
+    });
+    f.host.runtime = deaf([{ type: 'done', text: 'Here is the answer anyway.' }], 60);
+    const result = await turnOn(f, 'none');
+    expect(result).toMatchObject({ status: 'error', error: TIMED_OUT, text: `The run stopped: ${TIMED_OUT}.` });
+    const [run] = await db.select().from(runs);
+    expect(run.status).toBe('error');
+    expect(f.host.active.size).toBe(0);
+  });
+
+  it('leaves a run the runtime ended on its own alone, cap and timer unfired', async () => {
+    const f = await hostFixture(db, { trajectory: [{ say: 'unused' }] });
+    f.host.runtime = deaf([
+      { type: 'usage', inputTokens: 1, outputTokens: 1, costUsd: 0.25 },
+      { type: 'done', text: 'Inside every budget.' },
+    ]);
+    const result = await turnOn(f, 'none', { costCapUsd: 0.5 });
+    expect(result).toMatchObject({ status: 'done', error: null, text: 'Inside every budget.' });
   });
 });
