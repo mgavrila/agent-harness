@@ -97,6 +97,15 @@ describe('classifyMessage', () => {
       files: [{ name: 'w9.pdf', url: 'https://files.slack.com/w9' }],
     });
   });
+
+  it("drops a notice from Slack's own system user, even in a direct message", () => {
+    expect(
+      classifyMessage(
+        { type: 'message', channel: 'D1', channel_type: 'im', user: 'USLACKBOT', text: 'you were added', ts: '1.1' },
+        BOT,
+      ),
+    ).toBeNull();
+  });
 });
 
 describe('the thread rule', () => {
