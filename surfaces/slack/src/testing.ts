@@ -31,5 +31,8 @@ export function fakeSlackSession(
     defaultConversation: 'C0DEMO',
     ...over,
   };
-  return { session: createSlackSession({ api, events }, config), api, events };
+  // The thread memory lives in the real transport, which this wiring skips; a test that cares
+  // about the thread rule builds the memory itself, in `transport/bolt.test.ts`.
+  const transport = { api, events, notePostedIn: () => {} };
+  return { session: createSlackSession(transport, config), api, events };
 }

@@ -48,5 +48,13 @@ export function webClientApi(client: WebClient): SlackApi {
     views: {
       open: (args) => client.views.open({ trigger_id: args.trigger_id, view: args.view as never }),
     },
+    conversations: {
+      replies: async (args) => {
+        const res = await client.conversations.replies({ channel: args.channel, ts: args.ts, limit: args.limit });
+        // Narrowed to the two fields the thread rule reads, so nothing else a thread holds — the
+        // messages' own text above all — travels past this boundary.
+        return { messages: (res.messages ?? []).map((m) => ({ user: m.user, bot_id: m.bot_id })) };
+      },
+    },
   };
 }

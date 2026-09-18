@@ -31,6 +31,23 @@ export interface SlackEphemeralArgs {
   text: string;
 }
 
+export interface SlackRepliesArgs {
+  channel: string;
+  /** The thread's parent message, Slack's `thread_ts`. */
+  ts: string;
+  limit?: number;
+}
+
+/** The two fields of a threaded message that say whether the assistant wrote it. */
+export interface SlackThreadMessage {
+  user?: string;
+  bot_id?: string;
+}
+
+export interface SlackRepliesResult {
+  messages?: SlackThreadMessage[];
+}
+
 export interface SlackPostResult {
   ok?: boolean;
   ts?: string;
@@ -53,6 +70,9 @@ export interface SlackApi {
   };
   views: {
     open(args: SlackViewOpenArgs): Promise<{ ok?: boolean }>;
+  };
+  conversations: {
+    replies(args: SlackRepliesArgs): Promise<SlackRepliesResult>;
   };
 }
 
@@ -86,7 +106,10 @@ export interface SlackInbound {
   text: string;
   ts: string;
   threadTs: string | null;
-  /** True for a direct message or a message that mentions the bot. */
+  /**
+   * True for a direct message, for a message that mentions the bot, and for a reply inside a
+   * thread the assistant has already posted in.
+   */
   mentioned: boolean;
   /** `path` is relative to `<storageDir>/incoming`. */
   files: { name: string; path: string }[];
@@ -122,4 +145,10 @@ export interface SlackEvents {
 export interface SlackTransport {
   api: SlackApi;
   events: SlackEvents;
+  /**
+   * Record that the assistant has posted into `<channel>:<threadTs>`. The session calls this
+   * wherever it replies inside a thread, and the transport counts a later reply in that thread
+   * as addressed to the assistant even when nobody mentions it.
+   */
+  notePostedIn(channel: string, threadTs: string): void;
 }

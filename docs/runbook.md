@@ -559,9 +559,10 @@ row is retried until `maxAttempts` (default 3) and then marked `failed` for a hu
 ### Inbound messages
 
 A surface delivers a `MessageEvent` with `mentioned` set: true for a direct message and for a
-channel message that mentions the bot, false for every other channel message. The host's whole
-rule is to return without running when `mentioned` is false — a channel message is answered only
-when the bot is mentioned; a direct message always runs. Each turn still runs as the principal of
+channel message addressed to the assistant, false for every other channel message. The host's
+whole rule is to return without running when `mentioned` is false; what counts as addressed is the
+surface's own question, and Slack answers it with a mention or a reply inside one of the
+assistant's threads (see "Slack credentials" below). Each turn still runs as the principal of
 whoever wrote it, never the principal who started the thread.
 
 A file attached to the message has already been downloaded, by the surface, into
@@ -590,6 +591,12 @@ with the second process.
 Subscribe the app to the `message.channels`, `message.groups`, `message.im`, `message.mpim` and
 `app_mention` events, listed in `.env.example`. Invite the bot to `SLACK_APPROVALS_CHANNEL` and
 to every channel it should answer messages in.
+
+**A reply inside a thread the bot has already posted in needs no mention**: the thread is the
+conversation, so a follow-up written there is answered as it stands. Mentioning the bot is still
+what starts a new thread or gets an answer at a channel's top level, and a direct message needs no
+mention anywhere; the `channels:history`, `groups:history` and `im:history` scopes above are what
+let the bot recognise its own threads again after a restart.
 
 Compose's `host` service has no `env_file`: it gets an explicit `environment:` allowlist
 interpolated from `.env`, so nothing outside that list reaches the container. Who may decide an
@@ -720,8 +727,8 @@ in order, with the stack down.
    `1000:1000`), and the old approvals image is left dangling.
 7. **Expect these behaviour changes.** No watchdogs. An attachment is stored as
    `incoming/<ts>-<safe name>` rather than under its original name. A reply lands in a Slack
-   thread under the message that caused it, and a follow-up written in that thread, in a channel,
-   has to mention the bot again. Every chat turn now runs as the writer's own principal and level,
+   thread under the message that caused it, and a follow-up written in that thread is answered
+   without another mention. Every chat turn now runs as the writer's own principal and level,
    so a `member` who used to act through a service principal at `service` level is parked for
    `write.internal`. Only a `levels.member` cell in the client's `policy.yaml` lifts that:
    `decide` reads the level cell before the class default, and `mergePolicy` keeps the kernel's

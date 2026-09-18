@@ -35,19 +35,29 @@ never hold a Slack credential knows to leave both out of it.
 
 Bolt's `message` and `app_mention` listeners narrow every payload to a `SlackInbound` and hand it
 to the one handler `SurfaceSession.onMessage` registered. `mentioned` is true for a direct
-message and for a mention; a plain channel message is `mentioned: false` and the host still
-receives it but does not answer. A **channel** `message` that carries the mention token is dropped,
+message, for a mention, and for a reply inside a thread this assistant has posted in; a plain
+channel message is `mentioned: false` and the host still receives it but does not answer. A **channel** `message` that carries the mention token is dropped,
 because `app_mention` already delivered it — Slack sends both when the bot is a channel member. A
 direct message is kept whether or not it names the bot, with the token stripped: `app_mention` is
 documented for channels, and dropping a DM on the assumption it arrives twice would lose it
 outright. Messages with a `bot_id`, and any subtype but `file_share` (edits, deletions, joins),
 are dropped.
 
-**A follow-up inside a thread in a channel has to mention the bot again.** A reply is posted in a
-thread under the message that caused it, so the natural next message is written in that thread —
-where, in a channel, it arrives as an ordinary unmentioned `message` and the host stays silent.
-Mention the bot in the thread and it answers, in that same thread. A direct message needs no
-mention, in a thread or out of one.
+**A follow-up inside a thread the assistant has posted in needs no mention.** A reply is posted in
+a thread under the message that caused it, so the natural next message is written in that thread,
+and there the thread itself is the address: it arrives as an ordinary unmentioned `message` and is
+classified `mentioned: true`, text untouched. A mention is still what starts a new thread or gets
+an answer at a channel's top level, and a direct message needs no mention either way.
+
+`classifyMessage` stays pure and reports the thread a channel reply belongs to; `classifyInbound`
+decides. Behind it, `createThreadMemory` holds two bounded sets of `<channel>:<thread ts>` keys —
+the threads the assistant has posted in, which `session.ts` records through
+`SlackTransport.notePostedIn` whenever it replies in a thread or opens a stream in one, and the
+threads a lookup said are somebody else's. Both are empty after a restart, so a key in neither is
+resolved by reading the thread once (`conversations.replies`, 50 messages, covered by the
+`*:history` scopes already listed): a `bot_id` or the bot's own user id in it means the thread is
+the assistant's. Either answer is cached, so a busy thread costs one call; a failed lookup is
+cached as nothing, treated as not addressed, and logged once.
 
 A file attached to a message is downloaded by `transport/files.ts` with the bot token into
 `<storageDir>/incoming/<message ts, dot replaced by a dash>-<file name, sanitised to

@@ -6,6 +6,9 @@ import type {
   SlackInbound,
   SlackPostMessageArgs,
   SlackPostResult,
+  SlackRepliesArgs,
+  SlackRepliesResult,
+  SlackThreadMessage,
   SlackUpdateArgs,
   SlackUploadArgs,
   SlackView,
@@ -22,6 +25,10 @@ export class FakeSlack implements SlackApi {
   uploads: SlackUploadArgs[] = [];
   opened: SlackViewOpenArgs[] = [];
   ephemeral: SlackEphemeralArgs[] = [];
+  /** Every `conversations.replies` call that got past `failWith`, in order. */
+  repliesCalls: SlackRepliesArgs[] = [];
+  /** What `conversations.replies` answers, keyed `<channel>:<thread ts>`; missing is an empty thread. */
+  replies: Record<string, SlackThreadMessage[]> = {};
   /** When set, every call rejects with this message. */
   failWith?: string;
   /**
@@ -73,6 +80,14 @@ export class FakeSlack implements SlackApi {
       this.guard();
       this.opened.push(args);
       return { ok: true };
+    },
+  };
+
+  conversations = {
+    replies: async (args: SlackRepliesArgs): Promise<SlackRepliesResult> => {
+      this.guard();
+      this.repliesCalls.push(args);
+      return { messages: this.replies[`${args.channel}:${args.ts}`] ?? [] };
     },
   };
 }

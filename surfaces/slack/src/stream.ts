@@ -12,7 +12,8 @@ const NAME = 'slack';
 export const STREAM_EDIT_INTERVAL_MS = 1500;
 
 export interface StreamDeps {
-  api: SlackApi;
+  /** A streamed reply is two `chat` calls and nothing else, so that is all this asks for. */
+  api: Pick<SlackApi, 'chat'>;
   conversation: string;
   threadTs?: string;
   now?: () => number;
