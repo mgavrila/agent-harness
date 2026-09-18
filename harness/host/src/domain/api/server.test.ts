@@ -4,6 +4,7 @@ import { describe, expect, it, onTestFinished } from 'vitest';
 import { messages, threads } from '@harness/db';
 import type { Trajectory } from '@harness/runtime-api/testing';
 import { COORDINATOR, MEMBER, hostFixture, useTestDb, type HostFixture } from '../../testing.js';
+import { WITHHELD } from '../threads/repository.js';
 import { startRunApi } from './server.js';
 import { API_MAX_BODY_BYTES } from './types.js';
 
@@ -171,6 +172,19 @@ describe('the run API: a run', () => {
     expect(
       (await a.post(`/v1/runs/not-a-uuid/cancel?surface=memory&userId=${COORDINATOR.surfaces.memory}`)).status,
     ).toBe(404);
+  });
+
+  it('withholds a restricted value from the streamed text and from the outcome', async () => {
+    // Invariant 10: a restricted value never leaves the process, on a `RunEvent` or anywhere else.
+    // The delta is checked as it goes out and the outcome carries the reply already withheld, so
+    // the digits appear in neither frame.
+    const a = await api([{ say: 'the number is 123-45-6789' }]);
+    const all = await collect(await a.open(asCoordinator('what is it?')));
+    const text = all.find((f) => f.event === 'text');
+    expect(text!.data.delta).toBe(WITHHELD);
+    expect(all.at(-1)!.data.text).toBe(WITHHELD);
+    // And nowhere else in the stream either, whatever frame it might have ridden out on.
+    expect(JSON.stringify(all)).not.toContain('123-45-6789');
   });
 });
 

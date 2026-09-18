@@ -7,7 +7,11 @@ import type { SchedulerStatus } from '../playbooks/scheduler.js';
  * would be a deployment that had found a use this API was not built for.
  */
 
-/** One request body. Enforced while reading, so a caller cannot stream a gigabyte at the process. */
+/**
+ * One request body. Enforced while reading: past the cap nothing further is read off the socket
+ * and the connection is dropped once the refusal has been written, so a caller cannot stream a
+ * gigabyte at the process by ignoring the answer.
+ */
 export const API_MAX_BODY_BYTES = 1_048_576;
 /** One message. Longer than any human writes and shorter than a document, which belongs in `incoming/`. */
 export const API_MAX_TEXT_CHARS = 10_000;

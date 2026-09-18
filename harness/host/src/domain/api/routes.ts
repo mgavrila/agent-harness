@@ -30,9 +30,10 @@ const OpenRunShape = z
   })
   .strict();
 
-function json(res: ServerResponse, status: number, body: unknown): void {
+/** `then` runs once the body is on the wire: what the 413 path hangs the socket's teardown on. */
+function json(res: ServerResponse, status: number, body: unknown, then?: () => void): void {
   res.writeHead(status, { 'content-type': 'application/json' });
-  res.end(JSON.stringify(body));
+  res.end(JSON.stringify(body), then);
 }
 
 /**
@@ -52,31 +53,31 @@ export function bearerOk(header: string | undefined, token: string): boolean {
 /**
  * Read the body, refusing past the cap while it arrives rather than after.
  *
- * Over the cap the answer is settled at once and everything already held is dropped, so the
- * process never holds more than the cap however much a caller sends. The socket is left alone
- * rather than destroyed: a caller who is told nothing learns nothing, and the 413 above cannot be
- * written down a connection this function has already torn up. What remains of the body is
- * discarded by the server once the response has been written.
+ * Past the cap this stops consuming: the `data` handler comes off and the request is paused, so
+ * nothing further is read off the socket and what was already held is released. It does not
+ * destroy the connection — a 413 cannot be written down a socket this function has torn up, and a
+ * caller told nothing learns nothing. The caller answers, and hangs the teardown on the answer
+ * being flushed, so the read stays bounded either way.
  */
 export async function readBody(req: IncomingMessage): Promise<{ ok: true; text: string } | { ok: false }> {
   return new Promise((resolve) => {
     let chunks: Buffer[] = [];
     let size = 0;
-    let over = false;
-    req.on('data', (chunk: Buffer) => {
-      if (over) return;
+    const onData = (chunk: Buffer): void => {
       size += chunk.length;
       if (size > API_MAX_BODY_BYTES) {
-        over = true;
+        // Both, because removing the last `data` listener does not by itself stop a flowing stream.
+        req.off('data', onData);
+        req.pause();
         chunks = [];
         resolve({ ok: false });
         return;
       }
       chunks.push(chunk);
-    });
-    req.on('end', () => {
-      if (!over) resolve({ ok: true, text: Buffer.concat(chunks).toString('utf8') });
-    });
+    };
+    req.on('data', onData);
+    // Already settled if the cap tripped; a promise keeps its first answer.
+    req.on('end', () => resolve({ ok: true, text: Buffer.concat(chunks).toString('utf8') }));
     req.on('error', () => resolve({ ok: false }));
   });
 }
@@ -118,7 +119,13 @@ async function callerOf(host: Host, ref: { surface: string; userId: string }): P
  */
 async function openRunRoute(host: Host, req: IncomingMessage, res: ServerResponse): Promise<void> {
   const body = await readBody(req);
-  if (!body.ok) return json(res, 413, { error: `a request body may be at most ${API_MAX_BODY_BYTES} bytes` });
+  // The 413 goes out first and the socket is torn up after it, so the caller is told why and a
+  // caller that keeps sending anyway is cut off rather than read and discarded for as long as it
+  // likes. Destroying before the flush would answer nothing; not destroying at all would let one
+  // authenticated connection stream gigabytes past a cap that had already refused it.
+  if (!body.ok) {
+    return json(res, 413, { error: `a request body may be at most ${API_MAX_BODY_BYTES} bytes` }, () => req.destroy());
+  }
   let raw: unknown;
   try {
     raw = JSON.parse(body.text);
