@@ -27,6 +27,35 @@ export async function findOrCreateSource(
 }
 
 /**
+ * What is already stored for one file, or `undefined` when the folder has never held it.
+ *
+ * Separate from `upsertDocument` so a caller can decide whether a document changed *before* it
+ * embeds: the hash must not be written until the chunks that go with it are, or a document whose
+ * embedding failed would be reported unchanged for ever (the write half of that is one
+ * transaction in `syncKnowledge`).
+ */
+export async function findDocumentState(
+  db: Db,
+  sourceId: string,
+  documentPath: string,
+): Promise<{ id: string; sha256: string; deletedAt: Date | null } | undefined> {
+  const [row] = await db
+    .select({ id: knowledgeDocuments.id, sha256: knowledgeDocuments.sha256, deletedAt: knowledgeDocuments.deletedAt })
+    .from(knowledgeDocuments)
+    .where(and(eq(knowledgeDocuments.sourceId, sourceId), eq(knowledgeDocuments.path, documentPath)))
+    .limit(1);
+  return row;
+}
+
+/** True when what is stored for a file is this exact file, live. The one test that skips the embedder. */
+export function isUnchanged(
+  existing: { sha256: string; deletedAt: Date | null } | undefined,
+  doc: ParsedKnowledgeDocument,
+): boolean {
+  return existing !== undefined && existing.sha256 === doc.sha256 && existing.deletedAt === null;
+}
+
+/**
  * One file's row, keyed by `(source_id, path)`.
  *
  * The decision to re-embed is `sha256` alone, and that hash covers the frontmatter too — so
@@ -39,11 +68,7 @@ export async function upsertDocument(
   input: { client: string; sourceId: string; doc: ParsedKnowledgeDocument; now: Date },
 ): Promise<{ id: string; change: DocumentChange }> {
   const { client, sourceId, doc, now } = input;
-  const [existing] = await db
-    .select({ id: knowledgeDocuments.id, sha256: knowledgeDocuments.sha256, deletedAt: knowledgeDocuments.deletedAt })
-    .from(knowledgeDocuments)
-    .where(and(eq(knowledgeDocuments.sourceId, sourceId), eq(knowledgeDocuments.path, doc.path)))
-    .limit(1);
+  const existing = await findDocumentState(db, sourceId, doc.path);
 
   if (!existing) {
     const [row] = await db
@@ -63,7 +88,7 @@ export async function upsertDocument(
     return { id: row.id, change: 'added' };
   }
 
-  if (existing.sha256 === doc.sha256 && existing.deletedAt === null) {
+  if (isUnchanged(existing, doc)) {
     return { id: existing.id, change: 'unchanged' };
   }
 

@@ -78,7 +78,9 @@ export {
 export { CHUNK_OVERLAP, CHUNK_SIZE, chunkText } from './domain/knowledge/chunk.js';
 export { parseKnowledgeDocument, readKnowledgeFolder } from './domain/knowledge/document.js';
 export {
+  findDocumentState,
   findOrCreateSource,
+  isUnchanged,
   replaceChunks,
   tombstoneMissing,
   touchSource,

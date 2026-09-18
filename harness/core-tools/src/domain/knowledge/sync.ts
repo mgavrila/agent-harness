@@ -1,14 +1,54 @@
 import path from 'node:path';
+import { withTransaction } from '@harness/db';
+import { ToolError } from '@harness/shared';
 import { containsRestrictedPattern } from '../../shared/redaction/patterns.js';
 import type { ToolDeps } from '../tooling/types.js';
 import { chunkText } from './chunk.js';
 import { readKnowledgeFolder } from './document.js';
 import { embedTexts } from './embed.js';
-import { findOrCreateSource, replaceChunks, tombstoneMissing, touchSource, upsertDocument } from './repository.js';
-import { KNOWLEDGE_SOURCE_KIND, KNOWLEDGE_SOURCE_NAME, type KnowledgeSyncResult } from './types.js';
+import {
+  findDocumentState,
+  findOrCreateSource,
+  isUnchanged,
+  replaceChunks,
+  tombstoneMissing,
+  touchSource,
+  upsertDocument,
+} from './repository.js';
+import {
+  KNOWLEDGE_SOURCE_KIND,
+  KNOWLEDGE_SOURCE_NAME,
+  type KnowledgeSyncResult,
+  type ParsedKnowledgeDocument,
+} from './types.js';
 
 /** The one refusal a document can earn, in the register every other refusal uses: a category, never the text. */
 const RESTRICTED_REASON = 'it contains a restricted identifier; remove it from the document and sync again';
+
+/**
+ * Why a document did not make it past the embedder.
+ *
+ * A `ToolError` from the embed route is safe to repeat: `embed.ts` builds it from the route name
+ * and the HTTP status and never from the text that was sent, for this reason. Anything else is a
+ * bug rather than a gateway answer, so it is reported as a category and nothing more.
+ */
+function embedFailureReason(err: unknown): string {
+  const cause = err instanceof ToolError ? `: ${err.message}` : '';
+  return `it could not be embedded${cause}; the document was left as it was and the next sync will try it again`;
+}
+
+/**
+ * Everything about a document that must not reach a chunk row, a citation or a run event
+ * (invariant 10): its text, its title, and its path — which `knowledge_search` returns so the
+ * model can cite it, and which therefore travels exactly as far as the text does.
+ */
+function isRestricted(doc: ParsedKnowledgeDocument, chunks: readonly string[]): boolean {
+  return (
+    containsRestrictedPattern(doc.path) ||
+    containsRestrictedPattern(doc.title) ||
+    chunks.some((chunk) => containsRestrictedPattern(chunk))
+  );
+}
 
 /**
  * Walk the client's knowledge folder into the tables (spec 5.7).
@@ -18,14 +58,28 @@ const RESTRICTED_REASON = 'it contains a restricted identifier; remove it from t
  * the source. Nothing is deleted outright and no other client's rows are touched, because every
  * statement is scoped to this client's source row.
  *
- * Invariant 10 is enforced here, before anything is written: a document whose title or whose text
+ * Invariant 10 is enforced here, before anything is written: a document whose path, title or text
  * trips the restricted-pattern check contributes no chunks and its row is left exactly as it was —
  * a new one is not added, an old one is not updated and not tombstoned — and its path comes back
  * in `skipped`, so one bad file is a line in the result rather than a folder that will not sync.
  *
- * Each document's chunks are replaced in their own transaction rather than the whole folder in
- * one: a batch of embeddings is a network call, and a transaction held open across a network call
- * is a lock held for as long as the gateway feels like taking.
+ * The order of the three steps per document is the load-bearing part. The stored hash is **read**
+ * before the embed and **written** with the chunks it produced, in one transaction, never before:
+ * the hash is what decides whether a document is ever embedded again, so storing it while the
+ * chunks still belong to the previous generation would make the failure permanent and silent —
+ * the next sync would call the document unchanged, and a document whose `min_level` had just been
+ * raised would keep serving chunks at the old level, which is invariant 7 defeated in the unsafe
+ * direction. Written this way, a failed embed leaves the previous row and the previous chunks
+ * exactly where they were and the next sync retries the document.
+ *
+ * The embed itself is outside that transaction, and each document gets its own rather than the
+ * folder sharing one: a batch of embeddings is a network call, and a transaction held open across
+ * a network call is a lock held for as long as the gateway feels like taking.
+ *
+ * A gateway that refuses one document does not end the sync. The document is named in `skipped`
+ * with the reason, and every other document in the folder is synced — the same rule the restricted
+ * check follows, and the one that matters most when the refusal is a daily budget that would
+ * otherwise leave the whole folder on yesterday's content.
  */
 export async function syncKnowledge(deps: ToolDeps, opts: { dir?: string } = {}): Promise<KnowledgeSyncResult> {
   const dir = opts.dir ?? path.join(deps.clientDir, 'knowledge');
@@ -58,18 +112,35 @@ export async function syncKnowledge(deps: ToolDeps, opts: { dir?: string } = {})
   for (const doc of documents) {
     seen.push(doc.path);
     const chunks = chunkText(doc.body);
-    if (containsRestrictedPattern(doc.title) || chunks.some((chunk) => containsRestrictedPattern(chunk))) {
+    if (isRestricted(doc, chunks)) {
       result.skipped.push({ path: doc.path, reason: RESTRICTED_REASON });
       continue;
     }
-    const { id, change } = await upsertDocument(deps.db, { client: deps.client, sourceId, doc, now });
-    if (change === 'unchanged') {
+    if (isUnchanged(await findDocumentState(deps.db, sourceId, doc.path), doc)) {
       result.unchanged += 1;
       continue;
     }
-    const vectors = await embedTexts(deps, chunks);
-    result.chunks += await replaceChunks(deps.db, { documentId: id, client: deps.client, doc, chunks, vectors });
-    if (change === 'added') result.added += 1;
+
+    let vectors: number[][];
+    try {
+      vectors = await embedTexts(deps, chunks);
+    } catch (err) {
+      result.skipped.push({ path: doc.path, reason: embedFailureReason(err) });
+      continue;
+    }
+
+    // The row and its chunks together, so the hash and the chunks it describes are never two
+    // separately observable writes. `upsertDocument` reads the row again inside the transaction,
+    // which is what decides `added` against `updated`.
+    const outcome = await withTransaction(deps.db, async (tx) => {
+      const { id, change } = await upsertDocument(tx, { client: deps.client, sourceId, doc, now });
+      return {
+        change,
+        written: await replaceChunks(tx, { documentId: id, client: deps.client, doc, chunks, vectors }),
+      };
+    });
+    result.chunks += outcome.written;
+    if (outcome.change === 'added') result.added += 1;
     else result.updated += 1;
   }
 
