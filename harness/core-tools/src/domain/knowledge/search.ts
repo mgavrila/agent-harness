@@ -1,5 +1,5 @@
 import { and, desc, eq, isNotNull, isNull, lte, sql, type InferColumnsDataTypes, type SQL } from 'drizzle-orm';
-import { knowledgeChunks, knowledgeDocuments } from '@harness/db';
+import { knowledgeChunks, knowledgeDocuments, withTransaction } from '@harness/db';
 import type { ToolDeps } from '../tooling/types.js';
 import { embedTexts } from './embed.js';
 import { KNOWLEDGE_SEARCH_LIMIT, RRF_K, levelRank, type KnowledgeHit } from './types.js';
@@ -70,17 +70,31 @@ const candidateOf = (row: Row): KnowledgeCandidate => ({
  * distance threshold**: a nearest-neighbour search always answers with its `k` nearest rows,
  * however far away they are, which is why the tool tells the model that a hit is the nearest text
  * rather than an answer.
+ *
+ * The access filter reaches the plan as the index scan's `Filter`, which is to say the scan walks
+ * its nearest candidates and *then* discards the ones this caller may not read. Left alone that
+ * costs recall rather than safety — it fails closed, never open — but a member whose visible
+ * chunks are a small fraction of a large corpus would get fewer than `k` rows, or none, while
+ * visible chunks sat just outside the default `ef_search` of 40. `hnsw.iterative_scan` is
+ * pgvector 0.8's answer: the scan resumes and keeps walking until `k` rows survive the filter.
+ * `relaxed_order` rather than `strict_order` because the fusion reads a row's *position* and not
+ * its distance, so the slight reordering relaxed mode allows costs nothing here and is the faster
+ * of the two. It is `SET LOCAL` inside a transaction so the setting dies with the statement's
+ * transaction instead of leaning on whatever pooled connection this happened to run on.
  */
 async function vectorTopK(deps: ToolDeps, vector: readonly number[], k: number): Promise<KnowledgeCandidate[]> {
   const literal = sql`${`[${vector.join(',')}]`}::vector`;
-  const rows: Row[] = await deps.db
-    .select(COLUMNS)
-    .from(knowledgeChunks)
-    .innerJoin(knowledgeDocuments, eq(knowledgeDocuments.id, knowledgeChunks.documentId))
-    .where(and(visibleTo(deps), isNotNull(knowledgeChunks.embedding)))
-    .orderBy(sql`${knowledgeChunks.embedding} <=> ${literal}`)
-    .limit(k);
-  return rows.map(candidateOf);
+  return withTransaction(deps.db, async (tx) => {
+    await tx.execute(sql`SET LOCAL hnsw.iterative_scan = 'relaxed_order'`);
+    const rows: Row[] = await tx
+      .select(COLUMNS)
+      .from(knowledgeChunks)
+      .innerJoin(knowledgeDocuments, eq(knowledgeDocuments.id, knowledgeChunks.documentId))
+      .where(and(visibleTo(deps), isNotNull(knowledgeChunks.embedding)))
+      .orderBy(sql`${knowledgeChunks.embedding} <=> ${literal}`)
+      .limit(k);
+    return rows.map(candidateOf);
+  });
 }
 
 /**
