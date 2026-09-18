@@ -8,6 +8,15 @@ import type { EnvSource, Level, Logger } from '@harness/shared';
  * client, and nothing else.
  */
 
+/**
+ * The message a runtime puts on its `error` event when the loop itself broke — it threw, or the
+ * transport under it did — rather than when the run reached a verdict of its own such as a
+ * cancel, a timeout or a spent budget. The host retries a firing that ends this way exactly once,
+ * so the string is part of the contract and lives here, where the runtime that emits it and the
+ * host that reads it both import the one copy instead of keeping two that can drift apart.
+ */
+export const RUN_FAILED_MESSAGE = 'the run failed; see the host log';
+
 /** What the runtime learns as it runs. `error.message` is safe to post: never a payload value. */
 export type RunEvent =
   | { type: 'text'; delta: string }
@@ -74,7 +83,7 @@ export interface RunRequest {
   /** The persona text (SOUL.md). */
   persona: string;
   skills: readonly RunSkill[];
-  /** The curated memory snapshot, frozen for this run. Empty until Plan 9 renders one. */
+  /** The curated memory snapshot, rendered by the host before the run starts and frozen for it. Empty when the principal has none. */
   memory: string;
   /** An MCP client already connected to a core-tools server built on this run's `ToolDeps`. */
   tools: Client;

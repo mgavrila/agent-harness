@@ -100,6 +100,29 @@ const writeOk = defineTool({
   },
 });
 
+const scoped = defineTool({
+  name: 'scoped_write',
+  description: 'A write whose class follows its scope',
+  actionClass: 'write.self',
+  actionClassFor: ({ scope }) => (scope === 'client' ? 'write.internal' : 'write.self'),
+  input: z.object({ scope: z.enum(['principal', 'client']) }),
+  output: z.object({ scope: z.string() }),
+  handler: async ({ scope }) => ({ scope }),
+});
+
+/** A resolver that reads something and cannot: `memory_remove`'s looks its entry up in the database. */
+const brokenClass = defineTool({
+  name: 'broken_class',
+  description: 'A write whose class resolver fails',
+  actionClass: 'write.self',
+  actionClassFor: () => {
+    throw new Error('the entry could not be read');
+  },
+  input: z.object({}),
+  output: z.object({ ok: z.boolean() }),
+  handler: async () => ({ ok: true }),
+});
+
 const db = useTestDb();
 
 const allTools = [echo, sendExternal, pay, boom, boomToolError, writeThenThrow, writeOk];
@@ -295,5 +318,39 @@ describe('registerTools', () => {
     const res = await client.callTool({ name: 'send_external', arguments: { to: 'payer@example.com' } });
     expect(res.isError).toBe(true);
     expect(await db.select().from(approvals)).toHaveLength(0);
+  });
+});
+
+describe('a tool whose action class follows its arguments', () => {
+  it('decides, audits and parks on the resolved class, not the declared one', async () => {
+    const member = makeTestDeps(db, { principal: { ...TEST_PRINCIPAL, level: 'member' } });
+    const client = await connectTools('scoped', [scoped], member);
+
+    const own = await client.callTool({ name: 'scoped_write', arguments: { scope: 'principal' } });
+    expect(own.isError).toBeFalsy();
+    const shared = await client.callTool({ name: 'scoped_write', arguments: { scope: 'client' } });
+    expect((shared.structuredContent as { status: string }).status).toBe('pending');
+
+    const rows = await db.select().from(auditLog).where(eq(auditLog.tool, 'scoped_write'));
+    expect(rows.map((r) => [r.actionClass, r.decision]).sort()).toEqual([
+      ['write.internal', 'approval'],
+      ['write.self', 'auto'],
+    ]);
+    const [parked] = await db.select().from(approvals);
+    expect(parked.summary).toBe('scoped_write (write.internal) requested by u-test');
+  });
+
+  it('reports a resolver that fails as an internal error and audits it, rather than rejecting the call', async () => {
+    // The resolver runs before policy decides and may touch the database, so its failure has to
+    // reach the caller the way every other failure does — an envelope and an audit row — not as
+    // a rejected MCP callback with nothing written down. The row carries the *declared* class,
+    // because the resolved one is exactly what could not be worked out.
+    const client = await connectTools('broken', [brokenClass], makeTestDeps(db));
+    const res = await client.callTool({ name: 'broken_class', arguments: {} });
+    expect(res.isError).toBe(true);
+    expect(textOf(res)).toBe('Tool broken_class could not be processed (internal error; see audit log).');
+    const [row] = await db.select().from(auditLog).where(eq(auditLog.tool, 'broken_class'));
+    expect(row).toMatchObject({ actionClass: 'write.self', decision: 'error' });
+    expect(row.error).toContain('the entry could not be read');
   });
 });

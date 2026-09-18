@@ -15,12 +15,41 @@ export { readSkillCatalogue } from './domain/skills.js';
 export { readPersona } from './domain/persona.js';
 export { openKernel } from './domain/kernel.js';
 export {
+  COST_CAP_EXCEEDED,
+  RUNTIME_FAILED,
+  TIMED_OUT,
   UNAUTHORISED_TEXT,
   attachMessageHandlers,
   cancelRun,
   handleMessage,
   runTurn,
+  serialize,
+  type AbortReason,
+  type TurnDelivery,
   type TurnInput,
   type TurnResult,
 } from './domain/conversation.js';
 export { decisionDeps, resumeOnDecision, resumeText } from './domain/resume.js';
+export {
+  DELIVERIES,
+  PLAYBOOK_NAME_PATTERN,
+  PlaybookShape,
+  PlaybooksFileShape,
+  nextRunAfter,
+  parsePlaybooksFile,
+  readPlaybooksFile,
+  type PlaybookDefinition,
+} from './domain/playbooks/schema.js';
+export { claimDuePlaybooks, finishPlaybookRun, syncPlaybooks, type ClaimedRun } from './domain/playbooks/repository.js';
+export { preflightPlaybook, type PreflightResult } from './domain/playbooks/preflight.js';
+export { playbookNoticeKey, stagePlaybookNotice } from './domain/playbooks/notice.js';
+export {
+  MAX_ATTEMPTS,
+  SCHEDULER_TICK_MS,
+  executePlaybook,
+  playbookConversation,
+  startScheduler,
+  type SchedulerHandle,
+  type SchedulerStatus,
+  type TickResult,
+} from './domain/playbooks/scheduler.js';

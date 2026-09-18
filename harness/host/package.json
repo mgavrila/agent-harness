@@ -25,9 +25,11 @@
     "@harness/surface-memory": "workspace:*",
     "@harness/surface-slack": "workspace:*",
     "@modelcontextprotocol/client": "^2.0.0",
+    "croner": "10.0.1",
     "dotenv": "^17.4.2",
     "drizzle-orm": "^0.45.2",
-    "yaml": "^2.9.1"
+    "yaml": "^2.9.1",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@harness/pack-healthcare": "workspace:*",

@@ -157,4 +157,4 @@ One Slack app, in Socket Mode with Interactivity on, carries both chat and appro
 `docs/runbook.md`, "Slack credentials: one app", for the scopes and how to invite it.
 
 `docs/demo.md` is the five-minute script. `docs/runbook.md` covers the
-operational side: effects outbox, the host and its surfaces, playbooks, and storage.
+operational side: effects outbox, the host and its surfaces, memory, playbooks, and storage.

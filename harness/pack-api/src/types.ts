@@ -168,6 +168,14 @@ export interface ToolDef<I extends z.ZodObject, O extends z.ZodObject, TDeps = P
   name: string;
   description: string;
   actionClass: ActionClass;
+  /**
+   * The class of one particular call, when it depends on the arguments: a memory write is
+   * `write.self` in the caller's own scope and `write.internal` in the client's. Resolved before
+   * policy decides, recorded on the audit row, printed in a parked approval's summary and
+   * resolved again at replay. Omitted, every call is `actionClass`. May read through `deps`
+   * (the entry a removal names, say); it must not write.
+   */
+  actionClassFor?: (args: z.infer<I>, deps: TDeps) => ActionClass | Promise<ActionClass>;
   input: I;
   output: O;
   handler: (args: z.infer<I>, deps: TDeps) => Promise<z.infer<O>>;

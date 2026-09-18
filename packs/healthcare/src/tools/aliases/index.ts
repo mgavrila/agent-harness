@@ -25,8 +25,8 @@ import { providerAliases } from './providers.js';
  * `COMPAT_REPLACES`, the transitional list this file carried while it still lived in
  * core-tools, did name twelve; it was not a pack, so it had no `genericTools` gate to lean on.
  * Dropping the five here is the whole difference between the two lists, and the surface
- * snapshot proves it changes nothing for healthcare: 17 kernel tools - 7 replaced - 5 gated off
- * + 18 from this pack = the same 23 names as before.
+ * snapshot proves it costs healthcare nothing: as the catalogues stand today, 22 kernel tools
+ * - 7 replaced - 5 gated off + 18 from this pack = the 28 names the snapshot records.
  */
 export const HEALTHCARE_REPLACES = [
   'deadlines_compute',

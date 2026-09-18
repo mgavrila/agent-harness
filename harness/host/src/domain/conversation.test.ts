@@ -1,11 +1,34 @@
 import { describe, expect, it, vi } from 'vitest';
 import { eq } from 'drizzle-orm';
-import { approvals, auditLog, messages, runs, threads } from '@harness/db';
-import { COORDINATOR, hostFixture, useTestDb } from '../testing.js';
-import { TIMEOUT_MARGIN_MS, UNAUTHORISED_TEXT, attachMessageHandlers, cancelRun, drainActive } from './conversation.js';
+import type { RunEvent, RuntimeSession } from '@harness/runtime-api';
+import { approvals, auditLog, memoryEntries, messages, runs, threads } from '@harness/db';
+import { COORDINATOR, hostFixture, useTestDb, type HostFixture } from '../testing.js';
+import {
+  COST_CAP_EXCEEDED,
+  TIMED_OUT,
+  TIMEOUT_MARGIN_MS,
+  UNAUTHORISED_TEXT,
+  attachMessageHandlers,
+  cancelRun,
+  drainActive,
+  runTurn,
+  type TurnDelivery,
+  type TurnInput,
+} from './conversation.js';
+import { findOrCreateThread } from './threads/repository.js';
 import * as threadsRepository from './threads/repository.js';
+import { HISTORY_MAX_CHARS } from './threads/trim.js';
 
 const db = useTestDb();
+
+/** Poll until `ready` holds, so a test waits on the signal it means rather than on a fixed delay. */
+async function waitFor(ready: () => boolean, timeoutMs = 2_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!ready()) {
+    if (Date.now() > deadline) throw new Error('timed out waiting for the condition');
+    await new Promise((r) => setTimeout(r, 5));
+  }
+}
 
 describe('a message on a surface', () => {
   it('runs as the resolved principal, replies once on a surface without streaming, and records both turns', async () => {
@@ -159,7 +182,8 @@ describe('a message on a surface', () => {
     const [run] = await db.select().from(runs);
     expect(run.status).toBe('error');
     expect(f.surface.texts).toHaveLength(1);
-    expect(f.surface.texts[0].text).toContain('cancelled');
+    // The backstop fired, so the human reads why the run stopped, not the runtime's "cancelled".
+    expect(f.surface.texts[0].text).toContain(TIMED_OUT);
   });
 
   it('closes the kernel and marks the run error, leaking neither the controller nor the run, when recording the reply fails', async () => {
@@ -194,7 +218,7 @@ describe('a message on a surface', () => {
     expect(f.surface.streams).toEqual([{ conversation: 'memory', text: 'Part one.', ended: true, replyTo: null }]);
     expect(f.surface.texts).toHaveLength(2);
     expect(f.surface.texts[0].text).toBe('Part one.');
-    expect(f.surface.texts[1].text).toContain('cancelled');
+    expect(f.surface.texts[1].text).toContain(TIMED_OUT);
     expect(f.surface.texts[1].replyTo).toEqual({ surface: 'memory', conversation: 'memory', id: 'm1' });
   });
 });
@@ -259,11 +283,16 @@ describe('drainActive', () => {
       trajectory: (request) => (request.input.text === 'first' ? [{ sleep: 10_000 }] : [{ say: 'two' }]),
     });
     attachMessageHandlers(f.host);
-    const turns = [f.surface.say('U012', 'first'), f.surface.say('U012', 'second')];
-    await new Promise((r) => setTimeout(r, 50));
+    // Wait for the first turn's run to be in flight rather than for a fixed delay, and only then
+    // send the second: under full-suite load the run can take well over 50 ms to open, and both
+    // messages started together reach the thread's chain in whichever order their identity and
+    // thread lookups finish in, so "second" could be the turn that runs.
+    const first = f.surface.say('U012', 'first');
+    await waitFor(() => f.host.active.size === 1);
+    const second = f.surface.say('U012', 'second');
 
     await drainActive(f.host, 10_000);
-    await Promise.all(turns);
+    await Promise.all([first, second]);
 
     // The second turn was next on the thread's chain; starting it now would open a run against a
     // runtime and a pool the caller is about to stop.
@@ -294,8 +323,8 @@ describe('drainActive', () => {
 describe("the host's timeout backstop", () => {
   it("is armed a margin after the budget, so the runtime's own timeout is the one that fires", async () => {
     // The runtime arms `AbortSignal.timeout(budget.timeoutMs)`; the host's timer is the backstop
-    // for a runtime that ignores it, and firing first would replace "the run timed out" with
-    // "cancelled" for the human.
+    // for a runtime that ignores it, and firing first would replace the runtime's own account of
+    // what it was doing when it ran out with the host's `TIMED_OUT`.
     expect(TIMEOUT_MARGIN_MS).toBe(5_000);
     const f = await hostFixture(db, {
       trajectory: [{ sleep: 120 }, { say: 'in time' }],
@@ -306,5 +335,262 @@ describe("the host's timeout backstop", () => {
     const [run] = await db.select().from(runs);
     expect(run.status).toBe('done');
     expect(f.surface.texts.map((t) => t.text)).toEqual(['in time']);
+  });
+});
+
+describe('memory on the run', () => {
+  it('hands the runtime the caller snapshot, rendered once before the run and never mid-run', async () => {
+    const f = await hostFixture(db, {
+      trajectory: [{ tool: 'memory_add', args: { text: 'Prefers bullet points.' } }, { say: 'Noted.' }],
+    });
+    attachMessageHandlers(f.host);
+    await db.insert(memoryEntries).values({
+      client: 'test',
+      scope: 'client',
+      principalId: null,
+      text: 'The office closes at five.',
+      createdBy: 'u-coordinator',
+    });
+    await f.surface.say('U012', 'remember that I like bullets');
+    expect(f.runtime.requests[0].memory).toContain('- The office closes at five. (id: ');
+    // Added during the turn, so not in this turn's snapshot: frozen for the run.
+    expect(f.runtime.requests[0].memory).not.toContain('Prefers bullet points.');
+    await f.surface.say('U012', 'and now?');
+    expect(f.runtime.requests[1].memory).toContain('## Your notes (principal scope)\n- Prefers bullet points. (id: ');
+  });
+
+  it('keeps a remembered fact across a restart, and away from another principal (the exit criterion)', async () => {
+    const first = await hostFixture(db, {
+      trajectory: [{ tool: 'memory_add', args: { text: 'Prefers bullet points.' } }, { say: 'Noted.' }],
+    });
+    attachMessageHandlers(first.host);
+    await first.surface.say('U012', 'remember that I like bullets');
+    await first.close();
+    // A second host over the same database is a restart: nothing survives but the tables.
+    const second = await hostFixture(db, { trajectory: [{ say: 'hi' }] });
+    attachMessageHandlers(second.host);
+    await second.surface.say('U012', 'hello again');
+    expect(second.runtime.requests[0].memory).toContain('Prefers bullet points.');
+    await second.surface.say('U345', 'hello from someone else');
+    expect(second.runtime.requests[1].memory).toBe('');
+  });
+});
+
+describe('the history budget', () => {
+  it('is spent on history only, never on the message being run', async () => {
+    const f = await hostFixture(db, { trajectory: [{ say: 'ok' }] });
+    attachMessageHandlers(f.host);
+    await f.surface.say('U012', 'first');
+    await f.surface.say('U012', 'x'.repeat(HISTORY_MAX_CHARS + 1_000));
+    expect(f.runtime.requests[1].history).toEqual([
+      { role: 'user', content: 'first' },
+      { role: 'assistant', content: 'ok' },
+    ]);
+  });
+});
+
+describe('cancelRun after the backstop', () => {
+  it('refuses to cancel a run the host timeout already ended', async () => {
+    const f = await hostFixture(db, { trajectory: [{ say: 'unused' }] });
+    const controller = new AbortController();
+    controller.abort('timeout');
+    f.host.active.set('r1', { controller, done: Promise.resolve() });
+    expect(cancelRun(f.host, 'r1')).toBe(false);
+    // The turn's own `finally` removes the entry; a refused cancel leaves it alone.
+    expect(f.host.active.has('r1')).toBe(true);
+  });
+});
+
+/** A runtime that reports spend, then waits for the abort the host owes it, then ends cancelled. */
+function spender(costUsd: number): RuntimeSession {
+  return {
+    name: 'spender',
+    run: (request) => ({
+      events: (async function* (): AsyncGenerator<RunEvent> {
+        yield { type: 'usage', inputTokens: 1, outputTokens: 1, costUsd };
+        if (!request.signal.aborted) {
+          await new Promise<void>((resolve) =>
+            request.signal.addEventListener('abort', () => resolve(), { once: true }),
+          );
+        }
+        yield { type: 'error', message: 'cancelled' };
+      })(),
+    }),
+    stop: async () => {},
+  };
+}
+
+/** One `runTurn` on a fresh thread, the way the scheduler will call it: no surface handler involved. */
+async function turnOn(f: HostFixture, deliver: TurnDelivery, extra: Partial<TurnInput> = {}) {
+  const thread = await findOrCreateThread(db, {
+    client: 'test',
+    surface: 'memory',
+    conversation: 'memory',
+    principalId: 'u-coordinator',
+  });
+  return runTurn(f.host, {
+    thread,
+    principal: COORDINATOR,
+    role: 'host',
+    text: 'go',
+    attachments: [],
+    replyTo: null,
+    deliver,
+    ...extra,
+  });
+}
+
+describe('where a turn delivers', () => {
+  it("'none' records the reply and posts nothing, not even on a streaming surface", async () => {
+    const f = await hostFixture(db, { trajectory: [{ say: 'Nothing to report.' }], streaming: true });
+    const result = await turnOn(f, 'none');
+    expect(result).toMatchObject({ status: 'done', text: 'Nothing to report.', error: null });
+    expect(f.surface.texts).toEqual([]);
+    expect(f.surface.streams).toEqual([]);
+    expect((await db.select().from(messages)).map((m) => [m.role, m.content])).toEqual([
+      ['host', 'go'],
+      ['assistant', 'Nothing to report.'],
+    ]);
+  });
+
+  it('a named conversation gets one post and no stream', async () => {
+    const f = await hostFixture(db, { trajectory: [{ say: 'Two renewals.' }], streaming: true });
+    await turnOn(f, { surface: 'memory', conversation: 'C-ops' });
+    expect(f.surface.streams).toEqual([]);
+    expect(f.surface.texts).toEqual([{ conversation: 'C-ops', text: 'Two renewals.', replyTo: null }]);
+  });
+
+  it('a surface that is not loaded is refused before a run opens', async () => {
+    const f = await hostFixture(db, { trajectory: [{ say: 'never' }] });
+    await expect(turnOn(f, { surface: 'nowhere', conversation: 'x' })).rejects.toThrow('which is not loaded');
+    expect(await db.select().from(runs)).toHaveLength(0);
+  });
+
+  it('offers only the skills the turn names, and uses the turn timeout', async () => {
+    const f = await hostFixture(db, { trajectory: [{ say: 'ok' }] });
+    const one = { name: 'only-this', version: '2.0.0', description: 'one skill', dir: '/nonexistent' };
+    await turnOn(f, 'none', { skills: [one], timeoutMs: 45_000 });
+    expect(f.runtime.requests[0].skills).toEqual([one]);
+    expect(f.runtime.requests[0].budget.timeoutMs).toBe(45_000);
+  });
+
+  it('aborts a run whose reported spend passes the cost cap, and says so', async () => {
+    const f = await hostFixture(db, { trajectory: [{ say: 'unused' }] });
+    f.host.runtime = spender(0.75);
+    const result = await turnOn(f, 'none', { costCapUsd: 0.5 });
+    expect(result).toMatchObject({
+      status: 'error',
+      error: 'the run exceeded its cost cap',
+      text: 'The run stopped: the run exceeded its cost cap.',
+    });
+    const [run] = await db.select().from(runs);
+    expect(run.status).toBe('error');
+    expect(f.host.active.size).toBe(0);
+  });
+
+  it('reports the runtime fixed message on error, so a caller can decide on it', async () => {
+    const f = await hostFixture(db, { trajectory: [{ say: 'unused' }] });
+    f.host.runtime = {
+      name: 'broken',
+      run: () => ({
+        events: (async function* (): AsyncGenerator<RunEvent> {
+          yield { type: 'error', message: 'the run failed; see the host log' };
+        })(),
+      }),
+      stop: async () => {},
+    };
+    const result = await turnOn(f, 'none');
+    expect(result).toMatchObject({ status: 'error', error: 'the run failed; see the host log' });
+  });
+});
+
+describe('an abort the runtime ignores', () => {
+  /**
+   * A runtime that never reads `request.signal`: it pauses, then yields these events whatever the
+   * host has decided in the meantime. What a runtime with a bug, or one that swallows the abort
+   * inside its own framework, looks like from here.
+   */
+  function deaf(events: readonly RunEvent[], pauseMs = 0): RuntimeSession {
+    return {
+      name: 'deaf',
+      run: () => ({
+        events: (async function* (): AsyncGenerator<RunEvent> {
+          for (const event of events) {
+            if (pauseMs > 0) await new Promise((r) => setTimeout(r, pauseMs));
+            yield event;
+          }
+        })(),
+      }),
+      stop: async () => {},
+    };
+  }
+
+  it('ends a run past its cost cap as an error, even when the runtime answers as if nothing happened', async () => {
+    const f = await hostFixture(db, { trajectory: [{ say: 'unused' }] });
+    f.host.runtime = deaf([
+      { type: 'usage', inputTokens: 1, outputTokens: 1, costUsd: 0.75 },
+      { type: 'done', text: 'Here is the answer anyway.' },
+    ]);
+    const result = await turnOn(f, 'none', { costCapUsd: 0.5 });
+    expect(result).toMatchObject({
+      status: 'error',
+      error: COST_CAP_EXCEEDED,
+      text: `The run stopped: ${COST_CAP_EXCEEDED}.`,
+    });
+    const [run] = await db.select().from(runs);
+    expect(run.status).toBe('error');
+    // The answer the runtime produced past the cap is not the thread's record of the turn.
+    expect((await db.select().from(messages)).map((m) => m.content)).not.toContain('Here is the answer anyway.');
+    expect(f.host.active.size).toBe(0);
+  });
+
+  it('ends a run the backstop timer aborted as an error, even when the runtime answers as if nothing happened', async () => {
+    const f = await hostFixture(db, {
+      trajectory: [{ say: 'unused' }],
+      budget: { timeoutMs: 20, timeoutMarginMs: 0 },
+    });
+    f.host.runtime = deaf([{ type: 'done', text: 'Here is the answer anyway.' }], 60);
+    const result = await turnOn(f, 'none');
+    expect(result).toMatchObject({ status: 'error', error: TIMED_OUT, text: `The run stopped: ${TIMED_OUT}.` });
+    const [run] = await db.select().from(runs);
+    expect(run.status).toBe('error');
+    expect(f.host.active.size).toBe(0);
+  });
+
+  it('ends a run past its cost cap as an error, even when the runtime throws instead of answering', async () => {
+    const f = await hostFixture(db, { trajectory: [{ say: 'unused' }] });
+    f.host.runtime = {
+      name: 'deaf-and-broken',
+      run: () => ({
+        events: (async function* (): AsyncGenerator<RunEvent> {
+          yield { type: 'usage', inputTokens: 1, outputTokens: 1, costUsd: 0.75 };
+          // A runtime that surfaces the abort as a failure of its own rather than as an event.
+          // Without the forced outcome this reads as RUNTIME_FAILED and the cap is lost as the
+          // reason the run stopped.
+          throw new Error('the transport closed under the abort');
+        })(),
+      }),
+      stop: async () => {},
+    };
+    const result = await turnOn(f, 'none', { costCapUsd: 0.5 });
+    expect(result).toMatchObject({
+      status: 'error',
+      error: COST_CAP_EXCEEDED,
+      text: `The run stopped: ${COST_CAP_EXCEEDED}.`,
+    });
+    const [run] = await db.select().from(runs);
+    expect(run.status).toBe('error');
+    expect(run.endedAt).not.toBeNull();
+    expect(f.host.active.size).toBe(0);
+  });
+
+  it('leaves a run the runtime ended on its own alone, cap and timer unfired', async () => {
+    const f = await hostFixture(db, { trajectory: [{ say: 'unused' }] });
+    f.host.runtime = deaf([
+      { type: 'usage', inputTokens: 1, outputTokens: 1, costUsd: 0.25 },
+      { type: 'done', text: 'Inside every budget.' },
+    ]);
+    const result = await turnOn(f, 'none', { costCapUsd: 0.5 });
+    expect(result).toMatchObject({ status: 'done', error: null, text: 'Inside every budget.' });
   });
 });

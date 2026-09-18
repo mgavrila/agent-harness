@@ -21,11 +21,16 @@ principals:
     displayName: Credentialing coordinator
     surfaces:
       slack: U0456EFGH
-  # The host's own identity (HARNESS_HOST_PRINCIPAL): reconciliation, and playbooks from Plan 9.
+  # The host's own identity (HARNESS_HOST_PRINCIPAL): reconciliation runs as it.
   - id: svc-host
     kind: service
     level: service
     displayName: Harness host
+  # The identity the scheduled playbooks in playbooks.yaml run as (spec 3.3).
+  - id: svc-playbooks
+    kind: service
+    level: service
+    displayName: Nightly playbooks
   # The stdio server's default: the MCP inspector and the eval runner on an operator's machine.
   - id: svc-local
     kind: service

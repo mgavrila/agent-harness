@@ -31,11 +31,12 @@ the notify step, because you are already in the conversation.
    nothing else, on its own line:
 
    ```
-   {"wakeAgent": false}
+   Nothing to report.
    ```
 
-   That is the scheduler's silence gate. Do not write "all clear", do not
-   summarise what you checked, do not greet anyone.
+   Your reply in a scheduled run is recorded and never posted, so this line is
+   for the record only. Do not write "all clear" anywhere a human could see it,
+   do not summarise what you checked, do not greet anyone.
 3. Otherwise, get the lineage: call `audit_query` with
    `tool: "deadlines_upcoming"` and `limit: 1`, and keep the `id` of the first
    entry. That is the audit row of the query you just ran.
@@ -51,8 +52,8 @@ the notify step, because you are already in the conversation.
    speaks again.
 6. Call `harness_notify` with that `idempotency_key`, the message below as
    `text`, and `derived_from` set to `[<the audit id from step 3>]`.
-7. Produce no chat output of your own. Reply with `{"wakeAgent": false}` on its
-   own line; the message the practice sees is the one you staged.
+7. Produce no chat output of your own beyond the line `Nothing to report.`; the
+   message the practice sees is the one you staged.
 
 ## The message
 
@@ -87,5 +88,5 @@ it. No preamble, no closing sentence, no offer to help.
 ## Verification
 
 Before finishing: `harness_notify` returned `staged: true` (a `false` means
-this exact digest already went out and you should stay silent), or you replied
-with the silence gate. One of those two is always true.
+this exact digest already went out and you should stay silent), or your whole
+reply was the line `Nothing to report.`. One of those two is always true.

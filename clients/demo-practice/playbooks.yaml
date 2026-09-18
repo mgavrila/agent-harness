@@ -1,0 +1,25 @@
+# Scheduled work for demo-practice, read by the host at startup into the `playbooks` table
+# (spec 5.6). `name` is the key: edit an entry and restart the host; remove one and it is
+# disabled, not deleted, so its run history stays. A firing missed while the host was down is
+# not replayed — the next one is computed from the clock at startup.
+#
+#   schedule      cron, five or six fields, in `timezone` (an IANA name; default UTC)
+#   skill         a skill of a loaded pack; the run is offered that one skill
+#   principal     a service principal declared in identity.yaml; the run acts as it
+#   deliver       none (default): the run's own reply is recorded and posted nowhere —
+#                 the skill stages what the practice should see through harness_notify;
+#                 conversation: post the reply once to `surface`/`conversation`
+#   surface       a loaded surface (default: the primary one); also where a failure notice goes
+#   conversation  a conversation on that surface (default: its default conversation)
+#   cost_cap_usd  required; see "Playbooks" in docs/runbook.md for what it bounds today
+#   timeout_s     the run's budget timeout (default 600)
+playbooks:
+  - name: credentialing-expirations
+    schedule: '0 7 * * *'
+    timezone: America/New_York
+    skill: credentialing-expirations
+    prompt: Run the credentialing-expirations playbook for today. Follow the skill exactly, including its silence rule.
+    principal: svc-playbooks
+    deliver: none
+    cost_cap_usd: 0.5
+    timeout_s: 300

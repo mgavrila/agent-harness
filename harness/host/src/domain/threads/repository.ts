@@ -61,13 +61,13 @@ export async function appendMessage(
   return content;
 }
 
-/** The newest `limit` turns of a thread, oldest first: the shape `RunRequest.history` takes. */
+/** The newest `limit` turns of a thread, oldest first: the shape `RunRequest.history` takes. `seq` breaks a timestamp tie, so two rows one transaction wrote come back in the order they were written. */
 export async function recentHistory(db: Db, threadId: string, limit: number): Promise<RunHistoryTurn[]> {
   const rows = await db
     .select({ role: messages.role, content: messages.content })
     .from(messages)
     .where(eq(messages.threadId, threadId))
-    .orderBy(desc(messages.createdAt), desc(messages.id))
+    .orderBy(desc(messages.createdAt), desc(messages.seq))
     .limit(limit);
   return rows.reverse().map((r) => ({ role: r.role as RunHistoryTurn['role'], content: r.content }));
 }

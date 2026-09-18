@@ -27,6 +27,7 @@ console.log('  2. Create one Slack app (Socket Mode and Interactivity on; see do
 console.log("     paste its two tokens and the approvals channel id, and put the two humans'");
 console.log('     Slack member ids in identity.yaml.');
 console.log(`  3. Review clients/${values.name}/SOUL.md and policy.yaml before the first run.`);
+console.log('     playbooks.yaml runs as svc-playbooks; keep that principal in identity.yaml or change both.');
 console.log(
   `  4. COMPOSE_PROJECT_NAME=${values.name} docker compose --env-file .env -f harness/compose/docker-compose.yml --profile demo up -d --build,`,
 );

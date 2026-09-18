@@ -1,5 +1,6 @@
 import { and, eq, sql } from 'drizzle-orm';
 import { approvals, encrypt, type Db } from '@harness/db';
+import type { ActionClass } from '@harness/pack-api';
 import type { AnyToolDef, ToolDeps } from '../tooling/types.js';
 
 /**
@@ -16,6 +17,7 @@ export async function createOrReuseApproval(
   tool: AnyToolDef,
   args: unknown,
   argsHash: string,
+  actionClass: ActionClass = tool.actionClass,
 ): Promise<typeof approvals.$inferSelect> {
   const idempotencyKey = `${deps.client}:${tool.name}:${argsHash}`;
   const pendingRow = and(
@@ -30,7 +32,7 @@ export async function createOrReuseApproval(
     await db.update(approvals).set({ status: 'expired', decidedAt: deps.now() }).where(eq(approvals.id, existing.id));
   }
 
-  const summary = `${tool.name} (${tool.actionClass}) requested by ${deps.principal.id}`;
+  const summary = `${tool.name} (${actionClass}) requested by ${deps.principal.id}`;
   const expiresAt = new Date(deps.now().getTime() + deps.approvalTtlHours * 3600 * 1000);
   await db
     .insert(approvals)

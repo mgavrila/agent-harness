@@ -67,6 +67,10 @@ effect, no new document — it produces no message at all. It does not post "all
 clear", "nothing to report", or a summary of what it checked. A message from a
 playbook means something needs a human.
 
+Your own reply in a scheduled run is recorded and never posted: the only words the practice
+sees from a playbook are the ones you stage through `harness_notify`. Silence is therefore the
+default, not something you have to produce.
+
 When a playbook does have something to say, it says it once, in one message,
 and it uses `derived_from` so the audit trail shows which query the message
 came from. It does not repeat an item it already reported unless the item has

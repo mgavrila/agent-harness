@@ -6,7 +6,7 @@ import { newClient, titleCase } from './scaffold.js';
 
 let root: string;
 
-/** A repository skeleton with just the parts new-client reads: the four files plus .env.example. */
+/** A repository skeleton with just the parts new-client reads: the five files plus .env.example. */
 async function scaffold(): Promise<void> {
   await mkdir(path.join(root, 'packs', 'healthcare'), { recursive: true });
   const template = path.join(root, 'clients', 'demo-practice');
@@ -21,6 +21,10 @@ async function scaffold(): Promise<void> {
     'principals:\n  - id: svc-local\n    kind: service\n    level: service\n    displayName: Demo Practice\n',
   );
   await writeFile(path.join(template, 'routing.yaml'), 'routes:\n  chat: demo-practice-chat\n');
+  await writeFile(
+    path.join(template, 'playbooks.yaml'),
+    "playbooks:\n  - name: nightly\n    schedule: '0 7 * * *'\n    skill: demo-practice-skill\n    prompt: Run it for Demo Practice.\n    principal: svc-playbooks\n    cost_cap_usd: 0.5\n",
+  );
   await writeFile(path.join(template, '.env.example'), 'HARNESS_CLIENT=demo-practice\n');
 }
 
@@ -44,7 +48,7 @@ describe('newClient', () => {
     const out = await newClient({ pack: 'healthcare', name: 'river-clinic', root });
     expect(out.dir).toBe(path.join(root, 'clients', 'river-clinic'));
     expect(out.files.sort()).toEqual(
-      ['.env.example', 'SOUL.md', 'identity.yaml', 'policy.yaml', 'routing.yaml'].sort(),
+      ['.env.example', 'SOUL.md', 'identity.yaml', 'playbooks.yaml', 'policy.yaml', 'routing.yaml'].sort(),
     );
     expect(out.skipped).toEqual([]);
 
@@ -58,13 +62,19 @@ describe('newClient', () => {
 
     const env = await readFile(path.join(out.dir, '.env.example'), 'utf8');
     expect(env).toContain('HARNESS_CLIENT=river-clinic');
+
+    const playbooksFile = await readFile(path.join(out.dir, 'playbooks.yaml'), 'utf8');
+    expect(playbooksFile).toContain('Run it for River Clinic.');
+    expect(playbooksFile).not.toContain('demo-practice');
   });
 
   it('reports a template file that is missing as skipped', async () => {
     await rm(path.join(root, 'clients', 'demo-practice', 'routing.yaml'));
     const out = await newClient({ pack: 'healthcare', name: 'river-clinic', root });
     expect(out.skipped).toEqual(['routing.yaml']);
-    expect(out.files.sort()).toEqual(['.env.example', 'SOUL.md', 'identity.yaml', 'policy.yaml'].sort());
+    expect(out.files.sort()).toEqual(
+      ['.env.example', 'SOUL.md', 'identity.yaml', 'playbooks.yaml', 'policy.yaml'].sort(),
+    );
   });
 
   it('refuses a slug that is not a safe directory name', async () => {

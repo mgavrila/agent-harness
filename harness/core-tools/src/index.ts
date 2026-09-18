@@ -48,6 +48,28 @@ export { allTools, createCoreToolsServer, kernelTools, publishedTools } from './
 // --- Domains ------------------------------------------------------------------------------
 export { closeRun, openRun, type OpenRunInput, type RunStatus } from './domain/session/repository.js';
 export { createOrReuseApproval } from './domain/approvals/repository.js';
+export { assertNoInjection, findInjection, type InjectionCategory } from './domain/memory/injection.js';
+export {
+  MEMORY_CAPS,
+  MEMORY_ENTRY_MAX_CHARS,
+  MEMORY_SCOPES,
+  SESSION_SEARCH_LIMIT,
+  type MemoryEntry,
+  type MemoryScope,
+  type MemoryUsage,
+  type SessionHit,
+} from './domain/memory/types.js';
+export { addMemory, findMemoryEntry, listMemory, memoryUsage, removeMemory } from './domain/memory/repository.js';
+export { memorySnapshot, renderMemorySnapshot } from './domain/memory/render.js';
+export { searchSessions } from './domain/memory/search.js';
+export {
+  PLAYBOOK_RUN_STATUSES,
+  type PlaybookRow,
+  type PlaybookRunRow,
+  type PlaybookRunStatus,
+  type PlaybookSummary,
+} from './domain/playbooks/types.js';
+export { findPlaybook, listPlaybooks, requestPlaybookRun, summarisePlaybook } from './domain/playbooks/repository.js';
 export { executeApproval, type ExecutedApproval } from './domain/approvals/execute.js';
 export {
   URGENCY_BUCKETS,

@@ -3,7 +3,7 @@
  *
  *   pnpm new-client --pack healthcare --name river-clinic
  *
- * A client is content and configuration, never code: four files and an env example.
+ * A client is content and configuration, never code: five files and an env example.
  * This copies `clients/demo-practice` and rewrites the client slug and display name. It
  * deliberately does not touch `.env`, because secrets are the operator's job.
  */
@@ -21,10 +21,17 @@ const DEFAULT_TEMPLATE = 'demo-practice';
 const TEMPLATE_DISPLAY_NAME = 'Demo Practice';
 
 /**
- * Files copied from the template: the four files a client is made of, plus its env example.
+ * Files copied from the template: the five files a client is made of, plus its env example.
  * A template missing one of them simply does not get it and the result says so.
  */
-const TEMPLATE_FILES = ['SOUL.md', 'identity.yaml', 'policy.yaml', 'routing.yaml', '.env.example'] as const;
+const TEMPLATE_FILES = [
+  'SOUL.md',
+  'identity.yaml',
+  'policy.yaml',
+  'routing.yaml',
+  'playbooks.yaml',
+  '.env.example',
+] as const;
 
 export interface NewClientOptions {
   pack: string;

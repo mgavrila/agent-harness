@@ -7,6 +7,7 @@ import {
   boolean,
   real,
   integer,
+  bigint,
   jsonb,
   date,
   customType,
@@ -257,6 +258,12 @@ export const messages = pgTable(
   'messages',
   {
     id: uuid('id').primaryKey().defaultRandom(),
+    /**
+     * Insertion order. `created_at` is `now()` at statement time, so two rows written by one
+     * transaction — a resume notice and the answer to it — carry one timestamp; this is the
+     * tiebreak every reader orders by. Never written by the application.
+     */
+    seq: bigint('seq', { mode: 'number' }).generatedAlwaysAsIdentity(),
     threadId: uuid('thread_id')
       .notNull()
       .references(() => threads.id),
@@ -346,5 +353,97 @@ export const auditLog = pgTable(
   (t) => [
     index('audit_log_tool_created_idx').on(t.tool, t.createdAt),
     index('audit_log_client_created_idx').on(t.client, t.createdAt.desc()),
+  ],
+);
+
+/**
+ * Curated memory (spec 5.5). One row per remembered fact, in one of two scopes: `principal`
+ * (that principal's own notes, `principal_id` set) or `client` (shared by everyone in the
+ * deployment, `principal_id` null). Written only through `memory_add` after the injection scan
+ * and the restricted-pattern check; capped per scope in core-tools, not here. `thread_id` tags
+ * the conversation an entry was written from, when there was one.
+ */
+export const memoryEntries = pgTable(
+  'memory_entries',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    client: text('client').notNull(),
+    scope: text('scope').notNull(),
+    principalId: text('principal_id'),
+    text: text('text').notNull(),
+    createdBy: text('created_by').notNull(),
+    threadId: uuid('thread_id').references(() => threads.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('memory_entries_client_scope_principal_idx').on(t.client, t.scope, t.principalId)],
+);
+
+/**
+ * Scheduled work (spec 5.6): one row per entry of `clients/<name>/playbooks.yaml`, upserted by
+ * the host at startup and keyed by name. A playbook removed from the file is disabled, never
+ * deleted, so its run history stays attached. `next_run_at` is what the scheduler claims on and
+ * is recomputed from the file and the clock at every host start, so a firing missed while the
+ * host was down is not replayed.
+ */
+export const playbooks = pgTable(
+  'playbooks',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    client: text('client').notNull(),
+    name: text('name').notNull(),
+    /** A cron expression, five or six fields. */
+    schedule: text('schedule').notNull(),
+    timezone: text('timezone').notNull().default('UTC'),
+    skill: text('skill').notNull(),
+    prompt: text('prompt').notNull(),
+    /** The service principal the run acts as. */
+    principalId: text('principal_id').notNull(),
+    /** Where a notice or a delivered reply goes; null means the primary surface's default conversation. */
+    surface: text('surface'),
+    conversation: text('conversation'),
+    /** `none`: the reply is recorded and posted nowhere. `conversation`: posted once to `surface`/`conversation`. */
+    deliver: text('deliver').notNull().default('none'),
+    costCapUsd: real('cost_cap_usd').notNull(),
+    timeoutS: integer('timeout_s').notNull().default(600),
+    enabled: boolean('enabled').notNull().default(true),
+    nextRunAt: timestamp('next_run_at', { withTimezone: true }),
+    lastRunAt: timestamp('last_run_at', { withTimezone: true }),
+    lastStatus: text('last_status'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('playbooks_client_name_uq').on(t.client, t.name),
+    index('playbooks_due_idx').on(t.client, t.enabled, t.nextRunAt),
+  ],
+);
+
+/**
+ * One firing of a playbook: `requested` (asked for by `playbooks_run_now`, waiting for the next
+ * tick), `running`, then `done`, `failed` or `preflight_failed`. `run_id` is the last `runs` row
+ * the firing opened (a retry opens a second one); `attempts` counts them; `error` is a fixed,
+ * safe sentence, never model or payload text.
+ */
+export const playbookRuns = pgTable(
+  'playbook_runs',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    playbookId: uuid('playbook_id')
+      .notNull()
+      .references(() => playbooks.id),
+    runId: uuid('run_id').references(() => runs.id),
+    scheduledAt: timestamp('scheduled_at', { withTimezone: true }).notNull(),
+    status: text('status').notNull().default('requested'),
+    attempts: integer('attempts').notNull().default(0),
+    /** The principal who asked for an off-schedule run; null when the scheduler fired it. */
+    requestedBy: text('requested_by'),
+    startedAt: timestamp('started_at', { withTimezone: true }),
+    endedAt: timestamp('ended_at', { withTimezone: true }),
+    error: text('error'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('playbook_runs_playbook_scheduled_idx').on(t.playbookId, t.scheduledAt),
+    index('playbook_runs_status_idx').on(t.status),
   ],
 );

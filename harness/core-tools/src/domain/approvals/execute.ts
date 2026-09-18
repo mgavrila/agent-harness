@@ -43,6 +43,7 @@ export async function executeApproval(deps: ToolDeps, approvalId: string): Promi
   };
   const target = deps.tools.get(parsed.tool);
   if (!target) throw new ToolError(`approval ${approvalId} references unknown tool ${parsed.tool}`);
+  const args = target.input.parse(parsed.args) as Record<string, unknown>;
   // Policy is re-read at replay time: an approval granted before the class was blocked must not
   // become a way around the current policy. It is re-checked at the level the action was parked
   // under; a row parked before that level was recorded falls back to the replaying principal's
@@ -51,11 +52,24 @@ export async function executeApproval(deps: ToolDeps, approvalId: string): Promi
   // blocked on that fallback, while a policy tightened after the row was parked still applies.
   // Throwing here rolls the `executed` transition back to `approved`.
   const parkedLevel = parsed.level && (LEVELS as readonly string[]).includes(parsed.level) ? parsed.level : undefined;
-  if (decide(target.actionClass, parkedLevel ?? deps.principal.level, deps.policy) === 'blocked') {
+  // Resolved again here, not read off the row: the class of a call is a function of its
+  // arguments and the policy is re-read at replay, so both halves are re-derived together.
+  const actionClass = target.actionClassFor ? await target.actionClassFor(args, deps) : target.actionClass;
+  if (decide(actionClass, parkedLevel ?? deps.principal.level, deps.policy) === 'blocked') {
     throw new ToolError(`approval ${approvalId} cannot execute: ${target.name} is now blocked by policy`);
   }
+  // A `write.self` write belongs to whoever asked for it. The replay runs on the *approver's*
+  // deps — Plan 8 opens the run as whoever decided — and a `write.self` handler takes its owner
+  // from `deps.principal.id`, so replaying someone else's would file their note in the approver's
+  // own scope: wrong owner, invisible to the requester, and silent. The approver cannot stand in
+  // for them, so the replay is refused rather than impersonating the requester. Throwing rolls
+  // the `executed` transition back to `approved`, leaving the approval for the requester to run.
+  if (actionClass === 'write.self' && row.requestedBy !== deps.principal.id) {
+    throw new ToolError(
+      `approval ${approvalId} cannot execute: a write to a principal's own memory can only be approved by the principal who asked for it`,
+    );
+  }
 
-  const args = target.input.parse(parsed.args) as Record<string, unknown>;
   // The replayed tool runs on this handler's deps, so it shares the open
   // transaction and the session context.
   const result: unknown = await withCurrentTool(deps.context, target.name, () => target.handler(args, deps));
@@ -65,7 +79,7 @@ export async function executeApproval(deps: ToolDeps, approvalId: string): Promi
     where: and(eq(auditLog.approvalId, row.id), eq(auditLog.decision, 'approval')),
   });
   await writeAudit(deps.db, {
-    ...auditBaseFor(deps, target, hashArgs(args), parking?.derivedFrom ?? []),
+    ...auditBaseFor(deps, target, hashArgs(args), parking?.derivedFrom ?? [], actionClass),
     decision: 'auto',
     approvalId: row.id,
     recordIds: target.recordIds?.(args, result) ?? [],

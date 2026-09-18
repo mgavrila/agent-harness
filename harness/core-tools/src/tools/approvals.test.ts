@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import * as z from 'zod/v4';
 import { eq } from 'drizzle-orm';
-import { approvals, auditLog, encrypt, records, threads } from '@harness/db';
+import { approvals, auditLog, encrypt, memoryEntries, records, threads } from '@harness/db';
 import { ToolError } from '@harness/shared';
 import { defineTool } from '../domain/tooling/registry.js';
 import {
@@ -16,6 +16,7 @@ import {
 } from '../testing.js';
 import { DEFAULT_POLICY, mergePolicy } from '../domain/tooling/policy.js';
 import { approvalTools } from './approvals.js';
+import { memoryTools } from './memory.js';
 
 const db = useTestDb();
 const deps = makeTestDeps(db);
@@ -223,6 +224,57 @@ describe('approvals_execute', () => {
     expect(textOf(res)).toContain('blocked by policy');
     const [after] = await db.select().from(approvals).where(eq(approvals.id, row.id));
     expect(after.status).toBe('approved');
+  });
+});
+
+describe('replaying a write to a principal own scope', () => {
+  // `write.self` is auto at every level by default, so nothing parks it; a deployment whose
+  // policy.yaml asks a human to sign off on memory writes is what reaches this path.
+  const parksSelfWrites = mergePolicy(DEFAULT_POLICY, { classes: { 'write.self': 'approval' } });
+  const selfWriteTools = [...memoryTools, ...approvalTools];
+
+  /** Park a principal-scope `memory_add` as `u-test` and approve the row it produced. */
+  async function parkSelfWrite(): Promise<string> {
+    const requester = makeTestDeps(db, { policy: parksSelfWrites, encryptionKey: deps.encryptionKey });
+    const client = await connectTools('approvals-test-self-write', selfWriteTools, requester);
+    const res = await client.callTool({ name: 'memory_add', arguments: { text: 'Prefers bullet points.' } });
+    const id = approvalIdOf(res);
+    await db
+      .update(approvals)
+      .set({ status: 'approved', decidedBy: 'U1', decidedAt: deps.now() })
+      .where(eq(approvals.id, id));
+    return id;
+  }
+
+  it('refuses the replay for anyone but the principal who asked, leaving the approval unspent', async () => {
+    const id = await parkSelfWrite();
+    // The replay runs on the approver's deps, and a `write.self` handler takes its owner from
+    // them — so without the guard this would file the requester's note in the approver's memory.
+    const approver = makeTestDeps(db, {
+      principal: { ...TEST_PRINCIPAL, id: 'u-lead', level: 'lead', displayName: 'Lead' },
+      policy: parksSelfWrites,
+      encryptionKey: deps.encryptionKey,
+    });
+    const client = await connectTools('approvals-test-self-write-other', selfWriteTools, approver);
+    const res = await client.callTool({ name: 'approvals_execute', arguments: { approval_id: id } });
+    expect(res.isError).toBe(true);
+    expect(textOf(res)).toContain('can only be approved by the principal who asked for it');
+    expect(await db.select().from(memoryEntries)).toHaveLength(0);
+    const [row] = await db.select().from(approvals).where(eq(approvals.id, id));
+    expect(row.status).toBe('approved');
+    expect(row.executedAt).toBeNull();
+  });
+
+  it('replays it for the principal who asked, into their own scope', async () => {
+    const id = await parkSelfWrite();
+    const requester = makeTestDeps(db, { policy: parksSelfWrites, encryptionKey: deps.encryptionKey });
+    const client = await connectTools('approvals-test-self-write-owner', selfWriteTools, requester);
+    const res = await client.callTool({ name: 'approvals_execute', arguments: { approval_id: id } });
+    expect(resultOf<{ status: string }>(res).status).toBe('executed');
+    const [entry] = await db.select().from(memoryEntries);
+    expect(entry).toMatchObject({ scope: 'principal', principalId: 'u-test', createdBy: 'u-test' });
+    const [row] = await db.select().from(approvals).where(eq(approvals.id, id));
+    expect(row.status).toBe('executed');
   });
 });
 
