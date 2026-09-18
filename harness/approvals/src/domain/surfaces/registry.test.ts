@@ -37,6 +37,25 @@ describe('loadSurfaces', () => {
       /both named "memory"/,
     );
   });
+
+  it('loads the http surface by name', async () => {
+    const surfaces = await loadSurfaces(['@harness/surface-http'], deps);
+    expect(surfaces.all).toHaveLength(1);
+    expect(surfaces.primary.name).toBe('http');
+  });
+
+  it('loads slack and http together, in the documented order, with slack primary', async () => {
+    // Slack's `connect` only builds a transport from env; it opens no socket until `start()`,
+    // which loadSurfaces never calls, so a fake token is enough to prove the two load together.
+    const slackDeps = {
+      ...deps,
+      env: { SLACK_BOT_TOKEN: 'xoxb-test', SLACK_APP_TOKEN: 'xapp-test', SLACK_APPROVALS_CHANNEL: 'C0TEST' },
+    };
+    const surfaces = await loadSurfaces(['@harness/surface-slack', '@harness/surface-http'], slackDeps);
+    expect(surfaces.all).toHaveLength(2);
+    expect(surfaces.primary.name).toBe('slack');
+    expect(surfaces.find('http')).toBeDefined();
+  });
 });
 
 describe('surfacesOf', () => {

@@ -17,6 +17,7 @@
     "@harness/identity-api": "workspace:*",
     "@harness/shared": "workspace:*",
     "@harness/surface-api": "workspace:*",
+    "@harness/surface-http": "workspace:*",
     "@harness/surface-slack": "workspace:*",
     "@modelcontextprotocol/client": "^2.0.0",
     "drizzle-orm": "^0.45.2",

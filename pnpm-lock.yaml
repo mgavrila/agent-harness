@@ -111,6 +111,9 @@ importers:
       '@harness/surface-api':
         specifier: workspace:*
         version: link:../surface-api
+      '@harness/surface-http':
+        specifier: workspace:*
+        version: link:../../surfaces/http
       '@harness/surface-slack':
         specifier: workspace:*
         version: link:../../surfaces/slack
