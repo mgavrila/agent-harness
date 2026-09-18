@@ -7,6 +7,7 @@ host needs, all behind `@harness/surface-api`.
 src/config.ts            the three variables this adapter reads, from deps.env only
 src/session.ts           SurfaceSession over the transport: post, update, reply, upload, open a form
 src/stream.ts            startStream: a reply as one message edited at a bounded rate
+src/format.ts            toMrkdwn: the model's Markdown as Slack mrkdwn, escaped for the API
 src/render/blocks.ts     a Card as Block Kit. Byte-pinned against what the app produced before Plan 6
 src/render/modal.ts      a Form as a Slack modal view, and reading a submission back
 src/transport/           the SlackApi slice, the WebClient adapter, the Bolt listener, the file
@@ -108,6 +109,28 @@ team the adapter cannot always supply, and it is new enough that this repository
 exercise it against real Slack from a test. `startStream`'s `opts.recipient` carries the user a
 reply is for, so an adapter that adopts the native API later has it in hand already. Edits are the
 well-trodden path in the meantime.
+
+## Outgoing text
+
+`toMrkdwn` (`src/format.ts`) is what every reply passes through on its way out, because Slack does
+not parse Markdown: `**bold**`, `# heading` and `[text](url)` reach a channel as literal
+characters. It escapes `&`, `<` and `>` first — Slack's `mrkdwn` contract asks a caller to — and
+holds the Slack syntax already in the text (`<@U…>`, `<#C…|…>`, `<!here>`, `<url|label>`) and a
+line-leading `>` out of that pass, so escaping never corrupts a mention or the link syntax the
+function itself emits afterwards. Code spans, fenced blocks and GFM tables (rendered as a fence,
+since `mrkdwn` has no table of its own) are held aside and put back verbatim; a link's URL and a
+bare URL are held too, before any emphasis runs, so an `_` or a `*` in a destination is never read
+as a marker and never rewritten.
+
+Emphasis is one left-to-right scan rather than one regex, so a bold span can hold an italic one
+(`**bold *and emphatic*, too**`) and nothing the scan has converted is re-read as another marker.
+Two rules are narrower than Markdown's, both because of Slack: a lone `*…*` is italic only around a
+single word, inside a `**…**` span, or around one (`*italic **and strong** too*`), since a plain
+`*two words*` is exactly what this function emits for bold and re-reading it would flip a bold
+phrase to italic; and `__…__` is bold only between
+non-word characters and around more than one word, so `__init__`, `__main__` and `MY__VAR__NAME`
+keep their underscores. Everything but the escaping round-trips, and the one asterisk-wrapped
+single word that does not is pinned by a test.
 
 ## Capabilities
 
