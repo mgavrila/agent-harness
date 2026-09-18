@@ -1,5 +1,5 @@
 import { and, desc, eq, isNotNull, isNull, lte, sql, type InferColumnsDataTypes, type SQL } from 'drizzle-orm';
-import { knowledgeChunks, knowledgeDocuments, withTransaction } from '@harness/db';
+import { knowledgeChunks, knowledgeDocuments, withTransaction, type Db } from '@harness/db';
 import type { ToolDeps } from '../tooling/types.js';
 import { embedTexts } from './embed.js';
 import { KNOWLEDGE_SEARCH_LIMIT, RRF_K, levelRank, type KnowledgeHit } from './types.js';
@@ -63,6 +63,29 @@ const candidateOf = (row: Row): KnowledgeCandidate => ({
 });
 
 /**
+ * One ranking's `k` best chunks.
+ *
+ * The two rankings below read the same columns off the same two tables through the same access
+ * filter and differ only in what they match on and what they order by, so that is all either of
+ * them says. `db` is a transaction handle for the vector ranking, which needs a `SET LOCAL`, and
+ * the pool for the lexical one, which does not.
+ */
+async function rankedChunks(
+  db: Db,
+  deps: ToolDeps,
+  opts: { match: SQL; order: SQL; k: number },
+): Promise<KnowledgeCandidate[]> {
+  const rows: Row[] = await db
+    .select(COLUMNS)
+    .from(knowledgeChunks)
+    .innerJoin(knowledgeDocuments, eq(knowledgeDocuments.id, knowledgeChunks.documentId))
+    .where(and(visibleTo(deps), opts.match))
+    .orderBy(opts.order)
+    .limit(opts.k);
+  return rows.map(candidateOf);
+}
+
+/**
  * The `k` nearest chunks by cosine distance.
  *
  * `<=>` is pgvector's cosine-distance operator and is what the HNSW index on `embedding` was
@@ -86,14 +109,11 @@ async function vectorTopK(deps: ToolDeps, vector: readonly number[], k: number):
   const literal = sql`${`[${vector.join(',')}]`}::vector`;
   return withTransaction(deps.db, async (tx) => {
     await tx.execute(sql`SET LOCAL hnsw.iterative_scan = 'relaxed_order'`);
-    const rows: Row[] = await tx
-      .select(COLUMNS)
-      .from(knowledgeChunks)
-      .innerJoin(knowledgeDocuments, eq(knowledgeDocuments.id, knowledgeChunks.documentId))
-      .where(and(visibleTo(deps), isNotNull(knowledgeChunks.embedding)))
-      .orderBy(sql`${knowledgeChunks.embedding} <=> ${literal}`)
-      .limit(k);
-    return rows.map(candidateOf);
+    return rankedChunks(tx, deps, {
+      match: isNotNull(knowledgeChunks.embedding),
+      order: sql`${knowledgeChunks.embedding} <=> ${literal}`,
+      k,
+    });
   });
 }
 
@@ -107,14 +127,11 @@ async function vectorTopK(deps: ToolDeps, vector: readonly number[], k: number):
  */
 async function lexicalTopK(deps: ToolDeps, query: string, k: number): Promise<KnowledgeCandidate[]> {
   const tsquery = sql`plainto_tsquery('english', ${query})`;
-  const rows: Row[] = await deps.db
-    .select(COLUMNS)
-    .from(knowledgeChunks)
-    .innerJoin(knowledgeDocuments, eq(knowledgeDocuments.id, knowledgeChunks.documentId))
-    .where(and(visibleTo(deps), sql`${knowledgeChunks.tsv} @@ ${tsquery}`))
-    .orderBy(desc(sql`ts_rank_cd(${knowledgeChunks.tsv}, ${tsquery})`))
-    .limit(k);
-  return rows.map(candidateOf);
+  return rankedChunks(deps.db, deps, {
+    match: sql`${knowledgeChunks.tsv} @@ ${tsquery}`,
+    order: desc(sql`ts_rank_cd(${knowledgeChunks.tsv}, ${tsquery})`),
+    k,
+  });
 }
 
 /**
