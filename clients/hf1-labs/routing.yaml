@@ -7,7 +7,7 @@
 routes:
   # Interactive Slack turns.
   chat:
-    model: gemini/gemini-2.5-flash
+    model: gemini/gemini-3.6-flash
     daily_budget_usd: 3
 
   # Document classification and field extraction. Needs a response schema.
@@ -17,7 +17,7 @@ routes:
 
   # Multi-step planning.
   reason:
-    model: gemini/gemini-2.5-flash
+    model: gemini/gemini-3.6-flash
     daily_budget_usd: 2
 
   # LLM-as-judge in evals. The same family as `extract`, because this deployment has one
