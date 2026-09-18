@@ -170,7 +170,32 @@ describe('a message on a surface', () => {
     expect(warnings).toContain(`run ${run.id}: the runtime returned no text after 1 tool calls`);
   });
 
-  it('says the same thing on a streaming surface, where a run that ends with no say step streamed nothing', async () => {
+  it('appends the sentence to a stream that was opened and then had nothing to say', async () => {
+    // The trajectory has to emit *text* for a stream to exist at all: `stream` is assigned only
+    // in the `text` arm of the event loop, so a run of nothing but tool calls opens none and
+    // answers through `postText` — which is the case below, not this one. Whitespace opens a
+    // stream and still leaves the final text empty, which is the pair this branch is for.
+    const f = await hostFixture(db, {
+      trajectory: [{ tool: 'memory_list', args: {} }, { say: '   ' }],
+      streaming: true,
+    });
+    attachMessageHandlers(f.host);
+    await f.surface.say('U012', 'anything?');
+
+    // Asserted on the stream alone rather than on a pool of streams and posts: pooling the two
+    // is what let this case pass while the append it names never ran. The sentence is *in* the
+    // stream, after the whitespace the runtime did emit, which only the append puts there.
+    expect(f.surface.streams).toEqual([
+      { conversation: 'memory', text: `   ${EMPTY_REPLY}`, ended: true, replyTo: null },
+    ]);
+    // The memory surface materialises an ended stream as one post of its own; what matters here
+    // is that the host did not put a second one beside it.
+    expect(f.surface.texts).toHaveLength(1);
+    const [run] = await db.select().from(runs);
+    expect(run.status).toBe('done');
+  });
+
+  it('posts the sentence instead when the run emitted no text at all and so opened no stream', async () => {
     const f = await hostFixture(db, {
       trajectory: [
         { tool: 'memory_list', args: {} },
@@ -180,12 +205,8 @@ describe('a message on a surface', () => {
     });
     attachMessageHandlers(f.host);
     await f.surface.say('U012', 'anything?');
-    // The sentence reaches the human however the surface takes it: appended to the stream when
-    // one was opened, posted on its own when none was.
-    const said = [...f.surface.streams.map((s) => s.text), ...f.surface.texts.map((t) => t.text)];
-    expect(said).toContain(EMPTY_REPLY);
-    const [run] = await db.select().from(runs);
-    expect(run.status).toBe('done');
+    expect(f.surface.streams).toEqual([]);
+    expect(f.surface.texts).toEqual([{ conversation: 'memory', text: EMPTY_REPLY, replyTo: null, kind: 'reply' }]);
   });
 
   it('leaves a non-empty reply alone, streamed or posted', async () => {
