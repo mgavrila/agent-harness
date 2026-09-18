@@ -41,3 +41,15 @@ export {
   type PlaybookDefinition,
 } from './domain/playbooks/schema.js';
 export { claimDuePlaybooks, finishPlaybookRun, syncPlaybooks, type ClaimedRun } from './domain/playbooks/repository.js';
+export { preflightPlaybook, type PreflightResult } from './domain/playbooks/preflight.js';
+export { playbookNoticeKey, stagePlaybookNotice } from './domain/playbooks/notice.js';
+export {
+  MAX_ATTEMPTS,
+  SCHEDULER_TICK_MS,
+  executePlaybook,
+  playbookConversation,
+  startScheduler,
+  type SchedulerHandle,
+  type SchedulerStatus,
+  type TickResult,
+} from './domain/playbooks/scheduler.js';

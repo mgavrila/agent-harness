@@ -7,6 +7,7 @@ import type { Db } from '@harness/db';
 import { surfacesOf } from '@harness/approvals';
 import type { Principal } from '@harness/identity-api';
 import { StaticIdentity } from '@harness/identity-api/testing';
+import type { RunSkill } from '@harness/runtime-api';
 import { ScriptedRuntime, type Trajectory } from '@harness/runtime-api/testing';
 import { MemorySurface } from '@harness/surface-api/testing';
 import { TIMEOUT_MARGIN_MS } from './domain/conversation.js';
@@ -54,6 +55,16 @@ export const MEMBER: Principal = {
   attributes: {},
 };
 
+/** The principal the test playbooks run as: a service, never a person. */
+export const PLAYBOOKS_PRINCIPAL: Principal = {
+  id: 'svc-playbooks',
+  kind: 'service',
+  level: 'service',
+  displayName: 'Nightly playbooks',
+  surfaces: {},
+  attributes: {},
+};
+
 export interface HostFixture {
   host: Host;
   surface: MemorySurface;
@@ -70,10 +81,17 @@ export interface HostFixture {
  */
 export async function hostFixture(
   db: Db,
-  opts: { trajectory: Trajectory; principals?: Principal[]; budget?: Partial<HostBudget>; streaming?: boolean },
+  opts: {
+    trajectory: Trajectory;
+    principals?: Principal[];
+    budget?: Partial<HostBudget>;
+    streaming?: boolean;
+    /** The skills the host offers; default one fixture skill. A scheduler test passes the shipped catalogue. */
+    skills?: readonly RunSkill[];
+  },
 ): Promise<HostFixture> {
   const surface = new MemorySurface({ capabilities: { streaming: opts.streaming ?? false } });
-  const identity = new StaticIdentity(opts.principals ?? [COORDINATOR, MEMBER, HOST_PRINCIPAL]);
+  const identity = new StaticIdentity(opts.principals ?? [COORDINATOR, MEMBER, HOST_PRINCIPAL, PLAYBOOKS_PRINCIPAL]);
   const runtime = new ScriptedRuntime(opts.trajectory);
   const host: Host = {
     db,
@@ -85,7 +103,9 @@ export async function hostFixture(
     persona: 'You are the test assistant.',
     // A plain fixture name: the vocabulary scan of `harness/host/src` (kernel-vocabulary.test.ts)
     // forbids the product's own skill names in anything that is not itself a `*.test.ts` file.
-    skills: [{ name: 'sample-skill', version: '1.0.0', description: 'a skill for tests', dir: '/nonexistent' }],
+    skills: opts.skills ?? [
+      { name: 'sample-skill', version: '1.0.0', description: 'a skill for tests', dir: '/nonexistent' },
+    ],
     model: { baseUrl: 'http://127.0.0.1:1', apiKey: 'sk-test', route: 'chat', fallbackRoute: 'reason' },
     budget: {
       maxModelCalls: 30,
