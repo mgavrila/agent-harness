@@ -16,6 +16,31 @@ beforeEach(() => {
 
 const connectServer = () => connectTestClient(() => createCoreToolsServer(deps));
 
+/**
+ * Every argument name a JSON Schema declares, nested objects and array items included.
+ *
+ * Names only, which is what invariant 1 is about: an enum *value* or a description that says
+ * "principal" sets nothing, and since Plan 9 `memory_add` takes a `scope` whose two values are
+ * exactly `principal` and `client`.
+ */
+function argumentNames(schema: unknown): string[] {
+  const names: string[] = [];
+  const walk = (node: unknown): void => {
+    if (node === null || typeof node !== 'object') return;
+    const record = node as Record<string, unknown>;
+    const properties = record.properties;
+    if (properties !== null && typeof properties === 'object') {
+      for (const [name, child] of Object.entries(properties)) {
+        names.push(name);
+        walk(child);
+      }
+    }
+    walk(record.items);
+  };
+  walk(schema);
+  return names;
+}
+
 describe('run context and lineage', () => {
   it('stamps the run every audit row belongs to, from the context the run was opened with', async () => {
     const context = await openRun(db, { client: 'test', principal: TEST_PRINCIPAL });
@@ -34,7 +59,11 @@ describe('run context and lineage', () => {
     const { tools } = await client.listTools();
     expect(tools.map((t) => t.name)).not.toContain('harness_set_context');
     // Invariant 1: identity comes only from whoever opened the run, never from an argument.
-    for (const tool of tools) expect(JSON.stringify(tool.inputSchema), tool.name).not.toMatch(/principal|run_id/);
+    for (const tool of tools) {
+      for (const name of argumentNames(tool.inputSchema)) {
+        expect(name, `${tool.name}.${name}`).not.toMatch(/principal|run_id/);
+      }
+    }
   });
 
   it('stores derived_from on the audit row and strips it from handler args', async () => {

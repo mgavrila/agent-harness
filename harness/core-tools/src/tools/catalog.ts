@@ -8,6 +8,7 @@ import { auditTools } from './audit.js';
 import { deadlineTools } from './deadlines.js';
 import { documentTools } from './documents.js';
 import { harnessTools } from './harness.js';
+import { memoryTools } from './memory.js';
 import { GENERIC_RECORD_TOOLS, recordTools } from './records.js';
 
 /**
@@ -23,6 +24,7 @@ export function kernelTools(packs: PackRegistry): AnyToolDef[] {
     ...auditTools,
     ...approvalTools,
     ...harnessTools,
+    ...memoryTools,
     ...documentTools(packs),
   ];
 }

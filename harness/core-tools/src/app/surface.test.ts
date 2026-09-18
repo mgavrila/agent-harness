@@ -65,6 +65,8 @@ describe('public surface', () => {
  *
  * Plan 7 removed one tool, `harness_set_context`, and nothing else: identity and the run are
  * bound by whoever opens the session, so there is no tool to set them.
+ *
+ * Plan 9 adds the four memory tools of spec 5.5 (Task 3) and the two playbook tools of spec 5.6 (Task 7).
  */
 const RECORDED_TOOLS = [
   'approvals_execute',
@@ -82,11 +84,15 @@ const RECORDED_TOOLS = [
   'forms_roster',
   'harness_notify',
   'harness_reconcile',
+  'memory_add',
+  'memory_list',
+  'memory_remove',
   'providers_confirm_field',
   'providers_get',
   'providers_list_pending',
   'providers_search',
   'providers_upsert',
+  'session_search',
   'verify_nppes',
   'verify_state_license',
 ];
@@ -97,7 +103,7 @@ describe('the four places Plan 6 moved the tool surface', () => {
   const recorded = async (): Promise<ToolSurfaceEntry[]> =>
     JSON.parse(await readFile(path.join(architecture, 'tool-surface.json'), 'utf8')) as ToolSurfaceEntry[];
 
-  it('publishes the twenty-two tools of Plan 6 less harness_set_context, which Plan 7 deleted', async () => {
+  it('publishes the twenty-two tools of Plan 6 less harness_set_context, plus the memory tools of Plan 9', async () => {
     expect((await recorded()).map((tool) => tool.name)).toEqual(RECORDED_TOOLS);
   });
 

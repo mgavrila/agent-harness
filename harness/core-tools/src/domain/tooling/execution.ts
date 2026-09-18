@@ -32,7 +32,12 @@ function envelopeResult(structured: Envelope): ToolCallResult {
  * wrapped so a secondary failure cannot escape the MCP callback. The message is
  * deliberately generic; the detail is in the audit log when it could be written.
  */
-async function handleUnexpectedError(db: Db, tool: AnyToolDef, base: AuditBase, err: unknown): Promise<ToolCallResult> {
+export async function handleUnexpectedError(
+  db: Db,
+  tool: AnyToolDef,
+  base: AuditBase,
+  err: unknown,
+): Promise<ToolCallResult> {
   try {
     await writeAudit(db, { ...base, decision: 'error', error: describeError(err) });
   } catch {
@@ -48,7 +53,7 @@ export async function runBlocked(deps: ToolDeps, tool: AnyToolDef, base: AuditBa
   } catch (err) {
     return await handleUnexpectedError(deps.db, tool, base, err);
   }
-  return textResult(`Tool ${tool.name} is blocked by policy (action class ${tool.actionClass}).`, true);
+  return textResult(`Tool ${tool.name} is blocked by policy (action class ${base.actionClass}).`, true);
 }
 
 /**
@@ -64,7 +69,7 @@ export async function runForApproval(
 ): Promise<ToolCallResult> {
   try {
     const row = await withTransaction(deps.db, async (tx) => {
-      const parked = await createOrReuseApproval(tx, deps, tool, args, base.argsHash);
+      const parked = await createOrReuseApproval(tx, deps, tool, args, base.argsHash, base.actionClass);
       await writeAudit(tx, { ...base, decision: 'approval', approvalId: parked.id });
       return parked;
     });

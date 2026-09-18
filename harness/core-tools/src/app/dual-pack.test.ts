@@ -47,11 +47,11 @@ describe('two packs in one process', () => {
     const deps = makeTestDeps(db, { packs });
     const names = publishedTools(deps).map((t) => t.name);
     expect(new Set(names).size).toBe(names.length);
-    // Sixteen kernel tools (Plan 7 deleted harness_set_context), seven of them replaced by
-    // healthcare, plus healthcare's eighteen: 16 − 7 + 18 = 27. The five records_* survive
+    // Twenty kernel tools (sixteen from Plan 7, four memory tools from Plan 9), seven of them replaced by
+    // healthcare, plus healthcare's eighteen: 20 − 7 + 18 = 31. The five records_* survive
     // because the stories pack's `epic` kind leaves genericTools true, so the publication gate
     // does not drop them.
-    expect(names).toHaveLength(27);
+    expect(names).toHaveLength(31);
     for (const name of ['providers_get', 'forms_fill', 'verify_nppes', 'deadlines_upcoming']) {
       expect(names).toContain(name);
     }

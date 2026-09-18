@@ -1,3 +1,4 @@
+import type { ActionClass } from '@harness/pack-api';
 import type { AnyToolDef, AuditBase, RunContext, ToolDeps } from './types.js';
 
 /**
@@ -11,12 +12,13 @@ export function auditBaseFor(
   tool: AnyToolDef,
   argsHash: string,
   derivedFrom: string[] = [],
+  actionClass: ActionClass = tool.actionClass,
 ): AuditBase {
   return {
     client: deps.client,
     caller: deps.principal.id,
     tool: tool.name,
-    actionClass: tool.actionClass,
+    actionClass,
     argsHash,
     runId: deps.context.runId ?? null,
     skill: deps.context.skill ?? null,
