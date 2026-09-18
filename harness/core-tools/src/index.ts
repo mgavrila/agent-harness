@@ -64,6 +64,20 @@ export { memorySnapshot, renderMemorySnapshot } from './domain/memory/render.js'
 export { searchSessions } from './domain/memory/search.js';
 export { EMBED_BATCH, assertEmbedDims, embedTexts } from './domain/knowledge/embed.js';
 export {
+  KNOWLEDGE_DEFAULT_K,
+  KNOWLEDGE_SEARCH_LIMIT,
+  KNOWLEDGE_SOURCE_KIND,
+  KNOWLEDGE_SOURCE_NAME,
+  RRF_K,
+  SERVICE_RANK,
+  levelRank,
+  type KnowledgeHit,
+  type KnowledgeSyncResult,
+  type ParsedKnowledgeDocument,
+} from './domain/knowledge/types.js';
+export { CHUNK_OVERLAP, CHUNK_SIZE, chunkText } from './domain/knowledge/chunk.js';
+export { parseKnowledgeDocument, readKnowledgeFolder } from './domain/knowledge/document.js';
+export {
   PLAYBOOK_RUN_STATUSES,
   type PlaybookRow,
   type PlaybookRunRow,
