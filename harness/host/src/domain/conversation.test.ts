@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { eq } from 'drizzle-orm';
 import type { RunEvent, RuntimeSession } from '@harness/runtime-api';
 import { approvals, auditLog, memoryEntries, messages, runs, threads } from '@harness/db';
@@ -13,6 +13,7 @@ import {
   drainActive,
   runTurn,
   type TurnDelivery,
+  type TurnEvent,
   type TurnInput,
 } from './conversation.js';
 import { findOrCreateThread } from './threads/repository.js';
@@ -592,5 +593,98 @@ describe('an abort the runtime ignores', () => {
     ]);
     const result = await turnOn(f, 'none', { costCapUsd: 0.5 });
     expect(result).toMatchObject({ status: 'done', error: null, text: 'Inside every budget.' });
+  });
+});
+
+describe('a watcher on a turn', () => {
+  it('hands a watcher the run id, every runtime event in order, and the outcome', async () => {
+    const f = await hostFixture(db, {
+      trajectory: [
+        { skill: 'sample-skill', version: '1.0.0' },
+        { tool: 'audit_query', args: {} },
+        { say: 'all clear' },
+      ],
+    });
+    onTestFinished(() => f.close());
+    const thread = await findOrCreateThread(db, {
+      client: 'test',
+      surface: 'memory',
+      conversation: 'memory',
+      principalId: COORDINATOR.id,
+    });
+    const seen: TurnEvent[] = [];
+    const result = await runTurn(f.host, {
+      thread,
+      principal: COORDINATOR,
+      role: 'user',
+      text: 'anything overdue?',
+      attachments: [],
+      replyTo: null,
+      observe: (event) => seen.push(event),
+    });
+
+    expect(seen[0]).toEqual({ type: 'run', runId: result.runId });
+    expect(seen.at(-1)).toEqual({ type: 'result', status: 'done', text: 'all clear', error: null });
+    expect(seen.slice(1, -1).map((event) => event.type)).toEqual([
+      'skill_activated',
+      'tool_call',
+      'tool_result',
+      'text',
+      'done',
+    ]);
+  });
+
+  it('tells a watcher that a cancelled run was cancelled, with the run id it can cancel by', async () => {
+    const f = await hostFixture(db, { trajectory: [{ sleep: 150 }, { say: 'too late' }] });
+    onTestFinished(() => f.close());
+    const thread = await findOrCreateThread(db, {
+      client: 'test',
+      surface: 'memory',
+      conversation: 'memory',
+      principalId: COORDINATOR.id,
+    });
+    const seen: TurnEvent[] = [];
+    const turn = runTurn(f.host, {
+      thread,
+      principal: COORDINATOR,
+      role: 'user',
+      text: 'start something slow',
+      attachments: [],
+      replyTo: null,
+      observe: (event) => {
+        seen.push(event);
+        // The run id reaches the watcher before the runtime has produced anything, which is what
+        // lets the run API answer 202 with an id a caller can immediately cancel by.
+        if (event.type === 'run') expect(cancelRun(f.host, event.runId)).toBe(true);
+      },
+    });
+    const result = await turn;
+    expect(result.status).toBe('cancelled');
+    expect(seen.at(-1)).toEqual({ type: 'result', status: 'cancelled', text: '', error: 'cancelled' });
+  });
+
+  it('is not failed by a watcher that throws', async () => {
+    const f = await hostFixture(db, { trajectory: [{ say: 'fine' }] });
+    onTestFinished(() => f.close());
+    const thread = await findOrCreateThread(db, {
+      client: 'test',
+      surface: 'memory',
+      conversation: 'memory',
+      principalId: COORDINATOR.id,
+    });
+    const result = await runTurn(f.host, {
+      thread,
+      principal: COORDINATOR,
+      role: 'user',
+      text: 'hello',
+      attachments: [],
+      replyTo: null,
+      observe: () => {
+        throw new Error('the socket went away');
+      },
+    });
+    // A watcher is watching, not taking part: a client that hung up mid-run must not turn a
+    // finished run into a failed one.
+    expect(result).toMatchObject({ status: 'done', text: 'fine', error: null });
   });
 });

@@ -132,6 +132,17 @@ async function failStrandedRuns(
 }
 
 /**
+ * How many playbooks one tick claims.
+ *
+ * A bound, not a setting: a tick that claimed every due row would run them all before the next
+ * one, and with two hosts on one database the bound is also what keeps one of them from taking the
+ * whole queue. Ten is more than any client schedules in one minute, and what a tick leaves behind
+ * is still due thirty seconds later. This was a `limit?` option until Plan 10; nothing ever passed
+ * one, so it is a constant now and there is one number to find rather than two places to look.
+ */
+export const CLAIM_BATCH = 10;
+
+/**
  * Take ownership of what is due, in one transaction, with `FOR UPDATE SKIP LOCKED` so two hosts
  * on one database never both fire the same row. Requested runs first (a person asked), then the
  * playbooks whose `next_run_at` has passed: each gets a `playbook_runs` row at its planned time
@@ -139,11 +150,7 @@ async function failStrandedRuns(
  * host's — finds nothing to claim twice. The claimed rows are returned oldest first; running
  * them is the caller's, outside any transaction.
  */
-export async function claimDuePlaybooks(
-  db: Db,
-  opts: { client: string; now: Date; limit?: number },
-): Promise<ClaimedRun[]> {
-  const limit = opts.limit ?? 10;
+export async function claimDuePlaybooks(db: Db, opts: { client: string; now: Date }): Promise<ClaimedRun[]> {
   return withTransaction(db, async (tx) => {
     const claimed: ClaimedRun[] = [];
     const requested = await tx
@@ -152,7 +159,7 @@ export async function claimDuePlaybooks(
       .innerJoin(playbooks, eq(playbooks.id, playbookRuns.playbookId))
       .where(and(eq(playbooks.client, opts.client), eq(playbooks.enabled, true), eq(playbookRuns.status, 'requested')))
       .orderBy(asc(playbookRuns.scheduledAt))
-      .limit(limit)
+      .limit(CLAIM_BATCH)
       .for('update', { of: playbookRuns, skipLocked: true });
     for (const { run } of requested) {
       // Read the playbook again under its own lock. The join above locks the run row only, so the
@@ -186,7 +193,7 @@ export async function claimDuePlaybooks(
       .from(playbooks)
       .where(and(eq(playbooks.client, opts.client), eq(playbooks.enabled, true), lte(playbooks.nextRunAt, opts.now)))
       .orderBy(asc(playbooks.nextRunAt))
-      .limit(limit)
+      .limit(CLAIM_BATCH)
       .for('update', { skipLocked: true });
     for (const playbook of due) {
       const [run] = await tx

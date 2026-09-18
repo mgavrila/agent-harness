@@ -26,6 +26,7 @@ export {
   serialize,
   type AbortReason,
   type TurnDelivery,
+  type TurnEvent,
   type TurnInput,
   type TurnResult,
 } from './domain/conversation.js';
@@ -40,7 +41,13 @@ export {
   readPlaybooksFile,
   type PlaybookDefinition,
 } from './domain/playbooks/schema.js';
-export { claimDuePlaybooks, finishPlaybookRun, syncPlaybooks, type ClaimedRun } from './domain/playbooks/repository.js';
+export {
+  CLAIM_BATCH,
+  claimDuePlaybooks,
+  finishPlaybookRun,
+  syncPlaybooks,
+  type ClaimedRun,
+} from './domain/playbooks/repository.js';
 export { preflightPlaybook, type PreflightResult } from './domain/playbooks/preflight.js';
 export { playbookNoticeKey, stagePlaybookNotice } from './domain/playbooks/notice.js';
 export {

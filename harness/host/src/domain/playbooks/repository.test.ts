@@ -5,7 +5,7 @@ import { createDb, playbookRuns, playbooks, withTransaction } from '@harness/db'
 import { TEST_DATABASE_URL } from '@harness/db/testing';
 import { requestPlaybookRun } from '@harness/core-tools';
 import { useTestDb } from '../../testing.js';
-import { claimDuePlaybooks, finishPlaybookRun, syncPlaybooks, type ClaimedRun } from './repository.js';
+import { CLAIM_BATCH, claimDuePlaybooks, finishPlaybookRun, syncPlaybooks, type ClaimedRun } from './repository.js';
 import type { PlaybookDefinition } from './schema.js';
 
 const db = useTestDb();
@@ -162,6 +162,18 @@ describe('claimDuePlaybooks', () => {
     const [claimed] = await claimDuePlaybooks(db, { client: 'test', now: NOW });
     expect(claimed.playbook).toMatchObject({ id: row.id, prompt: 'Run the edited one.', principalId: 'svc-renewals' });
     expect(claimed.run.requestedBy).toBe('u-practice-manager');
+  });
+
+  it('claims at most CLAIM_BATCH playbooks in one tick, leaving the rest for the next', async () => {
+    const at = new Date('2026-09-16T07:00:00Z');
+    await syncPlaybooks(
+      db,
+      { client: 'test', now: NOW },
+      Array.from({ length: CLAIM_BATCH + 2 }, (_, i) => ({ ...nightly, name: `nightly-${i}` })),
+    );
+    await db.update(playbooks).set({ nextRunAt: at });
+    expect(await claimDuePlaybooks(db, { client: 'test', now: at })).toHaveLength(CLAIM_BATCH);
+    expect(await claimDuePlaybooks(db, { client: 'test', now: at })).toHaveLength(2);
   });
 });
 

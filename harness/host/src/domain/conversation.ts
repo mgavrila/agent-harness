@@ -1,7 +1,7 @@
 import { hashArgs, memorySnapshot, writeAudit, type RunStatus } from '@harness/core-tools';
 import { containsRestrictedPattern } from '@harness/core-tools/redaction';
 import type { Principal } from '@harness/identity-api';
-import type { RunRequest, RunSkill } from '@harness/runtime-api';
+import type { RunEvent, RunRequest, RunSkill } from '@harness/runtime-api';
 import { describeError } from '@harness/shared';
 import type { MessageEvent, MessageRef, StreamHandle, SurfaceSession } from '@harness/surface-api';
 import type { Host } from './host.js';
@@ -68,6 +68,18 @@ const FORCED_OUTCOME: Partial<Record<AbortReason, string>> = {
  */
 export type TurnDelivery = 'thread' | 'none' | { surface: string; conversation: string };
 
+/**
+ * What a watcher of a turn sees, in order: the run id as soon as the run is open, every event the
+ * runtime produced, and the turn's own outcome once the host has had its say.
+ *
+ * The middle is the runtime's events **unfiltered** — the same deltas a streamed surface reply
+ * gets today, restricted-pattern check and all still to come. A watcher that sends them outside
+ * this process is the one that applies the check, which is what the run API's writer does; the
+ * closing `result` carries the whole reply already withheld if it tripped.
+ */
+export type TurnEvent =
+  { type: 'run'; runId: string } | RunEvent | { type: 'result'; status: RunStatus; text: string; error: string | null };
+
 export interface TurnInput {
   thread: ThreadRow;
   principal: Principal;
@@ -84,6 +96,11 @@ export interface TurnInput {
   timeoutMs?: number;
   /** Abort once the runtime's reported spend passes this. Undefined: no cap beyond the call ceilings. */
   costCapUsd?: number;
+  /**
+   * Somebody watching this turn as it happens: the run API's stream, and nothing else today. It
+   * is told the run id first, so a caller can cancel a run it has not seen a word of yet.
+   */
+  observe?: (event: TurnEvent) => void;
 }
 
 export interface TurnResult {
@@ -163,6 +180,25 @@ export async function runTurn(host: Host, turn: TurnInput): Promise<TurnResult> 
     finish = resolve;
   });
   host.active.set(runId, { controller, done: finished });
+  /**
+   * A watcher is watching, not taking part: its failure is logged and dropped. An HTTP client that
+   * hung up mid-run must not turn a finished run into a failed one, and must not skip the
+   * `finally` that closes the run row either.
+   */
+  const emit = (event: TurnEvent): void => {
+    if (!turn.observe) return;
+    try {
+      turn.observe(event);
+    } catch (err) {
+      host.log.error(`run ${runId}: the turn watcher threw`, err);
+    }
+  };
+  // After `host.active.set`, deliberately. `cancelRun` looks the run up in `host.active` and
+  // answers false when it is not there, so a watcher told the run id one line earlier would be
+  // handed an id it cannot cancel — and a caller that cancels the instant it reads the first
+  // frame is exactly what the run API's stream invites. The test below cancels from inside
+  // `observe` and asserts `true`, which is what pins this ordering.
+  emit({ type: 'run', runId });
   const timeoutMs = turn.timeoutMs ?? host.budget.timeoutMs;
   const timer = setTimeout(() => abort('timeout'), timeoutMs + host.budget.timeoutMarginMs);
 
@@ -225,6 +261,7 @@ export async function runTurn(host: Host, turn: TurnInput): Promise<TurnResult> 
       const recipient = turn.principal.surfaces[turn.thread.surface] ?? '';
       try {
         for await (const event of host.runtime.run(request).events) {
+          emit(event);
           switch (event.type) {
             case 'text':
               if (target?.ownThread) {
@@ -316,6 +353,9 @@ export async function runTurn(host: Host, turn: TurnInput): Promise<TurnResult> 
           content: text,
         });
       }
+      // After the forced outcome and the redaction guard, so a watcher is told what the run
+      // actually ended as and reads the text the human would have been sent.
+      emit({ type: 'result', status, text: safeText, error });
       return { runId, status, text: safeText, error };
     } catch (err) {
       status = 'error';
