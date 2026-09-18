@@ -2,6 +2,7 @@
  * Create a client folder from a pack's defaults.
  *
  *   pnpm new-client --pack healthcare --name river-clinic
+ *   pnpm new-client --name internal-team            # a client with no pack
  *
  * A client is content and configuration, never code: five files, an env example and a
  * knowledge folder.
@@ -43,7 +44,12 @@ const TEMPLATE_FILES = [
 const TEMPLATE_DIRS = ['knowledge'] as const;
 
 export interface NewClientOptions {
-  pack: string;
+  /**
+   * The pack the client serves, checked against `packs/` so a typo fails here rather than at the
+   * first start. Omitted for a client with no pack at all — `HARNESS_PACKS=''`, the kernel's own
+   * tools and no product area — which is a client like any other: a folder, not code.
+   */
+  pack?: string;
   name: string;
   /** Repository root. Defaults to the directory above this file. */
   root?: string;
@@ -85,10 +91,33 @@ function substitute(text: string, templateSlug: string, name: string): string {
   return text.replaceAll(templateSlug, name).replaceAll(TEMPLATE_DISPLAY_NAME, titleCase(name));
 }
 
-async function copyTextFile(from: string, to: string, templateSlug: string, name: string): Promise<void> {
+async function copyTextFile(
+  from: string,
+  to: string,
+  templateSlug: string,
+  name: string,
+  transform: (text: string) => string = (text) => text,
+): Promise<void> {
   const text = await readFile(from, 'utf8');
   await mkdir(path.dirname(to), { recursive: true });
-  await writeFile(to, substitute(text, templateSlug, name));
+  await writeFile(to, transform(substitute(text, templateSlug, name)));
+}
+
+/**
+ * The `HARNESS_PACKS` line of a pack-less client's `.env.example`.
+ *
+ * A client scaffolded with no `--pack` serves no pack, and its own env example has to say so:
+ * `HARNESS_PACKS=` names none, where a deleted line falls back to the default pack. A template
+ * that carries no such line gets one, so the answer is in the file either way rather than in a
+ * console line the operator has to remember. With a pack the template's line is copied as it is:
+ * the template names the packages a client of that shape serves, and a pack's directory name is
+ * not its package name.
+ */
+function noPacksLine(text: string): string {
+  const emptied = text.replace(/^HARNESS_PACKS=.*$/m, 'HARNESS_PACKS=');
+  if (emptied !== text) return emptied;
+  const newline = text.endsWith('\n') ? '' : '\n';
+  return `${text}${newline}# No pack: this client serves the kernel's own tools and no product area.\nHARNESS_PACKS=\n`;
 }
 
 export async function newClient(opts: NewClientOptions): Promise<NewClientResult> {
@@ -103,8 +132,10 @@ export async function newClient(opts: NewClientOptions): Promise<NewClientResult
   }
   if (name === templateSlug) throw new Error(`name must differ from the template client "${templateSlug}"`);
 
-  const packDir = path.join(root, 'packs', pack);
-  if (!(await exists(packDir))) throw new Error(`no pack named "${pack}" in ${path.join(root, 'packs')}`);
+  if (pack !== undefined) {
+    const packDir = path.join(root, 'packs', pack);
+    if (!(await exists(packDir))) throw new Error(`no pack named "${pack}" in ${path.join(root, 'packs')}`);
+  }
 
   const templateDir = path.join(root, 'clients', templateSlug);
   if (!(await exists(templateDir))) throw new Error(`no template client at ${templateDir}`);
@@ -123,7 +154,13 @@ export async function newClient(opts: NewClientOptions): Promise<NewClientResult
         skipped.push(relative);
         continue;
       }
-      await copyTextFile(from, path.join(dir, relative), templateSlug, name);
+      await copyTextFile(
+        from,
+        path.join(dir, relative),
+        templateSlug,
+        name,
+        pack === undefined && relative === '.env.example' ? noPacksLine : undefined,
+      );
       files.push(relative);
     }
     for (const directory of TEMPLATE_DIRS) {

@@ -19,7 +19,8 @@ export interface ToolSource {
  * Four rules, in this order, and each one fails loudly rather than quietly:
  *
  *  1. A kernel tool in `hidden` is not published. That set is how the generic `records_*` tools
- *     stay out of a catalogue whose every record kind is served by a pack's own tools.
+ *     stay out of a catalogue whose every record kind is served by a pack's own tools, and how
+ *     the two pack-dependent `documents_*` tools stay out of one where no pack declares a kind.
  *  2. A kernel tool named in a source's `replaces` is dropped. A name that is not a kernel tool
  *     is a `ConfigError`, not a no-op: a typo there would leave the generic tool published
  *     beside a half-working replacement and nothing would say so.

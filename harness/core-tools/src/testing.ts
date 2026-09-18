@@ -91,7 +91,10 @@ export function makeTestDeps(db: Db, overrides: TestDepsOverrides = {}): ToolDep
     clientDir: path.join(storageDir, 'client'),
     embedDims: 1_024,
     parser: localParser(storageDir),
-    formsDir: TEST_PACKS.formsDir(),
+    // Resolved from `packs`, not from `TEST_PACKS`, and by the same rule `formsDirFrom` uses at
+    // startup: a fixture that loads another pack, or none, does not get the shipped pack's
+    // templates directory.
+    formsDir: packs.all[0]?.formsDir ?? storageDir,
     restrictedToModel: false,
     sinks: {},
     context: { ...TEST_CONTEXT, ...context },

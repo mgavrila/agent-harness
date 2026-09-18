@@ -101,6 +101,20 @@ afterAll(async () => {
 });
 
 describe('openPipeline', () => {
+  it('refuses a registry with no pack, before it migrates or opens a pool', async () => {
+    // A server may serve no pack; a run measures one. The refusal is a `ConfigError` naming what
+    // is missing rather than a `TypeError` off `all[0]`, and the unreachable database URL below
+    // is the assertion that nothing was opened before the check.
+    await expect(
+      openPipeline({
+        databaseUrl: 'postgres://nobody@127.0.0.1:1/nothing',
+        storageDir: corpus,
+        gateway: { baseUrl: gateway.url, apiKey: 'sk-eval', timeoutMs: 10_000, maxCallsPerRun: 100 },
+        registry: registryOf([]),
+      }),
+    ).rejects.toThrow('an eval run measures a pack');
+  });
+
   /**
    * The eval runs the shipping catalogue, and the shipping catalogue includes a tool that calls
    * a public registry over the network. Nothing about an eval should reach one: the corpus is

@@ -1,6 +1,9 @@
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { formsDirFrom, parserFromEnv } from './config.js';
+import { pack as healthcarePack } from '@harness/pack-healthcare';
+import { pack as storiesPack } from '@harness/pack-stories';
+import { registryOf } from '../packs/registry.js';
+import { formsDirFrom, packNames, parserFromEnv } from './config.js';
 
 /**
  * The forms directory belongs to the pack. `HARNESS_FORMS_DIR` is an override a deployment
@@ -8,12 +11,45 @@ import { formsDirFrom, parserFromEnv } from './config.js';
  * pack's templates without editing a second variable.
  */
 describe('formsDirFrom', () => {
-  const packs = { formsDir: () => '/packs/healthcare/forms' };
+  const healthcare = registryOf([healthcarePack]);
 
-  it('takes the pack forms directory when HARNESS_FORMS_DIR is unset, and the override when it is set', () => {
-    expect(formsDirFrom(packs, undefined)).toBe('/packs/healthcare/forms');
-    expect(formsDirFrom(packs, '/srv/elsewhere/forms')).toBe('/srv/elsewhere/forms');
-    expect(formsDirFrom(packs, './forms')).toBe(path.resolve('./forms'));
+  it('takes the primary pack’s templates directory when HARNESS_FORMS_DIR is unset, and the override when it is set', () => {
+    expect(formsDirFrom(healthcare, undefined, '/srv/storage')).toBe(healthcarePack.formsDir);
+    expect(formsDirFrom(healthcare, '/srv/elsewhere/forms', '/srv/storage')).toBe('/srv/elsewhere/forms');
+    expect(formsDirFrom(healthcare, './forms', '/srv/storage')).toBe(path.resolve('./forms'));
+  });
+
+  it('stands the storage directory in when the primary pack ships no templates, and when there is no pack', () => {
+    // `formsDir` is optional on the pack contract and the stories pack declares none, which used
+    // to fail startup for `HARNESS_PACKS=@harness/pack-stories` alone. Nothing reads the value in
+    // either deployment: the forms tools belong to a pack that ships templates.
+    expect(storiesPack.formsDir).toBeUndefined();
+    expect(formsDirFrom(registryOf([storiesPack]), undefined, '/srv/storage')).toBe('/srv/storage');
+    expect(formsDirFrom(registryOf([]), undefined, '/srv/storage')).toBe('/srv/storage');
+    expect(formsDirFrom(registryOf([]), '/srv/elsewhere/forms', '/srv/storage')).toBe('/srv/elsewhere/forms');
+  });
+});
+
+/**
+ * Unset and empty are two different answers: an existing deployment that says nothing keeps the
+ * pack it has always had, and a client that says "no pack" gets none. `optionalEnv` cannot tell
+ * them apart, which is why `packNames` reads the variable itself.
+ */
+describe('packNames', () => {
+  it('keeps the default when HARNESS_PACKS is unset', () => {
+    expect(packNames({})).toEqual(['@harness/pack-healthcare']);
+  });
+
+  it('reads an empty HARNESS_PACKS as a client with no pack', () => {
+    expect(packNames({ HARNESS_PACKS: '' })).toEqual([]);
+    expect(packNames({ HARNESS_PACKS: '  ' })).toEqual([]);
+  });
+
+  it('splits, trims and drops empty entries', () => {
+    expect(packNames({ HARNESS_PACKS: ' @harness/pack-healthcare , @harness/pack-stories ,' })).toEqual([
+      '@harness/pack-healthcare',
+      '@harness/pack-stories',
+    ]);
   });
 });
 

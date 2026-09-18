@@ -170,7 +170,7 @@ describe('the scheduler', () => {
       status: 'preflight_failed',
       attempts: 0,
       runId: null,
-      error: 'skill "no-such-skill" is not in any loaded pack',
+      error: 'skill "no-such-skill" is not in the loaded skill catalogue',
     });
     const [effect] = await db.select().from(toolEffects);
     expect(effect).toMatchObject({
@@ -188,7 +188,7 @@ describe('the scheduler', () => {
       scheduledAt: firing.scheduledAt,
       runId: null,
       threadId: null,
-      text: 'Playbook "nightly" scheduled for 2026-09-15T12:00:00.000Z did not run: skill "no-such-skill" is not in any loaded pack.',
+      text: 'Playbook "nightly" scheduled for 2026-09-15T12:00:00.000Z did not run: skill "no-such-skill" is not in the loaded skill catalogue.',
     });
     expect(again.staged).toBe(false);
     expect(await db.select().from(toolEffects)).toHaveLength(1);

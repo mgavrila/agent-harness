@@ -154,7 +154,11 @@ services:
       HARNESS_ENCRYPTION_KEY: '${HARNESS_ENCRYPTION_KEY:-}'
       HARNESS_CLIENT: '${HARNESS_CLIENT:-demo-practice}'
       HARNESS_STORAGE_DIR: '/srv/harness-storage'
-      HARNESS_PACKS: '${HARNESS_PACKS:-@harness/pack-healthcare}'
+      # One dash, not `:-`, and the difference is the whole point: `${VAR:-default}` substitutes
+      # the default when the variable is unset *or empty*, and an empty HARNESS_PACKS is how a
+      # client says it serves no pack. With `-` the default applies only when the variable is
+      # unset, so `HARNESS_PACKS=` in .env reaches the container as the empty string it is.
+      HARNESS_PACKS: '${HARNESS_PACKS-@harness/pack-healthcare}'
       # The run API surface is loaded beside the primary one so a headless caller has a surface
       # to name. It is never first: the first entry is where approval cards are posted, and this
       # one cannot post a card.

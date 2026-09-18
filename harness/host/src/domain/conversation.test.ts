@@ -1,5 +1,6 @@
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { eq } from 'drizzle-orm';
+import { registryOf } from '@harness/core-tools';
 import type { RunEvent, RuntimeSession } from '@harness/runtime-api';
 import { approvals, auditLog, memoryEntries, messages, runs, threads } from '@harness/db';
 import { COORDINATOR, hostFixture, useTestDb, type HostFixture } from '../testing.js';
@@ -73,6 +74,25 @@ describe('a message on a surface', () => {
     expect(request.skills.map((s) => s.name)).toEqual(['sample-skill']);
     expect(request.threadId).toBe(thread.id);
     expect(request.runId).toBe(run.id);
+  });
+
+  it('runs a turn for a host whose registry holds no pack, over the kernel’s own tools', async () => {
+    // An internal team whose client is a folder with no product area in it. The registry is built
+    // here rather than through `HARNESS_PACKS` — `app/main.test.ts` in core-tools covers the
+    // variable — so what this asserts is the turn: it reaches the kernel and comes back the same
+    // way every other turn does.
+    const f = await hostFixture(db, {
+      packs: registryOf([]),
+      trajectory: [{ tool: 'memory_list', args: {} }, { say: 'Nothing is remembered yet.' }],
+    });
+    attachMessageHandlers(f.host);
+    await f.surface.say('U012', 'What do you remember?');
+
+    expect(f.surface.texts).toEqual([{ conversation: 'memory', text: 'Nothing is remembered yet.', replyTo: null }]);
+    const [run] = await db.select().from(runs);
+    expect(run.status).toBe('done');
+    const [audit] = await db.select().from(auditLog).where(eq(auditLog.tool, 'memory_list'));
+    expect(audit).toMatchObject({ caller: 'u-coordinator', decision: 'auto' });
   });
 
   it('refuses a user the identity plug-in does not know, runs nothing, and audits the refusal', async () => {

@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ConfigError } from '@harness/shared';
+import { ConfigError, ToolError } from '@harness/shared';
 import { pack as healthcarePack } from '@harness/pack-healthcare';
 import { loadPacks, registryOf } from './registry.js';
 
@@ -43,8 +43,10 @@ describe('loadPacks', () => {
     await expect(loadPacks(['@harness/shared'])).rejects.toThrow('module "@harness/shared" exports no `pack`');
   });
 
-  it('refuses an empty HARNESS_PACKS rather than starting with no document kinds', async () => {
-    await expect(loadPacks([])).rejects.toThrow('HARNESS_PACKS names no pack');
+  it('loads no pack at all when HARNESS_PACKS is the empty string', async () => {
+    const packs = await loadPacks([]);
+    expect(packs.all).toEqual([]);
+    expect(packs.documentKinds()).toEqual([]);
   });
 });
 
@@ -153,10 +155,38 @@ describe('byName', () => {
   });
 });
 
+/**
+ * A client with no pack: kernel tools only, which the kernel's own principle — a client is a
+ * folder, not code — makes a configuration and not a mistake. What used to be refused at
+ * construction is answered here, one accessor at a time, so that everything a pack declares is
+ * simply empty and the three answers that need a primary pack name what is missing.
+ */
 describe('registryOf([])', () => {
-  it('refuses an empty pack list rather than crashing on manifest() or formsDir() later', () => {
-    expect(() => registryOf([])).toThrow(ConfigError);
-    expect(() => registryOf([])).toThrow('HARNESS_PACKS names no pack; at least one is required');
+  it('builds a registry whose every declaration is empty', () => {
+    const packs = registryOf([]);
+    expect(packs.all).toEqual([]);
+    expect(packs.documentKinds()).toEqual([]);
+    expect(packs.recordKinds()).toEqual([]);
+    expect(packs.attachmentKinds()).toEqual([]);
+    expect(packs.skillsDirs()).toEqual([]);
+    expect(packs.attachmentKind('license')).toBeUndefined();
+  });
+
+  it('names the missing pack rather than crashing on the three answers a primary pack gives', () => {
+    const packs = registryOf([]);
+    expect(() => packs.manifest()).toThrow('no pack is loaded');
+    expect(() => packs.formsDir()).toThrow(ConfigError);
+    expect(() => packs.formsDir()).toThrow('no pack is loaded, so no pack ships a forms directory');
+    expect(() => packs.targetFor(undefined)).toThrow(ToolError);
+    expect(() => packs.targetFor(undefined)).toThrow('no pack is loaded');
+  });
+
+  it('answers the per-kind lookups the same way, naming no pack', () => {
+    const packs = registryOf([]);
+    expect(() => packs.targetFor('state_license')).toThrow(ToolError);
+    expect(() => packs.targetForRecordKind('provider')).toThrow(ToolError);
+    expect(() => packs.recordKind('provider')).toThrow('no loaded pack declares record kind "provider"');
+    expect(() => packs.byName('healthcare')).toThrow('no pack named "healthcare" is loaded');
   });
 });
 

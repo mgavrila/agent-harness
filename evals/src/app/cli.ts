@@ -22,14 +22,32 @@ export function flagFrom(argv: readonly string[], name: string): string | undefi
  * Which packs this run loads.
  *
  * `HARNESS_PACKS` names them, exactly as it does for a server; `--pack` picks one of them when
- * several are. The default is the shipped pack, so a single-pack deployment needs neither flag
- * nor variable and behaves as it always did.
+ * several are. Unset, the default is the shipped pack, so a single-pack deployment needs neither
+ * flag nor variable and behaves as it always did. Set to the empty string it names no pack, which
+ * a server serves happily and an eval run cannot: `runEvals` refuses it below, because a run with
+ * nothing to measure has no report to write.
  */
 export function packNames(env: string | undefined): string[] {
   return (env ?? '@harness/pack-healthcare')
     .split(',')
     .map((name) => name.trim())
     .filter((name) => name !== '');
+}
+
+/**
+ * The packs this run loads, or the usage error that stops it.
+ *
+ * The same `{ ok }` shape as the flag parsers above, and for the same reason: the check is worth
+ * a test of its own, and the entrypoint below is a guarded `import.meta` block no test can call.
+ * A server may serve no pack; a run that measures one may not, and it says so before `loadPacks`
+ * logs that it loaded none.
+ */
+export function packsToMeasure(env: string | undefined): { ok: true; names: string[] } | { ok: false; error: string } {
+  const names = packNames(env);
+  if (names.length === 0) {
+    return { ok: false, error: 'HARNESS_PACKS names no pack; an eval run measures one, so name it there' };
+  }
+  return { ok: true, names };
 }
 
 function flag(name: string): string | undefined {
@@ -153,8 +171,14 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
 
   // Everything the run measures comes off the loaded pack, which is what makes this runner
   // pack-agnostic: it imports none, and `HARNESS_PACKS` names what it loads.
-  const names = packNames(optionalEnv('HARNESS_PACKS'));
-  const registry = await loadPacks(names);
+  // Read raw rather than through `optionalEnv`, which cannot tell an unset variable from an empty
+  // one — and here they mean different things: the shipped pack, or no pack at all.
+  const toMeasure = packsToMeasure(process.env.HARNESS_PACKS);
+  if (!toMeasure.ok) {
+    process.stderr.write(`${toMeasure.error}\n`);
+    process.exit(2);
+  }
+  const registry = await loadPacks(toMeasure.names);
   const wanted = packFlag.pack;
   let measured: Pack;
   try {
@@ -200,7 +224,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
         : { extract: 'see clients/<name>/routing.yaml', judge: 'see clients/<name>/routing.yaml' },
     evalSetVersion: flag('version') ?? '1.0.0',
     limit,
-    packs: names,
+    packs: toMeasure.names,
     packName: measured.name,
     recordKinds: measured.records.map((r) => r.kind),
     judgedFields: evals.judgedFields,

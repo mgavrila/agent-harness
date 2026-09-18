@@ -24,7 +24,11 @@ export interface ResolvedTarget {
  * handler reaches the active pack's manifest or forms directory the same way it reaches the
  * database: through its dependencies, never through an import.
  *
- * Several packs can be loaded at once and the plural accessors union them.
+ * Several packs can be loaded at once and the plural accessors union them, and none may be
+ * loaded at all: `HARNESS_PACKS=''` is a client with no product area, whose catalogue is the
+ * kernel's own tools. Every plural accessor is then empty and the three primary-pack answers
+ * below throw naming what is missing — a client is a folder and not code, so "no pack" has to be
+ * something the folder can say.
  *
  * **The primary pack rule.** The first entry of `HARNESS_PACKS` is the deployment's primary
  * pack, and it is what answers every question that has only one answer: `manifest()` (the
@@ -32,7 +36,8 @@ export interface ResolvedTarget {
  * target for a document nobody has classified. Three places, one rule, stated here so no caller
  * has to rediscover it. A deployment orders `HARNESS_PACKS` to say which area of the product it
  * is mainly for; a caller that means a different pack's document says so with
- * `documents_classify`, or by declaring the kind at ingest.
+ * `documents_classify`, or by declaring the kind at ingest. With no pack loaded there is no
+ * primary pack: all three throw, naming the missing pack, rather than reading `all[0]`.
  *
  * One classification role and one templates directory is what the document and forms pipelines
  * take today; making those two per-pack is a feature, not a refactor, and waits for the pack
@@ -58,7 +63,8 @@ export interface PackRegistry {
   /**
    * The target a document of this kind feeds: an exact claim first, then any catch-all, and for
    * an unclassified document the primary pack's first target — see the rule above. Throws
-   * `ToolError` naming the kind when a kind was given and no loaded pack claims it.
+   * `ToolError` naming the kind when a kind was given and no loaded pack claims it, and with no
+   * pack loaded at all, whatever the kind: extraction is a pack's business.
    */
   targetFor(documentKind: string | undefined): ResolvedTarget;
   /**
@@ -69,10 +75,15 @@ export interface PackRegistry {
    * record kind.
    */
   targetForRecordKind(kind: string): ResolvedTarget;
-  /** The primary pack's extraction manifest, for the classification role and version. */
+  /** The primary pack's extraction manifest. Throws `ToolError` when no pack is loaded. */
   manifest(): ExtractionManifest;
-  /** The primary pack's forms directory. `HARNESS_FORMS_DIR` overrides it in `app/server.ts`. */
+  /**
+   * The primary pack's own forms directory, for a caller that means that pack's templates.
+   * Throws `ConfigError` when no pack is loaded, or when the primary pack ships none. A
+   * deployment's value comes from `formsDirFrom` instead, which prefers `HARNESS_FORMS_DIR` and
+   * falls back to the storage directory rather than refusing to start.
+   */
   formsDir(): string;
-  /** One skills directory per loaded pack, in order. */
+  /** One skills directory per loaded pack, in order; empty when none is loaded. */
   skillsDirs(): string[];
 }
