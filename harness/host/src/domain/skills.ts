@@ -37,12 +37,14 @@ export function kernelSkillsDir(): string {
 }
 
 /**
- * Every skill's `SKILL.md`, read off the packs' own `skillsDir`s. Each directory is walked in
- * name order, so the catalogue a runtime sees is deterministic across a process's whole life,
- * not whatever order the filesystem happened to hand back. A skill's frontmatter `name` must
- * match its directory name — the one thing this reads that a pack's own tests do not already
- * check — because a mismatch would let a skill file move without moving the runtime handle
- * that names it, or let two skills collide silently on one activation name.
+ * Every skill's `SKILL.md`, read off each directory it is handed — the kernel's own `skills/`
+ * first and then every loaded pack's `skillsDir`, which is the order `app/main.ts` passes them
+ * in. Each directory is walked in name order, so the catalogue a runtime sees is deterministic
+ * across a process's whole life, not whatever order the filesystem happened to hand back. A
+ * skill's frontmatter `name` must match its directory name — the one thing this reads that a
+ * pack's own tests do not already check — because a mismatch would let a skill file move without
+ * moving the runtime handle that names it, or let two skills collide silently on one activation
+ * name.
  */
 export async function readSkillCatalogue(dirs: readonly string[]): Promise<RunSkill[]> {
   const skills: RunSkill[] = [];
