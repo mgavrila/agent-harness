@@ -1,6 +1,13 @@
 import { RUN_FAILED_MESSAGE } from '@harness/runtime-api';
 import { describeError } from '@harness/shared';
-import { RUNTIME_FAILED, runTurn, serialize, type TurnDelivery, type TurnResult } from '../conversation.js';
+import {
+  RUNTIME_FAILED,
+  runTurn,
+  serialize,
+  type TurnDelivery,
+  type TurnInput,
+  type TurnResult,
+} from '../conversation.js';
 import type { Host } from '../host.js';
 import { findOrCreateThread } from '../threads/repository.js';
 import { stagePlaybookNotice } from './notice.js';
@@ -110,30 +117,58 @@ export async function executePlaybook(
       ? { surface: flight.surface.name, conversation: playbook.conversation ?? flight.surface.defaultConversation }
       : 'none';
 
+  const { attempts, runId, error } = await runWithRetry(host, playbook.name, {
+    thread,
+    principal: flight.principal,
+    role: 'host',
+    text: playbook.prompt,
+    attachments: [],
+    replyTo: null,
+    deliver,
+    skills: [flight.skill],
+    timeoutMs: playbook.timeoutS * 1000,
+    costCapUsd: playbook.costCapUsd,
+  });
+
+  const status = error === null ? 'done' : 'failed';
+  await finishPlaybookRun(host.db, run.id, { status, runId, attempts, error, endedAt: host.now() });
+  if (status === 'failed') {
+    await stagePlaybookNotice(host, {
+      playbook,
+      scheduledAt: run.scheduledAt,
+      runId,
+      threadId: thread.id,
+      text: `Playbook "${playbook.name}" scheduled for ${run.scheduledAt.toISOString()} failed after ${attempts} attempt(s): ${error}. See the host log and the playbook_runs table.`,
+    });
+  }
+  host.log.info(`playbook "${playbook.name}": ${status} after ${attempts} attempt(s)`);
+  return status;
+}
+
+/** How a firing's turns ended: how many were made, the last run they opened, and the last failure — null once one succeeded. */
+interface RetryOutcome {
+  attempts: number;
+  runId: string | null;
+  error: string | null;
+}
+
+/**
+ * The turn, then at most one more (spec 5.6). A transport failure is worth the second attempt; a
+ * verdict the run reached on its own is not, and a shutdown is not either. `name` is the
+ * playbook's, for the log.
+ */
+async function runWithRetry(host: Host, name: string, turn: TurnInput): Promise<RetryOutcome> {
   let attempts = 0;
-  let lastRunId: string | null = null;
-  let lastError: string | null = null;
+  let runId: string | null = null;
+  let error: string | null = null;
   while (attempts < MAX_ATTEMPTS) {
     attempts += 1;
     let outcome: TurnResult | undefined;
     try {
-      outcome = await serialize(host, thread.id, () =>
-        runTurn(host, {
-          thread,
-          principal: flight.principal,
-          role: 'host',
-          text: playbook.prompt,
-          attachments: [],
-          replyTo: null,
-          deliver,
-          skills: [flight.skill],
-          timeoutMs: playbook.timeoutS * 1000,
-          costCapUsd: playbook.costCapUsd,
-        }),
-      );
+      outcome = await serialize(host, turn.thread.id, () => runTurn(host, turn));
     } catch (err) {
-      host.log.error(`playbook "${playbook.name}" attempt ${attempts} threw`, err);
-      lastError = TURN_THREW;
+      host.log.error(`playbook "${name}" attempt ${attempts} threw`, err);
+      error = TURN_THREW;
       continue;
     }
     // `serialize` answers `undefined` for a turn whose turn came once the host had begun
@@ -141,39 +176,19 @@ export async function executePlaybook(
     // refused the same way. Recorded as a failed firing — the schedule fires it again — and
     // never retried, which is the one difference between a shutdown and a transport failure.
     if (outcome === undefined) {
-      host.log.info(`playbook "${playbook.name}": the host was draining; the firing was not started`);
-      lastError = HOST_STOPPED;
+      host.log.info(`playbook "${name}": the host was draining; the firing was not started`);
+      error = HOST_STOPPED;
       break;
     }
-    const result = outcome;
-    lastRunId = result.runId;
-    if (result.status === 'done') {
-      lastError = null;
+    runId = outcome.runId;
+    if (outcome.status === 'done') {
+      error = null;
       break;
     }
-    lastError = result.error ?? RUNTIME_FAILED;
-    if (!RETRYABLE.has(lastError)) break;
+    error = outcome.error ?? RUNTIME_FAILED;
+    if (!RETRYABLE.has(error)) break;
   }
-
-  const status = lastError === null ? 'done' : 'failed';
-  await finishPlaybookRun(host.db, run.id, {
-    status,
-    runId: lastRunId,
-    attempts,
-    error: lastError,
-    endedAt: host.now(),
-  });
-  if (status === 'failed') {
-    await stagePlaybookNotice(host, {
-      playbook,
-      scheduledAt: run.scheduledAt,
-      runId: lastRunId,
-      threadId: thread.id,
-      text: `Playbook "${playbook.name}" scheduled for ${run.scheduledAt.toISOString()} failed after ${attempts} attempt(s): ${lastError}. See the host log and the playbook_runs table.`,
-    });
-  }
-  host.log.info(`playbook "${playbook.name}": ${status} after ${attempts} attempt(s)`);
-  return status;
+  return { attempts, runId, error };
 }
 
 /**
