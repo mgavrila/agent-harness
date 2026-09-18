@@ -5,7 +5,8 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { eq } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished } from 'vitest';
-import { knowledgeChunks, knowledgeDocuments } from '@harness/db';
+import { createDb, knowledgeChunks, knowledgeDocuments } from '@harness/db';
+import { TEST_DATABASE_URL } from '@harness/db/testing';
 import { ToolError } from '@harness/shared';
 import { makeTestDeps, startFakeGateway, useTestDb, type FakeGateway } from '../../testing.js';
 import type { ToolDeps } from '../tooling/types.js';
@@ -217,6 +218,54 @@ describe('syncKnowledge', () => {
   it('is an empty sync, not an error, for a client with no knowledge folder', async () => {
     const deps = makeTestDeps(db, { clientDir: path.join(tmpdir(), 'harness-client-nonexistent') });
     expect(await syncKnowledge(deps)).toMatchObject({ scanned: 0, added: 0, removed: 0, chunks: 0, skipped: [] });
+  });
+
+  it('serialises two syncs of one folder, so a document ends with one generation of chunks', async () => {
+    const { deps, write } = await clientFolder();
+    await write('front-desk.md', '# Front desk\n\nThe office closes at five.\n');
+    await write('holidays.md', '# Holidays\n\nClosed on the first Monday.\n');
+
+    // Two pools, because two transactions on one pool are two connections only by luck and the
+    // race being pinned here is between two *connections*: the nightly playbook on one host and a
+    // hand-run `knowledge_sync` on another, which `serialize` does not cover because it is per
+    // thread. The deps are otherwise the same folder, client and gateway.
+    const one = createDb(TEST_DATABASE_URL);
+    const two = createDb(TEST_DATABASE_URL);
+    onTestFinished(async () => {
+      await one.close();
+      await two.close();
+    });
+
+    const [first, second] = await Promise.all([
+      syncKnowledge({ ...deps, db: one.db }),
+      syncKnowledge({ ...deps, db: two.db }),
+    ]);
+
+    // Neither sync fails: the loser of the insert race finds the row rather than a unique
+    // violation, which would come out of `syncKnowledge` and end the playbook run in `error`.
+    for (const result of [first, second]) expect(result).toMatchObject({ scanned: 2, removed: 0, skipped: [] });
+    expect(await db.$count(knowledgeDocuments)).toBe(2);
+    // One generation, not two. Both syncs replace a document's chunks, and the second's DELETE
+    // must see the first's INSERTs — which it does only if the two are serialised, because under
+    // READ COMMITTED a DELETE that waited on a concurrent transaction re-checks the rows in its
+    // own snapshot and never sees the rows that transaction added.
+    const chunks = await db.select().from(knowledgeChunks);
+    expect(chunks).toHaveLength(2);
+    expect(chunks.map((c) => c.ordinal).sort()).toEqual([0, 0]);
+    expect(new Set(chunks.map((c) => c.documentId)).size).toBe(2);
+
+    // Again over documents that already exist, which is the other half of the race: both syncs
+    // read the old hash before either writes, so both re-chunk and both replace. One generation
+    // survives, and it is the new text.
+    await write('front-desk.md', '# Front desk\n\nThe office closes at six from Monday.\n');
+    await write('holidays.md', '# Holidays\n\nClosed on the first Monday and the last Friday.\n');
+    await Promise.all([syncKnowledge({ ...deps, db: one.db }), syncKnowledge({ ...deps, db: two.db })]);
+    const replaced = await db.select().from(knowledgeChunks);
+    expect(replaced).toHaveLength(2);
+    expect(replaced.map((c) => c.text).sort()).toEqual([
+      '# Front desk\n\nThe office closes at six from Monday.',
+      '# Holidays\n\nClosed on the first Monday and the last Friday.',
+    ]);
   });
 
   it('leaves another client’s documents alone when it tombstones', async () => {

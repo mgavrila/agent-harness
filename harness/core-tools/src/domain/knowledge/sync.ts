@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { sql } from 'drizzle-orm';
 import { withTransaction } from '@harness/db';
 import { ToolError } from '@harness/shared';
 import { containsRestrictedPattern } from '../../shared/redaction/patterns.js';
@@ -134,9 +135,23 @@ export async function syncKnowledge(deps: ToolDeps, opts: { dir?: string } = {})
     }
 
     // The row and its chunks together, so the hash and the chunks it describes are never two
-    // separately observable writes. `upsertDocument` reads the row again inside the transaction,
-    // which is what decides `added` against `updated`.
+    // separately observable writes, and the whole write behind a lock on this one document.
+    //
+    // The lock is what stops two syncs of one document interleaving. `knowledge_sync` is a tool a
+    // practitioner can run from a chat turn while the nightly playbook is running it on another
+    // thread — or another host — and `serialize` is per thread, so nothing above this covers it.
+    // Unserialised, the two delete each other's chunks and insert their own: under READ COMMITTED
+    // a DELETE that waited on a concurrent transaction re-checks the rows of its own snapshot and
+    // never sees the rows that transaction added, so the document can end with two live
+    // generations and stay that way until its file changes, `knowledge_search` returning the same
+    // passage twice.
+    //
+    // `pg_advisory_xact_lock` in its two-integer form, keyed on the source id and the path — the
+    // pair `knowledge_documents_source_path_uq` is built on — rather than on a hash of the two
+    // joined, so a collision takes both halves colliding. It is transaction-scoped, so the commit
+    // or the rollback releases it and no path out of this function can leave it held.
     const outcome = await withTransaction(deps.db, async (tx) => {
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${sourceId}), hashtext(${doc.path}))`);
       const { id, change } = await upsertDocument(tx, { client: deps.client, sourceId, doc, now });
       return {
         change,

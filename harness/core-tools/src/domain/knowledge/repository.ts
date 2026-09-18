@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNull, notInArray, type SQL } from 'drizzle-orm';
+import { and, eq, inArray, isNull, notInArray, sql, type SQL } from 'drizzle-orm';
 import { knowledgeChunks, knowledgeDocuments, knowledgeSources, withTransaction, type Db } from '@harness/db';
 import type { ParsedKnowledgeDocument } from './types.js';
 
@@ -62,49 +62,58 @@ export function isUnchanged(
  * raising a document's `min_level` re-chunks it, which is what puts the new level on every chunk,
  * where the access filter reads it (decision 8). A tombstoned document whose file has come back is
  * an `updated`, not an `added`: the id is the same and nothing that pointed at it has to move.
+ *
+ * One statement, `ON CONFLICT` on the unique constraint the table already carries, rather than a
+ * select followed by an insert: two syncs of one folder both find no row, both insert, and the
+ * second earns a unique violation that is nobody's `ToolError` and so comes out of the sync. Here
+ * the loser of that race updates instead, whether or not it holds the lock `syncKnowledge` takes.
+ *
+ * `xmax = 0` on the returned row is how Postgres answers "was this an insert or an update": an
+ * inserted row has no deleting transaction, an updated one carries the updating transaction's id.
+ * The `setWhere` leaves an identical, live document alone — `updated_at` included, because that
+ * column is when the content last changed and a citation shows it — and an update that touches
+ * nothing returns no row, which is `unchanged`.
  */
 export async function upsertDocument(
   db: Db,
   input: { client: string; sourceId: string; doc: ParsedKnowledgeDocument; now: Date },
 ): Promise<{ id: string; change: DocumentChange }> {
   const { client, sourceId, doc, now } = input;
-  const existing = await findDocumentState(db, sourceId, doc.path);
-
-  if (!existing) {
-    const [row] = await db
-      .insert(knowledgeDocuments)
-      .values({
-        client,
-        sourceId,
-        path: doc.path,
-        title: doc.title,
-        sha256: doc.sha256,
-        minLevel: doc.minLevel,
-        minRank: doc.minRank,
-        principals: doc.principals,
-        updatedAt: now,
-      })
-      .returning({ id: knowledgeDocuments.id });
-    return { id: row.id, change: 'added' };
-  }
-
-  if (isUnchanged(existing, doc)) {
-    return { id: existing.id, change: 'unchanged' };
-  }
-
-  await db
-    .update(knowledgeDocuments)
-    .set({
+  const [row] = await db
+    .insert(knowledgeDocuments)
+    .values({
+      client,
+      sourceId,
+      path: doc.path,
       title: doc.title,
       sha256: doc.sha256,
       minLevel: doc.minLevel,
       minRank: doc.minRank,
       principals: doc.principals,
       updatedAt: now,
-      deletedAt: null,
     })
-    .where(eq(knowledgeDocuments.id, existing.id));
-  return { id: existing.id, change: 'updated' };
+    .onConflictDoUpdate({
+      target: [knowledgeDocuments.sourceId, knowledgeDocuments.path],
+      set: {
+        title: doc.title,
+        sha256: doc.sha256,
+        minLevel: doc.minLevel,
+        minRank: doc.minRank,
+        principals: doc.principals,
+        updatedAt: now,
+        deletedAt: null,
+      },
+      setWhere: sql`${knowledgeDocuments.sha256} IS DISTINCT FROM ${doc.sha256} OR ${knowledgeDocuments.deletedAt} IS NOT NULL`,
+    })
+    .returning({ id: knowledgeDocuments.id, inserted: sql<boolean>`(xmax = 0)` });
+  if (row) return { id: row.id, change: row.inserted ? 'added' : 'updated' };
+
+  // No row back: the conflict fired and the update matched nothing, so what is stored is this
+  // exact file, live. The row is certainly there — the conflict is what brought us here — and
+  // this read is only for its id.
+  const existing = await findDocumentState(db, sourceId, doc.path);
+  if (!existing) throw new Error(`knowledge document ${doc.path} conflicted with a row that is not there`);
+  return { id: existing.id, change: 'unchanged' };
 }
 
 /**
