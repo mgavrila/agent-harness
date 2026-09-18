@@ -11,8 +11,9 @@ export interface HostBudget {
   timeoutMs: number;
   /**
    * How long after `timeoutMs` the host's own abort fires. The runtime arms a timeout on the same
-   * budget; the margin is what keeps the two from racing, so the runtime's own "the run timed out"
-   * is what the human reads rather than the host's "cancelled". `TIMEOUT_MARGIN_MS` in production.
+   * budget; the margin is what keeps the two from racing, so the runtime's own account of what it
+   * was doing when it ran out is what the human reads rather than the host's `TIMED_OUT`, which
+   * knows only that the budget was spent. `TIMEOUT_MARGIN_MS` in production.
    */
   timeoutMarginMs: number;
   maxHistoryMessages: number;

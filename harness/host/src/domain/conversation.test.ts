@@ -323,8 +323,8 @@ describe('drainActive', () => {
 describe("the host's timeout backstop", () => {
   it("is armed a margin after the budget, so the runtime's own timeout is the one that fires", async () => {
     // The runtime arms `AbortSignal.timeout(budget.timeoutMs)`; the host's timer is the backstop
-    // for a runtime that ignores it, and firing first would replace "the run timed out" with
-    // "cancelled" for the human.
+    // for a runtime that ignores it, and firing first would replace the runtime's own account of
+    // what it was doing when it ran out with the host's `TIMED_OUT`.
     expect(TIMEOUT_MARGIN_MS).toBe(5_000);
     const f = await hostFixture(db, {
       trajectory: [{ sleep: 120 }, { say: 'in time' }],
@@ -554,6 +554,33 @@ describe('an abort the runtime ignores', () => {
     expect(result).toMatchObject({ status: 'error', error: TIMED_OUT, text: `The run stopped: ${TIMED_OUT}.` });
     const [run] = await db.select().from(runs);
     expect(run.status).toBe('error');
+    expect(f.host.active.size).toBe(0);
+  });
+
+  it('ends a run past its cost cap as an error, even when the runtime throws instead of answering', async () => {
+    const f = await hostFixture(db, { trajectory: [{ say: 'unused' }] });
+    f.host.runtime = {
+      name: 'deaf-and-broken',
+      run: () => ({
+        events: (async function* (): AsyncGenerator<RunEvent> {
+          yield { type: 'usage', inputTokens: 1, outputTokens: 1, costUsd: 0.75 };
+          // A runtime that surfaces the abort as a failure of its own rather than as an event.
+          // Without the forced outcome this reads as RUNTIME_FAILED and the cap is lost as the
+          // reason the run stopped.
+          throw new Error('the transport closed under the abort');
+        })(),
+      }),
+      stop: async () => {},
+    };
+    const result = await turnOn(f, 'none', { costCapUsd: 0.5 });
+    expect(result).toMatchObject({
+      status: 'error',
+      error: COST_CAP_EXCEEDED,
+      text: `The run stopped: ${COST_CAP_EXCEEDED}.`,
+    });
+    const [run] = await db.select().from(runs);
+    expect(run.status).toBe('error');
+    expect(run.endedAt).not.toBeNull();
     expect(f.host.active.size).toBe(0);
   });
 

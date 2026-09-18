@@ -14,9 +14,10 @@ export const UNAUTHORISED_TEXT = 'You are not authorised to use this assistant.'
 /**
  * The production value of `budget.timeoutMarginMs`: how long after the run's own budget the host's
  * abort fires. A runtime arms its timeout on `budget.timeoutMs` exactly, so without a margin the
- * two timers race and the human reads whichever won — "The run stopped: cancelled." from here or
- * "the run timed out" from the runtime. The margin makes the runtime's own message the one that
- * wins and leaves this timer as the backstop for a runtime that never returns at all.
+ * two timers race and the human reads whichever won — this host's `TIMED_OUT`, which knows only
+ * that the budget was spent, or the runtime's own account of what it was doing when it ran out.
+ * The margin makes the runtime's the one that wins and leaves this timer as the backstop for a
+ * runtime that never returns at all.
  */
 export const TIMEOUT_MARGIN_MS = 5_000;
 
