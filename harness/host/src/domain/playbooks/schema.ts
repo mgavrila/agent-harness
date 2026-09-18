@@ -4,10 +4,16 @@ import { Cron } from 'croner';
 import { parse as parseYaml } from 'yaml';
 import * as z from 'zod/v4';
 import { PRINCIPAL_ID_PATTERN } from '@harness/identity-api';
-import { CONVERSATION_ID_PATTERN, ConfigError, SURFACE_NAME_PATTERN, describeError } from '@harness/shared';
+import {
+  CONVERSATION_ID_PATTERN,
+  ConfigError,
+  PLAYBOOK_NAME_PATTERN,
+  SURFACE_NAME_PATTERN,
+  describeError,
+} from '@harness/shared';
 
-/** A playbook's name: a lowercase slug, the key the table is upserted on. */
-export const PLAYBOOK_NAME_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
+/** The name shape lives in `@harness/shared`, because `playbooks_run_now` checks the same one. */
+export { PLAYBOOK_NAME_PATTERN };
 
 /** `none`: the run's reply is recorded and posted nowhere. `conversation`: posted once to `surface`/`conversation`. */
 export const DELIVERIES = ['none', 'conversation'] as const;

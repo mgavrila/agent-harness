@@ -16,7 +16,7 @@ export {
   ToolError,
   describeError,
 } from './errors.js';
-export { CONVERSATION_ID_PATTERN, SURFACE_NAME_PATTERN } from './ids.js';
+export { CONVERSATION_ID_PATTERN, PLAYBOOK_NAME_PATTERN, SURFACE_NAME_PATTERN } from './ids.js';
 export { LEVELS, USER_LEVELS, type Level } from './levels.js';
 export {
   booleanFromEnv,

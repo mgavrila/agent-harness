@@ -1,10 +1,8 @@
 import * as z from 'zod/v4';
-import { ToolError } from '@harness/shared';
+import { PLAYBOOK_NAME_PATTERN, ToolError } from '@harness/shared';
 import { defineTool } from '../domain/tooling/registry.js';
 import type { AnyToolDef } from '../domain/tooling/types.js';
 import { findPlaybook, listPlaybooks, requestPlaybookRun, summarisePlaybook } from '../domain/playbooks/repository.js';
-
-const PLAYBOOK_NAME = /^[a-z0-9][a-z0-9-]{0,63}$/;
 
 const SummaryShape = z.object({
   name: z.string(),
@@ -40,7 +38,7 @@ const playbooksRunNow = defineTool({
     'Ask the scheduler to run one playbook at its next tick — within thirty seconds, ahead of its schedule. ' +
     'Returns the id of the requested firing; the run itself opens later, as the playbook’s own service principal.',
   actionClass: 'admin',
-  input: z.object({ name: z.string().regex(PLAYBOOK_NAME, 'a playbook name is a lowercase slug') }),
+  input: z.object({ name: z.string().regex(PLAYBOOK_NAME_PATTERN, 'a playbook name is a lowercase slug') }),
   output: z.object({ playbook_run_id: z.string(), status: z.literal('requested') }),
   handler: async ({ name }, deps) => {
     const playbook = await findPlaybook(deps.db, deps.client, name);
