@@ -4,6 +4,7 @@ import { auditLog, decrypt, messages, playbookRuns, playbooks, runs, threads, to
 import { requestPlaybookRun } from '@harness/core-tools';
 import { RUN_FAILED_MESSAGE, type RunEvent, type RuntimeSession } from '@harness/runtime-api';
 import { hostFixture, testKernelConfig, useTestDb, type HostFixture } from '../../testing.js';
+import { drainActive } from '../conversation.js';
 import { readSkillCatalogue } from '../skills.js';
 import { stagePlaybookNotice } from './notice.js';
 import { syncPlaybooks } from './repository.js';
@@ -324,6 +325,36 @@ describe('the scheduler', () => {
       error: 'the host stopped before the run finished',
     });
     // The one notice says what happened, in the shutdown's own words rather than a crash's.
+    const effects = await db.select().from(toolEffects);
+    expect(effects).toHaveLength(1);
+    expect(JSON.parse(decrypt(effects[0].payloadEncrypted, f.host.config.encryptionKey))).toMatchObject({
+      text: 'Playbook "nightly" scheduled for 2026-09-15T12:00:00.000Z failed after 1 attempt(s): the host stopped before the run finished. See the host log and the playbook_runs table.',
+    });
+  });
+
+  it("records a firing whose turn was already running when the drain aborted it mid-run, under the drain's own words (I2)", async () => {
+    const f = await hostFixture(db, { trajectory: [{ sleep: 150 }, { say: 'late' }] });
+    await due(f, { ...NIGHTLY, skill: 'sample-skill' });
+    const scheduler = startScheduler(f.host, { tickMs: 3_600_000 });
+    const tick = scheduler.tick();
+    await new Promise((r) => setTimeout(r, 60));
+    expect(f.host.active.size).toBe(1);
+    // The shutdown begins while the turn is already running, unlike the refused-turn case above:
+    // `drainActive` aborts it mid-flight, the same as a real shutdown racing a slow tool call.
+    await drainActive(f.host, 1_000);
+    try {
+      expect(await tick).toEqual({ claimed: 1, done: 0, failed: 1, preflightFailed: 0 });
+    } finally {
+      await scheduler.stop();
+    }
+    const [firing] = await db.select().from(playbookRuns);
+    expect(firing).toMatchObject({
+      status: 'failed',
+      attempts: 1,
+      error: 'the host stopped before the run finished',
+    });
+    expect(firing.runId).not.toBeNull();
+    // The one notice says what happened, in the shutdown's own words rather than "cancelled".
     const effects = await db.select().from(toolEffects);
     expect(effects).toHaveLength(1);
     expect(JSON.parse(decrypt(effects[0].payloadEncrypted, f.host.config.encryptionKey))).toMatchObject({

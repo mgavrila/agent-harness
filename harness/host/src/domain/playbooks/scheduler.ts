@@ -185,7 +185,12 @@ async function runWithRetry(host: Host, name: string, turn: TurnInput): Promise<
       error = null;
       break;
     }
-    error = outcome.error ?? RUNTIME_FAILED;
+    // A turn already running when the drain aborted it ends `cancelled`, the same as any other
+    // cancel; only while the host is still draining does that mean the shutdown, so it is the
+    // drain's own sentence that goes on the row and the notice, not the word `cancelled` an
+    // operator would otherwise have to learn to read as "the host stopped" (I2). A cancel that
+    // arrives once the drain has ended keeps its own text.
+    error = outcome.status === 'cancelled' && host.draining ? HOST_STOPPED : (outcome.error ?? RUNTIME_FAILED);
     if (!RETRYABLE.has(error)) break;
   }
   return { attempts, runId, error };
