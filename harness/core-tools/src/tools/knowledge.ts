@@ -15,6 +15,11 @@ const HitShape = z.object({
   text: z.string(),
   score: z.number(),
 });
+const SkipShape = z.object({
+  path: z.string(),
+  kind: z.enum(['restricted', 'embed_failed']),
+  reason: z.string(),
+});
 
 const knowledgeSearch = defineTool({
   name: 'knowledge_search',
@@ -56,7 +61,7 @@ const knowledgeSync = defineTool({
     unchanged: z.number(),
     removed: z.number(),
     chunks: z.number(),
-    skipped: z.array(z.object({ path: z.string(), kind: z.enum(['restricted', 'embed_failed']), reason: z.string() })),
+    skipped: z.array(SkipShape),
   }),
   handler: async (_args, deps) => syncKnowledge(deps),
 });

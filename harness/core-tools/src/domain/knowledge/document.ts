@@ -52,7 +52,7 @@ export function parseKnowledgeDocument(relPath: string, text: string): ParsedKno
   }
   const body = (match ? text.slice(match[0].length) : text).trim();
   if (body === '') throw new ConfigError(`knowledge document "${relPath}" is empty`);
-  const minLevel = parsed.data.min_level as Level;
+  const minLevel: Level = parsed.data.min_level;
   return {
     path: relPath,
     title: parsed.data.title ?? titleFrom(body, relPath),
