@@ -8,7 +8,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { startFakeGateway, type FakeGateway } from '@harness/runtime-api/testing';
 import { EVALS_DATABASE_URL, EXTRACTION, VERDICTS, writeEvalCorpus } from '../corpus.test-helpers.js';
 import type { Report } from '../domain/report/types.js';
-import { flagFrom, packNames, parseLimitFlag, parsePackFlag, parseUpdateBaselineFlag } from './cli.js';
+import { flagFrom, packNames, packsToMeasure, parseLimitFlag, parsePackFlag, parseUpdateBaselineFlag } from './cli.js';
 
 const execFileAsync = promisify(execFile);
 const evalsDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -77,10 +77,23 @@ describe('parsePackFlag', () => {
   }
 });
 
+describe('packsToMeasure', () => {
+  it('refuses an empty HARNESS_PACKS by name, which is what the runner exits 2 on', () => {
+    // A server may serve no pack; an eval run measures one, so this refuses rather than quietly
+    // measuring the default — and refuses before `loadPacks` logs that it loaded none.
+    const result = packsToMeasure('');
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain('HARNESS_PACKS names no pack');
+  });
+
+  it('passes the named packs through, and the default when the variable is unset', () => {
+    expect(packsToMeasure(undefined)).toEqual({ ok: true, names: ['@harness/pack-healthcare'] });
+    expect(packsToMeasure('@harness/pack-stories')).toEqual({ ok: true, names: ['@harness/pack-stories'] });
+  });
+});
+
 describe('packNames', () => {
-  it('reads an empty HARNESS_PACKS as no pack, which an eval run then refuses by name', () => {
-    // A server may serve no pack; an eval run measures one, so `runEvals` exits 2 on this rather
-    // than quietly measuring the default.
+  it('reads an empty HARNESS_PACKS as no pack', () => {
     expect(packNames('')).toEqual([]);
   });
 

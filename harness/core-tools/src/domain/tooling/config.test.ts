@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { pack as healthcarePack } from '@harness/pack-healthcare';
+import { pack as storiesPack } from '@harness/pack-stories';
 import { registryOf } from '../packs/registry.js';
 import { formsDirFrom, packNames, parserFromEnv } from './config.js';
 
@@ -10,15 +11,20 @@ import { formsDirFrom, packNames, parserFromEnv } from './config.js';
  * pack's templates without editing a second variable.
  */
 describe('formsDirFrom', () => {
-  const packs = { all: [healthcarePack], formsDir: () => '/packs/healthcare/forms' };
+  const healthcare = registryOf([healthcarePack]);
 
-  it('takes the pack forms directory when HARNESS_FORMS_DIR is unset, and the override when it is set', () => {
-    expect(formsDirFrom(packs, undefined, '/srv/storage')).toBe('/packs/healthcare/forms');
-    expect(formsDirFrom(packs, '/srv/elsewhere/forms', '/srv/storage')).toBe('/srv/elsewhere/forms');
-    expect(formsDirFrom(packs, './forms', '/srv/storage')).toBe(path.resolve('./forms'));
+  it('takes the primary pack’s templates directory when HARNESS_FORMS_DIR is unset, and the override when it is set', () => {
+    expect(formsDirFrom(healthcare, undefined, '/srv/storage')).toBe(healthcarePack.formsDir);
+    expect(formsDirFrom(healthcare, '/srv/elsewhere/forms', '/srv/storage')).toBe('/srv/elsewhere/forms');
+    expect(formsDirFrom(healthcare, './forms', '/srv/storage')).toBe(path.resolve('./forms'));
   });
 
-  it('asks no pack for templates when none is loaded, and still honours the override', () => {
+  it('stands the storage directory in when the primary pack ships no templates, and when there is no pack', () => {
+    // `formsDir` is optional on the pack contract and the stories pack declares none, which used
+    // to fail startup for `HARNESS_PACKS=@harness/pack-stories` alone. Nothing reads the value in
+    // either deployment: the forms tools belong to a pack that ships templates.
+    expect(storiesPack.formsDir).toBeUndefined();
+    expect(formsDirFrom(registryOf([storiesPack]), undefined, '/srv/storage')).toBe('/srv/storage');
     expect(formsDirFrom(registryOf([]), undefined, '/srv/storage')).toBe('/srv/storage');
     expect(formsDirFrom(registryOf([]), '/srv/elsewhere/forms', '/srv/storage')).toBe('/srv/elsewhere/forms');
   });

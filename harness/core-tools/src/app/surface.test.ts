@@ -25,6 +25,9 @@ const architecture = path.join(repoRoot, ARCHITECTURE_DIR);
  */
 const SCAN_ANCHORS = [
   'DATABASE_URL',
+  // `packNames` reads `env.HARNESS_PACKS` off the bag it is handed, which no scan pattern
+  // matches; the runner's `process.env.HARNESS_PACKS` is what keeps the variable in the scan.
+  'HARNESS_PACKS',
   'LITELLM_MASTER_KEY',
   'HARNESS_STORAGE_DIR',
   'VERIFY_NPPES_ENABLED',

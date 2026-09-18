@@ -176,7 +176,7 @@ describe('registryOf([])', () => {
     const packs = registryOf([]);
     expect(() => packs.manifest()).toThrow('no pack is loaded');
     expect(() => packs.formsDir()).toThrow(ConfigError);
-    expect(() => packs.formsDir()).toThrow('HARNESS_FORMS_DIR');
+    expect(() => packs.formsDir()).toThrow('no pack is loaded, so no pack ships a forms directory');
     expect(() => packs.targetFor(undefined)).toThrow(ToolError);
     expect(() => packs.targetFor(undefined)).toThrow('no pack is loaded');
   });

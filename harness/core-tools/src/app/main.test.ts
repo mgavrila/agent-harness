@@ -80,6 +80,44 @@ describe('stdio entrypoint', () => {
     }
   }, 30_000);
 
+  it('spawns with a pack that ships no forms directory, which used to kill it at startup', async () => {
+    // `@harness/pack-stories` declares a skills directory and no forms directory, which the
+    // contract allows. Before the forms fallback, resolving the templates directory at startup
+    // threw `pack "stories" ships no forms directory` and the server never served.
+    const storageDir = mkdtempSync(path.join(tmpdir(), 'harness-smoke-storage-'));
+    const identityFile = path.join(storageDir, 'identity.yaml');
+    writeFileSync(
+      identityFile,
+      'principals:\n  - id: svc-local\n    kind: service\n    level: service\n    displayName: Local\n',
+    );
+    const client = new Client({ name: 'smoke', version: '0.0.0' });
+    const transport = new StdioClientTransport({
+      command: 'pnpm',
+      args: ['exec', 'tsx', path.join(here, 'main.ts')],
+      cwd: path.resolve(here, '../..'),
+      env: {
+        ...process.env,
+        DATABASE_URL: TEST_DATABASE_URL,
+        HARNESS_ENCRYPTION_KEY: randomBytes(32).toString('base64'),
+        HARNESS_CLIENT: 'smoke',
+        HARNESS_PRINCIPAL: 'svc-local',
+        HARNESS_IDENTITY_FILE: identityFile,
+        HARNESS_STORAGE_DIR: storageDir,
+        HARNESS_PACKS: '@harness/pack-stories',
+      },
+    });
+    await client.connect(transport);
+    try {
+      const names = (await client.listTools()).tools.map((t) => t.name);
+      // The pack's own kinds are loaded, so the two document tools a pack serves are published.
+      expect(names).toContain('documents_extract');
+      expect(names).toContain('records_upsert');
+      expect(names).not.toContain('forms_fill');
+    } finally {
+      await client.close();
+    }
+  }, 30_000);
+
   it('refuses to start as a principal the identity file does not declare', async () => {
     // Same spawn with HARNESS_PRINCIPAL=u-ghost: the child exits with a ConfigError before it
     // serves, so the client's connect rejects. What matters is that no server ever came up as

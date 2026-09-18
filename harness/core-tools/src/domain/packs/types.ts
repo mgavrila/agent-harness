@@ -78,8 +78,10 @@ export interface PackRegistry {
   /** The primary pack's extraction manifest. Throws `ToolError` when no pack is loaded. */
   manifest(): ExtractionManifest;
   /**
-   * The primary pack's forms directory. `HARNESS_FORMS_DIR` overrides it in `app/server.ts`, and
-   * with no pack loaded that override is the only answer: this throws `ConfigError` saying so.
+   * The primary pack's own forms directory, for a caller that means that pack's templates.
+   * Throws `ConfigError` when no pack is loaded, or when the primary pack ships none. A
+   * deployment's value comes from `formsDirFrom` instead, which prefers `HARNESS_FORMS_DIR` and
+   * falls back to the storage directory rather than refusing to start.
    */
   formsDir(): string;
   /** One skills directory per loaded pack, in order; empty when none is loaded. */

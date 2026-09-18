@@ -76,9 +76,11 @@ describe('a message on a surface', () => {
     expect(request.runId).toBe(run.id);
   });
 
-  it('runs a turn for a client with no pack, over the kernel’s own tools', async () => {
-    // `HARNESS_PACKS=''`: an internal team whose client is a folder with no product area in it.
-    // The turn has to reach the kernel and come back the same way every other turn does.
+  it('runs a turn for a host whose registry holds no pack, over the kernel’s own tools', async () => {
+    // An internal team whose client is a folder with no product area in it. The registry is built
+    // here rather than through `HARNESS_PACKS` — `app/main.test.ts` in core-tools covers the
+    // variable — so what this asserts is the turn: it reaches the kernel and comes back the same
+    // way every other turn does.
     const f = await hostFixture(db, {
       packs: registryOf([]),
       trajectory: [{ tool: 'memory_list', args: {} }, { say: 'Nothing is remembered yet.' }],

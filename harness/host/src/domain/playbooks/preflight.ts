@@ -20,7 +20,7 @@ export async function preflightPlaybook(
   playbook: PlaybookRow,
 ): Promise<PreflightResult> {
   const skill = host.skills.find((s) => s.name === playbook.skill);
-  if (!skill) return { ok: false, reason: `skill "${playbook.skill}" is not in any loaded pack` };
+  if (!skill) return { ok: false, reason: `skill "${playbook.skill}" is not in the loaded skill catalogue` };
   let principal: Principal | null;
   try {
     principal = await host.identity.get(playbook.principalId);

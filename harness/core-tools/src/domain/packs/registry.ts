@@ -158,13 +158,12 @@ export function registryOf(all: Pack[]): PackRegistry {
       }
       return all[0].extraction;
     },
-    // The requirement is the primary pack's: a pack that ships templates must say where they are.
-    // With no pack there is no such pack to ask, so nothing is checked and the deployment is told
-    // the one way it can still answer the question.
+    // The primary pack's own directory, for a caller that means that and nothing else. A
+    // deployment does not ask this at startup — `formsDirFrom` does, and it stands the storage
+    // directory in for a pack that ships no templates rather than refusing to start over a
+    // directory nothing will open.
     formsDir: () => {
-      if (all.length === 0) {
-        throw new ConfigError(`${NO_PACKS}; set HARNESS_FORMS_DIR to say where the form templates are`);
-      }
+      if (all.length === 0) throw new ConfigError(`${NO_PACKS}, so no pack ships a forms directory`);
       const dir = all[0].formsDir;
       if (!dir) throw new ConfigError(`pack "${all[0].name}" ships no forms directory`);
       return dir;

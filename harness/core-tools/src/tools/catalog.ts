@@ -6,7 +6,7 @@ import type { PackRegistry } from '../domain/packs/types.js';
 import { approvalTools } from './approvals.js';
 import { auditTools } from './audit.js';
 import { deadlineTools } from './deadlines.js';
-import { documentTools } from './documents.js';
+import { PACK_DOCUMENT_TOOLS, documentTools } from './documents.js';
 import { harnessTools } from './harness.js';
 import { knowledgeTools } from './knowledge.js';
 import { memoryTools } from './memory.js';
@@ -43,9 +43,11 @@ export function kernelTools(packs: PackRegistry): AnyToolDef[] {
 export const allTools = kernelTools;
 
 /**
- * What the MCP server publishes: the kernel's tools, less the ones a source replaced and the
- * generic `records_*` tools when no loaded record kind wants them, plus every source's own.
- * `publishedCatalogue` is where those rules live and where each of them fails loudly.
+ * What the MCP server publishes: the kernel's tools, less the ones a source replaced, less the
+ * two kinds of tool nothing loaded can serve — the generic `records_*` tools when no loaded
+ * record kind wants them, and `documents_classify`/`documents_extract` when no loaded pack
+ * declares a document kind — plus every source's own. `publishedCatalogue` is where those rules
+ * live and where each of them fails loudly.
  */
 export function publishedTools(deps: ToolDeps, kernel: AnyToolDef[] = kernelTools(deps.packs)): AnyToolDef[] {
   const sources: ToolSource[] = deps.packs.all.map((pack) => ({
@@ -56,7 +58,14 @@ export function publishedTools(deps: ToolDeps, kernel: AnyToolDef[] = kernelTool
   // A deployment whose every kind is served by a pack's own tools publishes none of the five,
   // and its catalogue is exactly what the packs named.
   const anyGenericKind = deps.packs.recordKinds().some((r) => r.genericTools !== false);
-  const hidden = anyGenericKind ? new Set<string>() : new Set<string>(GENERIC_RECORD_TOOLS);
+  // The same question about the other namespace: with no document kind declared — a client with
+  // no pack, since `definePack` refuses a pack that declares none — classifying and extracting
+  // have no target to reach, so they are withheld rather than published and left to fail.
+  const anyDocumentKind = deps.packs.documentKinds().length > 0;
+  const hidden = new Set<string>([
+    ...(anyGenericKind ? [] : GENERIC_RECORD_TOOLS),
+    ...(anyDocumentKind ? [] : PACK_DOCUMENT_TOOLS),
+  ]);
   return publishedCatalogue(kernel, sources, hidden);
 }
 

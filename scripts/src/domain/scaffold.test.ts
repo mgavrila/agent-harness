@@ -25,7 +25,10 @@ async function scaffold(): Promise<void> {
     path.join(template, 'playbooks.yaml'),
     "playbooks:\n  - name: nightly\n    schedule: '0 7 * * *'\n    skill: demo-practice-skill\n    prompt: Run it for Demo Practice.\n    principal: svc-playbooks\n    cost_cap_usd: 0.5\n",
   );
-  await writeFile(path.join(template, '.env.example'), 'HARNESS_CLIENT=demo-practice\n');
+  await writeFile(
+    path.join(template, '.env.example'),
+    'HARNESS_CLIENT=demo-practice\nHARNESS_PACKS=@harness/pack-healthcare\n',
+  );
   await mkdir(path.join(template, 'knowledge'), { recursive: true });
   await writeFile(
     path.join(template, 'knowledge', 'front-desk.md'),
@@ -111,12 +114,29 @@ describe('newClient', () => {
     }
   });
 
-  it('scaffolds a client with no pack at all, which is what --pack is optional for', async () => {
-    // `HARNESS_PACKS=''`: a client that wants the kernel's own tools and no product area. The
-    // folder is the same folder; only the variable in its `.env.example` differs.
+  it('scaffolds a client with no pack at all, and empties HARNESS_PACKS to say so', async () => {
+    // `HARNESS_PACKS=`: a client that wants the kernel's own tools and no product area. The
+    // folder is the same folder; the one line that differs is the one that decides it.
     const out = await newClient({ name: 'internal-team', root });
-    expect(out.files).toContain('SOUL.md');
     expect(out.dir).toBe(path.join(root, 'clients', 'internal-team'));
+    expect(out.files).toContain('.env.example');
+    const env = await readFile(path.join(out.dir, '.env.example'), 'utf8');
+    expect(env).toMatch(/^HARNESS_PACKS=$/m);
+    expect(env).not.toContain('@harness/pack-healthcare');
+    expect(env).toContain('HARNESS_CLIENT=internal-team');
+  });
+
+  it('writes the HARNESS_PACKS line even when the template carries none', async () => {
+    await writeFile(path.join(root, 'clients', 'demo-practice', '.env.example'), 'HARNESS_CLIENT=demo-practice\n');
+    const out = await newClient({ name: 'internal-team', root });
+    expect(await readFile(path.join(out.dir, '.env.example'), 'utf8')).toMatch(/^HARNESS_PACKS=$/m);
+  });
+
+  it('copies the template’s HARNESS_PACKS line untouched when a pack is named', async () => {
+    const out = await newClient({ pack: 'healthcare', name: 'river-clinic', root });
+    expect(await readFile(path.join(out.dir, '.env.example'), 'utf8')).toContain(
+      'HARNESS_PACKS=@harness/pack-healthcare',
+    );
   });
 
   it('refuses a pack that is not installed', async () => {

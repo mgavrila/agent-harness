@@ -26,8 +26,8 @@ console.log(
 console.log(`     Set HARNESS_CLIENT=${values.name} and a storage directory this client does not share.`);
 console.log(
   values.pack
-    ? `     HARNESS_PACKS names the packs this client serves; the template names the healthcare pack.`
-    : `     Set HARNESS_PACKS= (empty) — this client was scaffolded with no pack.`,
+    ? '     HARNESS_PACKS names the packs this client serves; the template names the healthcare pack.'
+    : '     Its HARNESS_PACKS is already empty: this client serves no pack, only the kernel’s tools.',
 );
 console.log('  2. Create one Slack app (Socket Mode and Interactivity on; see docs/runbook.md),');
 console.log("     paste its two tokens and the approvals channel id, and put the two humans'");

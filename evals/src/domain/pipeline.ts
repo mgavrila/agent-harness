@@ -187,6 +187,17 @@ export function extractIdKeyFor(packs: PackRegistry, extractTool: string, docume
  * the caller points wherever it likes.
  */
 export async function openPipeline(opts: OpenPipelineOptions): Promise<PipelineHandle> {
+  // Both pack questions are settled before the database is touched: a run with nothing to measure
+  // should not have migrated, opened a pool and written a `runs` row it then abandons.
+  if (!opts.registry && !opts.packs) {
+    throw new ConfigError('openPipeline needs either `packs` to load or an already-built `registry`');
+  }
+  const packs = opts.registry ?? (await loadPacks([...(opts.packs ?? [])]));
+  // A server may load no pack; a run that measures one may not, and `all[0]` a few lines down is
+  // where that would otherwise surface as a `TypeError`.
+  if (packs.all.length === 0) {
+    throw new ConfigError('an eval run measures a pack, and the registry it was given holds none');
+  }
   await runMigrations(opts.databaseUrl);
   const { db, close: closeDb } = createDb(opts.databaseUrl);
   const client = opts.client ?? 'evals';
@@ -194,15 +205,6 @@ export async function openPipeline(opts: OpenPipelineOptions): Promise<PipelineH
   const policy: Policy = { ...DEFAULT_POLICY };
   const confidenceThreshold = opts.confidenceThreshold ?? DEFAULT_CONFIDENCE_THRESHOLD;
   const toolsCalled: string[] = [];
-  if (!opts.registry && !opts.packs) {
-    throw new ConfigError('openPipeline needs either `packs` to load or an already-built `registry`');
-  }
-  const packs = opts.registry ?? (await loadPacks([...(opts.packs ?? [])]));
-  // A server may load no pack; a run that measures one may not. Said here, where the registry is
-  // in hand, rather than left to `all[0]` of an empty array a line later.
-  if (packs.all.length === 0) {
-    throw new ConfigError('an eval run measures a pack, and the registry it was given holds none');
-  }
   // `byName` throws a ConfigError naming the pack, which is the message the caller wants; for the
   // default it cannot throw, because the pack it names is the first of a registry just checked to
   // hold one.

@@ -21,18 +21,18 @@ import { DEFAULT_CONFIDENCE_THRESHOLD } from './types.js';
  * its templates somewhere else; set, it wins and is resolved against the process working
  * directory, exactly as it did before the registry existed.
  *
- * With no pack loaded there is no pack to ask and no forms tool to read the answer — the forms
- * tools are a pack's — so the storage directory stands in, the same stand-in the eval pipeline
- * uses for a measured pack that ships no templates. Asking the registry instead would fail a
- * startup over a directory nothing in that deployment will ever open.
+ * `formsDir` is optional on the pack contract, and a primary pack that declares none — or no
+ * primary pack at all, which is a client with no pack — leaves nothing to answer with. The
+ * storage directory stands in there, the same stand-in the eval pipeline uses for a measured pack
+ * that ships no templates. Nothing reads the value in that deployment: `deps.formsDir` has one
+ * consumer, the healthcare pack's forms tools, and a pack that ships forms tools ships a
+ * `formsDir` with them. The cost is that such a pack, having forgotten one, no longer fails at
+ * startup; what it loses is a loud failure over a directory nothing would have opened, and what
+ * it buys is that `HARNESS_PACKS=@harness/pack-stories` starts at all.
  */
-export function formsDirFrom(
-  packs: Pick<PackRegistry, 'all' | 'formsDir'>,
-  raw: string | undefined,
-  storageDir: string,
-): string {
+export function formsDirFrom(packs: Pick<PackRegistry, 'all'>, raw: string | undefined, storageDir: string): string {
   if (raw) return path.resolve(raw);
-  return packs.all.length === 0 ? storageDir : packs.formsDir();
+  return packs.all[0]?.formsDir ?? storageDir;
 }
 
 /** What a deployment that has never heard of `HARNESS_PACKS` serves. */

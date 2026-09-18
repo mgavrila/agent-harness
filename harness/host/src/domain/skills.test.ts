@@ -54,8 +54,8 @@ describe('readSkillCatalogue', () => {
     expect(skills[0].description).toContain('knowledge');
   });
 
-  it('offers a client with no pack the kernel’s own skills and nothing else', async () => {
-    // The list `app/main.ts` builds, with `HARNESS_PACKS=''`: the kernel directory, then one
+  it('offers a host whose registry holds no pack the kernel’s own skills and nothing else', async () => {
+    // The list `app/main.ts` builds when no pack is loaded: the kernel directory, then one
     // `skillsDir` per loaded pack, of which there are none.
     const packs = registryOf([]);
     expect(packs.skillsDirs()).toEqual([]);

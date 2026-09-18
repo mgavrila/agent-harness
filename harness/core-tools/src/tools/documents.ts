@@ -139,6 +139,16 @@ const documentsExtract = defineTool({
   recordIds: (args, result) => [args.document_id, result.record_id],
 });
 
+/**
+ * The two document tools that need a pack to do anything: one asks the model which of the loaded
+ * packs' kinds a document is, the other writes a pack's record from it. The publication gate in
+ * `tools/catalog.ts` withholds them when no loaded pack declares a document kind, the same way it
+ * withholds the generic record tools when no loaded record kind wants them — a tool in the
+ * catalogue is a claim to the model that it can be called. Ingesting, getting and listing a file
+ * are the kernel's own business and stay published whatever is loaded.
+ */
+export const PACK_DOCUMENT_TOOLS = ['documents_classify', 'documents_extract'] as const;
+
 export function documentTools(packs: PackRegistry): AnyToolDef[] {
   return [documentsIngestFor(packs), documentsClassify, documentsExtract, documentsGet, documentsList];
 }

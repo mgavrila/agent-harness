@@ -51,7 +51,7 @@ describe('preflightPlaybook', () => {
     const f = await hostFixture(db, { trajectory: [] });
     expect(await preflightPlaybook(f.host, row({ skill: 'no-such-skill' }))).toEqual({
       ok: false,
-      reason: 'skill "no-such-skill" is not in any loaded pack',
+      reason: 'skill "no-such-skill" is not in the loaded skill catalogue',
     });
     expect(await preflightPlaybook(f.host, row({ principalId: 'svc-nobody' }))).toEqual({
       ok: false,
