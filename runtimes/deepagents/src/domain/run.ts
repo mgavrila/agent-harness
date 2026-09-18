@@ -16,8 +16,6 @@ export interface RunContext {
 }
 
 const BUDGET_MESSAGE = 'the run exceeded its budget';
-/** The contract's own word for a loop that broke, which is what the host retries once. */
-const FAILED_MESSAGE = RUN_FAILED_MESSAGE;
 
 /** A skill activation is a `read_file` under `/skills/<name>/`; the version is the host's. */
 const SKILL_PATH = /^\/skills\/([^/]+)\//;
@@ -206,7 +204,8 @@ export async function runDeepAgent(request: RunRequest, ctx: RunContext, queue: 
       queue.push({ type: 'error', message: 'the run timed out' });
     } else {
       ctx.log.error(`run ${request.runId} failed`, err);
-      queue.push({ type: 'error', message: FAILED_MESSAGE });
+      // The contract's own word for a loop that broke, which is what the host retries once.
+      queue.push({ type: 'error', message: RUN_FAILED_MESSAGE });
     }
   } finally {
     queue.close();
