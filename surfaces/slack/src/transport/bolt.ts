@@ -52,6 +52,9 @@ export interface Classified {
  */
 export function classifyMessage(event: RawMessage, botUserId: string | undefined): Classified | null {
   if (event.bot_id || !event.user) return null;
+  // Slack's own system user posts notices (e.g. "you were added to a channel") into the
+  // assistant's DM; its channel cannot be posted to, so this is a person to nobody.
+  if (event.user === 'USLACKBOT') return null;
   const mention = botUserId ? `<@${botUserId}>` : null;
   const text = event.text ?? '';
   const files = (event.files ?? [])

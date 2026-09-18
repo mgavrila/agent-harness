@@ -40,7 +40,8 @@ channel message is `mentioned: false` and the host still receives it but does no
 because `app_mention` already delivered it — Slack sends both when the bot is a channel member. A
 direct message is kept whether or not it names the bot, with the token stripped: `app_mention` is
 documented for channels, and dropping a DM on the assumption it arrives twice would lose it
-outright. Messages with a `bot_id`, and any subtype but `file_share` (edits, deletions, joins),
+outright. Messages with a `bot_id`, any subtype but `file_share` (edits, deletions, joins), and any
+message from Slack's own system user `USLACKBOT` (e.g. a "you were added to a channel" notice),
 are dropped.
 
 **A follow-up inside a thread the assistant has posted in needs no mention.** A reply is posted in
