@@ -33,6 +33,8 @@ class IdentityWithDefaults implements IdentitySession {
   private readonly log: Logger;
   /** Minted principals, keyed by their own id, so each one is logged and derived once. */
   private readonly minted = new Map<string, Principal>();
+  /** Derived ids a declared principal already holds: refused once with a warning, then silently. */
+  private readonly refused = new Set<string>();
 
   constructor(declared: StaticIdentity, defaults: Readonly<Record<string, UserLevel>>, log: Logger) {
     this.declared = declared;
@@ -50,9 +52,15 @@ class IdentityWithDefaults implements IdentitySession {
     if (!minted) return null;
     const already = this.minted.get(minted.id);
     if (already) return already;
+    if (this.refused.has(minted.id)) return null;
     // A derived id that a declared principal already holds would hand one person another's
-    // history. Refuse: the file is wrong, and nobody should run until it is fixed.
+    // history, so this caller is refused rather than admitted. It stays a refusal here rather
+    // than a startup error because nothing at load knows which ids will be derived: a check over
+    // the declared ids could only guess from their shape, and would refuse a file whose author
+    // happened to end an id in eight hex characters. The warning is written once per colliding
+    // id, not once per message, so a person who keeps typing does not fill the log.
     if (await this.declared.get(minted.id)) {
+      this.refused.add(minted.id);
       this.log.warn(`static identity: derived id "${minted.id}" is already declared; refusing the caller`);
       return null;
     }

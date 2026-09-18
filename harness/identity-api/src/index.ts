@@ -14,6 +14,7 @@ export {
   IdentityFileShape,
   PRINCIPAL_ID_PATTERN,
   PrincipalShape,
+  UNDEFAULTABLE_SURFACE,
   parseIdentityFile,
   parseIdentityFileWithDefaults,
   principalFromDefault,

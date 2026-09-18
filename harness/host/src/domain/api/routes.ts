@@ -89,7 +89,15 @@ type Caller = { ok: true; principal: Principal } | { ok: false; status: number; 
  *
  * The bearer secret says the *caller* may use this API; it does not say who they are acting as.
  * That is the identity plug-in's answer, from a surface and that surface's own user id, so nothing
- * a caller sends can name a principal directly.
+ * a caller sends can name a principal directly, and nothing it sends can choose a level.
+ *
+ * What it can name is any *loaded* surface. A client whose identity file gives one of those a
+ * default level admits an undeclared user there, and this route is one of the doors into that — a
+ * token holder could open runs as a succession of freshly derived principals of that surface, each
+ * at the default level and never above it. The run API's own surface may never have a default
+ * (`UNDEFAULTABLE_SURFACE` in `@harness/identity-api`, a load-time refusal), so for its own callers
+ * the file is the whole list; a client that wants the same of another surface declares everyone on
+ * it, or leaves `HARNESS_HOST_TOKEN` unset and binds no listener at all.
  */
 async function callerOf(host: Host, ref: { surface: string; userId: string }): Promise<Caller> {
   if (!SURFACE_NAME_PATTERN.test(ref.surface) || ref.userId === '') {

@@ -3,6 +3,7 @@ import { ConfigError } from '@harness/shared';
 import {
   PRINCIPAL_ID_PATTERN,
   parseIdentityFile,
+  UNDEFAULTABLE_SURFACE,
   parseIdentityFileWithDefaults,
   principalFromDefault,
 } from './principals.js';
@@ -137,12 +138,25 @@ describe('parseIdentityFileWithDefaults', () => {
       /identity file is invalid/,
     );
   });
+
+  it('refuses a default on the run API, whose one bearer token would mint principals at will', () => {
+    expect(() =>
+      parseIdentityFileWithDefaults({ defaults: { [UNDEFAULTABLE_SURFACE]: 'member' }, principals: [manager] }),
+    ).toThrow(ConfigError);
+    expect(() => parseIdentityFileWithDefaults({ defaults: { http: 'member' }, principals: [manager] })).toThrow(
+      /"http" may not have a default; the run API's bearer is one shared secret/,
+    );
+    // Every other surface is still free to have one.
+    expect(parseIdentityFileWithDefaults({ defaults: { memory: 'member' }, principals: [manager] }).defaults).toEqual({
+      memory: 'member',
+    });
+  });
 });
 
 describe('principalFromDefault', () => {
-  it('mints a stable id from the surface and the surface user id', () => {
+  it('mints a stable id from the surface, the surface user id and its digest', () => {
     expect(principalFromDefault('memory', 'U0123ABCD', 'member')).toEqual({
-      id: 'u-memory-u0123abcd',
+      id: 'u-memory-u0123abcd-8742d695',
       kind: 'user',
       level: 'member',
       displayName: 'U0123ABCD',
@@ -156,9 +170,33 @@ describe('principalFromDefault', () => {
 
   it('replaces every character an id may not carry, and keeps the level it was given', () => {
     const minted = principalFromDefault('ms-teams', 'A.User@Example', 'lead');
-    expect(minted?.id).toBe('u-ms-teams-a-user-example');
+    expect(minted?.id).toBe('u-ms-teams-a-user-example-0e7aed07');
     expect(minted?.level).toBe('lead');
     expect(PRINCIPAL_ID_PATTERN.test(minted?.id ?? '')).toBe(true);
+  });
+
+  it('gives user ids that slug alike different principals, and each of them the same one twice', () => {
+    // The whole point of the digest. These three slug to `bob-smith-example-com`, and without it
+    // the second and third callers would be handed the first one's principal — their memory,
+    // their audit trail, their approvals.
+    const ids = ['Bob.Smith@example.com', 'bob-smith-example-com', 'BOB_SMITH_EXAMPLE_COM'];
+    const minted = ids.map((userId) => principalFromDefault('memory', userId, 'member'));
+    expect(minted.map((p) => p?.id)).toEqual([
+      'u-memory-bob-smith-example-com-164ad630',
+      'u-memory-bob-smith-example-com-117a667c',
+      'u-memory-bob-smith-example-com-ad154fd2',
+    ]);
+    expect(new Set(minted.map((p) => p?.id)).size).toBe(3);
+    for (const [i, userId] of ids.entries()) {
+      expect(principalFromDefault('memory', userId, 'member')).toEqual(minted[i]);
+      expect(minted[i]?.displayName).toBe(userId);
+      expect(minted[i]?.surfaces).toEqual({ memory: userId });
+      expect(PRINCIPAL_ID_PATTERN.test(minted[i]?.id ?? '')).toBe(true);
+    }
+  });
+
+  it('is an id even when nothing of the user id survives the slug', () => {
+    expect(principalFromDefault('memory', '@@@', 'member')?.id).toBe('u-memory-2ec847d8');
   });
 
   it('answers null rather than an id no principal could have', () => {

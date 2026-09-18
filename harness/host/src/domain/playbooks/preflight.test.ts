@@ -159,10 +159,10 @@ describe('the shipped hf1-labs client', () => {
     // Anyone else in the workspace: a member, under an id derived from their member id, so the
     // same teammate is the same principal on Monday as on Friday.
     const teammate = await session.resolve({ surface: 'slack', userId: 'U07NEWJOINER' });
-    expect(teammate).toMatchObject({ id: 'u-slack-u07newjoiner', kind: 'user', level: 'member' });
+    expect(teammate).toMatchObject({ id: 'u-slack-u07newjoiner-9c7b8d95', kind: 'user', level: 'member' });
     expect(await session.resolve({ surface: 'slack', userId: 'U07NEWJOINER' })).toEqual(teammate);
 
-    // The run API has no default: a caller the file does not name drives nothing.
+    // The run API can have no default at all, so a caller the file does not name drives nothing.
     expect(await session.resolve({ surface: 'http', userId: 'nobody' })).toBeNull();
     expect((await session.resolve({ surface: 'http', userId: 'andrei' }))?.id).toBe('u-andrei');
   });
