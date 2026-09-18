@@ -5,6 +5,7 @@ import {
   defineIdentityProvider,
   parseIdentityFileWithDefaults,
   principalFromDefault,
+  principalFromDerivedId,
   type IdentityProvider,
   type IdentitySession,
   type Principal,
@@ -23,7 +24,9 @@ import { ConfigError, describeError, optionalEnv, type Logger } from '@harness/s
  *
  * `list()` stays the file's own answer, because that is the question preflight and the
  * scaffolder's check are asking: who does this deployment declare. `get()` does answer for a
- * minted principal, because an approval or an audit row that carries its id has to resolve.
+ * minted principal, because an approval or an audit row that carries its id has to resolve —
+ * including one minted before this process started, which is what `principalFromDerivedId` is
+ * for: the map below is lost on every restart, and an approval outlives one.
  */
 class IdentityWithDefaults implements IdentitySession {
   readonly name: string;
@@ -70,7 +73,11 @@ class IdentityWithDefaults implements IdentitySession {
   }
 
   async get(principalId: string): Promise<Principal | null> {
-    return (await this.declared.get(principalId)) ?? this.minted.get(principalId) ?? null;
+    return (
+      (await this.declared.get(principalId)) ??
+      this.minted.get(principalId) ??
+      principalFromDerivedId(principalId, this.defaults)
+    );
   }
 
   async list(): Promise<Principal[]> {

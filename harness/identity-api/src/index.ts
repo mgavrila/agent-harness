@@ -18,6 +18,7 @@ export {
   parseIdentityFile,
   parseIdentityFileWithDefaults,
   principalFromDefault,
+  principalFromDerivedId,
   type IdentityFile,
   type UserLevel,
 } from './principals.js';

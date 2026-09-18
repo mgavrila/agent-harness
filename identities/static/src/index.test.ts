@@ -107,6 +107,24 @@ describe('@harness/identity-static', () => {
     expect(await session.resolve({ surface: 'http', userId: 'nobody' })).toBeNull();
   });
 
+  it('answers for a principal a previous process minted, which is where an approval outlives a restart', async () => {
+    const dirName = clientDir(WITH_DEFAULTS);
+    const first = await identity.connect({ env: {}, log, clientDir: dirName });
+    const minted = await first.resolve({ surface: 'memory', userId: 'U0C0KEB8W3X' });
+    await first.stop();
+
+    // A second session over the same file, having minted nothing: the approval raised before the
+    // restart names its requester by id, and that id has to resolve to the same person.
+    const second = await identity.connect({ env: {}, log, clientDir: dirName });
+    const recovered = await second.get(minted?.id ?? '');
+    expect(recovered?.id).toBe(minted?.id);
+    expect(recovered?.level).toBe('member');
+    expect(recovered?.kind).toBe('user');
+    // An id of the same shape on a surface the file gives no default is still nobody.
+    expect(await second.get('u-http-someone-deadbeef')).toBeNull();
+    expect(await second.get('u-memory-nobody')).toBeNull();
+  });
+
   it('refuses a caller whose derived id is already declared, and says so once', async () => {
     // `U9` on `memory` derives `u-memory-u9-c5f6f2a2`. Declaring that id outright would otherwise
     // hand whoever holds it the declared principal's memory, approvals and audit trail.

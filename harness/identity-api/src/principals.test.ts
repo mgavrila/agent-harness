@@ -6,6 +6,7 @@ import {
   UNDEFAULTABLE_SURFACE,
   parseIdentityFileWithDefaults,
   principalFromDefault,
+  principalFromDerivedId,
 } from './principals.js';
 
 const manager = {
@@ -202,5 +203,48 @@ describe('principalFromDefault', () => {
   it('answers null rather than an id no principal could have', () => {
     expect(principalFromDefault('memory', '', 'member')).toBeNull();
     expect(principalFromDefault('Memory', 'U1', 'member')).toBeNull();
+  });
+});
+
+describe('principalFromDerivedId', () => {
+  const defaults = { memory: 'member' } as const;
+
+  it('reads a minted id back at its surface default, for a process that never minted it', () => {
+    const minted = principalFromDefault('memory', 'U0123ABCD', 'member');
+    expect(principalFromDerivedId(minted?.id ?? '', defaults)).toEqual({
+      id: 'u-memory-u0123abcd-8742d695',
+      kind: 'user',
+      level: 'member',
+      // The raw surface user id is not recoverable from a one-way digest, and nothing needs it.
+      displayName: 'u0123abcd',
+      surfaces: {},
+      attributes: {},
+    });
+  });
+
+  it('reads the level the file gives that surface now, not the one it gave when the id was minted', () => {
+    expect(principalFromDerivedId('u-memory-u0123abcd-8742d695', { memory: 'lead' })?.level).toBe('lead');
+  });
+
+  it('takes the longest surface that matches, so one default is not read as another', () => {
+    const minted = principalFromDefault('ms-teams', 'A.User@Example', 'lead');
+    expect(minted?.id).toBe('u-ms-teams-a-user-example-0e7aed07');
+    const both = { ms: 'member', 'ms-teams': 'lead' } as const;
+    expect(principalFromDerivedId(minted?.id ?? '', both)).toMatchObject({
+      level: 'lead',
+      displayName: 'a-user-example',
+    });
+  });
+
+  it('names an id whose user id sanitised away by the id itself', () => {
+    expect(principalFromDerivedId('u-memory-2ec847d8', defaults)?.displayName).toBe('u-memory-2ec847d8');
+  });
+
+  it('answers null for a surface with no default, for a declared-looking id, and for no defaults', () => {
+    expect(principalFromDerivedId('u-slack-u9-c5f6f2a2', defaults)).toBeNull();
+    expect(principalFromDerivedId('u-memory-u0123abcd-8742d695', {})).toBeNull();
+    expect(principalFromDerivedId('u-coordinator', defaults)).toBeNull();
+    expect(principalFromDerivedId('u-memory-coordinator', defaults)).toBeNull();
+    expect(principalFromDerivedId('svc-memory-u9-c5f6f2a2', defaults)).toBeNull();
   });
 });

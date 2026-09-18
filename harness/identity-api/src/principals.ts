@@ -74,6 +74,9 @@ export const UNDEFAULTABLE_SURFACE = 'http';
 /** The digest appended to a derived id, in hex characters. */
 const DIGEST_LENGTH = 8;
 
+/** What follows `u-<surface>-` in a derived id: an optional slug, then the digest. */
+const DERIVED_TAIL = /^(?:(.+)-)?([0-9a-f]{8})$/;
+
 /** A parsed `identity.yaml`: who is declared, and what each surface gives everyone else. */
 export interface IdentityFile {
   principals: Principal[];
@@ -163,4 +166,39 @@ export function principalFromDefault(surface: string, userId: string, level: Use
   // Belt and braces: the two rules above already produce an id of this shape.
   if (!PRINCIPAL_ID_PATTERN.test(id)) return null;
   return { id, kind: 'user', level, displayName: userId, surfaces: { [surface]: userId }, attributes: {} };
+}
+
+/**
+ * The principal a derived id names, for a process that never minted it.
+ *
+ * `minted` in the plug-in is process-local, so after a restart nothing remembers the people a
+ * default admitted — and an approval raised before the restart names its requester by id. This
+ * reads the id back: `u-<surface>-<slug>-<digest>`, where `<surface>` is one the file gives a
+ * default, is that surface's default level. Null for anything else, including a derived id on a
+ * surface whose default has since been removed: the file is the authority, and a level nobody
+ * grants any more is not a level.
+ *
+ * `surfaces` comes back empty, and that is not an oversight. The digest is one-way and the slug
+ * has already lost case and punctuation, so the raw surface user id is not recoverable from the
+ * id; a guess would be a claim that this principal speaks as someone. Nothing needs it: a
+ * resumed turn is delivered to the thread's own conversation, not looked up from the person, and
+ * `resolve` — the only path that starts from a surface user id — mints the full principal itself.
+ *
+ * Surfaces are tried longest first, so a file that defaults both `chat` and `chat-web` reads
+ * `u-chat-web-a-user-0e7aed07` as the second surface's, not as the first's with a slug that
+ * happens to start `web-`.
+ */
+export function principalFromDerivedId(id: string, defaults: Readonly<Record<string, UserLevel>>): Principal | null {
+  for (const surface of Object.keys(defaults).sort((a, b) => b.length - a.length)) {
+    const prefix = `u-${surface}-`;
+    if (!id.startsWith(prefix)) continue;
+    const match = DERIVED_TAIL.exec(id.slice(prefix.length));
+    if (!match) continue;
+    const level = defaults[surface];
+    if (level === undefined) continue;
+    // A user id that sanitised away entirely leaves the digest alone; there is no slug to show,
+    // so the id is the most honest display name available.
+    return { id, kind: 'user', level, displayName: match[1] ?? id, surfaces: {}, attributes: {} };
+  }
+  return null;
 }
