@@ -10,9 +10,12 @@
 # onboarding section for how to read a member id.
 #
 # `defaults:` is optional and this client does not use it: a surface named there
-# (`defaults: { slack: member }`) admits anyone the file does not list, at that level, under an id
-# derived from their surface user id. A user level only — never `service`. A surface with no
-# default refuses an unknown user, which is what every principal below relies on.
+# (`defaults: { slack: member }`) admits anyone the file does not list, at that level, under
+# `u-<surface>-<their user id>-<digest>` — derived from their surface user id, so their audit trail
+# is their own across restarts. A user level only — never `service` — and never for `http`, whose
+# one bearer token is shared by every caller of the run API. A surface with no default refuses an
+# unknown user, which is what every principal below relies on; so does a surface misspelled here,
+# silently, since a default for a surface that is not loaded simply never applies.
 #
 # An `http:` entry is the id that principal is named by over the run API (docs/runbook.md, "The
 # run API"): any stable string, because the API resolves it here exactly as it resolves a Slack

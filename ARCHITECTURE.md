@@ -355,10 +355,16 @@ of that run carries. `buildKernelConfig()` does the startup-only work once; `dep
 { db, principal, context })` clones it per run. The stdio server opens one run per process.
 
 `identities/static` is the first plug-in: it reads `clients/<name>/identity.yaml`
-(`HARNESS_IDENTITY_FILE` overrides the path) through `parseIdentityFile`, which refuses a
-duplicate id, a user without a `u-` id or a service without `svc-`, a user at level `service`,
-and two principals claiming one surface user id. `CONTRIBUTING.md`, "Adding an identity
-provider", is the worked how-to.
+(`HARNESS_IDENTITY_FILE` overrides the path) through `parseIdentityFileWithDefaults`, which refuses
+a duplicate id, a user without a `u-` id or a service without `svc-`, a user at level `service`,
+and two principals claiming one surface user id. The file's optional `defaults` block gives a
+surface one **user** level, and someone that surface presents who is in no `principals` entry is
+admitted at it, as `u-<surface>-<their user id>-<digest>` — derived from the user id alone, so one
+person is one principal across restarts, and digested, so two user ids that slug alike are still
+two people. A surface with no default refuses an unknown user, which is the behaviour every client
+had before the block existed, and `http` may not have a default at all, because the run API's
+bearer token is one shared secret. `CONTRIBUTING.md`, "Adding an identity provider", is the worked
+how-to.
 
 ## Knowledge
 

@@ -10,7 +10,8 @@
 #   financial      nothing yet; blocked so a future tool cannot slip through — for a member.
 #                  The kernel gives lead and admin their own `financial` cell, and a level cell
 #                  wins over `classes`, so an admin's would be parked for approval, not refused.
-#                  Say `levels: { admin: { financial: blocked } }` here if that is not wanted.
+#                  Say `levels: { lead: { financial: blocked }, admin: { financial: blocked } }`
+#                  here if that is not wanted; the kernel gives both of those levels a cell.
 #   destructive    parked for a human
 classes:
   read: auto

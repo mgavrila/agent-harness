@@ -8,10 +8,13 @@
 #
 # Everyone in the HF1 Labs workspace who is not listed below is a `member` (see `defaults`):
 # they get their own memory and read access; a write to shared memory is parked for an admin.
-# A default admits an undeclared Slack user as `u-slack-<their member id>`, an id derived from
-# theirs rather than minted, so their audit trail is their own across restarts. A user level
-# only — `service` is a startup error — and a surface left out of `defaults`, `http` here,
-# goes on refusing everyone this file does not name.
+# A default admits an undeclared Slack user as `u-slack-<their member id>-<digest>`, an id derived
+# from theirs rather than minted, so their audit trail is their own across restarts. A user level
+# only — `service` is a startup error — and a surface left out of `defaults`, `http` here, goes on
+# refusing everyone this file does not name. `http` could not have one in any case: the run API's
+# bearer is a single shared secret, so everyone who may drive it is declared below. Mistype a
+# surface name here and the default silently never applies; the startup line names the surfaces
+# that got one.
 #
 # An `http:` entry is the id that principal is named by over the run API (docs/runbook.md, "The
 # run API"): any stable string, because the API resolves it here exactly as it resolves a Slack

@@ -667,9 +667,12 @@ nothing to edit under `harness/compose/`:
    is missing from the file refuses to start. For a deployment that serves a whole team rather
    than a named few, add the optional `defaults:` block — `defaults: { slack: member }` — and
    anyone the file does not list is admitted on that surface at that level, as
-   `u-slack-<their member id>`, an id derived from theirs so their audit trail is their own
-   across restarts. It takes a user level only (`service` is a startup error), and a surface
-   with no default goes on refusing everyone the file does not name.
+   `u-slack-<their member id>-<digest>`, an id derived from theirs so their audit trail is their
+   own across restarts. It takes a user level only (`service` is a startup error), and a surface
+   with no default goes on refusing everyone the file does not name. Two things to know before
+   adding one: `http` may not have a default at all, because the run API's bearer is one shared
+   secret and everyone who may drive it is declared; and a default on any other loaded surface is
+   reachable *through* the run API as well, since a caller names the surface it is speaking for.
 3. Create one Slack app as described under **Slack credentials** above and paste its tokens and
    the approvals channel id.
 4. Review `clients/<slug>/SOUL.md` and `policy.yaml` before the first run, and the markdown in

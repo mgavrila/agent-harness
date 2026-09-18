@@ -21,10 +21,14 @@ users and `svc-` for services, `service` level for services only, no surface use
 missing or invalid file is a `ConfigError` at startup: a deployment with nobody in it runs nothing.
 
 `defaults` is what makes a whole-team deployment practical. A surface listed there admits someone
-the file never mentions, at that level, as `u-<surface>-<their surface user id>` — derived, never
-random, so the same person is the same principal across restarts and carries their own audit
-trail. It takes a user level only; `service` is a `ConfigError`, because a default is by
-definition what a person who walked in gets. A surface with no default refuses an unknown user,
+the file never mentions, at that level, as `u-<surface>-<their surface user id>-<digest>` —
+derived, never random, so the same person is the same principal across restarts and carries their
+own audit trail. The digest is the first eight hex characters of the user id's SHA-256, and it is
+load-bearing: lowercasing and replacing punctuation maps many user ids onto one slug, and two
+people on one principal id share memory, approvals and an audit trail. It takes a user level only;
+`service` is a `ConfigError`, because a default is by definition what a person who walked in gets.
+`http` may not have one at all: the run API authenticates with a single shared bearer token, so
+every principal that may drive it is declared by name. A surface with no default refuses an unknown user,
 which is the right behaviour for a deployment whose members are all named in the file, and
 `list()` still answers with the declared principals alone.
 
