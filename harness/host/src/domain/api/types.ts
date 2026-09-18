@@ -2,9 +2,10 @@ import type { AddressInfo } from 'node:net';
 import type { SchedulerStatus } from '../playbooks/scheduler.js';
 
 /**
- * The run API's limits (spec 5.8, decision 19). Constants, not settings: every one of them is a
- * bound on what one request may cost this process, and a deployment that wanted a different one
- * would be a deployment that had found a use this API was not built for.
+ * The run API's limits (spec 5.8, decision 19). Constants, not settings: the five below are what
+ * one request may cost this process and how often an idle stream speaks, and a deployment that
+ * wanted a different one would be a deployment that had found a use this API was not built for.
+ * The bind and the port after them are the exception — those are defaults an operator overrides.
  */
 
 /**
@@ -25,7 +26,11 @@ export const API_THREAD_MESSAGES = 200;
  */
 export const SSE_KEEPALIVE_MS = 15_000;
 
-/** Loopback, as spec 5.8 says. Compose overrides it, for the reason `APPROVALS_HEALTH_BIND` is overridden. */
+/**
+ * Where the listener binds when the environment says nothing. Defaults rather than bounds: a
+ * deployment sets `HARNESS_HOST_BIND` and `HARNESS_HOST_PORT` over them, and Compose does set the
+ * bind, for the reason `APPROVALS_HEALTH_BIND` is overridden. Loopback, as spec 5.8 says.
+ */
 export const DEFAULT_HOST_BIND = '127.0.0.1';
 export const DEFAULT_HOST_PORT = 8788;
 

@@ -110,9 +110,11 @@ const host: Host = {
   surfaces,
   runtime,
   persona: await readPersona(clientDir),
-  // The kernel's own skills first, then every pack's, so a pack cannot shadow one by name: the
-  // catalogue is built in directory order and `readSkillCatalogue` refuses a duplicate directory
-  // name within one directory, not across two.
+  // The kernel's own skills first, then every pack's. `preflightPlaybook` resolves a playbook's
+  // skill name against this list with `find`, so the kernel's entry is the one it lands on. That
+  // is not a shadowing rule: `readSkillCatalogue` refuses a duplicate directory name within one
+  // directory and not across two, so a pack shipping a `knowledge-sync` directory of its own would
+  // still add a second entry of that name to the catalogue the runtime is offered.
   skills: await readSkillCatalogue([kernelSkillsDir(), ...config.packs.skillsDirs()]),
   model: { baseUrl: config.gateway.baseUrl, apiKey: config.gateway.apiKey, route: 'chat', fallbackRoute: 'reason' },
   budget: {
