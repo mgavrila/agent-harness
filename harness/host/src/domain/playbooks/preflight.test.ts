@@ -194,7 +194,7 @@ describe('the shipped hf1-labs client', () => {
     const admins = await Promise.all(
       ['U0C0KEB8W3X', 'U0C0Q8EU8BC', 'U0C0HQHGY8K'].map((userId) => session.resolve({ surface: 'slack', userId })),
     );
-    expect(admins.map((p) => `${p?.id}:${p?.level}`)).toEqual(['u-andrei:admin', 'u-admin-2:admin', 'u-admin-3:admin']);
+    expect(admins.map((p) => `${p?.id}:${p?.level}`)).toEqual(['u-mihai:admin', 'u-andrei-giura:admin', 'u-andrei:admin']);
 
     // Anyone else in the workspace: a member, under an id derived from their member id, so the
     // same teammate is the same principal on Monday as on Friday.

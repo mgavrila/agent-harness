@@ -23,25 +23,25 @@
 defaults:
   slack: member
 principals:
+  - id: u-mihai
+    kind: user
+    level: admin
+    displayName: Mihai Alexandru Schiop
+    surfaces:
+      slack: U0C0KEB8W3X
+  - id: u-andrei-giura
+    kind: user
+    level: admin
+    displayName: Andrei Giura
+    surfaces:
+      slack: U0C0Q8EU8BC
   - id: u-andrei
     kind: user
     level: admin
-    displayName: Andrei
-    surfaces:
-      slack: U0C0KEB8W3X
-      http: andrei
-  - id: u-admin-2
-    kind: user
-    level: admin
-    displayName: HF1 Labs admin
-    surfaces:
-      slack: U0C0Q8EU8BC
-  - id: u-admin-3
-    kind: user
-    level: admin
-    displayName: HF1 Labs admin
+    displayName: Andrei Gavrila
     surfaces:
       slack: U0C0HQHGY8K
+      http: andrei
   # The host's own identity (HARNESS_HOST_PRINCIPAL): reconciliation runs as it.
   - id: svc-host
     kind: service
