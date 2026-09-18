@@ -10,6 +10,7 @@ import type {
   UploadRequest,
 } from '@harness/surface-api';
 import type { SlackConfig } from './config.js';
+import { toMrkdwn } from './format.js';
 import { cardBlocks } from './render/blocks.js';
 import { formView, valuesOf } from './render/modal.js';
 import { createEditStream } from './stream.js';
@@ -97,7 +98,7 @@ export function createSlackSession(transport: SlackTransport, config: SlackConfi
     async postText(conversation, text, opts = {}) {
       assertConversation(conversation);
       const res = await guarded('chat.postMessage', () =>
-        api.chat.postMessage({ channel: conversation, text, thread_ts: opts.replyTo?.id }),
+        api.chat.postMessage({ channel: conversation, text: toMrkdwn(text), thread_ts: opts.replyTo?.id }),
       );
       // The assistant has now spoken in that thread, so a later reply there is addressed to it
       // with no mention. The id names the message being answered rather than the thread's root;

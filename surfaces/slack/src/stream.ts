@@ -1,5 +1,6 @@
 import { describeError, SurfaceError } from '@harness/shared';
 import type { StreamHandle } from '@harness/surface-api';
+import { toMrkdwn } from './format.js';
 import type { SlackApi } from './transport/types.js';
 
 const NAME = 'slack';
@@ -71,7 +72,7 @@ export function createEditStream(deps: StreamDeps): StreamHandle {
 
   const post = (): Promise<void> => {
     posting ??= guarded('chat.postMessage', () =>
-      deps.api.chat.postMessage({ channel: deps.conversation, text, thread_ts: deps.threadTs }),
+      deps.api.chat.postMessage({ channel: deps.conversation, text: toMrkdwn(text), thread_ts: deps.threadTs }),
     ).then(
       (res) => {
         ts = res.ts ?? '';
@@ -97,10 +98,13 @@ export function createEditStream(deps: StreamDeps): StreamHandle {
       if (!ts) return;
       lastCall = now();
       const postedTs = ts;
+      const mrkdwn = toMrkdwn(text);
       if (final) {
-        await guarded('chat.update', () => deps.api.chat.update({ channel: deps.conversation, ts: postedTs, text }));
+        await guarded('chat.update', () =>
+          deps.api.chat.update({ channel: deps.conversation, ts: postedTs, text: mrkdwn }),
+        );
       } else {
-        await deps.api.chat.update({ channel: deps.conversation, ts: postedTs, text }).catch(() => undefined);
+        await deps.api.chat.update({ channel: deps.conversation, ts: postedTs, text: mrkdwn }).catch(() => undefined);
       }
     });
     return editQueue;
