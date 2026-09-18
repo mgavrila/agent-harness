@@ -118,10 +118,11 @@ async function failStrandedRuns(
     )
     .for('update', { skipLocked: true });
   const gone = new Set(removed);
-  for (const reason of [PLAYBOOK_REMOVED, PLAYBOOK_DISABLED]) {
-    const ids = stranded
-      .filter((row) => (reason === PLAYBOOK_REMOVED) === gone.has(row.playbookId))
-      .map((row) => row.id);
+  const byReason: [reason: string, ids: string[]][] = [
+    [PLAYBOOK_REMOVED, stranded.filter((row) => gone.has(row.playbookId)).map((row) => row.id)],
+    [PLAYBOOK_DISABLED, stranded.filter((row) => !gone.has(row.playbookId)).map((row) => row.id)],
+  ];
+  for (const [reason, ids] of byReason) {
     if (ids.length === 0) continue;
     await tx
       .update(playbookRuns)
