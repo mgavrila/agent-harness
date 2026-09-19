@@ -12,8 +12,8 @@ export interface SlackConfig {
  *
  * `deps.env` only, never the ambient environment: whoever builds the bag decides what an adapter
  * can see, which is what stops a suite from opening a real socket because the machine running it
- * has a filled-in `.env`. One app now: chat and approvals share it, so there is one bot token and
- * one app-level token, not the two pairs Plan 6 through Plan 8a needed.
+ * has a filled-in `.env`. One app: chat and approvals share it, so there is one bot token and one
+ * app-level token.
  */
 export function slackConfig(env: EnvSource): SlackConfig {
   return {

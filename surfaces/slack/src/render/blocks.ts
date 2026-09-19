@@ -4,9 +4,8 @@ import type { Card, CardIcon, CardLine, NotePart } from '@harness/surface-api';
  * Block Kit, and the only place in the repository that knows what Block Kit is.
  *
  * Every function here takes a neutral `Card` and returns plain objects. The output is pinned
- * byte for byte against what `harness/approvals`' `domain/render/blocks.ts` produced before
- * Plan 6, because the demo deployment's card must not change: same blocks, same order, same
- * mrkdwn, same action ids.
+ * byte for byte by `blocks.test.ts`, because the demo deployment's card must not change: same
+ * blocks, same order, same mrkdwn, same action ids.
  */
 
 /** Slack's own date token, which renders in each reader's timezone. */
@@ -63,8 +62,8 @@ export function cardBlocks(card: Card): unknown[] {
       type: 'actions',
       // Derived from the card's own id rather than hard-coded, so this module never learns what
       // kind of card it is rendering. For `harness_approval` it is the block id the demo
-      // deployment's interaction payloads already carry. It follows `type` because that is the
-      // order today's `blocks.ts` emits, and the render test compares serialised bytes.
+      // deployment's interaction payloads already carry. It follows `type` because the render
+      // test compares serialised bytes, and that is the order they are in.
       block_id: `${card.id}_actions`,
       elements: card.actions.map(button),
     });

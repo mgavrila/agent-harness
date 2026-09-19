@@ -8,8 +8,8 @@ import { boltTransport } from './transport/bolt.js';
  *
  * The host loads this by name from `HARNESS_SURFACES` and holds nothing but the contract, so
  * every Slack-shaped thing — Block Kit, Bolt, Socket Mode, a `C…` channel id, a `ts` — is behind
- * this package's boundary. The rendered cards are pinned byte for byte against what the
- * approvals app produced before Plan 6.
+ * this package's boundary. What the renderers emit is pinned byte for byte by their own tests,
+ * because the cards in the demo workspace must not change shape.
  */
 export const surface: Surface = defineSurface({
   name: 'slack',

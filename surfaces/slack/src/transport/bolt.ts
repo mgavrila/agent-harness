@@ -38,7 +38,7 @@ export interface Classified {
 }
 
 /**
- * What an inbound payload means, or null to drop it (decision 1 of Plan 8b).
+ * What an inbound payload means, or null to drop it.
  *
  * `app_mention` is the one event that says the assistant was addressed at a channel's top level; a
  * channel `message` that carries the mention is the same message arriving a second time (when the
@@ -224,10 +224,9 @@ export async function classifyInbound(
 /**
  * A real Slack connection, in Socket Mode.
  *
- * One app now carries chat and approvals, because one process — this host — holds both
- * connections; the "two apps" reasoning from before Plan 8b is gone with the second process.
- * Slack still routes each Socket Mode event to exactly one open connection per app, but there is
- * only one connection now, so there is nothing to split between.
+ * One app carries chat and approvals, because one process — this host — holds both connections.
+ * Slack routes each Socket Mode event to exactly one open connection per app, and there is only
+ * one connection, so there is nothing to split between.
  *
  * Both the action and the view registrations are catch-alls. The contract takes one action
  * handler and one view handler and dispatches on the id itself, so there is nothing for Bolt to
