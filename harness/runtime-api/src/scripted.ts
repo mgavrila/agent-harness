@@ -2,7 +2,15 @@ import { readFile } from 'node:fs/promises';
 import * as z from 'zod/v4';
 import { ConfigError, hashArgs } from '@harness/shared';
 import { defineRuntime } from './runtime.js';
-import type { RunEvent, RunHandle, RunRequest, Runtime, RuntimeSession } from './types.js';
+import {
+  toolResultStatus,
+  type RunEvent,
+  type RunHandle,
+  type RunRequest,
+  type Runtime,
+  type RuntimeSession,
+  type ToolResultStatus,
+} from './types.js';
 
 const StepShape = z.union([
   z.object({ tool: z.string().min(1), args: z.record(z.string(), z.unknown()) }).strict(),
@@ -22,13 +30,6 @@ export function parseTrajectory(raw: unknown): TrajectoryStep[] {
 
 export async function readTrajectory(file: string): Promise<TrajectoryStep[]> {
   return parseTrajectory(JSON.parse(await readFile(file, 'utf8')));
-}
-
-/** The status the kernel's envelope carries, read off a tool result the way the host reads it. */
-function statusOf(res: { isError?: boolean; structuredContent?: unknown }): 'ok' | 'pending' | 'error' {
-  if (res.isError) return 'error';
-  const status = (res.structuredContent as { status?: unknown } | undefined)?.status;
-  return status === 'pending' ? 'pending' : 'ok';
 }
 
 function sleepUntil(ms: number, signal: AbortSignal): Promise<'slept' | 'aborted'> {
@@ -79,9 +80,9 @@ export class ScriptedRuntime implements RuntimeSession {
         }
         if ('tool' in step) {
           yield { type: 'tool_call', name: step.tool, argsHash: hashArgs(step.args) };
-          let status: 'ok' | 'pending' | 'error';
+          let status: ToolResultStatus;
           try {
-            status = statusOf(
+            status = toolResultStatus(
               await request.tools.callTool({ name: step.tool, arguments: step.args }, { signal: request.signal }),
             );
           } catch {

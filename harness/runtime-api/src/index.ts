@@ -6,7 +6,7 @@
  */
 export { LEVELS, USER_LEVELS, type Level } from '@harness/shared';
 export { defineRuntime } from './runtime.js';
-export { RUN_FAILED_MESSAGE } from './types.js';
+export { RUN_FAILED_MESSAGE, toolResultStatus } from './types.js';
 export type {
   RunAttachment,
   RunBudget,
@@ -21,4 +21,5 @@ export type {
   RuntimeDeps,
   RuntimeModule,
   RuntimeSession,
+  ToolResultStatus,
 } from './types.js';
