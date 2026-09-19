@@ -57,6 +57,7 @@ After Plans 11–12:
 | #  | Question | Decision | Why |
 | -- | -------- | -------- | --- |
 | 1  | Where the boundary is | **This repository is the OS: kernel packages, the four existing contracts plus the ones in §4, reference plug-ins, one test fixture client, a published image.** Everything that names a tenant lives in a second repository (working name `hf1-platform`). A client onboarding touches this repository zero times; a capability touches it once, behind a contract. | The user's rule. It is also the only way the kernel's merge rate stays low enough to be maintained by a small core group. |
+| 1b | How many repositories | **Four boundaries, two repositories now.** The four bands of the diagram are four units with one-way dependencies, `gateway ◄ os ◄ agents ◄ platform`: the gateway knows no tenant and no agent; the OS knows no client; the catalogue (`agents`: blueprints, packs, skills, lifecycle workers) implements OS contracts and knows no tenant or infrastructure; the platform names customers and consumes the other three. Physically: the gateway stays a directory of the OS repo (`harness/gateway`) until Jev is a package with an owner; the catalogue starts as `catalog/` inside `hf1-platform` under a lint rule that lets it import OS contracts only. A directory becomes a repository when it gains its own owner or release cadence; the move is mechanical because the boundary was enforced from day one. | Four repositories from the start cost a small team its week in version coordination; two repositories with four enforced boundaries cost nothing later. The user asked for simplicity and agreed on 2026-09-19. |
 | 2  | Client configuration | A **client document**: one versioned schema (`@harness/config-api`) holding what today is spread over `SOUL.md`, `identity.yaml`, `policy.yaml`, `routing.yaml`, `playbooks.yaml`, `skills/` and the knowledge source. Loaded through a **`ConfigSource`** contract with two implementations, `files` (a directory named by `HARNESS_CLIENTS_DIR` holding documents in the new format, never the repository root) and `postgres` (versioned rows). **The old folder layout is not read by anything**; the scaffolder writes the document format. | The folder was already data; only its location and its shape as six loose files were wrong. One schema makes the admin UI, the scaffolder and the export three views of one thing. |
 | 2b | Backwards compatibility | **None.** Every legacy path is deleted in the plan that replaces it: `clientDirFor` and the repository-root client lookup, `HARNESS_IDENTITY_FILE`, the six-file folder, Slack socket mode, the `HARNESS_PACKS`/`HARNESS_SURFACES`/`HARNESS_IDENTITY` process variables (they move into the document), the built-from-checkout Compose flow. No shims, no dual code paths, no "still works" clauses. | The user's instruction: "we are building a complete system". Two ways to do one thing is how a kernel rots; the live demo is one tenant and is re-onboarded, not carried. |
 | 3  | Blueprints and overlays | A resolved client document = **blueprint** (complete, with placeholders) + **overlay** (the tenant's edits) under a **lock set** the blueprint declares. The OS enforces the lock at load: a locked path in the overlay is refused with a `ConfigError`. Finished agents lock persona and policy; customisable ones unlock everything; subscription tiers are lock sets. | The user wants both finished agents and "customize as much as possible". Same object, different locks; a blueprint update ships to every tenant without overwriting their overlay. |
@@ -101,10 +102,14 @@ After Plans 11–12:
 | Dashboards | operations page over usage, audit, health, evals | platform |
 | Lifecycle workers | agents on the kernel with control-plane tools | platform |
 
-### 3.2 Two repositories
+### 3.2 Four boundaries, two repositories (decision 1b)
 
 ```
+gateway  ◄──  os  ◄──  agents  ◄──  platform        (dependencies point left, never right)
+
 agent-harness (this repository — "hf1 OS")
+  harness/gateway   the AI Gateway band: LiteLLM config renderer, virtual keys, budgets,
+                    Jev when it exists — a directory with its own contract until it has an owner
   harness/*         kernel packages, published
   contracts         pack-api, surface-api, identity-api, runtime-api,
                     + config-api, orchestration events, sandbox-api (reserved)
@@ -114,12 +119,14 @@ agent-harness (this repository — "hf1 OS")
   host image        published on tags
 
 hf1-platform (new repository)
+  catalog/          the "agents" band: blueprints (internal-team-assistant,
+                    credentialing-assistant, alliance-assistant), tenant packs, skills,
+                    knowledge seeds, lifecycle workers — imports OS contracts only (lint rule)
   tenants/          client documents (files source) or the config store's migrations
-  blueprints/       internal-team-assistant, credentialing-assistant, alliance-assistant
-  control-plane/    tenants, versions, provisioning, secrets, budgets, billing, catalogue
+  control-plane/    tenants, versions, provisioning, secrets, budgets, billing, catalogue API
   ingress/          Slack events, Teams webhooks → tenant lookup → host
   deploy/           compose profiles for dedicated tenants; Helm chart; SandboxTemplates
-  modeler/, dashboards/, workers/   the Design & Control band
+  modeler/, dashboards/   the hf1 OS product surfaces of the Design & Control band
   orchestration/    the process engine integration, last
 ```
 
