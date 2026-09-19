@@ -25,16 +25,16 @@ export interface ResolvedTarget {
  * database: through its dependencies, never through an import.
  *
  * Several packs can be loaded at once and the plural accessors union them, and none may be
- * loaded at all: `HARNESS_PACKS=''` is a client with no product area, whose catalogue is the
+ * loaded at all: an empty `packs` list is a client with no product area, whose catalogue is the
  * kernel's own tools. Every plural accessor is then empty and the three primary-pack answers
  * below throw naming what is missing — a client is a folder and not code, so "no pack" has to be
  * something the folder can say.
  *
- * **The primary pack rule.** The first entry of `HARNESS_PACKS` is the deployment's primary
+ * **The primary pack rule.** The first entry of the document’s `packs` list is the primary
  * pack, and it is what answers every question that has only one answer: `manifest()` (the
  * classification role and version), `formsDir()` (the templates directory), and the extraction
  * target for a document nobody has classified. Three places, one rule, stated here so no caller
- * has to rediscover it. A deployment orders `HARNESS_PACKS` to say which area of the product it
+ * has to rediscover it. A client orders its `packs` list to say which area of the product it
  * is mainly for; a caller that means a different pack's document says so with
  * `documents_classify`, or by declaring the kind at ingest. With no pack loaded there is no
  * primary pack: all three throw, naming the missing pack, rather than reading `all[0]`.
@@ -46,7 +46,7 @@ export interface ResolvedTarget {
  * there for a tool that knows which pack it belongs to.
  */
 export interface PackRegistry {
-  /** Every loaded pack, in the order `HARNESS_PACKS` named them. */
+  /** Every loaded pack, in the order the document named them. */
   readonly all: Pack[];
   /** Throws `ConfigError` when no loaded pack has that name. */
   byName(name: string): Pack;

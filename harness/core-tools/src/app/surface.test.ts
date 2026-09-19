@@ -25,9 +25,8 @@ const architecture = path.join(repoRoot, ARCHITECTURE_DIR);
  */
 const SCAN_ANCHORS = [
   'DATABASE_URL',
-  // `packNames` reads `env.HARNESS_PACKS` off the bag it is handed, which no scan pattern
-  // matches; the runner's `process.env.HARNESS_PACKS` is what keeps the variable in the scan.
-  'HARNESS_PACKS',
+  // Through `envOrDefault`, and the one variable a dedicated process may not be started without.
+  'HARNESS_CLIENT',
   'LITELLM_MASTER_KEY',
   'HARNESS_STORAGE_DIR',
   'VERIFY_NPPES_ENABLED',
@@ -188,7 +187,7 @@ describe('the files worker boundary', () => {
 /**
  * Spec section 7, read off the recorded Compose config: no Docker socket anywhere, no client
  * name outside a `${HARNESS_CLIENT…}` interpolation, and no forms directory pinned to a pack —
- * core-tools takes it from the first pack `HARNESS_PACKS` names.
+ * core-tools takes it from the first pack the client document's `packs` list names.
  */
 describe('the Compose stack names no client and mounts no socket', () => {
   const rendered = async (): Promise<string> => readFile(path.join(architecture, 'compose-surface.yaml'), 'utf8');
@@ -207,14 +206,19 @@ describe('the Compose stack names no client and mounts no socket', () => {
     expect(await rendered()).not.toContain('HARNESS_FORMS_DIR');
   });
 
-  it('runs the host, not an approvals process, and gives it the three plug-in names', async () => {
+  it('runs the host, not an approvals process, and names no plug-in the document names', async () => {
     const { services } = parseYaml(await rendered()) as {
       services: Record<string, { environment?: Record<string, string>; image?: string }>;
     };
     expect(services.approvals).toBeUndefined();
     expect(services.host.image).toBe('harness-host');
-    for (const name of ['HARNESS_SURFACES', 'HARNESS_IDENTITY', 'HARNESS_RUNTIME', 'HARNESS_HOST_PRINCIPAL']) {
+    // The two plug-in lists still on the environment; Task 6 moves both into the document.
+    for (const name of ['HARNESS_SURFACES', 'HARNESS_RUNTIME', 'HARNESS_HOST_PRINCIPAL']) {
       expect(services.host.environment?.[name], name).toBeDefined();
+    }
+    // The identity plug-in, the policy and the pack list are the document's, not a variable's.
+    for (const name of ['HARNESS_IDENTITY', 'HARNESS_POLICY_FILE', 'HARNESS_PACKS']) {
+      expect(services.host.environment?.[name], name).toBeUndefined();
     }
     expect(services.host.environment?.SLACK_ALLOWED_USERS).toBeUndefined();
   });

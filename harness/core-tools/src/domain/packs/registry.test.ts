@@ -43,7 +43,7 @@ describe('loadPacks', () => {
     await expect(loadPacks(['@harness/shared'])).rejects.toThrow('module "@harness/shared" exports no `pack`');
   });
 
-  it('loads no pack at all when HARNESS_PACKS is the empty string', async () => {
+  it('loads no pack at all when the document names none', async () => {
     const packs = await loadPacks([]);
     expect(packs.all).toEqual([]);
     expect(packs.documentKinds()).toEqual([]);

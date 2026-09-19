@@ -77,7 +77,7 @@ describe('a message on a surface', () => {
 
   it('runs a turn for a host whose registry holds no pack, over the kernel’s own tools', async () => {
     // An internal team whose client is a folder with no product area in it. The registry is built
-    // here rather than through `HARNESS_PACKS` — `app/main.test.ts` in core-tools covers the
+    // here rather than through a document — `app/main.test.ts` in core-tools covers the
     // variable — so what this asserts is the turn: it reaches the kernel and comes back the same
     // way every other turn does.
     const f = await hostFixture(db, {

@@ -38,7 +38,9 @@ export function kernelTools(packs: PackRegistry): AnyToolDef[] {
  * two kinds of tool nothing loaded can serve — the generic `records_*` tools when no loaded
  * record kind wants them, and `documents_classify`, `documents_extract` and `deadlines_compute`
  * when no loaded pack declares a document kind — plus every source's own. `publishedCatalogue`
- * is where those rules live and where each of them fails loudly.
+ * is where those rules live and where each of them fails loudly. Less, too, the names the
+ * client's own `policy.tools.hide` withholds, which is how a deployment drops one tool without
+ * blinding its action class.
  */
 export function publishedTools(deps: ToolDeps, kernel: AnyToolDef[] = kernelTools(deps.packs)): AnyToolDef[] {
   const sources: ToolSource[] = deps.packs.all.map((pack) => ({
@@ -62,6 +64,10 @@ export function publishedTools(deps: ToolDeps, kernel: AnyToolDef[] = kernelTool
   const hidden = new Set<string>([
     ...(anyGenericKind ? [] : GENERIC_RECORD_TOOLS),
     ...(anyDocumentKind ? [] : [...PACK_DOCUMENT_TOOLS, ...PACK_DEADLINE_TOOLS]),
+    // The client's own list, last, because it is the only one of the three a person wrote. It
+    // unions rather than replaces: a deployment with no document kind still withholds the
+    // document tools, whatever its `tools.hide` says.
+    ...deps.hiddenTools,
   ]);
   return publishedCatalogue(kernel, sources, hidden);
 }

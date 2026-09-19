@@ -16,7 +16,7 @@ import {
   toolEffects,
   type Db,
 } from '@harness/db';
-import { loadPolicy, requestPlaybookRun } from '@harness/core-tools';
+import { DEFAULT_POLICY, mergePolicy, requestPlaybookRun } from '@harness/core-tools';
 import { parsePlaybooksFile, type PlaybookDefinition } from '@harness/config-api';
 import { RUN_FAILED_MESSAGE, type RunEvent, type RuntimeSession } from '@harness/runtime-api';
 import { startFakeGateway } from '@harness/runtime-api/testing';
@@ -472,8 +472,18 @@ describe('the shipped knowledge-sync playbook (I1)', () => {
     // one a deployment makes rather than the fixture default.
     f.host.config = {
       ...f.host.config,
-      policy: await loadPolicy(path.join(demoClientDir, 'policy.yaml')),
-      clientDir: demoClientDir,
+      // The deployment's `policy.classes`, as a literal: `@harness/config-api` validates that
+      // section and `mergePolicy` applies it, so nothing here reads a policy file.
+      policy: mergePolicy(DEFAULT_POLICY, {
+        classes: {
+          read: 'auto',
+          'write.internal': 'auto',
+          external: 'approval',
+          financial: 'blocked',
+          destructive: 'approval',
+        },
+      }),
+      knowledgeDir: path.join(demoClientDir, 'knowledge'),
       gateway: { ...f.host.config.gateway, baseUrl: fake.url },
     };
 

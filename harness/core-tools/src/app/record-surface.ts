@@ -3,6 +3,8 @@ import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
+import { parseClientDocument } from '@harness/config-api';
+import { fixtureDocument } from '@harness/config-api/testing';
 import { describeError } from '@harness/shared';
 import { localParser } from '../domain/documents/parser.js';
 import { connectInProcess } from '../domain/tooling/in-process.js';
@@ -30,12 +32,16 @@ export interface ToolSurfaceEntry {
  * public surface must not need Postgres, or the snapshot could not be regenerated offline.
  */
 export async function surfaceDeps(): Promise<ToolDeps> {
-  // A literal rather than HARNESS_PACKS, deliberately: the committed snapshot has to describe
-  // the shipped default, not whatever the machine recording it happens to have configured.
-  const packs = await loadPacks(['@harness/pack-healthcare']);
+  // A fixture document rather than an environment, deliberately: the committed snapshot has to
+  // describe the shipped default, not whatever the machine recording it happens to have
+  // configured. Its `packs` names the one shipped pack and its `policy.tools.hide` is empty, so
+  // the recorded catalogue is the whole catalogue — which is also why `tools.hide` can never
+  // move this file.
+  const document = parseClientDocument(fixtureDocument({ id: 'surface', displayName: 'Surface recorder' }));
+  const packs = await loadPacks(document.packs);
   return {
     db: null as unknown as ToolDeps['db'],
-    client: 'surface',
+    client: document.id,
     principal: {
       id: 'svc-surface',
       kind: 'service',
@@ -45,13 +51,14 @@ export async function surfaceDeps(): Promise<ToolDeps> {
       attributes: {},
     },
     policy: { ...DEFAULT_POLICY },
+    hiddenTools: document.policy.tools.hide,
     encryptionKey: Buffer.alloc(32),
     now: () => new Date('2026-01-01T00:00:00Z'),
     approvalTtlHours: 24,
     confidenceThreshold: DEFAULT_CONFIDENCE_THRESHOLD,
     gateway: { baseUrl: 'http://127.0.0.1:1', apiKey: 'unused', timeoutMs: 1_000, maxCallsPerRun: 1 },
     storageDir: '/nonexistent/surface',
-    clientDir: '/nonexistent/surface',
+    knowledgeDir: null,
     embedDims: 1_024,
     parser: localParser('/nonexistent/surface'),
     formsDir: '/nonexistent/surface',

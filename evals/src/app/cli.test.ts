@@ -41,8 +41,8 @@ afterAll(async () => {
 
 describe('--pack', () => {
   it('reads the flag when it is given and leaves it undefined when it is not', () => {
-    // Undefined means "measure the first pack HARNESS_PACKS names", which is what a single-pack
-    // deployment gets without flag or variable.
+    // Undefined means "measure the first pack --packs names", which is what a single-pack
+    // run gets with no flag at all.
     expect(flagFrom(['node', 'cli.ts'], 'pack')).toBeUndefined();
     expect(flagFrom(['node', 'cli.ts', '--pack=stories'], 'pack')).toBe('stories');
     expect(flagFrom(['node', 'cli.ts', '--pack=healthcare', '--limit=3'], 'pack')).toBe('healthcare');
@@ -78,26 +78,26 @@ describe('parsePackFlag', () => {
 });
 
 describe('packsToMeasure', () => {
-  it('refuses an empty HARNESS_PACKS by name, which is what the runner exits 2 on', () => {
+  it('refuses an empty --packs by name, which is what the runner exits 2 on', () => {
     // A server may serve no pack; an eval run measures one, so this refuses rather than quietly
     // measuring the default — and refuses before `loadPacks` logs that it loaded none.
     const result = packsToMeasure('');
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error).toContain('HARNESS_PACKS names no pack');
+    if (!result.ok) expect(result.error).toContain('--packs names no pack');
   });
 
-  it('passes the named packs through, and the default when the variable is unset', () => {
+  it('passes the named packs through, and the default when the flag is absent', () => {
     expect(packsToMeasure(undefined)).toEqual({ ok: true, names: ['@harness/pack-healthcare'] });
     expect(packsToMeasure('@harness/pack-stories')).toEqual({ ok: true, names: ['@harness/pack-stories'] });
   });
 });
 
-describe('packNames', () => {
-  it('reads an empty HARNESS_PACKS as no pack', () => {
+describe('--packs', () => {
+  it('reads an empty --packs as no pack', () => {
     expect(packNames('')).toEqual([]);
   });
 
-  it('splits HARNESS_PACKS, trims it, and falls back to the shipped pack', () => {
+  it('splits --packs, trims it, and falls back to the shipped pack', () => {
     expect(packNames(undefined)).toEqual(['@harness/pack-healthcare']);
     expect(packNames('@harness/pack-healthcare')).toEqual(['@harness/pack-healthcare']);
     expect(packNames(' @harness/pack-healthcare , @harness/pack-stories ')).toEqual([
@@ -106,6 +106,18 @@ describe('packNames', () => {
     ]);
     // A trailing comma is a typo, not a request to load a pack with no name.
     expect(packNames('@harness/pack-healthcare,')).toEqual(['@harness/pack-healthcare']);
+  });
+
+  it('reads the pack list off the command line, and no flag still means the shipped pack', () => {
+    expect(flagFrom(['node', 'cli.ts'], 'packs')).toBeUndefined();
+    expect(packsToMeasure(flagFrom(['node', 'cli.ts'], 'packs'))).toEqual({
+      ok: true,
+      names: ['@harness/pack-healthcare'],
+    });
+    expect(
+      packNames(flagFrom(['node', 'cli.ts', '--packs=@harness/pack-stories,@harness/pack-healthcare'], 'packs')),
+    ).toEqual(['@harness/pack-stories', '@harness/pack-healthcare']);
+    expect(packsToMeasure(flagFrom(['node', 'cli.ts', '--packs='], 'packs')).ok).toBe(false);
   });
 });
 

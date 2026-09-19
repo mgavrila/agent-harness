@@ -35,7 +35,7 @@ describe('two packs in one process', () => {
     expect(storiesPack.replaces).toBeUndefined();
   });
 
-  it('loads both packs by the names HARNESS_PACKS would carry', async () => {
+  it('loads both packs by the names a client document would carry', async () => {
     // Not `registryOf`: this is the path a server takes, a dynamic import of each package name.
     // The stories pack is a devDependency of core-tools, which is what makes that resolve here.
     const loaded = await loadPacks(['@harness/pack-healthcare', '@harness/pack-stories']);

@@ -104,7 +104,7 @@ export async function hostFixture(
     skills?: readonly RunSkill[];
     /**
      * The packs this host serves; default the shipped one, as `makeTestDeps` has it. A test of a
-     * client with no pack passes `registryOf([])`, which is what `HARNESS_PACKS=''` loads.
+     * client with no pack passes `registryOf([])`, which is what an empty `packs` list loads.
      */
     packs?: PackRegistry;
   },

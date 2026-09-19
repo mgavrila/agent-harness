@@ -21,14 +21,19 @@ export function flagFrom(argv: readonly string[], name: string): string | undefi
 /**
  * Which packs this run loads.
  *
- * `HARNESS_PACKS` names them, exactly as it does for a server; `--pack` picks one of them when
- * several are. Unset, the default is the shipped pack, so a single-pack deployment needs neither
- * flag nor variable and behaves as it always did. Set to the empty string it names no pack, which
- * a server serves happily and an eval run cannot: `runEvals` refuses it below, because a run with
- * nothing to measure has no report to write.
+ * `--packs=<a,b>` names them; `--pack` then picks one of them when several are. Absent, the
+ * default is the shipped pack, so a single-pack run needs no flag at all. Given empty
+ * (`--packs=`) it names no pack, which a server serves happily and an eval run cannot:
+ * `packsToMeasure` refuses it below, because a run with nothing to measure has no report to
+ * write. The three states are why this takes the flag's raw `string | undefined` rather than
+ * going through `optionalEnv`-shaped helpers, which cannot tell absent from empty.
+ *
+ * It is a flag and no longer an environment variable: a pack list is a property of the client
+ * document a server loads, and the eval runner loads no document, so the run says what it
+ * measures on the command line that starts it.
  */
-export function packNames(env: string | undefined): string[] {
-  return (env ?? '@harness/pack-healthcare')
+export function packNames(raw: string | undefined): string[] {
+  return (raw ?? '@harness/pack-healthcare')
     .split(',')
     .map((name) => name.trim())
     .filter((name) => name !== '');
@@ -42,10 +47,10 @@ export function packNames(env: string | undefined): string[] {
  * A server may serve no pack; a run that measures one may not, and it says so before `loadPacks`
  * logs that it loaded none.
  */
-export function packsToMeasure(env: string | undefined): { ok: true; names: string[] } | { ok: false; error: string } {
-  const names = packNames(env);
+export function packsToMeasure(raw: string | undefined): { ok: true; names: string[] } | { ok: false; error: string } {
+  const names = packNames(raw);
   if (names.length === 0) {
-    return { ok: false, error: 'HARNESS_PACKS names no pack; an eval run measures one, so name it there' };
+    return { ok: false, error: '--packs names no pack; an eval run measures one, so name it there' };
   }
   return { ok: true, names };
 }
@@ -60,7 +65,7 @@ type PackFlagResult = { ok: true; pack: string | undefined } | { ok: false; erro
  * `--pack=<name>` or `--pack <name>`, both spellings, or `undefined` when neither is given.
  *
  * The spec writes the flag space-separated and the first implementation read only the `=` form,
- * so `--pack stories` silently measured the first pack `HARNESS_PACKS` named and wrote a report
+ * so `--pack stories` silently measured the first pack `--packs` named and wrote a report
  * headed with the wrong pack's name. A missing value is a usage error for the same reason: a
  * bare `--pack`, or one followed by another flag, is somebody asking for a pack they did not
  * manage to name, and falling back to the first one answers a question they did not ask.
@@ -123,8 +128,11 @@ export function parseUpdateBaselineFlag(argv: readonly string[]): UpdateBaseline
 /**
  * CLI usage: `pnpm --filter @harness/evals start -- [flags]`
  *
+ *   --packs=<a,b>       Which packs this run loads, comma-separated package names. Defaults to
+ *                        the shipped pack; `--packs=` names none, which is a usage error here
+ *                        because an eval run measures a pack.
  *   --pack=<name>       Which loaded pack to measure, by Pack.name. `--pack <name>` is accepted
- *                        too. Defaults to the first one HARNESS_PACKS names; a bare --pack, or a
+ *                        too. Defaults to the first one --packs names; a bare --pack, or a
  *                        name no loaded pack answers to, is a usage error: exit 2, nothing run.
  *                        Every path below defaults to that pack's evals block.
  *   --corpus=<dir>      Corpus root. Defaults to the pack's `evals.corpusDir`.
@@ -137,7 +145,7 @@ export function parseUpdateBaselineFlag(argv: readonly string[]): UpdateBaseline
  *   --limit=<N>         Positive integer. Run a sample of N cases instead of the whole corpus
  *                        (see selectCases). Anything else is a usage error: exit 2, nothing run.
  *   --gateway=<url>     Override the gateway's base URL only. The key still comes from
- *                        LITELLM_MASTER_KEY via gatewayFromEnv() -- this never takes a key on
+ *                        LITELLM_MASTER_KEY via gatewayFromEnv -- this never takes a key on
  *                        the command line.
  *   --update-baseline   After scoring, write the report to the --baseline path (default
  *                        evals/baseline.json). `=true` is accepted too; `=false` is a no-op.
@@ -170,10 +178,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   loadEnv({ path: path.join(repoRoot, '.env'), quiet: true });
 
   // Everything the run measures comes off the loaded pack, which is what makes this runner
-  // pack-agnostic: it imports none, and `HARNESS_PACKS` names what it loads.
-  // Read raw rather than through `optionalEnv`, which cannot tell an unset variable from an empty
-  // one — and here they mean different things: the shipped pack, or no pack at all.
-  const toMeasure = packsToMeasure(process.env.HARNESS_PACKS);
+  // pack-agnostic: it imports none, and `--packs` names what it loads.
+  const toMeasure = packsToMeasure(flag('packs'));
   if (!toMeasure.ok) {
     process.stderr.write(`${toMeasure.error}\n`);
     process.exit(2);
@@ -197,7 +203,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   }
 
   const corpusDir = path.resolve(flag('corpus') ?? evals.corpusDir ?? path.dirname(evals.casesFile));
-  const gateway = gatewayFromEnv();
+  const gateway = gatewayFromEnv(process.env);
   // `--gateway` overrides only the proxy's base URL, for pointing a run at a
   // gateway other than `HARNESS_GATEWAY_URL` (a staging proxy, a fake one in
   // an ad hoc smoke test). The key still comes from the environment: a

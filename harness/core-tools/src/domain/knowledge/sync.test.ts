@@ -36,7 +36,7 @@ async function clientFolder(client = 'test'): Promise<{
   await mkdir(dir, { recursive: true });
   const deps = makeTestDeps(db, {
     client,
-    clientDir,
+    knowledgeDir: dir,
     gateway: { baseUrl: fake.url, apiKey: 'sk-test', timeoutMs: 5_000, maxCallsPerRun: 100 },
   });
   const write = async (rel: string, text: string): Promise<void> => {
@@ -216,8 +216,12 @@ describe('syncKnowledge', () => {
   });
 
   it('is an empty sync, not an error, for a client with no knowledge folder', async () => {
-    const deps = makeTestDeps(db, { clientDir: path.join(tmpdir(), 'harness-client-nonexistent') });
+    const deps = makeTestDeps(db, { knowledgeDir: path.join(tmpdir(), 'harness-client-nonexistent') });
     expect(await syncKnowledge(deps)).toMatchObject({ scanned: 0, added: 0, removed: 0, chunks: 0, skipped: [] });
+  });
+
+  it('says so by name when the client keeps its knowledge in the store', async () => {
+    await expect(syncKnowledge(makeTestDeps(db, { knowledgeDir: null }), {})).rejects.toThrow(/in the store/);
   });
 
   it('serialises two syncs of one folder, so a document ends with one generation of chunks', async () => {

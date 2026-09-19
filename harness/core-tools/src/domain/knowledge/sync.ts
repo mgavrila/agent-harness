@@ -82,7 +82,12 @@ function isRestricted(doc: ParsedKnowledgeDocument, chunks: readonly string[]): 
  * otherwise leave the whole folder on yesterday's content.
  */
 export async function syncKnowledge(deps: ToolDeps, opts: { dir?: string } = {}): Promise<KnowledgeSyncResult> {
-  const dir = opts.dir ?? path.join(deps.clientDir, 'knowledge');
+  const dir = opts.dir ?? deps.knowledgeDir;
+  if (dir === null) {
+    throw new ToolError(
+      "this client keeps its knowledge in the store, not in a directory; the document's `knowledge` section decides which",
+    );
+  }
   const now = deps.now();
   // A stable, readable location rather than the absolute path, which differs between a checkout
   // and a container and would rewrite the row on every start for no reason.

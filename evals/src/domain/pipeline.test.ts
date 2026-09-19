@@ -23,7 +23,7 @@ import {
 
 /**
  * A pack is a fixture here, never an import of the shipping code: `openPipeline` takes the list
- * `HARNESS_PACKS` would name, and a test that measures a real pipeline has to name one.
+ * `--packs` would name, and a test that measures a real pipeline has to name one.
  */
 const HEALTHCARE = '@harness/pack-healthcare';
 const STORIES = '@harness/pack-stories';
@@ -319,7 +319,7 @@ describe('extractIdKeyFor', () => {
 
   /**
    * Nobody has said what the document is, so the kernel routes it to the primary pack's target —
-   * the first entry of `HARNESS_PACKS` — and the answer follows that pack, not the load order of
+   * the first entry of `--packs` — and the answer follows that pack, not the load order of
    * whoever happens to replace the tool.
    */
   it('follows the primary pack for a case that declares no kind', () => {
@@ -396,7 +396,7 @@ const EPIC_REPLY = JSON.stringify({
  *
  * Every other dual-pack assertion in this file builds its second pack with `definePack` and runs
  * a credentialing document through it, which proves the plumbing but never leaves healthcare's
- * corpus. This one loads `@harness/pack-stories` the way `HARNESS_PACKS` does, generates that
+ * corpus. This one loads `@harness/pack-stories` the way `--packs` does, generates that
  * pack's own documents with that pack's own generator, and runs a `meeting_notes` row out of that
  * pack's own cases file. Nothing here is written for the test: a failure means `pnpm evals
  * --pack stories` is broken for a real operator.
@@ -421,7 +421,7 @@ describe('both shipped packs loaded in the documented order, the stories pack me
       databaseUrl: EVALS_DATABASE_URL,
       storageDir: storiesCorpus,
       gateway: { baseUrl: storiesGateway.url, apiKey: 'sk-eval', timeoutMs: 10_000, maxCallsPerRun: 100 },
-      // Healthcare first, exactly as the stories README spells `HARNESS_PACKS`: the primary pack
+      // Healthcare first, exactly as the stories README spells `--packs`: the primary pack
       // is the one this run is *not* measuring, which is the arrangement that used to fail.
       packs: [HEALTHCARE, STORIES],
       measured: 'stories',

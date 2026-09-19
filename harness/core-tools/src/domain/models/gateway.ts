@@ -1,7 +1,7 @@
 import * as z from 'zod/v4';
 import { and, eq } from 'drizzle-orm';
 import { modelCalls } from '@harness/db';
-import { ModelOutputError, ToolError, requiredEnv } from '@harness/shared';
+import { ModelOutputError, ToolError, requiredEnv, type EnvSource } from '@harness/shared';
 import type { ToolDeps } from '../tooling/types.js';
 import {
   EMBED_ROUTE,
@@ -14,24 +14,26 @@ import {
   type Route,
 } from './types.js';
 
-export function gatewayFromEnv(): GatewayConfig {
-  const apiKey = requiredEnv('LITELLM_MASTER_KEY');
-  // Read directly, not through optionalEnv/numberFromEnv: those treat an empty string as
-  // unset, and this function has always treated an empty HARNESS_GATEWAY_URL as the literal
-  // empty base URL and an empty numeric variable as `Number('') === 0`, which fails the range
-  // check below and throws at startup. Preserving that exact behaviour is the point of leaving
-  // these three reads alone — nothing tests it, but nothing should silently change it either.
-  // That is also why the layer rule is suppressed here rather than satisfied: the helper it
-  // points at cannot express "an empty string is the value". Moving this whole function into
-  // app/, where the rule does not apply, is the real fix.
-  /* eslint-disable no-restricted-syntax */
-  const raw = process.env.HARNESS_GATEWAY_URL ?? 'http://127.0.0.1:4000';
-  const timeout = Number(process.env.HARNESS_GATEWAY_TIMEOUT_MS ?? 120_000);
+/**
+ * How this deployment reaches the model gateway, off the environment it is handed.
+ *
+ * The map is a parameter and never the ambient one, so a process that serves two clients can
+ * hand each its own — and so that nothing here reads a global to decide what a run may call.
+ */
+export function gatewayFromEnv(env: EnvSource): GatewayConfig {
+  const apiKey = requiredEnv('LITELLM_MASTER_KEY', '', env);
+  // Read off the map directly, not through optionalEnv/numberFromEnv: those treat an empty
+  // string as unset, and this function has always treated an empty HARNESS_GATEWAY_URL as the
+  // literal empty base URL and an empty numeric variable as `Number('') === 0`, which fails the
+  // range check below and throws at startup. Preserving that exact behaviour is the point of
+  // leaving these three reads alone — nothing tests it, but nothing should silently change it
+  // either.
+  const raw = env.HARNESS_GATEWAY_URL ?? 'http://127.0.0.1:4000';
+  const timeout = Number(env.HARNESS_GATEWAY_TIMEOUT_MS ?? 120_000);
   if (!Number.isFinite(timeout) || timeout < 1_000 || timeout > 600_000) {
     throw new Error('HARNESS_GATEWAY_TIMEOUT_MS must be a number between 1000 and 600000');
   }
-  const maxCalls = Number(process.env.HARNESS_GATEWAY_MAX_CALLS_PER_RUN ?? 100);
-  /* eslint-enable no-restricted-syntax */
+  const maxCalls = Number(env.HARNESS_GATEWAY_MAX_CALLS_PER_RUN ?? 100);
   if (!Number.isInteger(maxCalls) || maxCalls < 1 || maxCalls > 10_000) {
     throw new Error('HARNESS_GATEWAY_MAX_CALLS_PER_RUN must be a whole number between 1 and 10000');
   }

@@ -19,7 +19,6 @@ services:
         required: true
     environment:
       DATABASE_URL: postgres://harness:harness@postgres:5432/harness
-      HARNESS_CLIENT: ${HARNESS_CLIENT:-demo-practice}
       HARNESS_ENCRYPTION_KEY: ${HARNESS_ENCRYPTION_KEY:?set HARNESS_ENCRYPTION_KEY in .env}
       HARNESS_GATEWAY_URL: http://litellm:4000
       HARNESS_STORAGE_DIR: /data/storage
@@ -90,9 +89,6 @@ services:
       HARNESS_HOST_PORT: "8788"
       HARNESS_HOST_PRINCIPAL: ${HARNESS_HOST_PRINCIPAL:-svc-host}
       HARNESS_HOST_TOKEN: ${HARNESS_HOST_TOKEN:-}
-      HARNESS_IDENTITY: ${HARNESS_IDENTITY:-@harness/identity-static}
-      HARNESS_PACKS: ${HARNESS_PACKS-@harness/pack-healthcare}
-      HARNESS_POLICY_FILE: /srv/agent-harness/clients/${HARNESS_CLIENT:?set HARNESS_CLIENT in .env}/policy.yaml
       HARNESS_RUN_MAX_MODEL_CALLS: ${HARNESS_RUN_MAX_MODEL_CALLS:-30}
       HARNESS_RUN_MAX_TOOL_CALLS: ${HARNESS_RUN_MAX_TOOL_CALLS:-60}
       HARNESS_RUN_TIMEOUT_S: ${HARNESS_RUN_TIMEOUT_S:-600}

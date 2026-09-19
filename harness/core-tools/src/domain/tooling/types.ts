@@ -95,11 +95,28 @@ export interface ToolDeps {
    */
   storageDir: string;
   /**
-   * The client's own folder: `clients/<HARNESS_CLIENT>/`, where its persona, policy, identity,
-   * playbooks and `knowledge/` live. Derived, never configured — spec section 7 fixes the layout
-   * — and resolved from the repository root, which is the image's working directory too.
+   * Where this client's knowledge documents are, when they are a directory.
+   *
+   * `null` for a client whose knowledge lives in the store rather than on disk — which is what
+   * the document's `knowledge: { source: 'store' }` means — and `knowledge_sync` says so by name
+   * rather than walking a directory nobody configured. This is the only path a client still has,
+   * and it is one the client document supplied, never one derived from where this code lives.
    */
-  clientDir: string;
+  knowledgeDir: string | null;
+
+  /**
+   * Tool names this client does not publish (spec decision 7).
+   *
+   * Different from setting the tool's action class to `blocked`: hiding `documents_read`
+   * withholds that one tool while everything else in the `read` class still works. A name no
+   * loaded pack or kernel catalogue publishes is simply not there to hide.
+   *
+   * It withholds **kernel** names: `publishedCatalogue` applies this set before any pack
+   * contributes, so a tool a pack publishes under its own name — including a pack's replacement
+   * of a kernel name — is published whatever this list says. A deployment that wants a pack's
+   * tool gone removes the pack, or sets that tool's action class to `blocked`.
+   */
+  hiddenTools: readonly string[];
   /**
    * How wide an embedding vector this deployment stores, from `HARNESS_EMBED_DIMS`. It does not
    * *decide* the width: `knowledge_chunks.embedding` was created at a fixed width by migration
@@ -146,7 +163,7 @@ export interface ToolDeps {
   /** The kernel operations a pack may call that are not tools. Always `PACK_KERNEL`. */
   kernel: PackKernel;
   /**
-   * The packs this process loaded, from `HARNESS_PACKS`. Document kinds, the extraction
+   * The packs this client loaded, from the document’s `packs` list. Document kinds, the extraction
    * manifest and the forms directory all come from here rather than from an import, which is
    * what lets one build serve one area of the product today and a different one tomorrow.
    */

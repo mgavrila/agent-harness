@@ -118,7 +118,6 @@ services:
       HARNESS_STORAGE_DIR: /data/storage
       HARNESS_ENCRYPTION_KEY: ${HARNESS_ENCRYPTION_KEY:?set HARNESS_ENCRYPTION_KEY in .env}
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?set LITELLM_MASTER_KEY in .env}
-      HARNESS_CLIENT: ${HARNESS_CLIENT:-demo-practice}
     volumes:
       - ../../storage:/data/storage
     depends_on:
@@ -154,19 +153,12 @@ services:
       HARNESS_ENCRYPTION_KEY: '${HARNESS_ENCRYPTION_KEY:-}'
       HARNESS_CLIENT: '${HARNESS_CLIENT:-demo-practice}'
       HARNESS_STORAGE_DIR: '/srv/harness-storage'
-      # One dash, not `:-`, and the difference is the whole point: `${VAR:-default}` substitutes
-      # the default when the variable is unset *or empty*, and an empty HARNESS_PACKS is how a
-      # client says it serves no pack. With `-` the default applies only when the variable is
-      # unset, so `HARNESS_PACKS=` in .env reaches the container as the empty string it is.
-      HARNESS_PACKS: '${HARNESS_PACKS-@harness/pack-healthcare}'
       # The run API surface is loaded beside the primary one so a headless caller has a surface
       # to name. It is never first: the first entry is where approval cards are posted, and this
       # one cannot post a card.
       HARNESS_SURFACES: '${HARNESS_SURFACES:-@harness/surface-slack,@harness/surface-http}'
-      HARNESS_IDENTITY: '${HARNESS_IDENTITY:-@harness/identity-static}'
       HARNESS_RUNTIME: '${HARNESS_RUNTIME:-@harness/runtime-deepagents}'
       HARNESS_HOST_PRINCIPAL: '${HARNESS_HOST_PRINCIPAL:-svc-host}'
-      HARNESS_POLICY_FILE: '/srv/agent-harness/clients/${HARNESS_CLIENT:?set HARNESS_CLIENT in .env}/policy.yaml'
       # This process refuses to start without a gateway key, reached on the compose network
       # rather than the host loopback the .env value names.
       HARNESS_GATEWAY_URL: 'http://litellm:4000'

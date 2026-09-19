@@ -4,8 +4,8 @@ The offline measurement of the document pipeline. It ingests and extracts every 
 synthetic corpus through the real core-tools server, scores what was _stored_ rather than what
 the model said, and compares the result to a committed baseline.
 
-It imports no pack. `HARNESS_PACKS` names what is loaded, exactly as it does for a server, and
-`--pack` picks one of them when several are; the corpus, the cases, the injection file, the
+It imports no pack. `--packs` names what is loaded, and `--pack` picks one of them when several
+are; the corpus, the cases, the injection file, the
 intake skill, the judged fields and the pipeline's tool names all come off that pack's
 `evals` block. The report records which pack and which record kinds it measured, because the
 same metric name carries a different meaning for each.
@@ -56,7 +56,7 @@ pnpm synth            # generate the corpus first
 pnpm evals            # scores it and writes evals/results/report.{json,md}
 pnpm evals:baseline   # the same, then writes the report to evals/baseline.json
 
-HARNESS_PACKS=@harness/pack-healthcare,@harness/pack-stories pnpm evals -- --pack=stories
+pnpm evals -- --packs=@harness/pack-healthcare,@harness/pack-stories --pack=stories
 ```
 
 The last line loads both packs and measures the second. Everything follows `--pack`: its corpus,

@@ -1,13 +1,18 @@
 import { createHash } from 'node:crypto';
 import path from 'node:path';
-import { ConfigError, optionalEnv } from '@harness/shared';
+import { ConfigError, optionalEnv, type EnvSource } from '@harness/shared';
 
 /**
  * Root of the harness file store. There is no default: a deployment that has
  * not said where files live must fail at startup rather than scatter ingested
  * documents into whatever directory happened to be the working directory.
+ *
+ * The environment is a parameter and never the ambient one: the storage root is a property of
+ * the deployment, and a function that reached for `process.env` itself could not be handed a
+ * different map by a caller that serves more than one client.
  */
-export function storageRoot(dir: string | undefined = optionalEnv('HARNESS_STORAGE_DIR')): string {
+export function storageRoot(env: EnvSource): string {
+  const dir = optionalEnv('HARNESS_STORAGE_DIR', env);
   if (!dir || dir.trim() === '' || !path.isAbsolute(dir.trim())) {
     throw new ConfigError('HARNESS_STORAGE_DIR must be set to an absolute path');
   }

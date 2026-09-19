@@ -266,22 +266,33 @@ describe('callModelJson', () => {
   });
 });
 
+/**
+ * Both cases pass a literal map rather than editing `process.env`: the function takes the
+ * environment it reads, which is what lets one process configure two gateways — and what lets
+ * these two assertions run beside anything else without saving and restoring a global.
+ */
 describe('gatewayFromEnv', () => {
   it('requires a master key', () => {
-    const saved = process.env.LITELLM_MASTER_KEY;
-    delete process.env.LITELLM_MASTER_KEY;
-    expect(() => gatewayFromEnv()).toThrow(/LITELLM_MASTER_KEY/);
-    if (saved !== undefined) process.env.LITELLM_MASTER_KEY = saved;
+    expect(() => gatewayFromEnv({})).toThrow(/LITELLM_MASTER_KEY/);
   });
 
   it('defaults to loopback port 4000', () => {
-    const savedKey = process.env.LITELLM_MASTER_KEY;
-    const savedUrl = process.env.HARNESS_GATEWAY_URL;
-    process.env.LITELLM_MASTER_KEY = 'sk-x';
-    delete process.env.HARNESS_GATEWAY_URL;
-    expect(gatewayFromEnv().baseUrl).toBe('http://127.0.0.1:4000');
-    if (savedKey === undefined) delete process.env.LITELLM_MASTER_KEY;
-    else process.env.LITELLM_MASTER_KEY = savedKey;
-    if (savedUrl !== undefined) process.env.HARNESS_GATEWAY_URL = savedUrl;
+    expect(gatewayFromEnv({ LITELLM_MASTER_KEY: 'sk-x' }).baseUrl).toBe('http://127.0.0.1:4000');
+  });
+
+  it('reads the base URL, the timeout and the call ceiling off the map it was given', () => {
+    const gateway = gatewayFromEnv({
+      LITELLM_MASTER_KEY: 'sk-x',
+      HARNESS_GATEWAY_URL: 'http://gateway.internal:4000/',
+      HARNESS_GATEWAY_TIMEOUT_MS: '30000',
+      HARNESS_GATEWAY_MAX_CALLS_PER_RUN: '7',
+    });
+    // The trailing slash goes, so a joined path never doubles it.
+    expect(gateway).toEqual({
+      baseUrl: 'http://gateway.internal:4000',
+      apiKey: 'sk-x',
+      timeoutMs: 30_000,
+      maxCallsPerRun: 7,
+    });
   });
 });

@@ -1,6 +1,6 @@
-import type { ConfigSource } from '@harness/config-api';
+import type { ClientDocument, ConfigSource } from '@harness/config-api';
 import type { Db } from '@harness/db';
-import { ConfigError, requiredEnv, type EnvSource, type Logger } from '@harness/shared';
+import { ConfigError, envOrDefault, requiredEnv, type EnvSource, type Logger } from '@harness/shared';
 
 /** The sources this build ships. A third one is a package and one line here. */
 const SOURCES = ['files', 'postgres'] as const;
@@ -50,4 +50,30 @@ export async function loadConfigSource(name: string, deps: ConfigSourceDeps): Pr
     return postgresConfigSource({ db: deps.db, log: deps.log });
   }
   throw new ConfigError(`no config source named "${name}"; this build ships ${SOURCES.join(' and ')}`);
+}
+
+/**
+ * The one client a dedicated process serves, resolved through whatever `HARNESS_CONFIG_SOURCE`
+ * names.
+ *
+ * `HARNESS_CLIENT` is required here, with no default: a stdio server or a dedicated host is one
+ * client for its whole life, and a default would be a guess at which one. A client the source
+ * does not hold is a startup failure naming both the id and the source, because a process that
+ * started anyway would serve a client nobody configured.
+ *
+ * The source is opened for this one read and closed again, on the failure path too: a process
+ * that serves one client has nothing to watch, and a source left open would hold a connection or
+ * a file watcher for the life of the process for no reader.
+ */
+export async function loadClientDocument(deps: ConfigSourceDeps): Promise<ClientDocument> {
+  const clientId = envOrDefault('HARNESS_CLIENT', '', deps.env);
+  if (clientId === '') throw new ConfigError('HARNESS_CLIENT names the client this process serves; set it');
+  const source = await loadConfigSource(configSourceNameFrom(deps.env), deps);
+  try {
+    const loaded = await source.load(clientId);
+    if (!loaded) throw new ConfigError(`the ${source.name} config source holds no client "${clientId}"`);
+    return loaded.document;
+  } finally {
+    await source.close?.();
+  }
 }

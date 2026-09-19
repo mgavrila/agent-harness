@@ -1,4 +1,5 @@
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
+import type { EnvSource } from '@harness/shared';
 
 const IV_BYTES = 12;
 const TAG_BYTES = 16;
@@ -7,7 +8,15 @@ export function generateKey(): string {
   return randomBytes(32).toString('base64');
 }
 
-export function loadKey(b64: string | undefined = process.env.HARNESS_ENCRYPTION_KEY): Buffer {
+/**
+ * The deployment's 32-byte key, off the environment it is handed.
+ *
+ * The map is a parameter rather than the ambient environment: this package is exempt from the
+ * `process.env` rule, but taking the map is what makes a per-tenant key possible later and what
+ * makes this function testable without a global.
+ */
+export function loadKey(env: EnvSource): Buffer {
+  const b64 = env.HARNESS_ENCRYPTION_KEY;
   if (!b64) throw new Error('HARNESS_ENCRYPTION_KEY is not set');
   const key = Buffer.from(b64, 'base64');
   if (key.length !== 32) throw new Error('HARNESS_ENCRYPTION_KEY must decode to 32 bytes');

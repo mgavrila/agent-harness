@@ -1,8 +1,7 @@
-import { mkdir, readFile } from 'node:fs/promises';
+import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { config as loadEnv } from 'dotenv';
-import { parse as parseYaml } from 'yaml';
 import {
   DEFAULT_HEALTH_BIND,
   collectHealth,
@@ -13,25 +12,16 @@ import {
   startRunner,
   surfaceSinks,
 } from '@harness/approvals';
-import { assertEmbedDims, buildKernelConfig, loadIdentity } from '@harness/core-tools';
+import { assertEmbedDims, buildKernelConfig, loadClientDocument, loadIdentity } from '@harness/core-tools';
 import { outRoot } from '@harness/core-tools/storage';
 import { parsePlaybooksFile, type PlaybookDefinition } from '@harness/config-api';
 import { createDb } from '@harness/db';
 import { parseIdentityFileWithDefaults } from '@harness/identity-api';
-import {
-  ConfigError,
-  createLogger,
-  describeError,
-  envOrDefault,
-  numberFromEnv,
-  optionalEnv,
-  requiredEnv,
-} from '@harness/shared';
+import { ConfigError, createLogger, envOrDefault, numberFromEnv, optionalEnv, requiredEnv } from '@harness/shared';
 import { startRunApi } from '../domain/api/server.js';
 import { DEFAULT_HOST_BIND, DEFAULT_HOST_PORT } from '../domain/api/types.js';
 import { SHUTDOWN_DRAIN_MS, TIMEOUT_MARGIN_MS, attachMessageHandlers, drainActive } from '../domain/conversation.js';
 import type { Host } from '../domain/host.js';
-import { readPersona } from '../domain/persona.js';
 import { syncPlaybooks } from '../domain/playbooks/repository.js';
 import { SCHEDULER_TICK_MS, startScheduler } from '../domain/playbooks/scheduler.js';
 import { decisionDeps } from '../domain/resume.js';
@@ -56,29 +46,26 @@ const names = (raw: string): string[] =>
     .filter((n) => n !== '');
 
 const { db, close: closeDb } = createDb();
-const config = await buildKernelConfig(process.env);
+// Task 6 replaces this whole script with createHost(); until then the host loads the one client
+// HARNESS_CLIENT names through the configured source, exactly as the stdio server does.
+const document = await loadClientDocument({ env: process.env, log, db });
+const config = await buildKernelConfig(document, process.env);
 // Belt to the image's braces (decision 4): the storage volume's layout comes from
 // node.Dockerfile, but an operator who mounts a bare directory instead still gets both.
 await mkdir(path.join(config.storageDir, 'incoming'), { recursive: true });
 await mkdir(outRoot(config.storageDir), { recursive: true });
-// Derived by the kernel from HARNESS_CLIENT (spec section 7), so the host and core-tools cannot
-// disagree about where a client's files are.
-const clientDir = config.clientDir;
 // The knowledge tables' embedding width is fixed by migration 0013; refuse to start rather than
 // fail halfway through the first sync.
 await assertEmbedDims(db, config.embedDims);
 
-// The three plug-ins, by name. Identity first: the host's own principal has to be declared.
-// Task 6 replaces this read with the resolved client document's `identity` section, loaded
-// through the ConfigSource; a plug-in is never handed a path.
-const identitySection = parseIdentityFileWithDefaults(
-  parseYaml(await readFile(path.join(clientDir, 'identity.yaml'), 'utf8')),
-);
-const identity = await loadIdentity(envOrDefault('HARNESS_IDENTITY', '@harness/identity-static'), {
+// The three plug-ins, by name. Identity first: the host's own principal has to be declared. The
+// document's `identityPlugin.kind` names the plug-in and the specifier is derived from it, so no
+// host source writes a plug-in package name out and no plug-in is ever handed a path.
+const identity = await loadIdentity(`@harness/identity-${document.identityPlugin.kind}`, {
   env: process.env,
   log,
-  identity: identitySection,
-  settings: {},
+  identity: parseIdentityFileWithDefaults(document.identity),
+  settings: document.identityPlugin.settings,
 });
 const servicePrincipalId = envOrDefault('HARNESS_HOST_PRINCIPAL', 'svc-host');
 const servicePrincipal = await identity.get(servicePrincipalId);
@@ -87,34 +74,19 @@ if (!servicePrincipal || servicePrincipal.kind !== 'service') {
     `HARNESS_HOST_PRINCIPAL names "${servicePrincipalId}", which the identity plug-in "${identity.name}" does not declare as a service`,
   );
 }
-// The file into the table, once per start, and before a surface or the runtime connects: a
-// playbook edited, added or removed in clients/<name>/playbooks.yaml takes effect on the next
+// The document's playbooks into the table, once per start, and before a surface or the runtime
+// connects: a playbook edited, added or removed in the client document takes effect on the next
 // start, a firing missed while the process was down is not replayed (next_run_at is recomputed
-// from now), and a malformed file fails startup with no socket open and no message accepted.
-// Task 6 replaces this whole script with createHost(), where the document's playbooks arrive
-// already parsed. Until then, clients/<name>/playbooks.yaml still exists (Task 9 removes it), so
-// this reads and parses it the way the deleted `readPlaybooksFile` used to.
-const playbooksPath = path.join(clientDir, 'playbooks.yaml');
-let playbooksFile: { file: string; present: boolean; playbooks: PlaybookDefinition[] };
-try {
-  const text = await readFile(playbooksPath, 'utf8');
-  playbooksFile = { file: playbooksPath, present: true, playbooks: parsePlaybooksFile(parseYaml(text)) };
-} catch (err) {
-  if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
-    throw new ConfigError(`cannot read ${playbooksPath}: ${describeError(err)}`);
-  }
-  playbooksFile = { file: playbooksPath, present: false, playbooks: [] };
-}
+// from now), and a malformed section fails validation in the source, with no socket open and no
+// message accepted.
+const playbookDefinitions: PlaybookDefinition[] = parsePlaybooksFile(document.playbooks);
 const synced = await syncPlaybooks(
   db,
-  { client: config.client, now: now(), file: playbooksFile.file },
-  playbooksFile.playbooks,
+  // `file` is only where a bad schedule is named from, so it names the document, not a path.
+  { client: config.client, now: now(), file: `the ${document.id} client document` },
+  playbookDefinitions,
 );
-log.info(
-  playbooksFile.present
-    ? `playbooks: ${synced.upserted} from ${playbooksFile.file}, ${synced.disabled} disabled`
-    : `playbooks: no playbooks.yaml in ${clientDir}; ${synced.disabled} disabled`,
-);
+log.info(`playbooks: ${synced.upserted} from the ${document.id} client document, ${synced.disabled} disabled`);
 
 const surfaces = await loadSurfaces(names(requiredEnv('HARNESS_SURFACES')), {
   env: process.env,
@@ -138,7 +110,7 @@ const host: Host = {
   identity,
   surfaces,
   runtime,
-  persona: await readPersona(clientDir),
+  persona: document.persona,
   // The kernel's own skills first, then every pack's. `preflightPlaybook` resolves a playbook's
   // skill name against this list with `find`, so the kernel's entry is the one it lands on. That
   // is not a shadowing rule: `readSkillCatalogue` refuses a duplicate directory name within one
