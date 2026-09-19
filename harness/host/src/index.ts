@@ -32,16 +32,7 @@ export {
   type TurnResult,
 } from './domain/conversation.js';
 export { decisionDeps, resumeOnDecision, resumeText } from './domain/resume.js';
-export {
-  DELIVERIES,
-  PLAYBOOK_NAME_PATTERN,
-  PlaybookShape,
-  PlaybooksFileShape,
-  nextRunAfter,
-  parsePlaybooksFile,
-  readPlaybooksFile,
-  type PlaybookDefinition,
-} from './domain/playbooks/schema.js';
+export { nextRunAfter } from './domain/playbooks/schema.js';
 export {
   CLAIM_BATCH,
   claimDuePlaybooks,

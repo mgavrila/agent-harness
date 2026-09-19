@@ -1,7 +1,8 @@
 import { and, asc, eq, inArray, lte, not } from 'drizzle-orm';
 import { playbookRuns, playbooks, withTransaction, type Db } from '@harness/db';
 import type { PlaybookRow, PlaybookRunRow, PlaybookRunStatus } from '@harness/core-tools';
-import { nextRunAfter, type PlaybookDefinition } from './schema.js';
+import type { PlaybookDefinition } from '@harness/config-api';
+import { nextRunAfter } from './schema.js';
 
 export interface SyncResult {
   upserted: number;

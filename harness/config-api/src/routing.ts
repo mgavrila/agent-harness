@@ -2,8 +2,9 @@ import * as z from 'zod/v4';
 
 /**
  * The five named routes. Callers ask for a *job* (`extract`, `embed`), never a vendor, so a
- * routing change is a config change. This is the single definition; @harness/core-tools imports
- * it through the `@harness/gateway/routing` subpath.
+ * routing change is a config change. This is the single definition; it lives beside the rest of
+ * a client's configuration because `routes` is a section of the client document, and
+ * `@harness/gateway` and `@harness/core-tools` both import it from here.
  *
  * `embed` is the odd one: it is an embeddings deployment, not a chat one, so `callModel` refuses
  * it and `embedTexts` in @harness/core-tools calls `POST /v1/embeddings` instead. It is a route
@@ -15,9 +16,9 @@ export type Route = (typeof ROUTES)[number];
 
 export const RouteSpec = z
   .object({
-    /** A LiteLLM model identifier, always provider-prefixed (e.g. `gemini/gemini-3-flash-preview`). */
+    /** A LiteLLM model identifier, always upstream-prefixed (e.g. `gemini/gemini-3-flash-preview`). */
     model: z.string().min(1),
-    /** Only for self-hosted endpoints (vLLM, Ollama). Hosted providers resolve their own base URL. */
+    /** Only for self-hosted endpoints (vLLM, Ollama). A hosted upstream resolves its own base URL. */
     api_base: z.string().url().optional(),
     /** Tried in order when the primary deployment errors or is over budget. */
     fallbacks: z.array(z.string().min(1)).max(3).default([]),
@@ -26,7 +27,7 @@ export const RouteSpec = z
   })
   // An inline `api_key:` (or any other typo/unsupported field) must fail loudly
   // rather than be silently dropped — a routing file is not a place to smuggle
-  // a literal credential past the generator's os.environ/-only contract.
+  // a literal key past the generator's os.environ/-only contract.
   .strict();
 export type RouteSpec = z.infer<typeof RouteSpec>;
 

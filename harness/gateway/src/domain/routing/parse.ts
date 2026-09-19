@@ -1,6 +1,6 @@
 import { parse as parseYaml } from 'yaml';
 import * as z from 'zod/v4';
-import { RoutingFile } from './types.js';
+import { RoutingFile } from '@harness/config-api';
 
 /**
  * Parse a client's routing.yaml, or fail with the whole list of problems rather than the

@@ -33,6 +33,7 @@ const path = require('node:path');
 const PACKAGES = [
   { name: 'shared', src: 'harness/shared/src', severity: 'error' },
   { name: 'pack-api', src: 'harness/pack-api/src', severity: 'error' },
+  { name: 'config-api', src: 'harness/config-api/src', severity: 'error' },
   { name: 'surface-api', src: 'harness/surface-api/src', severity: 'error' },
   { name: 'identity-api', src: 'harness/identity-api/src', severity: 'error' },
   { name: 'runtime-api', src: 'harness/runtime-api/src', severity: 'error' },
@@ -102,6 +103,7 @@ function layerRules({ name, src, severity }) {
 const WORKSPACE_DIRS = [
   'harness/shared',
   'harness/pack-api',
+  'harness/config-api',
   'harness/surface-api',
   'harness/identity-api',
   'harness/runtime-api',
@@ -274,6 +276,22 @@ const GLOBAL_RULES = [
     to: {
       path: '^(harness|packs|surfaces|identities|runtimes|evals|scripts)/',
       pathNot: ['^harness/identity-api/src/', '^harness/shared/src/'],
+    },
+  },
+  {
+    name: 'config-api-imports-only-the-contracts-and-shared',
+    comment:
+      '@harness/config-api is the contract that says what a client is. It may import @harness/shared, @harness/identity-api (whose IdentityFileShape is the document’s identity section), @harness/pack-api (whose action classes the policy section is keyed by), zod, croner and node built-ins — and no other workspace package. An edge into core-tools, the host or a source implementation would be a cycle: every one of them imports this. The direction is one-way on purpose, which is also why an identity plug-in receives its section through IdentityDeps rather than importing this package.',
+    severity: 'error',
+    from: { path: '^harness/config-api/src/' },
+    to: {
+      path: '^(harness|packs|surfaces|identities|runtimes|evals|scripts)/',
+      pathNot: [
+        '^harness/config-api/src/',
+        '^harness/shared/src/',
+        '^harness/identity-api/src/',
+        '^harness/pack-api/src/',
+      ],
     },
   },
   {

@@ -82,6 +82,14 @@ const DEPLOYMENT_FORBIDDEN = /demo-practice|hermes/i;
  * transport that belongs to nobody, and an HTTP adapter that had learned a product area, a
  * messaging vendor or a framework would be exactly the coupling the surface contract removes.
  *
+ * `harness/config-api/src` is scanned for three of the four lists and deliberately not for the
+ * messaging one. The client document's schema has to name the surfaces a tenant may declare, so
+ * `surfaces.slack` with its team id and its two secret references is *data the schema admits*
+ * rather than a coupling — the same status `surfaces/slack` itself has, which is scanned by
+ * nothing. It is scanned for the other three like any contract: a document schema that knew a
+ * product area, a framework or a client's name would be the coupling this package exists to
+ * remove, which is also why `runtime` is a plug-in *name* there and not a literal.
+ *
  * **The allowlist is empty and must stay empty.** A word that has to appear belongs in a pack or
  * in an adapter, or the comment that carries it should say what the kernel actually means: a
  * model *vendor*, a *record*, a *file*, a *surface*. Adding an entry here is a decision to write
@@ -177,6 +185,27 @@ const SCANNED = [
     root: 'identities/static/src',
     forbidden: DEPLOYMENT_FORBIDDEN,
     minFiles: 1,
+    skip: [/\.test\.ts$/],
+  },
+  {
+    what: 'credentialing vocabulary',
+    root: 'harness/config-api/src',
+    forbidden: DOMAIN_FORBIDDEN,
+    minFiles: 5,
+    skip: [/\.test\.ts$/],
+  },
+  {
+    what: 'framework and vendor vocabulary',
+    root: 'harness/config-api/src',
+    forbidden: FRAMEWORK_FORBIDDEN,
+    minFiles: 5,
+    skip: [/\.test\.ts$/],
+  },
+  {
+    what: 'deployment vocabulary',
+    root: 'harness/config-api/src',
+    forbidden: DEPLOYMENT_FORBIDDEN,
+    minFiles: 5,
     skip: [/\.test\.ts$/],
   },
   {

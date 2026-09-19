@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
+import { ROUTES } from '@harness/config-api';
 import { parseRouting } from './parse.js';
 import { ROUTING } from './routing.test-helpers.js';
-import { ROUTES } from './types.js';
 
 describe('routing.schema', () => {
   it('names exactly the five spec routes', () => {

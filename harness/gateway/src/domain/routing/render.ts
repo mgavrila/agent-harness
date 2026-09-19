@@ -1,5 +1,5 @@
 import { stringify as stringifyYaml } from 'yaml';
-import { ROUTES, type RoutingFile } from './types.js';
+import { ROUTES, type RoutingFile } from '@harness/config-api';
 
 /**
  * Which environment variable holds the credential for a provider prefix. The

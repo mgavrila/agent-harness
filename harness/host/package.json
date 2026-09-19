@@ -14,6 +14,7 @@
   },
   "dependencies": {
     "@harness/approvals": "workspace:*",
+    "@harness/config-api": "workspace:*",
     "@harness/core-tools": "workspace:*",
     "@harness/db": "workspace:*",
     "@harness/identity-api": "workspace:*",

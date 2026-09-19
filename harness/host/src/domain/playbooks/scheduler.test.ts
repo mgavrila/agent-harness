@@ -1,5 +1,7 @@
+import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parse as parseYaml } from 'yaml';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { eq } from 'drizzle-orm';
 import {
@@ -15,6 +17,7 @@ import {
   type Db,
 } from '@harness/db';
 import { loadPolicy, requestPlaybookRun } from '@harness/core-tools';
+import { parsePlaybooksFile, type PlaybookDefinition } from '@harness/config-api';
 import { RUN_FAILED_MESSAGE, type RunEvent, type RuntimeSession } from '@harness/runtime-api';
 import { startFakeGateway } from '@harness/runtime-api/testing';
 import { hostFixture, testKernelConfig, useTestDb, waitFor, type HostFixture } from '../../testing.js';
@@ -22,7 +25,6 @@ import { drainActive } from '../conversation.js';
 import { kernelSkillsDir, readSkillCatalogue } from '../skills.js';
 import { stagePlaybookNotice } from './notice.js';
 import { syncPlaybooks } from './repository.js';
-import { readPlaybooksFile, type PlaybookDefinition } from './schema.js';
 import { SCHEDULER_TICK_MS, startScheduler } from './scheduler.js';
 
 // src/domain/playbooks -> src -> host -> harness -> <repo>. The same resolution main.ts uses.
@@ -451,7 +453,8 @@ describe('the shipped knowledge-sync playbook (I1)', () => {
     const fake = await startFakeGateway();
     onTestFinished(() => fake.close());
 
-    const { playbooks: shipped } = await readPlaybooksFile(demoClientDir);
+    const text = await readFile(path.join(demoClientDir, 'playbooks.yaml'), 'utf8');
+    const shipped = parsePlaybooksFile(parseYaml(text));
     const definition = shipped.find((p) => p.name === 'knowledge-sync');
     expect(definition, 'clients/demo-practice/playbooks.yaml must still ship knowledge-sync').toBeDefined();
 

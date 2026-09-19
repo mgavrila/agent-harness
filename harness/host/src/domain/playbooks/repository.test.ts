@@ -4,9 +4,9 @@ import { and, eq } from 'drizzle-orm';
 import { createDb, playbookRuns, playbooks, withTransaction } from '@harness/db';
 import { TEST_DATABASE_URL } from '@harness/db/testing';
 import { requestPlaybookRun } from '@harness/core-tools';
+import type { PlaybookDefinition } from '@harness/config-api';
 import { useTestDb } from '../../testing.js';
 import { CLAIM_BATCH, claimDuePlaybooks, finishPlaybookRun, syncPlaybooks, type ClaimedRun } from './repository.js';
-import type { PlaybookDefinition } from './schema.js';
 
 const db = useTestDb();
 const NOW = new Date('2026-09-15T12:00:00Z');

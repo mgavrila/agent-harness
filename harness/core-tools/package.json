@@ -18,8 +18,8 @@
     "start": "tsx src/app/main.ts"
   },
   "dependencies": {
+    "@harness/config-api": "workspace:*",
     "@harness/db": "workspace:*",
-    "@harness/gateway": "workspace:*",
     "@harness/identity-api": "workspace:*",
     "@harness/identity-static": "workspace:*",
     "@harness/pack-api": "workspace:*",

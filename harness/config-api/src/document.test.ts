@@ -1,0 +1,127 @@
+import { describe, expect, it } from 'vitest';
+import { ConfigError } from '@harness/shared';
+import { CLIENT_DOCUMENT_VERSION, migrate, parseClientDocument, surfaceNamesOf, tenantKeysOf } from './document.js';
+import { fixtureDocument } from './testing.js';
+
+describe('parseClientDocument', () => {
+  it('accepts the fixture document and returns it parsed', () => {
+    const document = parseClientDocument(fixtureDocument());
+    expect(document.schemaVersion).toBe(CLIENT_DOCUMENT_VERSION);
+    expect(document.id).toBe('fixture');
+    expect(document.packs).toEqual(['@harness/pack-healthcare']);
+    expect(document.runtime).toBe('scripted');
+    // `identity` is today's `IdentityFileShape`: `{ principals }` and nothing else. Task 2 adds
+    // `defaults` to that shape and asserts on it there, in the task that makes the field exist.
+    expect(document.identity.principals).toHaveLength(4);
+    expect(document.plugins).toEqual([]);
+  });
+
+  it('orders surfaces so the primary is never the run API', () => {
+    const document = parseClientDocument(fixtureDocument());
+    expect(surfaceNamesOf(document)).toEqual(['memory', 'http']);
+    const withSlack = parseClientDocument(
+      fixtureDocument({
+        surfaces: {
+          http: {},
+          slack: {
+            teamId: 'T001',
+            signingSecret: { env: 'SLACK_SIGNING_SECRET' },
+            botToken: { env: 'SLACK_BOT_TOKEN' },
+          },
+        },
+      }),
+    );
+    // Declaration order in the file does not decide it; SURFACE_ORDER does.
+    expect(surfaceNamesOf(withSlack)).toEqual(['slack', 'http']);
+  });
+
+  it('refuses a document whose only surface is the run API, which cannot post an approval card', () => {
+    expect(() => parseClientDocument(fixtureDocument({ surfaces: { http: {} } }))).toThrow(ConfigError);
+    expect(() => parseClientDocument(fixtureDocument({ surfaces: { http: {} } }))).toThrow(
+      /"http" cannot be a client's primary surface/,
+    );
+  });
+
+  it('refuses a secret value where a SecretRef is expected', () => {
+    const raw = fixtureDocument({
+      surfaces: {
+        memory: {},
+        slack: { teamId: 'T001', signingSecret: 'xoxb-not-a-reference', botToken: { env: 'SLACK_BOT_TOKEN' } },
+      },
+    });
+    expect(() => parseClientDocument(raw)).toThrow(ConfigError);
+    expect(() => parseClientDocument(raw)).toThrow(/signingSecret/);
+  });
+
+  it('refuses a SecretRef naming something that is not an environment variable', () => {
+    const raw = fixtureDocument({
+      surfaces: {
+        memory: {},
+        slack: { teamId: 'T001', signingSecret: { env: 'slack signing secret' }, botToken: { env: 'SLACK_BOT_TOKEN' } },
+      },
+    });
+    expect(() => parseClientDocument(raw)).toThrow(/env/);
+  });
+
+  it('refuses a client id that is not a safe path segment and a safe Postgres value', () => {
+    expect(() => parseClientDocument(fixtureDocument({ id: '../escape' }))).toThrow(ConfigError);
+    expect(() => parseClientDocument(fixtureDocument({ id: 'Fixture' }))).toThrow(ConfigError);
+  });
+
+  it('applies the identity rules zod cannot say', () => {
+    const raw = fixtureDocument({
+      identity: {
+        principals: [
+          { id: 'u-one', kind: 'user', level: 'lead', displayName: 'One', surfaces: { memory: 'U1' } },
+          { id: 'u-two', kind: 'user', level: 'lead', displayName: 'Two', surfaces: { memory: 'U1' } },
+        ],
+      },
+    });
+    expect(() => parseClientDocument(raw)).toThrow(/both claim user "U1" on surface "memory"/);
+  });
+
+  it('reserves plugins: an entry is refused until Plan 12 defines one', () => {
+    expect(() => parseClientDocument(fixtureDocument({ plugins: [{ kind: 'mcp' }] }))).toThrow(ConfigError);
+  });
+
+  it('names the tenant keys a resolver matches, without the caller knowing a vendor field', () => {
+    const withSlack = parseClientDocument(
+      fixtureDocument({
+        surfaces: {
+          slack: {
+            teamId: 'T0ABCDEF',
+            signingSecret: { env: 'SLACK_SIGNING_SECRET' },
+            botToken: { env: 'SLACK_BOT_TOKEN' },
+          },
+        },
+      }),
+    );
+    expect(tenantKeysOf(withSlack)).toEqual([{ surface: 'slack', key: 'T0ABCDEF' }]);
+    // A surface with nothing that identifies a workspace contributes no key.
+    expect(tenantKeysOf(parseClientDocument(fixtureDocument()))).toEqual([]);
+  });
+
+  it("names a memory surface's workspace as a tenant key too, which is what a pooled test routes on", () => {
+    const pooled = parseClientDocument(fixtureDocument({ surfaces: { memory: { workspace: 'W-ALPHA' }, http: {} } }));
+    expect(tenantKeysOf(pooled)).toEqual([{ surface: 'memory', key: 'W-ALPHA' }]);
+  });
+});
+
+describe('migrate', () => {
+  it('accepts schemaVersion 1, which is the only one there is', () => {
+    expect(migrate(fixtureDocument()).id).toBe('fixture');
+  });
+
+  it('rejects schemaVersion 2 by name, because forward-only means there is nowhere to go', () => {
+    expect(() => migrate(fixtureDocument({ schemaVersion: 2 }))).toThrow(ConfigError);
+    expect(() => migrate(fixtureDocument({ schemaVersion: 2 }))).toThrow(
+      /client document schemaVersion 2 is newer than this build, which knows 1/,
+    );
+  });
+
+  it('rejects a document with no schemaVersion at all', () => {
+    const raw = fixtureDocument();
+    delete raw.schemaVersion;
+    expect(() => migrate(raw)).toThrow(/schemaVersion/);
+  });
+});

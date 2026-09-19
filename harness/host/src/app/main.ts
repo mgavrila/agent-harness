@@ -14,6 +14,7 @@ import {
 } from '@harness/approvals';
 import { assertEmbedDims, buildKernelConfig, loadIdentity } from '@harness/core-tools';
 import { outRoot } from '@harness/core-tools/storage';
+import type { PlaybookDefinition } from '@harness/config-api';
 import { createDb } from '@harness/db';
 import { ConfigError, createLogger, envOrDefault, numberFromEnv, optionalEnv, requiredEnv } from '@harness/shared';
 import { startRunApi } from '../domain/api/server.js';
@@ -22,7 +23,6 @@ import { SHUTDOWN_DRAIN_MS, TIMEOUT_MARGIN_MS, attachMessageHandlers, drainActiv
 import type { Host } from '../domain/host.js';
 import { readPersona } from '../domain/persona.js';
 import { syncPlaybooks } from '../domain/playbooks/repository.js';
-import { readPlaybooksFile } from '../domain/playbooks/schema.js';
 import { SCHEDULER_TICK_MS, startScheduler } from '../domain/playbooks/scheduler.js';
 import { decisionDeps } from '../domain/resume.js';
 import { loadRuntime } from '../domain/runtime/registry.js';
@@ -75,7 +75,8 @@ if (!servicePrincipal || servicePrincipal.kind !== 'service') {
 // playbook edited, added or removed in clients/<name>/playbooks.yaml takes effect on the next
 // start, a firing missed while the process was down is not replayed (next_run_at is recomputed
 // from now), and a malformed file fails startup with no socket open and no message accepted.
-const playbooksFile = await readPlaybooksFile(clientDir);
+// Task 6 replaces this whole script with createHost(); the document's playbooks arrive there.
+const playbooksFile = { file: 'client document', present: true, playbooks: [] as PlaybookDefinition[] };
 const synced = await syncPlaybooks(
   db,
   { client: config.client, now: now(), file: playbooksFile.file },

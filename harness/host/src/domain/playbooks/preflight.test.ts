@@ -1,11 +1,13 @@
+import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parse as parseYaml } from 'yaml';
 import { describe, expect, it } from 'vitest';
 import { loadIdentity, type PlaybookRow } from '@harness/core-tools';
+import { parsePlaybooksFile } from '@harness/config-api';
 import { COORDINATOR, PLAYBOOKS_PRINCIPAL, hostFixture, testKernelConfig, useTestDb } from '../../testing.js';
 import { kernelSkillsDir, readSkillCatalogue } from '../skills.js';
 import { preflightPlaybook } from './preflight.js';
-import { readPlaybooksFile } from './schema.js';
 
 // src/domain/playbooks -> src -> host -> harness -> <repo>. The same resolution main.ts uses.
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../../..');
@@ -98,7 +100,8 @@ describe('the shipped demo playbooks (I1)', () => {
   const demoClientDir = path.join(repoRoot, 'clients', 'demo-practice');
 
   it('are valid entries, and pass preflight against the shipped skills and identity', async () => {
-    const { playbooks } = await readPlaybooksFile(demoClientDir);
+    const text = await readFile(path.join(demoClientDir, 'playbooks.yaml'), 'utf8');
+    const playbooks = parsePlaybooksFile(parseYaml(text));
     expect(playbooks.map((p) => p.name)).toEqual(['credentialing-expirations', 'knowledge-sync']);
     for (const playbook of playbooks) {
       expect(playbook).toMatchObject({
