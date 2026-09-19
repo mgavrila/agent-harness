@@ -331,15 +331,24 @@ describe('a message on a surface', () => {
 describe('two turns on one thread', () => {
   it('runs them one at a time, in the order they arrived, and lets the second see the first in its history', async () => {
     const f = await hostFixture(db, {
-      trajectory: (request) => (request.input.text === 'first' ? [{ sleep: 150 }, { say: 'one' }] : [{ say: 'two' }]),
+      trajectory: (request) => (request.input.text === 'first' ? [{ sleep: 1_000 }, { say: 'one' }] : [{ say: 'two' }]),
     });
     attachMessageHandlers(f.host);
-    // Both messages are in flight at once, the way two Slack messages a moment apart arrive.
-    const turns = [f.surface.say('U012', 'first'), f.surface.say('U012', 'second')];
-    await new Promise((r) => setTimeout(r, 60));
+    // Two messages a moment apart, the way two Slack messages arrive — but sent in an order the
+    // host can be held to. Started together they reach the thread's chain in whichever order their
+    // identity and thread lookups finish in, so "second" can be the one that arrives first, which
+    // is the host ordering what it was given and not the bug this test is about.
+    const first = f.surface.say('U012', 'first');
+    await waitFor(() => f.runtime.requests.length === 1);
+    const [threadId] = [...f.host.turns.keys()];
+    const chain = f.host.turns.get(threadId);
+    const second = f.surface.say('U012', 'second');
+    // `serialize` replaces the chain's tail as it takes a turn, so a new promise there is the
+    // signal that the second message has been queued rather than that it is still on its way.
+    await waitFor(() => f.host.turns.get(threadId) !== chain);
     // The second turn has not opened a run while the first is still inside the runtime.
     expect(f.runtime.requests.map((r) => r.input.text)).toEqual(['first']);
-    await Promise.all(turns);
+    await Promise.all([first, second]);
 
     expect(f.runtime.requests.map((r) => r.input.text)).toEqual(['first', 'second']);
     expect(f.runtime.requests[1].history).toEqual([
