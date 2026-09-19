@@ -8,10 +8,18 @@ import { RUN_FAILED_MESSAGE } from '@harness/runtime-api';
 import { CONVERSATION_ID_PATTERN, SURFACE_NAME_PATTERN, assertInsideRoot } from '@harness/shared';
 import { cancelRun, runTurn, serialize, type TurnEvent } from '../conversation.js';
 import type { Host } from '../host.js';
+import type { SchedulerStatus } from '../playbooks/scheduler.js';
+import type { HostPool } from '../tenancy/types.js';
 import { WITHHELD, findOrCreateThread } from '../threads/repository.js';
 import { findRunFor, readThreadFor } from './repository.js';
 import { sseStream } from './sse.js';
-import { API_MAX_ATTACHMENTS, API_MAX_BODY_BYTES, API_MAX_TEXT_CHARS, type RunApiOptions } from './types.js';
+import {
+  API_MAX_ATTACHMENTS,
+  API_MAX_BODY_BYTES,
+  API_MAX_TEXT_CHARS,
+  CLIENT_HEADER,
+  type RunApiOptions,
+} from './types.js';
 
 /** A uuid, checked before it reaches Postgres: an id of any other shape is "no such thing", not an error. */
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -243,26 +251,37 @@ async function threadRoute(host: Host, url: URL, res: ServerResponse, threadId: 
 }
 
 /**
- * What this process is doing (decision 16): the surfaces it loaded, the runs in flight, and the
+ * What one tenant is doing (decision 16): the surfaces it loaded, the runs in flight, and its
  * scheduler's own status, which had nowhere to be reported until this route existed.
+ *
+ * The scheduler is an argument rather than an option of the listener: a pooled host has one per
+ * open tenant and no single one to have put in the options a listener was started with.
  *
  * Counts and names only, never a conversation, a principal or a message — the same rule `/healthz`
  * follows, and for the same reason.
  */
-function statusRoute(host: Host, res: ServerResponse, opts: RunApiOptions): void {
+function statusRoute(host: Host, res: ServerResponse, scheduler: { status(): SchedulerStatus }): void {
   json(res, 200, {
     client: host.client,
     surfaces: host.surfaces.all.map((session) => session.name),
     primary_surface: host.surfaces.primary.name,
     runs_in_flight: host.active.size,
     draining: host.draining,
-    scheduler: opts.scheduler?.status() ?? null,
+    scheduler: scheduler.status(),
   });
 }
 
-/** Route one request. Every route is behind the bearer check, including the status one. */
+/**
+ * Route one request. Every route is behind the bearer check, and then behind the tenant check.
+ *
+ * `x-harness-client` names the client. On a dedicated host it may be absent, and a value that is
+ * not that host's client is refused; on a pooled host it is required, because a pool that picked
+ * a tenant for a caller who did not name one would pick the wrong one the day it had two. A
+ * refusal is 404 with the same body a nonexistent route gets, so the API never confirms that a
+ * client somebody guessed at exists.
+ */
 export async function handleApiRequest(
-  host: Host,
+  pool: HostPool,
   req: IncomingMessage,
   res: ServerResponse,
   opts: RunApiOptions,
@@ -270,7 +289,13 @@ export async function handleApiRequest(
   const url = new URL(req.url ?? '/', 'http://run-api.invalid');
   const route = url.pathname.replace(/\/+$/, '') || '/';
   if (!bearerOk(req.headers.authorization, opts.token)) return json(res, 401, { error: 'unauthorised' });
-  if (req.method === 'GET' && route === '/v1/status') return statusRoute(host, res, opts);
+  const named = req.headers[CLIENT_HEADER];
+  const clientId = typeof named === 'string' && named.trim() !== '' ? named.trim() : null;
+  const resolved = pool.resolver.resolve({ from: 'api', clientId });
+  const tenant = resolved === null ? null : await pool.tenantFor(resolved);
+  if (!tenant) return json(res, 404, { error: 'no such client' });
+  const host = tenant.host;
+  if (req.method === 'GET' && route === '/v1/status') return statusRoute(host, res, tenant.scheduler);
   if (req.method === 'POST' && route === '/v1/runs') return openRunRoute(host, req, res);
   const cancel = /^\/v1\/runs\/([^/]+)\/cancel$/.exec(route);
   if (req.method === 'POST' && cancel) return cancelRoute(host, url, res, cancel[1]);

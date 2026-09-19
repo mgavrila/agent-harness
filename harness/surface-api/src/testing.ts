@@ -17,6 +17,13 @@ export interface MemorySurfaceOptions {
   name?: string;
   conversation?: string;
   capabilities?: Partial<SurfaceCapabilities>;
+  /**
+   * The workspace every event this surface delivers belongs to, if it has one.
+   *
+   * A real transport reads it off the event; this one is told once, at construction, which is
+   * what lets a pooled host's test route a message to the tenant whose document claims that key.
+   */
+  tenantHint?: string;
 }
 
 /**
@@ -36,6 +43,8 @@ export class MemorySurface implements SurfaceSession {
   readonly name: string;
   readonly capabilities: SurfaceCapabilities;
   readonly defaultConversation: string;
+  /** What every event this surface delivers says about the workspace it came from; absent for none. */
+  readonly tenantHint: string | undefined;
 
   readonly cards: { ref: MessageRef; card: Card }[] = [];
   readonly texts: { conversation: string; text: string; replyTo: MessageRef | null; kind: PostKind }[] = [];
@@ -56,6 +65,7 @@ export class MemorySurface implements SurfaceSession {
   constructor(opts: MemorySurfaceOptions = {}) {
     this.name = opts.name ?? 'memory';
     this.defaultConversation = opts.conversation ?? 'memory';
+    this.tenantHint = opts.tenantHint;
     this.capabilities = {
       forms: true,
       privateReply: true,
@@ -168,6 +178,9 @@ export class MemorySurface implements SurfaceSession {
       attachments: [],
       message: null,
       mentioned: true,
+      // Before `over`, so a test that wants an event from somebody else's workspace — which is
+      // what a host's refusal is proved with — can still name one.
+      ...(this.tenantHint === undefined ? {} : { tenantHint: this.tenantHint }),
       ...over,
     });
   }

@@ -1,11 +1,13 @@
 import { hashArgs, memorySnapshot, writeAudit, type RunStatus } from '@harness/core-tools';
 import { containsRestrictedPattern } from '@harness/core-tools/redaction';
+import type { Db } from '@harness/db';
 import type { Principal } from '@harness/identity-api';
 import type { RunEvent, RunRequest, RunSkill } from '@harness/runtime-api';
-import { describeError } from '@harness/shared';
+import { describeError, type Logger } from '@harness/shared';
 import type { MessageEvent, MessageRef, StreamHandle, SurfaceSession } from '@harness/surface-api';
 import type { Host } from './host.js';
 import { openKernel } from './kernel.js';
+import type { ClientResolver } from './tenancy/resolver-types.js';
 import { WITHHELD, appendMessage, findOrCreateThread, recentHistory, type ThreadRow } from './threads/repository.js';
 import { HISTORY_MAX_CHARS, trimHistory } from './threads/trim.js';
 
@@ -33,7 +35,7 @@ export const EMPTY_REPLY = 'I finished without an answer; ask again and I will t
  */
 export const TIMEOUT_MARGIN_MS = 5_000;
 
-/** How long `app/main.ts` gives the turns in flight to unwind before it stops the runtime. */
+/** How long the entrypoint gives the turns in flight to unwind before it stops the runtime. */
 export const SHUTDOWN_DRAIN_MS = 10_000;
 
 const ABORT_REASONS = ['cancelled', 'timeout', 'cost-cap'] as const;
@@ -556,14 +558,51 @@ export async function handleMessage(host: Host, event: MessageEvent): Promise<vo
   );
 }
 
-/** Register the flow on every loaded surface. A handler's failure is logged, never thrown into the adapter. */
-export function attachMessageHandlers(host: Host): void {
-  for (const session of host.surfaces.all) {
+/**
+ * Register the flow on every one of this tenant's surfaces. A handler's failure is logged, never
+ * thrown into the adapter.
+ *
+ * Every event is checked against the pool's resolver before anything else happens. On a dedicated
+ * host that is invariant 19: an event whose workspace belongs to another client is refused and
+ * audited rather than answered with this client's data. On a pooled host it is the same check
+ * from the other side — the surface that delivered the event belongs to this tenant, so an event
+ * naming a different workspace has been misrouted and is not this tenant's to answer.
+ *
+ * Both parameters are structural on purpose: this module may not import `./tenancy/types.js`,
+ * which reaches `playbooks/scheduler.ts`, which reaches this file. `ClientResolver` comes from
+ * the leaf `./tenancy/resolver-types.js`, which imports nothing, so no cycle runs through it and
+ * `pnpm arch`'s `no-circular` stays green. `pool.ts` passes the whole pool and the whole tenant,
+ * which satisfy these shapes.
+ */
+export function attachMessageHandlers(
+  pool: { db: Db; log: Logger; resolver: ClientResolver },
+  tenant: { clientId: string; host: Host },
+): void {
+  for (const session of tenant.host.surfaces.all) {
     session.onMessage(async (event) => {
       try {
-        await handleMessage(host, event);
+        const claimed = pool.resolver.resolve({
+          from: 'surface',
+          surface: event.surface,
+          tenantHint: event.tenantHint ?? null,
+        });
+        if (claimed !== tenant.clientId) {
+          await writeAudit(pool.db, {
+            client: tenant.clientId,
+            caller: `${event.surface}:${event.userId}`,
+            tool: 'host_message',
+            actionClass: 'read',
+            argsHash: hashArgs({ conversation: event.conversation, tenantHint: event.tenantHint ?? null }),
+            decision: 'unauthorised',
+          });
+          pool.log.warn(
+            `tenant ${tenant.clientId}: a message on surface "${event.surface}" named another tenant; refused`,
+          );
+          return;
+        }
+        await handleMessage(tenant.host, event);
       } catch (err) {
-        host.log.error(`the message handler failed on surface "${session.name}": ${describeError(err)}`);
+        pool.log.error(`the message handler failed on surface "${session.name}": ${describeError(err)}`);
       }
     });
   }

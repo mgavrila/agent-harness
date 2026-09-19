@@ -16,6 +16,7 @@ export {
   migrate,
   parseClientDocument,
   surfaceNamesOf,
+  surfaceSecretsOf,
   tenantKeysOf,
   type ClientDocument,
 } from './document.js';

@@ -5,17 +5,31 @@ conversation turn at a time, and resumes a thread once a parked approval is deci
 transport and no framework of its own — every plug-in is loaded by name, through a dynamic
 import, and `pnpm arch` forbids a static edge from `harness/host/src` into any of them.
 
+## Tenants
+
+`createHost(deps)` is the whole of the process: a `Map<clientId, Tenant>` over a `ConfigSource`,
+and a `ClientResolver` that answers which client an inbound thing belongs to.
+
+| `HARNESS_CLIENT` | Mode        | What the resolver does                                                                                                                                                                               |
+| ---------------- | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| set              | `dedicated` | Opens that one client at start and refuses every other: an event whose workspace is another client's is refused and audited, and so is a run API request naming one.                                 |
+| unset            | `pooled`    | Opens every client the source lists, and takes the client from the workspace an event names or from the `x-harness-client` header. An event that names none is refused, because a pool cannot guess. |
+
+A `Tenant` is one client's whole world: its own `KernelConfig`, identity session, surfaces,
+runtime, persona, skills, budget, approvals runner and scheduler. Two tenants are two of these,
+which is what makes the isolation of invariant 13 structural rather than a check somebody
+remembered to write. A document that moves is never edited under a live tenant: `ConfigSource.watch`
+evicts it once its turns have drained and the next event opens a fresh one.
+
 ## The three plug-ins
 
-| Plug-in  | Variable           | What it does                                                                                                                                                                                                                               |
-| -------- | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Surfaces | `HARNESS_SURFACES` | Comma-separated adapter package names; the first is where an approval card is posted, every one of them is live for messages and decisions. Required, no default (`@harness/approvals`'s `loadSurfaces`).                                  |
-| Identity | `HARNESS_IDENTITY` | Which plug-in resolves a surface user to a principal. Defaults to `@harness/identity-static`, reading `clients/<HARNESS_CLIENT>/identity.yaml`.                                                                                            |
-| Runtime  | `HARNESS_RUNTIME`  | Which agent runtime drives the loop. Required, no default — a default here would name a specific plug-in's package in host source, the coupling `HARNESS_SURFACES` already avoids for the same reason; the demo's Compose service sets it. |
+Each is named by the client document and reached by a specifier the host builds from that name —
+`surfaces` (in the order the schema fixes, the first being where an approval card is posted),
+`identityPlugin.kind` and `runtime`. No plug-in package name appears in host source.
 
-The host's own identity is `HARNESS_HOST_PRINCIPAL` (default `svc-host`), a service principal
-declared in `identity.yaml`: reconciliation runs as it; a playbook runs as the service principal
-its entry in `playbooks.yaml` names.
+The host's own identity is `HARNESS_HOST_PRINCIPAL` (default `svc-host`), a service principal the
+document's `identity` section declares: reconciliation runs as it; a playbook runs as the service
+principal its entry in the document's `playbooks` section names.
 
 The host also ships one skill of its own, in `skills/`: `knowledge-sync`, which the knowledge
 refresh playbook names. It is offered beside every pack's, and the host's directory is read first,
@@ -30,7 +44,8 @@ with an error the human sees, and LiteLLM's own daily budget is the other half o
 (also capped at 24,000 characters; the runtime's own checkpoint carries the rest).
 
 The run API's own variables are `HARNESS_HOST_TOKEN` (no default; unset means no listener),
-`HARNESS_HOST_BIND` (`127.0.0.1`) and `HARNESS_HOST_PORT` (8788). Before any of that, `main.ts`
+`HARNESS_HOST_BIND` (`127.0.0.1`) and `HARNESS_HOST_PORT` (8788); one listener serves every open
+tenant and resolves which one a request belongs to per request. Before any of that, `main.ts`
 calls `assertEmbedDims`, which compares `HARNESS_EMBED_DIMS` against the width
 `knowledge_chunks.embedding` was created at and refuses to start when they disagree — better than
 failing halfway through the first knowledge sync.
@@ -152,11 +167,10 @@ to close.
 
 ```text
 src/domain/host.ts             the Host type: everything a flow takes, built once per process
-src/domain/runtime/registry.ts loadRuntime: HARNESS_RUNTIME, the same three failure modes as loadIdentity
+src/domain/runtime/registry.ts loadRuntime: by specifier, the same three failure modes as loadIdentity
 src/domain/threads/repository.ts findOrCreateThread, appendMessage (with the redaction guard), recentHistory
 src/domain/threads/trim.ts     trimHistory: the newest turns under a message and a character budget
 src/domain/skills.ts           kernelSkillsDir, readSkillCatalogue: name, version, description off every SKILL.md
-src/domain/persona.ts          readPersona: SOUL.md
 src/domain/kernel.ts           openKernel: one run, one ToolDeps, one in-process MCP client
 src/domain/conversation.ts     runTurn, handleMessage, attachMessageHandlers, serialize, cancelRun, drainActive
 src/domain/resume.ts           resumeText, resumeOnDecision, decisionDeps: the onDecided hook
@@ -169,11 +183,17 @@ src/domain/api/types.ts        the run API's limits and defaults: the body, text
 src/domain/api/sse.ts          the Server-Sent Events writer: 202, the three headers, the keep-alive
 src/domain/api/routes.ts       bearerOk, readBody, callerOf, the four routes
 src/domain/api/repository.ts   findRunFor, readThreadFor: this principal's row or nothing
-src/domain/api/server.ts       startRunApi: the node:http listener
+src/domain/api/server.ts       startRunApi: the node:http listener over the pool
+src/domain/tenancy/resolver-types.ts InboundRef, ClientResolver: the leaf conversation.ts imports
+src/domain/tenancy/resolver.ts dedicatedResolver, pooledResolver
+src/domain/tenancy/specifiers.ts   a plug-in name into @harness/<kind>-<name>, and nothing else
+src/domain/tenancy/skills.ts   materialiseSkills: the document's skills onto disk, per client
+src/domain/tenancy/tenant.ts   openTenant: one client's config, plug-ins, playbooks and loops
+src/domain/tenancy/pool.ts     createHost: the map, the resolver, invalidate, drain, close
 skills/knowledge-sync/         the one skill the host itself ships
-src/app/main.ts                the composition root: env, the three plug-ins, the loops, health, shutdown
+src/app/main.ts                the entrypoint: the environment, the source, the pool, health, shutdown
 src/index.ts                   the public API
-src/testing.ts                 ./testing: testKernelConfig, hostFixture, useTestDb
+src/testing.ts                 ./testing: testKernelConfig, hostFixture, poolFixture, useTestDb
 ```
 
 ## The host never statically imports a plug-in
@@ -195,3 +215,8 @@ Real Postgres (`harness_test`) through `useTestDb()` from `./testing`, `MemorySu
 identity and a scripted runtime — for the resume flow, driven the same way a real decision would
 arrive: through `@harness/approvals`'s own handlers and poller, against `hostFixture`'s real
 kernel.
+
+`poolFixture` is the same thing one layer up: a whole pooled host over N client documents, each
+tenant loading its plug-ins by name through the real loaders. `src/domain/tenancy/isolation.test.ts`
+is invariant 13 on it — every kernel read one tenant publishes, asked by the other, answering
+nothing of the first.

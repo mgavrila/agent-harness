@@ -53,6 +53,7 @@ const PACKAGES = [
   { name: 'surface-http', src: 'surfaces/http/src', severity: 'error' },
   { name: 'identity-static', src: 'identities/static/src', severity: 'error' },
   { name: 'runtime-deepagents', src: 'runtimes/deepagents/src', severity: 'error' },
+  { name: 'runtime-scripted', src: 'runtimes/scripted/src', severity: 'error' },
   { name: 'scripts', src: 'scripts/src', severity: 'error' },
 ];
 
@@ -125,6 +126,7 @@ const WORKSPACE_DIRS = [
   'surfaces/http',
   'identities/static',
   'runtimes/deepagents',
+  'runtimes/scripted',
   'scripts',
 ];
 
@@ -219,7 +221,7 @@ const GLOBAL_RULES = [
   {
     name: 'the-host-never-statically-imports-a-plugin',
     comment:
-      'The host loads its surfaces from HARNESS_SURFACES, its identity plug-in from HARNESS_IDENTITY and its runtime from HARNESS_RUNTIME, all through dynamic imports. A static edge from harness/host/src into surfaces/, identities/, runtimes/ or packs/ would wire the one process every client runs to one transport, one directory or one framework by name. src/testing.ts and *.test.ts are exempt: a host test drives the real memory surface and the real runtime loader against the packages that ship, and is not shipped itself.',
+      'The host loads its surfaces, its identity plug-in and its runtime by the names the client document gives them, turning each into a package specifier and reaching it through a dynamic import. A static edge from harness/host/src into surfaces/, identities/, runtimes/ or packs/ would wire the one process every client runs to one transport, one directory or one framework by name. src/testing.ts and *.test.ts are exempt: a host test drives the real memory surface and the real runtime loader against the packages that ship, and is not shipped itself.',
     severity: 'error',
     from: { path: '^harness/host/src/', pathNot: ['\\.test\\.ts$', '^harness/host/src/testing\\.ts$'] },
     to: { path: '^(surfaces|identities|runtimes|packs)/[^/]+/', dependencyTypesNot: ['dynamic-import'] },

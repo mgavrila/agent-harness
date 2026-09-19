@@ -20,7 +20,7 @@ describe('loadSurfaces', () => {
 
   it('refuses an empty list rather than starting a host nobody can answer', async () => {
     await expect(loadSurfaces([], deps)).rejects.toThrow(ConfigError);
-    await expect(loadSurfaces([], deps)).rejects.toThrow(/HARNESS_SURFACES/);
+    await expect(loadSurfaces([], deps)).rejects.toThrow(/declares no surface/);
   });
 
   it('names the module, and nothing about the filesystem, when one cannot be resolved', async () => {

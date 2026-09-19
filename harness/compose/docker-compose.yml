@@ -153,11 +153,8 @@ services:
       HARNESS_ENCRYPTION_KEY: '${HARNESS_ENCRYPTION_KEY:-}'
       HARNESS_CLIENT: '${HARNESS_CLIENT:-demo-practice}'
       HARNESS_STORAGE_DIR: '/srv/harness-storage'
-      # The run API surface is loaded beside the primary one so a headless caller has a surface
-      # to name. It is never first: the first entry is where approval cards are posted, and this
-      # one cannot post a card.
-      HARNESS_SURFACES: '${HARNESS_SURFACES:-@harness/surface-slack,@harness/surface-http}'
-      HARNESS_RUNTIME: '${HARNESS_RUNTIME:-@harness/runtime-deepagents}'
+      # Which surfaces this client serves and which runtime owns its loop are its document's
+      # `surfaces` and `runtime`, not this service's environment.
       HARNESS_HOST_PRINCIPAL: '${HARNESS_HOST_PRINCIPAL:-svc-host}'
       # This process refuses to start without a gateway key, reached on the compose network
       # rather than the host loopback the .env value names.

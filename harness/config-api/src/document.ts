@@ -132,6 +132,27 @@ export function tenantKeysOf(document: ClientDocument): { surface: string; key: 
 }
 
 /**
+ * Every environment variable this document's surfaces refer to, with the surface that named it.
+ *
+ * The same reason `tenantKeysOf` exists: the typed surface sections are read here, so the host
+ * never is. A host that checked a `signingSecret` by name would have a vendor's field in the one
+ * process every client runs, which `kernel-vocabulary.test.ts` forbids `harness/host/src`. The
+ * value itself never appears — a `SecretRef` names a variable and the deployment's environment
+ * holds what it is worth.
+ */
+export function surfaceSecretsOf(document: ClientDocument): { surface: string; env: string }[] {
+  const secrets: { surface: string; env: string }[] = [];
+  const withTokens = document.surfaces.slack;
+  if (withTokens) {
+    secrets.push(
+      { surface: 'slack', env: withTokens.signingSecret.env },
+      { surface: 'slack', env: withTokens.botToken.env },
+    );
+  }
+  return secrets;
+}
+
+/**
  * Validate a raw document, then apply the rules zod cannot say: the identity section's four
  * cross-principal rules, the playbooks' two, and the primary-surface rule.
  *

@@ -1,27 +1,46 @@
 import type { AddressInfo } from 'node:net';
 import { eq } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished } from 'vitest';
+import { parseClientDocument } from '@harness/config-api';
+import { fixtureDocument } from '@harness/config-api/testing';
 import { messages, threads } from '@harness/db';
 import type { Trajectory } from '@harness/runtime-api/testing';
-import { COORDINATOR, MEMBER, hostFixture, useTestDb, type HostFixture } from '../../testing.js';
+import { COORDINATOR, MEMBER, poolFixture, useTestDb, type PoolFixture } from '../../testing.js';
 import { WITHHELD } from '../threads/repository.js';
 import { startRunApi } from './server.js';
-import { API_MAX_BODY_BYTES } from './types.js';
+import { API_MAX_BODY_BYTES, CLIENT_HEADER } from './types.js';
 
 const db = useTestDb();
 const TOKEN = 'sk-run-api-test';
+/** The client this listener's one tenant serves; every route resolves it before it runs. */
+const CLIENT = 'test';
 
 interface Api {
-  f: HostFixture;
+  f: PoolFixture;
   url: string;
   open(body: unknown, token?: string): Promise<Response>;
-  get(path: string, token?: string): Promise<Response>;
+  get(path: string, token?: string, headers?: Record<string, string>): Promise<Response>;
   post(path: string, token?: string): Promise<Response>;
 }
 
+/**
+ * A dedicated host with one tenant, and the listener over its pool.
+ *
+ * The run API is per process and the tenants are per client, so the listener takes the pool and
+ * resolves a tenant per request — which is why every case here drives a real pool rather than a
+ * bare host.
+ */
 async function api(trajectory: Trajectory): Promise<Api> {
-  const f = await hostFixture(db, { trajectory });
-  const server = startRunApi(f.host, { token: TOKEN, bind: '127.0.0.1', port: 0 });
+  const f = await poolFixture(db, {
+    documents: [
+      parseClientDocument(
+        fixtureDocument({ id: CLIENT, displayName: 'Test', runtime: 'scripted', surfaces: { memory: {} } }),
+      ),
+    ],
+    trajectories: { [CLIENT]: trajectory },
+    dedicated: CLIENT,
+  });
+  const server = startRunApi(f.pool, { token: TOKEN, bind: '127.0.0.1', port: 0 });
   await server.ready;
   const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   onTestFinished(async () => {
@@ -38,7 +57,7 @@ async function api(trajectory: Trajectory): Promise<Api> {
         headers: { 'content-type': 'application/json', ...auth(token) },
         body: typeof body === 'string' ? body : JSON.stringify(body),
       }),
-    get: (p, token) => fetch(`${url}${p}`, { headers: auth(token) }),
+    get: (p, token, headers = {}) => fetch(`${url}${p}`, { headers: { ...auth(token), ...headers } }),
     post: (p, token) => fetch(`${url}${p}`, { method: 'POST', headers: auth(token) }),
   };
 }
@@ -142,7 +161,7 @@ describe('the run API: a run', () => {
     expect(thread).toMatchObject({ surface: 'memory', conversation: 'memory', kind: 'chat' });
     const rows = await db.select().from(messages).where(eq(messages.threadId, thread.id));
     expect(rows.map((r) => r.role)).toEqual(['user', 'assistant']);
-    expect(a.f.surface.texts).toEqual([]);
+    expect(a.f.surface(CLIENT).texts).toEqual([]);
   });
 
   it('cancels a run in flight, by the id the first frame carried', async () => {
@@ -221,13 +240,26 @@ describe('the run API: a thread and the status', () => {
     const response = await a.get('/v1/status');
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({
-      client: 'test',
+      client: CLIENT,
       surfaces: ['memory'],
       primary_surface: 'memory',
       runs_in_flight: 0,
       draining: false,
-      scheduler: null,
+      // The tenant's own scheduler, which is where it is reachable from now that there is one per
+      // tenant rather than one per process. It has not ticked: the interval is thirty seconds.
+      scheduler: { lastTickAt: null, lastOkAt: null, lastError: null, lastErrorAt: null, ticking: false },
     });
+  });
+
+  it('answers the tenant it serves when a caller names it, and 404 when a caller names another', async () => {
+    const a = await api([]);
+    // Naming this host's own client is the same request as naming none.
+    expect((await a.get('/v1/status', TOKEN, { [CLIENT_HEADER]: CLIENT })).status).toBe(200);
+    // Invariant 19 at the control plane: another client is "no such client", never this one's
+    // status under another name, and never a 403 that would confirm the client exists.
+    const other = await a.get('/v1/status', TOKEN, { [CLIENT_HEADER]: 'beta' });
+    expect(other.status).toBe(404);
+    expect(await other.json()).toEqual({ error: 'no such client' });
   });
 
   it('answers "no such route" for anything else', async () => {

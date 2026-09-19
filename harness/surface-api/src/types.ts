@@ -172,6 +172,16 @@ export interface MessageEvent {
    * host answers only when this is true.
    */
   mentioned: boolean;
+  /**
+   * Whatever identifies the workspace this event came from, in the surface's own terms — the
+   * organisation, the team, the tenant of whatever the transport calls one — or absent for a
+   * surface with no such notion.
+   *
+   * Opaque to the host, which matches it against the keys each client's document declares and
+   * never reads it as anything but a string. That is how one process serves several clients on
+   * one transport without the host learning a vendor's field name.
+   */
+  tenantHint?: string;
 }
 
 /**

@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { ConfigError } from '@harness/shared';
-import { CLIENT_DOCUMENT_VERSION, migrate, parseClientDocument, surfaceNamesOf, tenantKeysOf } from './document.js';
+import {
+  CLIENT_DOCUMENT_VERSION,
+  migrate,
+  parseClientDocument,
+  surfaceNamesOf,
+  surfaceSecretsOf,
+  tenantKeysOf,
+} from './document.js';
 import { fixtureDocument } from './testing.js';
 
 describe('parseClientDocument', () => {
@@ -102,6 +109,27 @@ describe('parseClientDocument', () => {
     expect(tenantKeysOf(withSlack)).toEqual([{ surface: 'slack', key: 'T0ABCDEF' }]);
     // A surface with nothing that identifies a workspace contributes no key.
     expect(tenantKeysOf(parseClientDocument(fixtureDocument()))).toEqual([]);
+  });
+
+  it('names the environment variables a surface refers to, so the host can check them by name', () => {
+    const withSlack = parseClientDocument(
+      fixtureDocument({
+        surfaces: {
+          memory: {},
+          slack: {
+            teamId: 'T0ABCDEF',
+            signingSecret: { env: 'SLACK_SIGNING_SECRET' },
+            botToken: { env: 'SLACK_BOT_TOKEN' },
+          },
+        },
+      }),
+    );
+    expect(surfaceSecretsOf(withSlack)).toEqual([
+      { surface: 'slack', env: 'SLACK_SIGNING_SECRET' },
+      { surface: 'slack', env: 'SLACK_BOT_TOKEN' },
+    ]);
+    // A surface with no transport refers to no secret, so a document of them needs none set.
+    expect(surfaceSecretsOf(parseClientDocument(fixtureDocument()))).toEqual([]);
   });
 
   it("names a memory surface's workspace as a tenant key too, which is what a pooled test routes on", () => {

@@ -212,12 +212,19 @@ describe('the Compose stack names no client and mounts no socket', () => {
     };
     expect(services.approvals).toBeUndefined();
     expect(services.host.image).toBe('harness-host');
-    // The two plug-in lists still on the environment; Task 6 moves both into the document.
-    for (const name of ['HARNESS_SURFACES', 'HARNESS_RUNTIME', 'HARNESS_HOST_PRINCIPAL']) {
+    // What is still this deployment's: which client it serves, and who it serves as.
+    for (const name of ['HARNESS_CLIENT', 'HARNESS_HOST_PRINCIPAL']) {
       expect(services.host.environment?.[name], name).toBeDefined();
     }
-    // The identity plug-in, the policy and the pack list are the document's, not a variable's.
-    for (const name of ['HARNESS_IDENTITY', 'HARNESS_POLICY_FILE', 'HARNESS_PACKS']) {
+    // Every plug-in a client names is the document's, not a variable's: its surfaces, its
+    // runtime, its identity provider, its policy and its packs.
+    for (const name of [
+      'HARNESS_SURFACES',
+      'HARNESS_RUNTIME',
+      'HARNESS_IDENTITY',
+      'HARNESS_POLICY_FILE',
+      'HARNESS_PACKS',
+    ]) {
       expect(services.host.environment?.[name], name).toBeUndefined();
     }
     expect(services.host.environment?.SLACK_ALLOWED_USERS).toBeUndefined();

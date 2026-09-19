@@ -1,6 +1,8 @@
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import type { ClientDocument } from '@harness/config-api';
+import { MemoryConfigSource } from '@harness/config-api/testing';
 import type { KernelConfig, PackRegistry } from '@harness/core-tools';
 import { makeTestDeps, type TestDepsOverrides } from '@harness/core-tools/testing';
 import type { Db } from '@harness/db';
@@ -9,9 +11,13 @@ import type { Principal } from '@harness/identity-api';
 import { StaticIdentity } from '@harness/identity-api/testing';
 import type { RunSkill } from '@harness/runtime-api';
 import { ScriptedRuntime, type Trajectory } from '@harness/runtime-api/testing';
+import { scriptedTrajectories } from '@harness/runtime-scripted';
 import { MemorySurface } from '@harness/surface-api/testing';
-import { TIMEOUT_MARGIN_MS } from './domain/conversation.js';
+import { attachMessageHandlers, TIMEOUT_MARGIN_MS } from './domain/conversation.js';
 import type { Host, HostBudget } from './domain/host.js';
+import { createHost } from './domain/tenancy/pool.js';
+import { dedicatedResolver } from './domain/tenancy/resolver.js';
+import type { HostPool, Tenant } from './domain/tenancy/types.js';
 
 export { useTestDb } from '@harness/db/testing';
 
@@ -157,6 +163,99 @@ export async function hostFixture(
     runtime,
     close: async () => {
       await runtime.stop();
+    },
+  };
+}
+
+/**
+ * `attachMessageHandlers` for a one-host fixture.
+ *
+ * The production call is `attachMessageHandlers(pool, tenant)`: a pool for its database handle,
+ * its logger and its resolver, and a tenant for its client id and its host. A test that drives
+ * one host has no pool, so this supplies the smallest thing that is one — a dedicated resolver
+ * over that host's own client, which answers that client for an event naming no workspace,
+ * exactly as a dedicated deployment's resolver does.
+ */
+export function attachTestHandlers(host: Host): void {
+  attachMessageHandlers(
+    { db: host.db, log: host.log, resolver: dedicatedResolver(host.client, () => []) },
+    { clientId: host.client, host },
+  );
+}
+
+export interface PoolFixture {
+  pool: HostPool;
+  /** The in-memory source behind the pool, so a test can move a document and invalidate. */
+  source: MemoryConfigSource;
+  tenant(clientId: string): Tenant;
+  surface(clientId: string): MemorySurface;
+  close(): Promise<void>;
+}
+
+/** A 32-byte key, base64, which is what `loadKey` requires of every deployment. */
+const TEST_ENCRYPTION_KEY = Buffer.alloc(32, 7).toString('base64');
+
+/**
+ * A whole pooled host over the real kernel and Postgres, with N tenants.
+ *
+ * Each tenant gets its own memory surface, its own static identity over its own document and its
+ * own scripted runtime — which is what a real pooled host has, and what makes the isolation test
+ * a test of the thing that ships rather than of a fixture that pretends. Every plug-in is reached
+ * the way a deployment reaches one: the document names it, `createHost` derives a specifier from
+ * the name and imports that package.
+ *
+ * The environment is built here and carries nothing ambient, so a developer's filled-in `.env`
+ * cannot reach a tenant and change what a case proves.
+ */
+export async function poolFixture(
+  db: Db,
+  opts: {
+    documents: readonly ClientDocument[];
+    /** Per client id, what its scripted runtime plays back. A client with no entry says nothing. */
+    trajectories?: Readonly<Record<string, Trajectory>>;
+    dedicated?: string;
+    env?: Record<string, string | undefined>;
+  },
+): Promise<PoolFixture> {
+  const source = new MemoryConfigSource(opts.documents.map((document) => ({ document, version: 'v1' })));
+  const env: Record<string, string | undefined> = {
+    HARNESS_STORAGE_DIR: mkdtempSync(path.join(tmpdir(), 'harness-pool-')),
+    HARNESS_ENCRYPTION_KEY: TEST_ENCRYPTION_KEY,
+    LITELLM_MASTER_KEY: 'sk-test',
+    ...opts.env,
+  };
+  // Before `createHost`, because a tenant's runtime is connected while the pool opens it and
+  // reads its script out of this registry at that moment.
+  scriptedTrajectories.clear();
+  for (const [clientId, trajectory] of Object.entries(opts.trajectories ?? {})) {
+    scriptedTrajectories.set(clientId, trajectory);
+  }
+  const pool = await createHost({
+    db,
+    env,
+    log: { info() {}, warn() {}, error() {} },
+    // The frozen clock `hostFixture` and `makeTestDeps` share, so a row an approval tool stages
+    // under one and a decision taken under the other agree on whether it has expired.
+    now: () => new Date('2026-09-15T12:00:00Z'),
+    source,
+    dedicatedClient: opts.dedicated ?? null,
+  });
+  const tenant = (clientId: string): Tenant => {
+    const found = pool.tenants.get(clientId);
+    if (!found) {
+      throw new Error(`no tenant "${clientId}" is open; open: ${[...pool.tenants.keys()].join(', ') || 'none'}`);
+    }
+    return found;
+  };
+  return {
+    pool,
+    source,
+    tenant,
+    surface: (clientId) => tenant(clientId).host.surfaces.find('memory') as MemorySurface,
+    close: async () => {
+      await pool.close();
+      // So one case's script cannot reach the next case's tenant.
+      scriptedTrajectories.clear();
     },
   };
 }
