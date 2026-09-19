@@ -23,7 +23,7 @@ export function gatewayFromEnv(): GatewayConfig {
   // these three reads alone — nothing tests it, but nothing should silently change it either.
   // That is also why the layer rule is suppressed here rather than satisfied: the helper it
   // points at cannot express "an empty string is the value". Moving this whole function into
-  // app/, where the rule does not apply, is the real fix and is a later task's call.
+  // app/, where the rule does not apply, is the real fix.
   /* eslint-disable no-restricted-syntax */
   const raw = process.env.HARNESS_GATEWAY_URL ?? 'http://127.0.0.1:4000';
   const timeout = Number(process.env.HARNESS_GATEWAY_TIMEOUT_MS ?? 120_000);
@@ -48,8 +48,11 @@ interface ChatCompletionResponse {
  * A gateway failure reported to the caller carries the route and the HTTP
  * status and nothing else. Model vendor error bodies routinely quote the prompt
  * back, and this message reaches `audit_log.error` and the agent.
+ *
+ * Shared with `embedTexts`, which reaches the same proxy over the embeddings wire shape: one
+ * refusal reads the same sentence whichever route earned it.
  */
-function gatewayError(route: Route, status: number, body: string): ToolError {
+export function gatewayError(route: Route, status: number, body: string): ToolError {
   if (/budget/i.test(body)) {
     return new ToolError(`model route "${route}" is over its daily budget; raise it in clients/<name>/routing.yaml`);
   }
@@ -59,6 +62,25 @@ function gatewayError(route: Route, status: number, body: string): ToolError {
     );
   }
   return new ToolError(`model route "${route}" failed at the gateway (HTTP ${status})`);
+}
+
+/**
+ * A request that never got an answer: the configured timeout, or anything else `fetch` raised.
+ * Neither message repeats what was sent, for the reason on `gatewayError`.
+ */
+export function gatewayUnreachable(route: Route, config: GatewayConfig, err: unknown): ToolError {
+  const name = err instanceof Error ? err.name : '';
+  if (name === 'TimeoutError' || name === 'AbortError') {
+    return new ToolError(`model route "${route}" timed out after ${config.timeoutMs}ms`);
+  }
+  return new ToolError(`model route "${route}" could not reach the gateway at ${config.baseUrl}`);
+}
+
+/** What the proxy charged for one call, off its own header. Zero when it sent nothing readable. */
+export function costFromResponse(response: Response): number {
+  const header = response.headers.get('x-litellm-response-cost');
+  const parsed = header === null ? Number.NaN : Number(header);
+  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 /**
@@ -94,11 +116,7 @@ export function httpGateway(config: GatewayConfig): ModelGateway {
           signal: AbortSignal.timeout(config.timeoutMs),
         });
       } catch (err) {
-        const name = err instanceof Error ? err.name : '';
-        if (name === 'TimeoutError' || name === 'AbortError') {
-          throw new ToolError(`model route "${opts.route}" timed out after ${config.timeoutMs}ms`);
-        }
-        throw new ToolError(`model route "${opts.route}" could not reach the gateway at ${config.baseUrl}`);
+        throw gatewayUnreachable(opts.route, config, err);
       }
 
       if (!response.ok) {
@@ -110,11 +128,8 @@ export function httpGateway(config: GatewayConfig): ModelGateway {
       const model = payload.model ?? opts.route;
       const inputTokens = payload.usage?.prompt_tokens ?? 0;
       const outputTokens = payload.usage?.completion_tokens ?? 0;
-      const costHeader = response.headers.get('x-litellm-response-cost');
-      const parsedCost = costHeader === null ? Number.NaN : Number(costHeader);
-      const costUsd = Number.isFinite(parsedCost) ? parsedCost : 0;
 
-      return { text, model, inputTokens, outputTokens, costUsd };
+      return { text, model, inputTokens, outputTokens, costUsd: costFromResponse(response) };
     },
   };
 }
