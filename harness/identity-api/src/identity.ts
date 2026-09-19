@@ -1,8 +1,6 @@
 import { ConfigError, USER_LEVELS, type Level } from '@harness/shared';
 import type { IdentityProvider } from './types.js';
 
-export type { IdentityDeps, IdentityModule, IdentityProvider, IdentitySession, Principal } from './types.js';
-
 /** A plug-in's name: lowercase, the same rule a pack's and a surface's name follow. */
 const NAME = /^[a-z][a-z0-9-]*$/;
 /** An environment variable name, which is what every entry of `secrets` has to be. */
