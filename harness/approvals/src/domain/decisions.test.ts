@@ -2,8 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { approvals } from '@harness/db';
 import { StaticIdentity } from '@harness/identity-api/testing';
-import type { Principal } from '@harness/identity-api';
-import { FakeCoreToolsClient, MemorySurface, pendingApproval, useTestDb } from '../testing.js';
+import { FakeCoreToolsClient, MemorySurface, pendingApproval, principal, useTestDb } from '../testing.js';
 import type { ApprovalRow } from './cards.js';
 import { decideApproval, threadReplyText, type DecidedOutcome } from './decisions.js';
 import { surfacesOf } from './surfaces/registry.js';
@@ -11,14 +10,7 @@ import { surfacesOf } from './surfaces/registry.js';
 const db = useTestDb();
 const now = () => new Date('2026-09-15T12:00:00Z');
 
-const LEAD: Principal = {
-  id: 'u-coordinator',
-  kind: 'user',
-  level: 'lead',
-  displayName: 'Coordinator',
-  surfaces: { memory: 'U012' },
-  attributes: {},
-};
+const LEAD = principal();
 
 /** One posted, pending approval on file, with `over` applied last. */
 async function seed(over: Record<string, unknown> = {}): Promise<ApprovalRow> {

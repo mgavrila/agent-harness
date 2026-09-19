@@ -2,9 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { approvals } from '@harness/db';
 import { StaticIdentity } from '@harness/identity-api/testing';
-import type { IdentitySession, Principal } from '@harness/identity-api';
+import type { IdentitySession } from '@harness/identity-api';
 import { MemorySurface } from '@harness/surface-api/testing';
-import { FakeCoreToolsClient, pendingApproval, useTestDb } from '../testing.js';
+import { FakeCoreToolsClient, pendingApproval, principal, useTestDb } from '../testing.js';
 import { APPROVE_ACTION_ID, DECLINE_ACTION_ID, EDIT_ACTION_ID, EDIT_FORM_ID, EDIT_NOTE_FIELD_ID } from './cards.js';
 import { registerApprovalHandlers } from './handlers.js';
 import { surfacesOf } from './surfaces/registry.js';
@@ -12,30 +12,15 @@ import { surfacesOf } from './surfaces/registry.js';
 const db = useTestDb();
 const now = () => new Date('2026-09-15T12:00:00Z');
 
-const LEAD: Principal = {
-  id: 'u-coordinator',
-  kind: 'user',
-  level: 'lead',
-  displayName: 'Coordinator',
-  surfaces: { memory: 'U012' },
-  attributes: {},
-};
-const MEMBER: Principal = {
-  id: 'u-member',
-  kind: 'user',
-  level: 'member',
-  displayName: 'Member',
-  surfaces: { memory: 'U345' },
-  attributes: {},
-};
-const SERVICE: Principal = {
+const LEAD = principal();
+const MEMBER = principal({ id: 'u-member', level: 'member', displayName: 'Member', surfaces: { memory: 'U345' } });
+const SERVICE = principal({
   id: 'svc-bot',
   kind: 'service',
   level: 'service',
   displayName: 'Bot',
   surfaces: { memory: 'UBOT' },
-  attributes: {},
-};
+});
 
 async function seed() {
   const [row] = await db

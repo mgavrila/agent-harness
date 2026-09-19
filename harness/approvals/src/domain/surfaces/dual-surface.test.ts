@@ -4,12 +4,11 @@ import { eq } from 'drizzle-orm';
 import { approvals, encrypt, toolEffects } from '@harness/db';
 import { dispatchStagedEffects } from '@harness/core-tools/effects';
 import { StaticIdentity } from '@harness/identity-api/testing';
-import type { Principal } from '@harness/identity-api';
 import { MemorySurface } from '@harness/surface-api/testing';
 import { surface as slackSurface } from '@harness/surface-slack';
 import { fakeSlackSession } from '@harness/surface-slack/testing';
 import { surface as memorySurface } from '@harness/surface-memory';
-import { FakeCoreToolsClient, pendingApproval, useTestDb } from '../../testing.js';
+import { FakeCoreToolsClient, pendingApproval, principal, useTestDb } from '../../testing.js';
 import { APPROVE_ACTION_ID } from '../cards.js';
 import { decideApproval } from '../decisions.js';
 import { registerApprovalHandlers } from '../handlers.js';
@@ -22,14 +21,7 @@ const db = useTestDb();
 const key = randomBytes(32);
 const now = () => new Date('2026-09-15T12:00:00Z');
 
-const LEAD: Principal = {
-  id: 'u-coordinator',
-  kind: 'user',
-  level: 'lead',
-  displayName: 'Coordinator',
-  surfaces: { slack: 'U012', memory: 'U012', stub: 'U012' },
-  attributes: {},
-};
+const LEAD = principal({ surfaces: { slack: 'U012', memory: 'U012', stub: 'U012' } });
 
 /**
  * Three surfaces at once: Slack, through the real adapter on a fake transport, the memory adapter
