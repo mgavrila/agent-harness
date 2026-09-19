@@ -6,7 +6,7 @@ import { ParseError } from './errors.js';
 import type { PageText, ParsedDocument } from './types.js';
 
 /** Below this many characters per page, on average, a PDF is treated as having no usable text layer. */
-export const MIN_CHARS_PER_PAGE = 40;
+const MIN_CHARS_PER_PAGE = 40;
 
 /**
  * A document with more pages than this is refused before `pdftotext` or `pdftoppm` ever run on
