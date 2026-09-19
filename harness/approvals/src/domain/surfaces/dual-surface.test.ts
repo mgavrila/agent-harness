@@ -136,9 +136,9 @@ describe('a host with several surfaces loaded', () => {
 
   /**
    * What a host running this domain in a separate process from the kernel would strip from a
-   * child's environment. Since Plan 8's host runs the kernel in-process, nothing here spawns a
-   * child any more, but the union of every loaded adapter's declared credentials is still what a
-   * deployment needs if it ever does.
+   * child's environment. The host runs the kernel in-process, so nothing here spawns a child,
+   * but the union of every loaded adapter's declared credentials is still what a deployment
+   * needs if it ever does.
    */
   it('collects the credentials of every loaded adapter, from the adapters themselves', () => {
     const { surfaces } = wire();
