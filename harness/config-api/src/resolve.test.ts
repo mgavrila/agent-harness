@@ -4,10 +4,21 @@ import { pointerSegments, readPointer, resolve } from './resolve.js';
 import { fixtureDocument } from './testing.js';
 import type { Blueprint, Overlay } from './types.js';
 
-function blueprint(lockset: string[]): Blueprint {
-  const { id: _id, displayName: _displayName, ...document } = fixtureDocument();
+function blueprint(lockset: string[], overrides: Record<string, unknown> = {}): Blueprint {
+  const { id: _id, displayName: _displayName, ...document } = fixtureDocument(overrides);
   return { document: document as Blueprint['document'], lockset, version: 'bp-1' };
 }
+
+/** `routing` with `chat` carrying one fallback, so an overlay has an array element to replace. */
+const routingWithFallback = {
+  routes: {
+    chat: { model: 'gemini/gemini-3-flash-preview', fallbacks: ['groq/openai/gpt-oss-120b'] },
+    extract: { model: 'gemini/gemini-3-flash-preview' },
+    reason: { model: 'gemini/gemini-3-flash-preview' },
+    judge: { model: 'groq/openai/gpt-oss-120b' },
+    embed: { model: 'gemini/gemini-embedding-001' },
+  },
+};
 
 const names: Overlay = {
   version: 'ov-1',
@@ -31,7 +42,9 @@ describe('pointerSegments', () => {
 
 describe('resolve', () => {
   it('applies an overlay on an unlocked path and returns a whole, valid document', () => {
-    const document = resolve(blueprint(['/persona']), {
+    const bp = blueprint(['/persona']);
+    const before = structuredClone(bp.document);
+    const document = resolve(bp, {
       version: 'ov-1',
       patch: [
         ...names.patch,
@@ -42,8 +55,8 @@ describe('resolve', () => {
     expect(document.id).toBe('acme');
     expect(document.displayName).toBe('Acme Clinic');
     expect(readPointer(document, '/policy/classes/external')).toBe('blocked');
-    // The blueprint is untouched: `resolve` clones before it writes.
-    expect(readPointer(blueprint([]).document, '/policy/classes')).toBeUndefined();
+    // The blueprint passed in is untouched: `resolve` clones before it writes.
+    expect(bp.document).toEqual(before);
   });
 
   it('refuses an operation inside a locked subtree, naming the operation and the lock', () => {
@@ -121,5 +134,31 @@ describe('resolve', () => {
       patch: [...names.patch, { op: 'remove', path: '/surfaces/http' }],
     });
     expect(document.surfaces.http).toBeUndefined();
+  });
+
+  it('inserts, appends, replaces and removes by array index (RFC 6902 §4.1)', () => {
+    const bp = blueprint([], { policy: { tools: { hide: ['knowledge_search'] } }, routing: routingWithFallback });
+    const document = resolve(bp, {
+      version: 'ov-1',
+      patch: [
+        ...names.patch,
+        // `-` appends, so a tenant does not have to know the pack list's current length.
+        { op: 'add', path: '/packs/-', value: '@harness/pack-stories' },
+        // A numeric index inserts before that position.
+        { op: 'add', path: '/policy/tools/hide/0', value: 'records_search' },
+        { op: 'replace', path: '/routing/routes/chat/fallbacks/0', value: 'groq/openai/gpt-oss-20b' },
+        // Removes what the insert above put at index 1.
+        { op: 'remove', path: '/policy/tools/hide/1' },
+      ],
+    });
+    expect(document.packs).toEqual(['@harness/pack-healthcare', '@harness/pack-stories']);
+    expect(document.policy.tools.hide).toEqual(['records_search']);
+    expect(document.routing.routes.chat.fallbacks).toEqual(['groq/openai/gpt-oss-20b']);
+  });
+
+  it('refuses an add whose index is past the end of the array', () => {
+    expect(() =>
+      resolve(blueprint([]), { version: 'ov-1', patch: [...names.patch, { op: 'add', path: '/packs/5', value: 'x' }] }),
+    ).toThrow(/cannot add \/packs\/5, which is not a position in a 1-element array/);
   });
 });

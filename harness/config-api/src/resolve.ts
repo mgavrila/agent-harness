@@ -1,21 +1,12 @@
 import { ConfigError } from '@harness/shared';
 import { parseClientDocument, type ClientDocument } from './document.js';
-import type { Blueprint, Overlay, PatchOp } from './types.js';
+import { pointerSegments, writePointer } from './pointer.js';
+import type { Blueprint, Overlay } from './types.js';
 
-/**
- * The segments of an RFC 6901 JSON pointer, with `~1` and `~0` unescaped.
- *
- * `''` is the whole document and has no segments. Anything that does not begin with `/` is not a
- * pointer, and saying so here is what keeps a typo in a lock set from silently locking nothing.
- */
-export function pointerSegments(pointer: string): string[] {
-  if (pointer === '') return [];
-  if (!pointer.startsWith('/')) throw new ConfigError(`"${pointer}" is not a JSON pointer; one starts with "/"`);
-  return pointer
-    .slice(1)
-    .split('/')
-    .map((segment) => segment.replaceAll('~1', '/').replaceAll('~0', '~'));
-}
+// `pointerSegments`, `readPointer` and `writePointer` are the pointer-level operations a JSON
+// Patch overlay is built from; they live in `./pointer.js` and are re-exported here so every
+// existing importer of `resolve.js` keeps working.
+export { pointerSegments, readPointer, writePointer } from './pointer.js';
 
 /**
  * Whether `a` and `b` overlap: either is a prefix of the other, or they are equal.
@@ -29,49 +20,6 @@ function pointersOverlap(a: string[], b: string[]): boolean {
   const shared = Math.min(a.length, b.length);
   for (let i = 0; i < shared; i += 1) if (a[i] !== b[i]) return false;
   return true;
-}
-
-function container(root: Record<string, unknown>, segments: string[]): Record<string, unknown> {
-  let node: unknown = root;
-  for (const segment of segments) {
-    if (typeof node !== 'object' || node === null) {
-      throw new ConfigError(`overlay: /${segments.join('/')} has no container in the blueprint`);
-    }
-    node = (node as Record<string, unknown>)[segment];
-  }
-  if (typeof node !== 'object' || node === null) {
-    throw new ConfigError(`overlay: /${segments.join('/')} is not an object or array in the blueprint`);
-  }
-  return node as Record<string, unknown>;
-}
-
-/** Read what a pointer names, or `undefined`. Used by `remove` and `replace` to check presence. */
-export function readPointer(root: unknown, pointer: string): unknown {
-  let node: unknown = root;
-  for (const segment of pointerSegments(pointer)) {
-    if (typeof node !== 'object' || node === null) return undefined;
-    node = (node as Record<string, unknown>)[segment];
-  }
-  return node;
-}
-
-/** Apply one operation in place. `add` and `replace` are the same write; `remove` deletes the key. */
-export function writePointer(root: Record<string, unknown>, op: PatchOp): void {
-  const segments = pointerSegments(op.path);
-  if (segments.length === 0) throw new ConfigError('overlay: the whole document is not a patchable path');
-  const last = segments[segments.length - 1];
-  const parent = container(root, segments.slice(0, -1));
-  if (op.op === 'remove') {
-    if (!(last in parent))
-      throw new ConfigError(`overlay: cannot remove ${op.path}, which the blueprint does not have`);
-    if (Array.isArray(parent)) parent.splice(Number(last), 1);
-    else delete parent[last];
-    return;
-  }
-  if (op.op === 'replace' && !(last in parent)) {
-    throw new ConfigError(`overlay: cannot replace ${op.path}, which the blueprint does not have; use "add"`);
-  }
-  parent[last] = op.value;
 }
 
 /**
