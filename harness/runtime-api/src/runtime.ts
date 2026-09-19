@@ -1,22 +1,6 @@
 import { ConfigError } from '@harness/shared';
 import type { Runtime } from './types.js';
 
-export type {
-  RunAttachment,
-  RunBudget,
-  RunEvent,
-  RunHandle,
-  RunHistoryTurn,
-  RunModel,
-  RunPrincipal,
-  RunRequest,
-  RunSkill,
-  Runtime,
-  RuntimeDeps,
-  RuntimeModule,
-  RuntimeSession,
-} from './types.js';
-
 const NAME = /^[a-z][a-z0-9-]*$/;
 const ENV_NAME = /^[A-Z][A-Z0-9_]*$/;
 

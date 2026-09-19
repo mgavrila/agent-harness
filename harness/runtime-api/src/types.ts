@@ -2,10 +2,10 @@ import type { Client } from '@modelcontextprotocol/client';
 import type { EnvSource, Level, Logger } from '@harness/shared';
 
 /**
- * Every declaration of the runtime contract, in one leaf module. `runtime.ts`, `scripted.ts` and
- * `testing.ts` re-export from here and keep their own runtime functions, so no two modules of this
- * package can end up importing each other. It imports types from `@harness/shared` and the MCP
- * client, and nothing else.
+ * Every declaration of the runtime contract, in one leaf module. The package's other modules take
+ * their types from here and keep their own runtime functions, so no two of them can end up
+ * importing each other. It imports types from `@harness/shared` and the MCP client, and nothing
+ * else.
  */
 
 /**
