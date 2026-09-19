@@ -12,9 +12,3 @@ export interface CoreToolsClient {
   reconcile(staleAfterMinutes: number): Promise<{ approvals_expired: number; dispatches_parked: number }>;
   close(): Promise<void>;
 }
-
-export interface CallResult {
-  isError?: boolean;
-  content?: { type: string; text?: string }[];
-  structuredContent?: { status?: string; result?: unknown };
-}

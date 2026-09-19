@@ -10,9 +10,16 @@ import {
 import type { Db } from '@harness/db';
 import type { Principal } from '@harness/identity-api';
 import { createLogger, describeError } from '@harness/shared';
-import type { CallResult, CoreToolsClient, ExecuteOutcome } from './types.js';
+import type { CoreToolsClient, ExecuteOutcome } from './types.js';
 
 const log = createLogger('approvals');
+
+/** The slice of an MCP `callTool` response the two calls below read. */
+interface CallResult {
+  isError?: boolean;
+  content?: { type: string; text?: string }[];
+  structuredContent?: { status?: string; result?: unknown };
+}
 
 export interface InProcessCoreToolsOptions {
   db: Db;
