@@ -19,6 +19,15 @@ function isMarker(value: unknown): value is IncludeMarker {
 const UNREADABLE = 'cannot be read; it is missing, or the host may not read it';
 
 /**
+ * `<client-id>/<file>` — enough for an operator to find the file, never the host's absolute path.
+ * Applies to the client document itself, not just its includes: a YAML syntax error is the single
+ * most tenant-provokable failure in this package.
+ */
+function relativeName(file: string): string {
+  return path.join(path.basename(path.dirname(file)), path.basename(file));
+}
+
+/**
  * Read one relative path, refusing anything that leaves the client's own directory.
  *
  * A client document is written by a tenant, and a tenant is not trusted to name a file: an
@@ -54,6 +63,12 @@ async function readIncluded(relative: string, realRoot: string): Promise<string>
   // And this one is on the real path, which is the only one that sees through a link.
   if (real !== realRoot && !real.startsWith(`${realRoot}${path.sep}`)) throw outside;
   try {
+    // A tenant who can write into their own directory while this read is in flight can still
+    // replace `real` with a symlink between the check above and this read, so this window is
+    // real, not merely theoretical. Left open rather than closed: the clients directory is
+    // operator-provisioned infrastructure, and closing it fully needs a per-component `openat`,
+    // which Node does not expose — an `O_NOFOLLOW` open would close the easy version of it, if
+    // this residual ever needs to go.
     return await readFile(real, 'utf8');
   } catch {
     throw new ConfigError(`!include "${relative}" ${UNREADABLE}`);
@@ -114,17 +129,26 @@ export async function parseWithIncludes(file: string): Promise<unknown> {
   let text: string;
   try {
     text = await readFile(file, 'utf8');
-  } catch (err) {
-    throw new ConfigError(`cannot read ${file}: ${describeError(err)}`);
+  } catch {
+    // Not `describeError(err)`: Node's own ENOENT/EACCES message embeds the absolute path it
+    // tried, which is exactly what an error a tenant can provoke must not publish.
+    throw new ConfigError(`cannot read ${relativeName(file)}: ${UNREADABLE}`);
   }
   // Once, here, rather than once per include: the directory is the same for every one of them,
-  // and this is the side of the comparison the host owns rather than the tenant.
-  const realRoot = await realpath(path.dirname(file));
+  // and this is the side of the comparison the host owns rather than the tenant. Guarded even
+  // though `readFile` above fails first in practice for a missing or unreadable directory — this
+  // way every failure of this function is genuinely one kind of error, not just usually one.
+  let realRoot: string;
+  try {
+    realRoot = await realpath(path.dirname(file));
+  } catch {
+    throw new ConfigError(`cannot resolve the directory for ${relativeName(file)}: ${UNREADABLE}`);
+  }
   let raw: unknown;
   try {
     raw = parseYaml(text, { customTags: INCLUDE_TAGS });
   } catch (err) {
-    throw new ConfigError(`${file} is not a valid client file: ${describeError(err)}`);
+    throw new ConfigError(`${relativeName(file)} is not a valid client file: ${describeError(err)}`);
   }
   return expand(raw, realRoot);
 }

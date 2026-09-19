@@ -1,12 +1,24 @@
-import { mkdtemp, mkdir, symlink, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { ConfigError } from '@harness/shared';
 import { parseWithIncludes } from './include.js';
 
+const tmpDirs: string[] = [];
+
+afterEach(async () => {
+  for (const dir of tmpDirs.splice(0)) await rm(dir, { recursive: true, force: true });
+});
+
+async function tmpDir(prefix: string): Promise<string> {
+  const dir = await mkdtemp(path.join(tmpdir(), prefix));
+  tmpDirs.push(dir);
+  return dir;
+}
+
 async function clientDir(files: Record<string, string>): Promise<string> {
-  const dir = await mkdtemp(path.join(tmpdir(), 'harness-config-'));
+  const dir = await tmpDir('harness-config-');
   for (const [name, text] of Object.entries(files)) {
     await mkdir(path.dirname(path.join(dir, name)), { recursive: true });
     await writeFile(path.join(dir, name), text, 'utf8');
@@ -47,7 +59,7 @@ describe('parseWithIncludes', () => {
     // The one a resolved-string check misses: every path here is under the client directory, and
     // the file the persona would become is not.
     const dir = await clientDir({ 'client.yaml': 'persona: !include persona.md\n' });
-    const elsewhere = await mkdtemp(path.join(tmpdir(), 'harness-elsewhere-'));
+    const elsewhere = await tmpDir('harness-elsewhere-');
     await writeFile(path.join(elsewhere, 'secrets.md'), 'whatever the host can read\n', 'utf8');
     await symlink(path.join(elsewhere, 'secrets.md'), path.join(dir, 'persona.md'));
     await expect(parseWithIncludes(path.join(dir, 'client.yaml'))).rejects.toThrow(ConfigError);
@@ -71,5 +83,21 @@ describe('parseWithIncludes', () => {
   it('refuses an include whose value is not a path', async () => {
     const dir = await clientDir({ 'client.yaml': 'persona: !include\n  - a\n' });
     await expect(parseWithIncludes(path.join(dir, 'client.yaml'))).rejects.toThrow(ConfigError);
+  });
+
+  it('does not publish the host path when the client file itself cannot be read', async () => {
+    const dir = await clientDir({});
+    const file = path.join(dir, 'client.yaml');
+    await expect(parseWithIncludes(file)).rejects.toThrow(ConfigError);
+    await expect(parseWithIncludes(file)).rejects.toThrow(/client.yaml/);
+    await expect(parseWithIncludes(file)).rejects.not.toThrow(new RegExp(tmpdir().replace(/[/\\]/g, '\\$&')));
+  });
+
+  it('does not publish the host path when the client file is not valid YAML', async () => {
+    const dir = await clientDir({ 'client.yaml': 'persona: [unterminated\n' });
+    const file = path.join(dir, 'client.yaml');
+    await expect(parseWithIncludes(file)).rejects.toThrow(ConfigError);
+    await expect(parseWithIncludes(file)).rejects.toThrow(/client.yaml/);
+    await expect(parseWithIncludes(file)).rejects.not.toThrow(new RegExp(tmpdir().replace(/[/\\]/g, '\\$&')));
   });
 });
