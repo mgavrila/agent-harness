@@ -159,9 +159,7 @@ describe('filesConfigSource', () => {
   it('names the missing directory when the clients root does not exist, rather than a raw ENOENT', async () => {
     const root = path.join(tmpdir(), 'harness-clients-does-not-exist');
     await expect(filesConfigSource({ root, log }).list?.()).rejects.toThrow(ConfigError);
-    await expect(filesConfigSource({ root, log }).list?.()).rejects.toThrow(
-      new RegExp(`cannot list ${root}`),
-    );
+    await expect(filesConfigSource({ root, log }).list?.()).rejects.toThrow(new RegExp(`cannot list ${root}`));
   });
 
   it('tells a watcher the new version once the writes settle, and only once', async () => {

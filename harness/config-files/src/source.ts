@@ -90,7 +90,9 @@ export function filesConfigSource(opts: FilesConfigSourceOptions): ConfigSource 
       // Relative to the client's own directory, never the host's absolute path: this is an error
       // a tenant's own overlay or client.yaml can provoke.
       const relativeSourceFile = path.join(clientId, path.basename(sourceFile));
-      throw new ConfigError(`${relativeSourceFile} declares id "${document.id}" but lives in the directory "${clientId}"`);
+      throw new ConfigError(
+        `${relativeSourceFile} declares id "${document.id}" but lives in the directory "${clientId}"`,
+      );
     }
     return { document, version: versionOf(document) };
   };
