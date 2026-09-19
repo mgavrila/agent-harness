@@ -19,7 +19,7 @@ import {
   type TurnEvent,
   type TurnInput,
 } from './conversation.js';
-import { findOrCreateThread } from './threads/repository.js';
+import { findOrCreateThread, type ThreadRow } from './threads/repository.js';
 import * as threadsRepository from './threads/repository.js';
 import { HISTORY_MAX_CHARS } from './threads/trim.js';
 
@@ -525,14 +525,19 @@ function spender(costUsd: number): RuntimeSession {
   };
 }
 
-/** One `runTurn` on a fresh thread, the way the scheduler will call it: no surface handler involved. */
-async function turnOn(f: HostFixture, deliver: TurnDelivery, extra: Partial<TurnInput> = {}) {
-  const thread = await findOrCreateThread(db, {
+/** The coordinator's thread on the memory surface: what a turn driven by hand runs on. */
+function coordinatorThread(): Promise<ThreadRow> {
+  return findOrCreateThread(db, {
     client: 'test',
     surface: 'memory',
     conversation: 'memory',
-    principalId: 'u-coordinator',
+    principalId: COORDINATOR.id,
   });
+}
+
+/** One `runTurn` on a fresh thread, the way the scheduler will call it: no surface handler involved. */
+async function turnOn(f: HostFixture, deliver: TurnDelivery, extra: Partial<TurnInput> = {}) {
+  const thread = await coordinatorThread();
   return runTurn(f.host, {
     thread,
     principal: COORDINATOR,
@@ -710,12 +715,7 @@ describe('a watcher on a turn', () => {
       ],
     });
     onTestFinished(() => f.close());
-    const thread = await findOrCreateThread(db, {
-      client: 'test',
-      surface: 'memory',
-      conversation: 'memory',
-      principalId: COORDINATOR.id,
-    });
+    const thread = await coordinatorThread();
     const seen: TurnEvent[] = [];
     const result = await runTurn(f.host, {
       thread,
@@ -741,12 +741,7 @@ describe('a watcher on a turn', () => {
   it('tells a watcher that a cancelled run was cancelled, with the run id it can cancel by', async () => {
     const f = await hostFixture(db, { trajectory: [{ sleep: 150 }, { say: 'too late' }] });
     onTestFinished(() => f.close());
-    const thread = await findOrCreateThread(db, {
-      client: 'test',
-      surface: 'memory',
-      conversation: 'memory',
-      principalId: COORDINATOR.id,
-    });
+    const thread = await coordinatorThread();
     const seen: TurnEvent[] = [];
     let cancelledFromEvent: boolean | null = null;
     const turn = runTurn(f.host, {
@@ -775,12 +770,7 @@ describe('a watcher on a turn', () => {
   it('is not failed by a watcher that throws', async () => {
     const f = await hostFixture(db, { trajectory: [{ say: 'fine' }] });
     onTestFinished(() => f.close());
-    const thread = await findOrCreateThread(db, {
-      client: 'test',
-      surface: 'memory',
-      conversation: 'memory',
-      principalId: COORDINATOR.id,
-    });
+    const thread = await coordinatorThread();
     const result = await runTurn(f.host, {
       thread,
       principal: COORDINATOR,
