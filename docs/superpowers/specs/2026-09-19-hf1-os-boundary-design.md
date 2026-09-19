@@ -223,18 +223,52 @@ surface supplies the id (Slack team id from the event; `x-harness-client` on the
 the events transport). `depsForRun(config, run)` in `core-tools/src/domain/tooling/deps.ts` is
 unchanged; the `KernelConfig` it clones is now looked up per run from a
 `Map<clientId, {version, config}>` filled from the `ConfigSource`, invalidated on `watch`.
-`clientDirFor(client, root)` in `tooling/config.ts`, whose default root is the repository, is
-replaced by the `files` source; `HARNESS_CLIENT` is read today in the host's `main.ts`,
-`tooling/config.ts`, the gateway renderer, the scaffolder CLI and Compose, and those are the
-places Plan 11a touches. Playbooks and the scheduler are per client and load lazily on first use in a pooled
+
+What has to change for that to be true, from the code as it is:
+
+- `harness/host/src/app/main.ts` is a top-level-await script holding one client, persona,
+  identity session, surface set, runtime, budget, skills catalogue, playbook sync and approvals
+  runner per process. Plan 11a extracts `createHost(deps)` and a per-client `Tenant` object
+  holding those, built from a resolved document and cached by version.
+- `buildKernelConfig(env)` ignores its `env` for `storageRoot()`, `loadPolicy()`, `loadKey()`
+  and `gatewayFromEnv()`, which read ambient `process.env`; and `policy.yaml` is addressed by
+  `HARNESS_POLICY_FILE` (unset → `DEFAULT_POLICY`, silently). All four take the resolved
+  document explicitly; `HARNESS_POLICY_FILE` is deleted.
+- `repoRoot` is computed at import time from `import.meta.url` in `tooling/config.ts`, the
+  host's `main.ts`, `host/src/domain/skills.ts`, the gateway renderer and the scaffolder. Every
+  one goes; the kernel's own `skills/` directory is the only path still resolved from a package.
+- `closeRun` and the startup `reconcile` in `session/repository.ts` are unscoped; both take a
+  client. The first entry of a client's `surfaces` is its primary (where cards go); a pooled
+  host keeps one primary per client.
+- The runtime checkpointer is one pool per process keyed by `thread_id` (a uuid, so rows never
+  collide); it stays shared, and the isolation test covers it.
+- `HARNESS_HOST_TOKEN` is one bearer for the process; pooled hosts are reached only through the
+  platform's ingress, which authenticates tenants, so the token stays per process.
+
+`clientDirFor(client, root)` in `tooling/config.ts` is deleted with the `files` source's
+arrival; `HARNESS_CLIENT` is read today in the host's `main.ts`, `tooling/config.ts`, the
+gateway renderer, the scaffolder CLI and Compose, and those are the places Plan 11a touches. Playbooks and the scheduler are per client and load lazily on first use in a pooled
 host; a dedicated host loads them at start as today.
 
 ### 4.3 Identity: directory providers
 
+On `main` today every principal is declared literally in `identity.yaml`; an unknown surface
+user is refused (`conversation.ts` `handleMessage`), and the surface passes no display name.
+The `defaults: { slack: member }` rule and the synthesised principal id
+(`u-<surface>-<slug>-<8 hex of sha256>`, collision refusal cached, reconstructable after a
+restart) exist only on PR #5's branch. Plan 11a **re-authors them into the kernel** as part of
+`@harness/identity-api` (`IdentityFile.defaults`, `principalFromDerivedId`) with their tests;
+PR #5 itself is never merged.
+
 `identities/slack-groups`: `IdentitySession.resolve({ surface, userId })` looks up the user's
-Slack user groups (cached, `sync.everySeconds`), maps the first matching entry of
-`groups: [{ id, level }]` to a level, then `exceptions: [{ userId, level | 'refuse' }]`, then
-`defaults`. Same synthesised id format as the static provider. Entra follows the same shape.
+Slack user groups through two new `SlackApi` methods (`usergroups.list`,
+`usergroups.users.list`; the surface exposes them, the provider receives a narrow lookup
+function through `IdentityDeps` so it never imports the surface — the arch gate forbids it),
+cached with `sync.everySeconds`, maps the first matching entry of `groups: [{ id, level }]` to
+a level, then `exceptions: [{ userId, level | 'refuse' }]`, then `defaults`. The display name
+comes from `users.info` at first sight and is stored on the derived principal under
+`PrincipalShape` (single line, ≤ 80, no control or format characters, since it is rendered
+into the runtime's rules block). Entra follows the same shape.
 
 ### 4.4 Policy
 
@@ -244,20 +278,35 @@ surface the model sees and refused with the same message as an unknown tool if c
 
 ### 4.5 Usage export
 
-View `usage_runs` over `runs` (status, started_at, ended_at), `model_calls` (input_tokens,
-output_tokens, cost_usd per route) and `approvals`, grouped by client, principal and day: runs,
-input and output tokens, cost, duration, outcomes, approvals requested and decided,
-`sandbox_seconds` (0 until a sandbox provider exists). `GET /v1/usage?from&to` returns it for the host's
+Today `model_calls` is written only by the kernel's own `callModel` and `embedTexts`; the
+runtime's `usage` events (`{ type: 'usage', inputTokens, outputTokens, costUsd }`) only feed the
+per-turn cost cap and are dropped, and `audit_log`'s token columns are never written. So the
+export is a schema and host change first: the host **persists every runtime `usage` event as a
+`model_calls` row** (`run_id`, `client`, `route: 'chat' | 'reason'`, model, tokens, cost), and
+`runs` gains `input_tokens`, `output_tokens`, `cost_usd` totals closed with the run. The
+`audit_log` token columns are dropped (never written; decision 2b).
+
+View `usage_runs` over `runs` (status, totals, started_at, ended_at), `model_calls` per route
+and `approvals`, grouped by client, principal and day: runs, input and output tokens, cost,
+duration, outcomes, approvals requested and decided, `sandbox_seconds` (0 until a sandbox
+provider exists). `GET /v1/usage?from&to` returns it for the host's
 client(s), bearer-authenticated like the rest of the run API. No message content, ever.
 
 ### 4.6 Slack events transport
 
 `surfaces/slack/src/transport/events.ts` replaces `bolt.ts` as the one `SlackTransport`
-(`transport/types.ts`): a handler the host mounts on its own HTTP server that verifies
-`X-Slack-Signature` against the tenant's signing secret with a timestamp window, answers
+(`{ api: SlackApi; events: SlackEvents; notePostedIn }`, `transport/types.ts`): a request
+handler that verifies `X-Slack-Signature` (HMAC over the timestamp and raw body with the
+tenant's signing secret, five-minute window; nothing of the kind exists today), answers
 `url_verification`, acknowledges within 3 seconds and hands the normalised event to the same
-inbound pipeline. Outbound calls use the Web API as today. Bolt and socket mode are removed
-with their dependency; the fake transport stays for tests.
+inbound pipeline. `stream.ts` and `files.ts` are unchanged. The host must not name Slack (the
+kernel-vocabulary test forbids `slack|bolt|blocks|thread_ts` in `harness/host/src` with an
+empty allowlist), so the surface contract gains an optional `http: { path, handler }` a surface
+returns and the host mounts on its own server beside the run API. Bolt's middleware supplied
+the bot identity; `SlackApi` gains `auth.test` so the thread rule (`classifyInbound`) keeps its
+comparison. The surface's `secrets` become `SLACK_BOT_TOKEN` and `SLACK_SIGNING_SECRET`
+(`SLACK_APP_TOKEN` goes with socket mode). Bolt is removed with its dependency; the fake
+transport stays for tests.
 
 ### 4.7 Publishing
 
@@ -322,13 +371,17 @@ declared plug-ins (MCP first, A2A second) with the bridge and the `write.assign`
 - `client_documents (client_id pk, schema_version, document jsonb, version text, blueprint_ref, overlay jsonb, updated_at)`
   and `client_document_versions (client_id, version, document jsonb, created_at, created_by)`
   for the `postgres` source.
-- `usage_runs` view (§4.5).
+- `runs.input_tokens`, `runs.output_tokens`, `runs.cost_usd`; `audit_log` loses its three
+  never-written token columns; `usage_runs` view (§4.5).
 - `runs.correlation jsonb null` (Plan 12).
 - `declared_plugins` is not a table: it is part of the document.
-- No change to tenant partitioning: every kernel table already carries a `client` column
-  (`records`, `documents`, `approvals`, `threads`, `runs`, `tool_effects`, `model_calls`,
-  `audit_log`, `memory_entries`, `playbooks`, `knowledge_sources`, …), and §9's isolation test
-  proves the repositories filter on it.
+- Tenant partitioning completed: `records`, `documents`, `approvals`, `threads`, `runs`,
+  `tool_effects`, `model_calls`, `audit_log`, `memory_entries`, `playbooks`,
+  `knowledge_sources`, `knowledge_documents`, `knowledge_chunks` already carry `client`;
+  **`attachments`, `fields`, `deadlines`, `messages` and `playbook_runs` do not** and gain it,
+  and the two global unique indexes on `approvals.idempotency_key` and
+  `tool_effects.idempotency_key` become `(client, idempotency_key)`. §9's isolation test proves
+  every repository filters on it.
 
 ## 7. Deployment
 
@@ -397,7 +450,38 @@ secrets; gateway keys and budgets; the ingress; the host pool and the Sandbox te
 modeler, forms and dashboards; billing; the lifecycle workers; the process engine. None of them
 needs a kernel change if §4 holds, and that is the test of §4.
 
-## 12. Open questions (answer before Plan 12's plan is written; none block Plan 11)
+## 12. Constraints the plans inherit from the code (from the grounding pass, 2026-09-19)
+
+Recorded so the plan writer does not rediscover them. The full map is in the worktree's
+ledger directory (`.superpowers/sdd/os-boundary/grounding.md`, gitignored).
+
+1. Every new environment variable must appear in the root `.env.example` or the env-var scan
+   fails; ESLint bans `process.env` outside `app/`, `shared/env.ts` and tests, so plug-ins read
+   `deps.env` only.
+2. The tool-surface and compose-surface snapshots are byte-exact; `tools.hide` must not change
+   the default catalogue, and the new Compose variables and the pulled image re-record the
+   compose snapshot once. `surfaceDeps()` in `record-surface.ts` pins the healthcare pack.
+3. The kernel-vocabulary test forbids Slack words in the host, core-tools, packs, the runtime
+   and the HTTP surface; `demo-practice` and `hermes` are forbidden everywhere in those trees.
+4. `pnpm arch`: the host may not statically import a surface, identity, runtime or pack; a
+   surface, identity or runtime may import only its own `*-api` package and `@harness/shared`.
+   The Slack-groups provider therefore receives a lookup function, never the surface.
+5. Plug-ins resolve through `node_modules` by specifier. A tenant pack from outside the repo
+   needs a real install step: the platform builds a tenant image `FROM` the host image with
+   its packs installed, or the pooled image ships the catalogue's packs. Not a kernel change.
+6. `HARNESS_PACKS` distinguishes unset from empty; the document's `packs: []` keeps that
+   meaning explicit and the variable goes.
+7. Two host tests read `clients/demo-practice` from the repository root
+   (`preflight.test.ts`, `scheduler.test.ts`); they move to the fixture in the document format.
+8. `readSkillCatalogue` requires `name`, `description`, `version` and a directory name equal to
+   the frontmatter name; documents carry skills as `name → markdown` and are validated the same
+   way on load.
+9. `assertEmbedDims` runs before anything serves; `knowledge_chunks.embedding` is a fixed
+   `vector(1024)`. A tenant's `routing.embed` must produce 1024 dimensions or fail at load.
+10. `Principal.displayName` is rendered into the model's rules block; every identity source
+    applies `PrincipalShape`.
+
+## 13. Open questions (answer before Plan 12's plan is written; none block Plan 11)
 
 1. Jev: library or service? Decides whether the typed seam imports it or calls it.
 2. Which process engine, when P8 comes. Open-source, embeddable, with a REST task API.
