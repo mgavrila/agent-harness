@@ -160,7 +160,7 @@ src/domain/persona.ts          readPersona: SOUL.md
 src/domain/kernel.ts           openKernel: one run, one ToolDeps, one in-process MCP client
 src/domain/conversation.ts     runTurn, handleMessage, attachMessageHandlers, serialize, cancelRun, drainActive
 src/domain/resume.ts           resumeText, resumeOnDecision, decisionDeps: the onDecided hook
-src/domain/playbooks/schema.ts     PlaybookShape, parsePlaybooksFile, readPlaybooksFile, nextRunAfter
+src/domain/playbooks/schema.ts     nextRunAfter (the playbook schema itself lives in @harness/config-api)
 src/domain/playbooks/repository.ts syncPlaybooks, claimDuePlaybooks, finishPlaybookRun
 src/domain/playbooks/preflight.ts  preflightPlaybook
 src/domain/playbooks/notice.ts     stagePlaybookNotice, playbookNoticeKey

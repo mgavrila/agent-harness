@@ -1,7 +1,8 @@
-import { mkdir } from 'node:fs/promises';
+import { mkdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { config as loadEnv } from 'dotenv';
+import { parse as parseYaml } from 'yaml';
 import {
   DEFAULT_HEALTH_BIND,
   collectHealth,
@@ -14,9 +15,17 @@ import {
 } from '@harness/approvals';
 import { assertEmbedDims, buildKernelConfig, loadIdentity } from '@harness/core-tools';
 import { outRoot } from '@harness/core-tools/storage';
-import type { PlaybookDefinition } from '@harness/config-api';
+import { parsePlaybooksFile, type PlaybookDefinition } from '@harness/config-api';
 import { createDb } from '@harness/db';
-import { ConfigError, createLogger, envOrDefault, numberFromEnv, optionalEnv, requiredEnv } from '@harness/shared';
+import {
+  ConfigError,
+  createLogger,
+  describeError,
+  envOrDefault,
+  numberFromEnv,
+  optionalEnv,
+  requiredEnv,
+} from '@harness/shared';
 import { startRunApi } from '../domain/api/server.js';
 import { DEFAULT_HOST_BIND, DEFAULT_HOST_PORT } from '../domain/api/types.js';
 import { SHUTDOWN_DRAIN_MS, TIMEOUT_MARGIN_MS, attachMessageHandlers, drainActive } from '../domain/conversation.js';
@@ -75,8 +84,20 @@ if (!servicePrincipal || servicePrincipal.kind !== 'service') {
 // playbook edited, added or removed in clients/<name>/playbooks.yaml takes effect on the next
 // start, a firing missed while the process was down is not replayed (next_run_at is recomputed
 // from now), and a malformed file fails startup with no socket open and no message accepted.
-// Task 6 replaces this whole script with createHost(); the document's playbooks arrive there.
-const playbooksFile = { file: 'client document', present: true, playbooks: [] as PlaybookDefinition[] };
+// Task 6 replaces this whole script with createHost(), where the document's playbooks arrive
+// already parsed. Until then, clients/<name>/playbooks.yaml still exists (Task 9 removes it), so
+// this reads and parses it the way the deleted `readPlaybooksFile` used to.
+const playbooksPath = path.join(clientDir, 'playbooks.yaml');
+let playbooksFile: { file: string; present: boolean; playbooks: PlaybookDefinition[] };
+try {
+  const text = await readFile(playbooksPath, 'utf8');
+  playbooksFile = { file: playbooksPath, present: true, playbooks: parsePlaybooksFile(parseYaml(text)) };
+} catch (err) {
+  if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+    throw new ConfigError(`cannot read ${playbooksPath}: ${describeError(err)}`);
+  }
+  playbooksFile = { file: playbooksPath, present: false, playbooks: [] };
+}
 const synced = await syncPlaybooks(
   db,
   { client: config.client, now: now(), file: playbooksFile.file },
