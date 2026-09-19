@@ -1,17 +1,6 @@
 import { SurfaceError } from '@harness/shared';
 import { defineSurface } from '@harness/surface-api';
-import type {
-  ActionEvent,
-  Card,
-  Form,
-  FormEvent,
-  MessageEvent,
-  MessageRef,
-  StreamHandle,
-  Surface,
-  SurfaceSession,
-  UploadRequest,
-} from '@harness/surface-api';
+import type { ActionEvent, FormEvent, MessageEvent, StreamHandle, Surface, SurfaceSession } from '@harness/surface-api';
 
 /**
  * The conversation a run opened over the API belongs to when the caller names none. A thread key
@@ -57,12 +46,12 @@ function session(): SurfaceSession {
     // No directory to look a display name up in, and no syntax to notify with: the id is the
     // honest rendering, and a caller reading it already knows what a principal id is.
     mention: (userId: string) => `@${userId}`,
-    postCard: (_conversation: string, _card: Card): Promise<MessageRef> => refuseLater(),
-    updateCard: (_ref: MessageRef, _card: Card): Promise<void> => refuseLater(),
-    postText: (_conversation: string, _text: string): Promise<MessageRef> => refuseLater(),
-    postPrivate: (_conversation: string, _userId: string, _text: string): Promise<void> => refuseLater(),
-    uploadFile: (_conversation: string, _file: UploadRequest): Promise<{ filename: string }> => refuseLater(),
-    openForm: (_trigger: string, _form: Form): Promise<void> => refuseLater(),
+    postCard: refuseLater,
+    updateCard: refuseLater,
+    postText: refuseLater,
+    postPrivate: refuseLater,
+    uploadFile: refuseLater,
+    openForm: refuseLater,
     // Accepted and never called: nothing arrives on this surface out of band. The run API resolves
     // the principal and opens the turn itself, so a message never takes the adapter's inbound path.
     onAction: (_handler: (event: ActionEvent) => Promise<void>) => {},
