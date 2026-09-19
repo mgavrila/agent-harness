@@ -55,9 +55,9 @@ export async function missingBinaries(timeoutMs = 10_000): Promise<string[]> {
   return missing;
 }
 
-/** The pages as one string, a blank line between them. */
-function joinPages(pages: PageText[]): string {
-  return pages.map((p) => p.text).join('\n\n');
+/** The worker's answer: the pages, and the same pages as one string with a blank line between them. */
+function parsed(pages: PageText[], ocrUsed: boolean): ParsedDocument {
+  return { pages, text: pages.map((p) => p.text).join('\n\n'), ocrUsed };
 }
 
 /** True when the file begins with the PDF magic number. A missing file is a 404, not a 500. */
@@ -168,8 +168,7 @@ export async function extractDocument(absPath: string, options: ExtractOptions =
     if (!IMAGE_EXTENSIONS.has(ext)) {
       throw new ParseError(415, `unsupported document type ${ext || '(none)'}; expected a PDF or an image`);
     }
-    const pages = [{ num: 1, text: await ocrImage(absPath, 1, opts) }];
-    return { pages, text: joinPages(pages), ocrUsed: true };
+    return parsed([{ num: 1, text: await ocrImage(absPath, 1, opts) }], true);
   }
   const count = await pageCount(absPath, opts.textTimeoutMs);
   if (count > MAX_PAGES) {
@@ -177,7 +176,6 @@ export async function extractDocument(absPath: string, options: ExtractOptions =
   }
   const layer = await textLayer(absPath, count, opts.textTimeoutMs);
   const total = layer.reduce((sum, p) => sum + p.text.trim().length, 0);
-  if (total >= MIN_CHARS_PER_PAGE * Math.max(count, 1)) return { pages: layer, text: joinPages(layer), ocrUsed: false };
-  const pages = await ocrPdf(absPath, count, opts);
-  return { pages, text: joinPages(pages), ocrUsed: true };
+  if (total >= MIN_CHARS_PER_PAGE * Math.max(count, 1)) return parsed(layer, false);
+  return parsed(await ocrPdf(absPath, count, opts), true);
 }
