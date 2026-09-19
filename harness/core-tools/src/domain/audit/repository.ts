@@ -11,7 +11,12 @@ interface AuditQueryArgs {
   limit: number;
 }
 
-export interface AuditEntry {
+/**
+ * One audit row as `audit_query` reports it. Not `AuditEntry` in `domain/tooling/audit.ts`,
+ * which is what `writeAudit` takes: that one carries the error text and the token counts, and
+ * this one is the masked read-back.
+ */
+export interface AuditEntryView {
   id: string;
   tool: string;
   action_class: string;
@@ -31,7 +36,7 @@ export interface AuditEntry {
 export async function queryAuditLog(
   deps: ToolDeps,
   { tool, decision, since, limit }: AuditQueryArgs,
-): Promise<{ entries: AuditEntry[] }> {
+): Promise<{ entries: AuditEntryView[] }> {
   const conditions: SQL[] = [eq(auditLog.client, deps.client)];
   if (tool) conditions.push(eq(auditLog.tool, tool));
   if (decision) conditions.push(eq(auditLog.decision, decision));
