@@ -3,7 +3,7 @@ import { eq } from 'drizzle-orm';
 import { registryOf } from '@harness/core-tools';
 import type { RunEvent, RuntimeSession } from '@harness/runtime-api';
 import { approvals, auditLog, memoryEntries, messages, runs, threads } from '@harness/db';
-import { COORDINATOR, hostFixture, useTestDb, type HostFixture } from '../testing.js';
+import { COORDINATOR, hostFixture, useTestDb, waitFor, type HostFixture } from '../testing.js';
 import {
   COST_CAP_EXCEEDED,
   EMPTY_REPLY,
@@ -24,15 +24,6 @@ import * as threadsRepository from './threads/repository.js';
 import { HISTORY_MAX_CHARS } from './threads/trim.js';
 
 const db = useTestDb();
-
-/** Poll until `ready` holds, so a test waits on the signal it means rather than on a fixed delay. */
-async function waitFor(ready: () => boolean, timeoutMs = 2_000): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (!ready()) {
-    if (Date.now() > deadline) throw new Error('timed out waiting for the condition');
-    await new Promise((r) => setTimeout(r, 5));
-  }
-}
 
 describe('a message on a surface', () => {
   it('runs as the resolved principal, replies once on a surface without streaming, and records both turns', async () => {

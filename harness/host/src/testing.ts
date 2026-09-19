@@ -15,6 +15,20 @@ import type { Host, HostBudget } from './domain/host.js';
 
 export { useTestDb } from '@harness/db/testing';
 
+/**
+ * Poll until `ready` holds, so a test waits on the signal it means rather than on a fixed delay.
+ *
+ * A turn opens a run, resolves an identity and writes to Postgres before the runtime sees it, and
+ * under a loaded suite that takes far longer than the tens of milliseconds a sleep would guess at.
+ */
+export async function waitFor(ready: () => boolean, timeoutMs = 2_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!ready()) {
+    if (Date.now() > deadline) throw new Error('timed out waiting for the condition');
+    await new Promise((r) => setTimeout(r, 5));
+  }
+}
+
 /** The startup-only half of a test bag: `makeTestDeps` less the per-run members. */
 export function testKernelConfig(db: Db, overrides: TestDepsOverrides = {}): KernelConfig {
   const {
