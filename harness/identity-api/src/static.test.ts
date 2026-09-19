@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { StaticIdentity } from './testing.js';
 import type { Principal } from './types.js';
-// Through the public API on purpose, so `index.ts` has an importer inside this package and
-// dependency-cruiser's `no-orphans` rule does not flag it.
+// Through the public API on purpose: this is the package's contract, so the test reads it the
+// way a consumer does.
 import { levelAtLeast } from './index.js';
 
 const manager: Principal = {
