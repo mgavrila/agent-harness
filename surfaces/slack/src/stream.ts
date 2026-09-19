@@ -1,9 +1,8 @@
 import { describeError, SurfaceError } from '@harness/shared';
 import type { StreamHandle } from '@harness/surface-api';
 import { toMrkdwn } from './format.js';
+import { guarded, NAME } from './guarded.js';
 import type { SlackApi } from './transport/types.js';
-
-const NAME = 'slack';
 
 /**
  * How often a streamed reply is edited. `chat.update` is a Tier 3 method (about fifty calls a
@@ -19,20 +18,6 @@ export interface StreamDeps {
   threadTs?: string;
   now?: () => number;
   setTimeout?: typeof setTimeout;
-}
-
-/**
- * Run one Web API call and turn whatever it throws into a `SurfaceError` — the same wrapping
- * `session.ts` gives every call this adapter makes on its own behalf: the message names the
- * surface and the operation, never the accumulated text or the channel, so it stays safe to
- * write into a plaintext column.
- */
-async function guarded<T>(op: string, call: () => Promise<T>): Promise<T> {
-  try {
-    return await call();
-  } catch (err) {
-    throw new SurfaceError(`${NAME}: ${op} failed: ${describeError(err)}`);
-  }
 }
 
 /**
