@@ -5,6 +5,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { TEST_DATABASE_URL } from '../testing.js';
 import type { Db } from './client.js';
 import { migrationStatements } from './migration-sql.test-helpers.js';
+import { rejectionMessage } from './postgres-error.test-helpers.js';
 import { scratchDatabase } from './scratch-database.test-helpers.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -13,23 +14,6 @@ const scratch = scratchDatabase(`harness_test_migration_0013_${process.pid}`);
 
 let db: Db;
 let close: () => Promise<void>;
-
-/**
- * The message a query's rejection really carries, or a sentence saying it did not reject at all.
- * drizzle-orm wraps the driver error as "Failed query: ..." and puts the underlying Postgres
- * error on `.cause`, so the cause is what the assertion below has to read. Mirrors the helper of
- * the same name in schema.test.ts and migration-0012.test.ts.
- */
-async function rejectionMessage(query: PromiseLike<unknown>): Promise<string> {
-  try {
-    await query;
-    return 'the query succeeded';
-  } catch (err) {
-    const cause = err instanceof Error ? err.cause : undefined;
-    if (cause instanceof Error) return cause.message;
-    return err instanceof Error ? err.message : String(err);
-  }
-}
 
 /**
  * No legacy fixture: 0013 creates three tables that reference nothing outside themselves, so the
