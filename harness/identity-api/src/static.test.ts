@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { StaticIdentity } from './testing.js';
 import type { Principal } from './types.js';
-// Through the public API on purpose: until `identities/static` exists (Task 3) nothing else
-// imports `index.ts`, and dependency-cruiser's `no-orphans` rule would otherwise flag it.
+// Through the public API on purpose, so `index.ts` has an importer inside this package and
+// dependency-cruiser's `no-orphans` rule does not flag it.
 import { levelAtLeast } from './index.js';
 
 const manager: Principal = {
@@ -41,7 +41,7 @@ describe('StaticIdentity', () => {
     expect(await session.get('svc-playbooks')).toBe(nightly);
     expect(await session.get('u-nobody')).toBeNull();
     expect(await session.list()).toEqual([manager, nightly]);
-    // The resolved principal's level is what a policy decision reads (Task 2).
+    // The resolved principal's level is what a policy decision reads.
     expect(levelAtLeast(manager.level, 'lead')).toBe(true);
   });
 
