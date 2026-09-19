@@ -78,6 +78,18 @@ export async function toolServerFixture(tools: readonly FixtureTool[]): Promise<
   };
 }
 
+/**
+ * The one tool a runtime suite needs to prove it reaches the kernel and nothing else: a search
+ * that answers `ok` and echoes the query back. Shared so the conformance run and every suite that
+ * scripts a tool call are asserting against the same tool.
+ */
+export const RECORDS_SEARCH: FixtureTool = {
+  name: 'records_search',
+  description: 'search',
+  inputSchema: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] },
+  handler: ({ query }) => ({ status: 'ok', result: { hits: [String(query)] } }),
+};
+
 /** A complete request with test defaults; `tools` is the one thing every test has to supply. */
 export function fixtureRequest(over: Partial<RunRequest> & { tools: Client }): RunRequest {
   return {

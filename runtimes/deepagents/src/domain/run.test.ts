@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { hashArgs } from '@harness/shared';
 import type { RunEvent, RunRequest } from '@harness/runtime-api';
 import {
+  RECORDS_SEARCH,
   fixtureRequest,
   startFakeGateway,
   toolServerFixture,
@@ -24,14 +25,7 @@ const log = { info() {}, warn() {}, error() {} };
 
 beforeEach(async () => {
   gateway = await startFakeGateway();
-  fixture = await toolServerFixture([
-    {
-      name: 'records_search',
-      description: 'search',
-      inputSchema: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] },
-      handler: ({ query }) => ({ status: 'ok', result: { hits: [String(query)] } }),
-    },
-  ]);
+  fixture = await toolServerFixture([RECORDS_SEARCH]);
   skillsDir = await mkdtemp(path.join(tmpdir(), 'harness-run-skills-'));
   await mkdir(path.join(skillsDir, 'credentialing-intake'));
   await writeFile(

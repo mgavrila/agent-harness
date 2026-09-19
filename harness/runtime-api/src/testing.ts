@@ -22,5 +22,16 @@ export {
   type Trajectory,
   type TrajectoryStep,
 } from './scripted.js';
-export { fixtureRequest, toolServerFixture, type FixtureTool, type ToolServerFixture } from './tool-server.js';
-export { runtimeConformance, type ConformanceHarness, type ConformanceScript } from './conformance.js';
+export {
+  RECORDS_SEARCH,
+  fixtureRequest,
+  toolServerFixture,
+  type FixtureTool,
+  type ToolServerFixture,
+} from './tool-server.js';
+export {
+  collectRunEvents,
+  runtimeConformance,
+  type ConformanceHarness,
+  type ConformanceScript,
+} from './conformance.js';

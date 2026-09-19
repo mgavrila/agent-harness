@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { RunEvent, RunRequest, RunSkill, RuntimeSession } from './types.js';
-import { fixtureRequest, toolServerFixture, type ToolServerFixture } from './tool-server.js';
+import { RECORDS_SEARCH, fixtureRequest, toolServerFixture, type ToolServerFixture } from './tool-server.js';
 
 export interface ConformanceScript {
   toolCall: { name: string; args: Record<string, unknown> };
@@ -22,7 +22,8 @@ export interface ConformanceHarness {
   skills?: readonly RunSkill[];
 }
 
-async function collect(events: AsyncIterable<RunEvent>): Promise<RunEvent[]> {
+/** Every event of a run, in order, once it has ended: what a suite asserting on a whole run reads. */
+export async function collectRunEvents(events: AsyncIterable<RunEvent>): Promise<RunEvent[]> {
   const out: RunEvent[] = [];
   for await (const e of events) out.push(e);
   return out;
@@ -39,14 +40,7 @@ export function runtimeConformance(name: string, harness: ConformanceHarness): v
     let fixture: ToolServerFixture;
     let session: RuntimeSession;
     beforeEach(async () => {
-      fixture = await toolServerFixture([
-        {
-          name: 'records_search',
-          description: 'search',
-          inputSchema: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] },
-          handler: ({ query }) => ({ status: 'ok', result: { hits: [String(query)] } }),
-        },
-      ]);
+      fixture = await toolServerFixture([RECORDS_SEARCH]);
       session = await harness.connect();
     });
     afterEach(async () => {
@@ -59,7 +53,7 @@ export function runtimeConformance(name: string, harness: ConformanceHarness): v
 
     it('calls tools only through request.tools, and reports each call once', async () => {
       await harness.script({ toolCall: { name: 'records_search', args: { query: 'ada' } }, finalText: 'done' });
-      const events = await collect(session.run(request()).events);
+      const events = await collectRunEvents(session.run(request()).events);
       expect(fixture.calls).toEqual([{ name: 'records_search', args: { query: 'ada' } }]);
       expect(events.filter((e) => e.type === 'tool_call')).toHaveLength(1);
       expect(events.filter((e) => e.type === 'tool_result')).toEqual([
@@ -86,7 +80,7 @@ export function runtimeConformance(name: string, harness: ConformanceHarness): v
         },
       });
       try {
-        await collect(session.run(request()).events);
+        await collectRunEvents(session.run(request()).events);
       } finally {
         process.env = real;
       }
@@ -96,7 +90,7 @@ export function runtimeConformance(name: string, harness: ConformanceHarness): v
 
     it('emits exactly one done or error, and done carries the final text', async () => {
       await harness.script({ toolCall: { name: 'records_search', args: { query: 'x' } }, finalText: 'All done.' });
-      const events = await collect(session.run(request()).events);
+      const events = await collectRunEvents(session.run(request()).events);
       const terminal = events.filter((e) => e.type === 'done' || e.type === 'error');
       expect(terminal).toEqual([{ type: 'done', text: expect.stringContaining('All done.') as string }]);
       expect(events.at(-1)).toBe(terminal[0]);
@@ -128,7 +122,7 @@ export function runtimeConformance(name: string, harness: ConformanceHarness): v
         finalText: 'done',
         skill: { name: skill.name, version: skill.version },
       });
-      const events = await collect(session.run(request()).events);
+      const events = await collectRunEvents(session.run(request()).events);
       const activated = events.findIndex((e) => e.type === 'skill_activated');
       const firstCall = events.findIndex((e) => e.type === 'tool_call');
       expect(activated).toBeGreaterThanOrEqual(0);
@@ -139,7 +133,7 @@ export function runtimeConformance(name: string, harness: ConformanceHarness): v
     it('sends request.model.user on every model request', async () => {
       if (!harness.modelRequests) return;
       await harness.script({ toolCall: { name: 'records_search', args: { query: 'x' } }, finalText: 'done' });
-      await collect(
+      await collectRunEvents(
         session.run(request({ model: { baseUrl: 'unused', apiKey: 'sk', route: 'chat', user: 'u-conformance' } }))
           .events,
       );
