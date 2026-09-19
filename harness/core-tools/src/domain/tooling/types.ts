@@ -83,7 +83,7 @@ export interface ToolDeps {
   /** How to reach the model gateway. Every model call goes through it. */
   gateway: GatewayConfig;
   /**
-   * Absolute root of the file store, from `storageRoot()`: required, with no
+   * Absolute root of the file store, from `storageRoot(env)`: required, with no
    * default, so a deployment that has not said where files live fails at
    * startup instead of scattering ingested documents into the working
    * directory. One root serves both halves and they do not collide: ingested
@@ -111,10 +111,13 @@ export interface ToolDeps {
    * withholds that one tool while everything else in the `read` class still works. A name no
    * loaded pack or kernel catalogue publishes is simply not there to hide.
    *
-   * It withholds **kernel** names: `publishedCatalogue` applies this set before any pack
-   * contributes, so a tool a pack publishes under its own name — including a pack's replacement
-   * of a kernel name — is published whatever this list says. A deployment that wants a pack's
-   * tool gone removes the pack, or sets that tool's action class to `blocked`.
+   * It withholds a name from the published catalogue whoever publishes it — the kernel, a loaded
+   * pack, or a pack's replacement of a kernel name — because a client that says it does not serve
+   * a tool means the tool a person would be offered, and which package happens to define it is not
+   * something that client knows. `publishedTools` applies the list after every source has
+   * contributed, for exactly that reason. A hidden name is never registered, so calling it is
+   * refused the way an unknown name is; the handler still exists on `kernelTools`, so a pack's
+   * wrapper can reach it.
    */
   hiddenTools: readonly string[];
   /**

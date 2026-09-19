@@ -69,7 +69,7 @@ describe('the stories pack', () => {
  *
  * Parsed with `readJsonl` from `@harness/shared` rather than with `loadExtractionCases`. That
  * loader lives in `@harness/evals`, and a pack that imported the eval runner would invert the one
- * relationship this pack exists to demonstrate: the runner measures whichever pack `HARNESS_PACKS`
+ * relationship this pack exists to demonstrate: the runner measures whichever pack `--packs`
  * names, and knows none of them. `@harness/shared` is what a pack may reach for, and the checks
  * the loader makes are re-stated below against *this* pack's own kinds, which is the stronger
  * assertion anyway — the loader can only check that `kind` is a string.

@@ -111,7 +111,7 @@ export async function generate(options: GenerateOptions): Promise<GroundTruth> {
 
   // One JSONL case per document, ready for @harness/evals. The case format is the runner's, not
   // this pack's: it calls the list `attachments`, because it loads a corpus from whichever pack
-  // `HARNESS_PACKS` names and "credential" is one pack's word for it. The ground truth above
+  // `--packs` names and "credential" is one pack's word for it. The ground truth above
   // keeps the pack's own vocabulary.
   const cases = documents.map((d) => ({
     id: d.document_id,

@@ -36,7 +36,7 @@ export interface Principal {
 
 /** A connected identity plug-in. */
 export interface IdentitySession {
-  /** The plug-in's name, as `HARNESS_IDENTITY` named it. */
+  /** The plug-in's name, as the client document's `identityPlugin.kind` named it. */
   readonly name: string;
   /**
    * The principal behind a surface user id, or null. **Null is "not authorised", never a guest**:

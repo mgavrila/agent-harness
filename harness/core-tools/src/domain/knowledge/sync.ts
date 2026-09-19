@@ -89,8 +89,11 @@ export async function syncKnowledge(deps: ToolDeps, opts: { dir?: string } = {})
     );
   }
   const now = deps.now();
-  // A stable, readable location rather than the absolute path, which differs between a checkout
-  // and a container and would rewrite the row on every start for no reason.
+  // A stable, readable label on the `knowledge_sources` row rather than the absolute path, which
+  // differs between a checkout and a container and would rewrite the row on every start for no
+  // reason. Nothing opens it: `dir` above is what is read. It still spells the old client-folder
+  // layout, which Task 9 changes when it moves `clients/` out of the repository — changing the
+  // string rewrites existing rows, so it moves with them rather than ahead of them.
   const location = opts.dir ?? path.posix.join('clients', deps.client, 'knowledge');
   const { id: sourceId } = await findOrCreateSource(
     deps.db,

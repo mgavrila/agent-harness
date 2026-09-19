@@ -102,7 +102,7 @@ export const ClientDocumentShape = z
      * until it does a document that carries one would be a document whose plug-ins nothing runs.
      */
     plugins: z.array(z.unknown()).max(0, 'declared plug-ins arrive in Plan 12').default([]),
-    /** Package names, as `HARNESS_PACKS` held them. An empty list is a client with no pack. */
+    /** Package names of the packs this client serves. An empty list is a client with no pack. */
     packs: z.array(z.string().min(1)).default([]),
   })
   .strict();
