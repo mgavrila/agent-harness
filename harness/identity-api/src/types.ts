@@ -1,4 +1,4 @@
-import type { EnvSource, Level, Logger } from '@harness/shared';
+import type { EnvSource, Level, Logger, SurfaceDirectory } from '@harness/shared';
 
 /** The four levels a person may hold. A `service` level belongs to a declared service, never to a default. */
 export type UserLevel = Exclude<Level, 'service'>;
@@ -71,6 +71,15 @@ export interface IdentityDeps {
   log: Logger;
   identity: IdentityFile;
   settings: Readonly<Record<string, unknown>>;
+  /**
+   * The directories the loaded surfaces offer, by surface name.
+   *
+   * A directory-backed plug-in reads group membership through this and never imports a surface:
+   * `pnpm arch` forbids the edge, and the reason it forbids it is that a plug-in which knew one
+   * transport would have to be rewritten for the next one. A surface with no directory is simply
+   * absent from the map.
+   */
+  directories: Readonly<Record<string, SurfaceDirectory>>;
 }
 
 /** What an `identities/*` package exports as `identity`. */

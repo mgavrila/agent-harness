@@ -52,9 +52,9 @@ function assertSecretsPresent(document: LoadedDocument['document'], env: Record<
  *
  * Everything a `Host` holds, built from the resolved document and from the deployment's own
  * environment — and nothing shared with another tenant but the database handle, the logger and
- * the clock. The order is the order `app/main.ts` had, and for the same reasons: identity first
- * because the host's own principal has to be declared; playbooks before a surface connects, so a
- * malformed schedule fails with no socket open; the runtime last before the object is built.
+ * the clock. Playbooks first, so a malformed schedule fails with no socket open; then the
+ * surfaces; then identity, which a directory-backed plug-in cannot connect before the surface it
+ * reads group membership from; then the runtime, last before the object is built.
  */
 export async function openTenant(pool: HostPool, loaded: LoadedDocument): Promise<Tenant> {
   const { document, version } = loaded;
@@ -62,20 +62,6 @@ export async function openTenant(pool: HostPool, loaded: LoadedDocument): Promis
   const log = pool.log;
   const config = await buildKernelConfig(document, pool.env);
   assertSecretsPresent(document, env);
-
-  const identity = await loadIdentity(identitySpecifier(document.identityPlugin.kind), {
-    env: pool.env,
-    log,
-    identity: parseIdentityFileWithDefaults(document.identity),
-    settings: document.identityPlugin.settings,
-  });
-  const servicePrincipalId = envOrDefault('HARNESS_HOST_PRINCIPAL', 'svc-host', pool.env);
-  const servicePrincipal = await identity.get(servicePrincipalId);
-  if (!servicePrincipal || servicePrincipal.kind !== 'service') {
-    throw new ConfigError(
-      `client "${config.client}": HARNESS_HOST_PRINCIPAL names "${servicePrincipalId}", which the identity plug-in "${identity.name}" does not declare as a service`,
-    );
-  }
 
   // The document into the table, once per open, and before a surface or the runtime connects: a
   // playbook added or removed takes effect when the tenant is next opened, a firing missed while
@@ -92,6 +78,30 @@ export async function openTenant(pool: HostPool, loaded: LoadedDocument): Promis
     log,
     storageDir: config.storageDir,
   });
+
+  // Identity comes after the surfaces, and that is a deliberate change of startup order: a
+  // directory-backed plug-in resolves a level from group membership, so the surface it asks has
+  // to be connected before it can ask anything. The consequence is that this host's own service
+  // principal is checked after the surfaces are up rather than before — a document that names a
+  // principal nobody declares now fails with sockets open, and `close()` shuts them again.
+  const directories = Object.fromEntries(
+    surfaces.all.filter((session) => session.directory).map((session) => [session.name, session.directory!]),
+  );
+  const identity = await loadIdentity(identitySpecifier(document.identityPlugin.kind), {
+    env: pool.env,
+    log,
+    identity: parseIdentityFileWithDefaults(document.identity),
+    settings: document.identityPlugin.settings,
+    directories,
+  });
+  const servicePrincipalId = envOrDefault('HARNESS_HOST_PRINCIPAL', 'svc-host', pool.env);
+  const servicePrincipal = await identity.get(servicePrincipalId);
+  if (!servicePrincipal || servicePrincipal.kind !== 'service') {
+    throw new ConfigError(
+      `client "${config.client}": HARNESS_HOST_PRINCIPAL names "${servicePrincipalId}", which the identity plug-in "${identity.name}" does not declare as a service`,
+    );
+  }
+
   const runtime = await loadRuntime(runtimeSpecifier(document.runtime), {
     // The one per-tenant thing a runtime is told. `RuntimeDeps` is `{ env, log, databaseUrl,
     // storageDir }` and a pooled host's process environment has no HARNESS_CLIENT — that is what

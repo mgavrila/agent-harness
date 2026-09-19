@@ -90,6 +90,9 @@ const DEPLOYMENT_FORBIDDEN = /demo-practice|hermes/i;
  * product area, a framework or a client's name would be the coupling this package exists to
  * remove, which is also why `runtime` is a plug-in *name* there and not a literal.
  *
+ * `identities/slack-groups/src` is exempt from the messaging list for the same reason
+ * `surfaces/slack` is — it *is* the vendor — and scanned for the other two like `identities/static`.
+ *
  * **The allowlist is empty and must stay empty.** A word that has to appear belongs in a pack or
  * in an adapter, or the comment that carries it should say what the kernel actually means: a
  * model *vendor*, a *record*, a *file*, a *surface*. Adding an entry here is a decision to write
@@ -185,6 +188,20 @@ const SCANNED = [
     root: 'identities/static/src',
     forbidden: DEPLOYMENT_FORBIDDEN,
     minFiles: 1,
+    skip: [/\.test\.ts$/],
+  },
+  {
+    what: 'framework and vendor vocabulary',
+    root: 'identities/slack-groups/src',
+    forbidden: FRAMEWORK_FORBIDDEN,
+    minFiles: 2,
+    skip: [/\.test\.ts$/],
+  },
+  {
+    what: 'deployment vocabulary',
+    root: 'identities/slack-groups/src',
+    forbidden: DEPLOYMENT_FORBIDDEN,
+    minFiles: 2,
     skip: [/\.test\.ts$/],
   },
   {

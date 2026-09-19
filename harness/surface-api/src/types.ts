@@ -1,4 +1,4 @@
-import type { EnvSource, Logger } from '@harness/shared';
+import type { EnvSource, Logger, SurfaceDirectory } from '@harness/shared';
 
 /**
  * Every declaration of the surface contract, in one leaf module.
@@ -222,6 +222,13 @@ export interface SurfaceSession {
   readonly capabilities: SurfaceCapabilities;
   /** Where this surface posts when nobody names a conversation. */
   readonly defaultConversation: string;
+  /**
+   * Who this surface's users are and what groups they are in, when it can say.
+   *
+   * Optional: a transport with no notion of a directory simply does not offer one, and an
+   * identity plug-in that wanted one is told so at load rather than at the first message.
+   */
+  readonly directory?: SurfaceDirectory;
   /** How this surface spells a mention of a user inside plain text. */
   mention(userId: string): string;
   /**

@@ -126,6 +126,7 @@ describe('the shipped demo playbooks (I1)', () => {
       log: f.host.log,
       identity: identitySection,
       settings: {},
+      directories: {},
     });
     // Skills, loaded the way main.ts loads them — the kernel's own directory first, then the
     // shipped pack's. `knowledge-sync` lives in the first and `credentialing-expirations` in the

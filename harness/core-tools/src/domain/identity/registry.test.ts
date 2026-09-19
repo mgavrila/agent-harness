@@ -13,7 +13,7 @@ const log = createLogger('test');
 const section = parseIdentityFileWithDefaults({
   principals: [{ id: 'u-coordinator', kind: 'user', level: 'lead', displayName: 'Coordinator' }],
 });
-const deps = { env: {}, log, identity: section, settings: {} };
+const deps = { env: {}, log, identity: section, settings: {}, directories: {} };
 
 describe('loadIdentity', () => {
   it('loads a plug-in by package name and connects it with the identity section it is handed', async () => {

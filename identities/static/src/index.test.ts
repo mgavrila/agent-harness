@@ -15,7 +15,7 @@ function file(extra: Record<string, unknown> = {}): IdentityFile {
 }
 
 const connect = (identityFile: IdentityFile, logger = log) =>
-  identity.connect({ env: {}, log: logger, identity: identityFile, settings: {} });
+  identity.connect({ env: {}, log: logger, identity: identityFile, settings: {}, directories: {} });
 
 describe('the static identity plug-in', () => {
   it('declares itself the way every plug-in does, and reads no environment variable', () => {

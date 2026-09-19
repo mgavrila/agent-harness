@@ -56,5 +56,34 @@ export function webClientApi(client: WebClient): SlackApi {
         return { messages: (res.messages ?? []).map((m) => ({ user: m.user, bot_id: m.bot_id })) };
       },
     },
+    usergroups: {
+      // Narrowed to the id, because that is all a level is decided from: a group's name and its
+      // handle are an operator's words and change without the mapping changing.
+      list: async () => {
+        const res = await client.usergroups.list({});
+        return { usergroups: (res.usergroups ?? []).flatMap((g) => (g.id ? [{ id: g.id }] : [])) };
+      },
+      users: {
+        list: async (args) => {
+          const res = await client.usergroups.users.list({ usergroup: args.usergroup });
+          return { users: res.users };
+        },
+      },
+    },
+    users: {
+      // Narrowed to the two name fields the directory reads, so nothing else a Slack profile
+      // carries — an email, a phone number, a photo URL — travels past this boundary.
+      info: async (args) => {
+        const res = await client.users.info({ user: args.user });
+        return {
+          user: res.user
+            ? {
+                real_name: res.user.real_name,
+                profile: { display_name: res.user.profile?.display_name, real_name: res.user.profile?.real_name },
+              }
+            : undefined,
+        };
+      },
+    },
   };
 }

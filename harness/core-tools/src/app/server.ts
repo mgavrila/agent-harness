@@ -24,6 +24,9 @@ export async function resolvePrincipal(document: ClientDocument, env: NodeJS.Pro
     log,
     identity: parseIdentityFileWithDefaults(document.identity),
     settings: document.identityPlugin.settings,
+    // A stdio server connects no surface, so there is no directory to offer. A document whose
+    // plug-in needs one fails here, naming the surface, rather than resolving nobody.
+    directories: {},
   });
   try {
     const id = envOrDefault('HARNESS_PRINCIPAL', 'svc-local', env);

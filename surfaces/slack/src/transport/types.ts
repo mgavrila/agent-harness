@@ -54,6 +54,23 @@ export interface SlackPostResult {
   channel?: string;
 }
 
+/** One user group. Only its id is read: the directory maps ids to levels, never names to them. */
+export interface SlackUsergroup {
+  id: string;
+}
+
+export interface SlackUsergroupsListResult {
+  usergroups?: SlackUsergroup[];
+}
+
+export interface SlackUsergroupUsersResult {
+  users?: string[];
+}
+
+export interface SlackUserInfoResult {
+  user?: { real_name?: string; profile?: { display_name?: string; real_name?: string } };
+}
+
 /**
  * The slice of Slack's Web API this app uses. Declaring it ourselves keeps the
  * tests free of a Slack client: `FakeSlack` implements this and nothing else,
@@ -73,6 +90,14 @@ export interface SlackApi {
   };
   conversations: {
     replies(args: SlackRepliesArgs): Promise<SlackRepliesResult>;
+  };
+  /** User groups, which is how a workspace says who is a lead and who is not. */
+  usergroups: {
+    list(): Promise<SlackUsergroupsListResult>;
+    users: { list(args: { usergroup: string }): Promise<SlackUsergroupUsersResult> };
+  };
+  users: {
+    info(args: { user: string }): Promise<SlackUserInfoResult>;
   };
 }
 
