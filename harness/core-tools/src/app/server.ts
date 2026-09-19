@@ -9,7 +9,7 @@ import { openRun } from '../domain/session/repository.js';
 
 const log = createLogger('core-tools');
 
-/** Re-exported so `buildKernelConfig` and this module name the client folder the one way. */
+/** Re-exported for `server.test.ts`, which pins the folder layout through this module. */
 export { clientDirFor };
 
 /**
