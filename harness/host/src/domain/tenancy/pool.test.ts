@@ -1,8 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { eq } from 'drizzle-orm';
-import { auditLog, threads } from '@harness/db';
+import { auditLog, runs, threads } from '@harness/db';
 import { parseClientDocument } from '@harness/config-api';
 import { fixtureDocument } from '@harness/config-api/testing';
+import { MemorySurface } from '@harness/surface-api/testing';
 import { poolFixture, useTestDb, waitFor } from '../../testing.js';
 
 const db = useTestDb();
@@ -104,6 +105,59 @@ describe('createHost', () => {
     expect(refusals.map((row) => [row.client, row.tool])).toEqual([['alpha', 'host_message']]);
     // And no thread was opened for it: the refusal is the whole of what happened.
     expect(await db.select().from(threads)).toHaveLength(1);
+    await f.close();
+  });
+
+  it('opens one tenant when two callers miss together, rather than one each', async () => {
+    const f = await poolFixture(db, { documents: [doc('alpha')] });
+    // A client the pool has not opened: the source learns about it after the warm-up, which is
+    // the cold miss the run API takes every time it names a client on a pooled host.
+    f.source.put(doc('gamma'), 'v1');
+    const load = vi.spyOn(f.source, 'load');
+
+    const [first, second] = await Promise.all([f.pool.tenantFor('gamma'), f.pool.tenantFor('gamma')]);
+
+    // One tenant, handed to both callers. Two would mean two schedulers for one client — a
+    // playbook firing twice — with the loser's runner, runtime and surfaces running unreferenced.
+    expect(first).not.toBeNull();
+    expect(first).toBe(second);
+    expect(load).toHaveBeenCalledTimes(1);
+    expect([...f.pool.tenants.keys()].sort()).toEqual(['alpha', 'gamma']);
+    await f.close();
+  });
+
+  it("answers or drops a message that arrives while a document is reloading, and never audits it as another client's", async () => {
+    const f = await poolFixture(db, {
+      documents: [doc('alpha', 'W-ALPHA')],
+      // Long enough to still be in flight when the reload begins, and well under the no-sleep
+      // ceiling a test has to keep to.
+      trajectories: { alpha: [{ sleep: 100 }, { say: 'Alpha here.' }] },
+    });
+    const before = f.tenant('alpha');
+    // The session is held, the way a transport holds its connection, rather than looked up
+    // through the pool: a message arrives on the socket that is already open, whatever the map
+    // says at that instant.
+    const connected = before.host.surfaces.find('memory') as MemorySurface;
+    void connected.say('U012', 'Something slow.', { tenantHint: 'W-ALPHA' });
+    await waitFor(() => before.host.active.size > 0);
+
+    const reloading = f.pool.invalidate('alpha');
+    await waitFor(() => before.host.draining);
+    // Mid-reload, on the tenant's own surface, with its own workspace key: this belongs to the
+    // tenant that is reloading, so it is answered or dropped — never refused as another client's.
+    await connected.say('U012', 'And another.', { tenantHint: 'W-ALPHA' });
+    await reloading;
+
+    expect(await db.select().from(auditLog).where(eq(auditLog.decision, 'unauthorised'))).toEqual([]);
+    // The turn the drain aborted closed its own row rather than being left `running` forever.
+    expect((await db.select().from(runs)).filter((row) => row.status === 'running')).toEqual([]);
+
+    // And the reopened tenant serves the next message, on its own fresh surface.
+    const after = f.tenant('alpha');
+    expect(after).not.toBe(before);
+    await f.surface('alpha').say('U012', 'Are you back?', { tenantHint: 'W-ALPHA' });
+    await waitFor(() => f.surface('alpha').texts.length > 0);
+    expect(f.surface('alpha').texts.map((t) => t.text)).toEqual(['Alpha here.']);
     await f.close();
   });
 

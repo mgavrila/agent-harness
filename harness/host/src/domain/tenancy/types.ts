@@ -30,6 +30,16 @@ export interface Tenant {
   readonly host: Host;
   readonly runner: Awaited<ReturnType<typeof startRunner>>;
   readonly scheduler: SchedulerHandle;
+  /**
+   * Stop everything that brings work in — the scheduler, the approvals runner and every surface —
+   * and leave the rest running so the turns in flight can finish. Idempotent, and never throws.
+   *
+   * This is the first half of `close`, separated because `invalidate` has to run it *before* it
+   * evicts the tenant: a message that arrives while a document is reloading belongs to the tenant
+   * that is reloading, and a tenant already out of the map would have it refused as another
+   * client's and audited as such.
+   */
+  quiesce(): Promise<void>;
   /** Stop everything this tenant holds, in the order a shutdown needs. Never throws. */
   close(): Promise<void>;
 }

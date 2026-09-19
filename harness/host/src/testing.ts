@@ -1,4 +1,5 @@
 import { mkdtempSync } from 'node:fs';
+import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { ClientDocument } from '@harness/config-api';
@@ -218,8 +219,9 @@ export async function poolFixture(
   },
 ): Promise<PoolFixture> {
   const source = new MemoryConfigSource(opts.documents.map((document) => ({ document, version: 'v1' })));
+  const storageDir = mkdtempSync(path.join(tmpdir(), 'harness-pool-'));
   const env: Record<string, string | undefined> = {
-    HARNESS_STORAGE_DIR: mkdtempSync(path.join(tmpdir(), 'harness-pool-')),
+    HARNESS_STORAGE_DIR: storageDir,
     HARNESS_ENCRYPTION_KEY: TEST_ENCRYPTION_KEY,
     LITELLM_MASTER_KEY: 'sk-test',
     ...opts.env,
@@ -256,6 +258,8 @@ export async function poolFixture(
       await pool.close();
       // So one case's script cannot reach the next case's tenant.
       scriptedTrajectories.clear();
+      // And so a suite does not leave one storage tree per fixture behind in the temp directory.
+      await rm(storageDir, { recursive: true, force: true });
     },
   };
 }

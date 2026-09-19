@@ -1,4 +1,4 @@
-import { mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it, onTestFinished } from 'vitest';
@@ -91,6 +91,18 @@ describe('two tenants in one host (invariant 13)', () => {
       );
       await asMember.close('done');
       await db.update(approvals).set({ status: 'approved' }).where(eq(approvals.id, approvalId));
+      // A document on file. One storage root serves the whole deployment, so alpha's file sits on
+      // the same disk beta can reach — which is the point: the row is alpha's, and the read is
+      // what has to say so.
+      const storageDir = f.tenant('alpha').host.config.storageDir;
+      await mkdir(path.join(storageDir, 'incoming'), { recursive: true });
+      await writeFile(path.join(storageDir, 'incoming', 'alpha-note.txt'), 'Alpha keeps this on file.\n', 'utf8');
+      const ingested = resultOf<{ document_id: string }>(
+        await alpha.client.callTool({
+          name: 'documents_ingest',
+          arguments: { path: 'incoming/alpha-note.txt' },
+        }),
+      );
       // And a thread of messages, driven the way a person would: a message on alpha's surface.
       await f.surface('alpha').say('U012', 'Alpha closes at five, remember.', { tenantHint: 'W-ALPHA' });
       await waitFor(() => f.surface('alpha').texts.length > 0);
@@ -143,6 +155,12 @@ describe('two tenants in one host (invariant 13)', () => {
         await beta.client.callTool({ name: 'documents_list', arguments: {} }),
       );
       expect(documents.documents).toEqual([]);
+      const gotDocument = await beta.client.callTool({
+        name: 'documents_get',
+        arguments: { document_id: ingested.document_id },
+      });
+      expect(gotDocument.isError ?? false).toBe(true);
+      expect(JSON.stringify(gotDocument)).not.toContain('alpha-note');
 
       // And the same reads on alpha answer, so none of the above passed because the read failed.
       expect(
@@ -150,6 +168,28 @@ describe('two tenants in one host (invariant 13)', () => {
           await alpha.client.callTool({ name: 'providers_search', arguments: { query: 'Ada' } }),
         ).providers.map((p) => p.name),
       ).toEqual(['Ada Lovelace']);
+      expect(
+        resultOf<{ provider: { name: string } }>(
+          await alpha.client.callTool({ name: 'providers_get', arguments: { provider_id: recordId } }),
+        ).provider.name,
+      ).toBe('Ada Lovelace');
+      expect(
+        JSON.stringify(
+          resultOf<{ entries: unknown[] }>(
+            await alpha.client.callTool({ name: 'audit_query', arguments: { limit: 50 } }),
+          ),
+        ),
+      ).toContain('providers_upsert');
+      expect(
+        resultOf<{ documents: { id: string }[] }>(
+          await alpha.client.callTool({ name: 'documents_list', arguments: {} }),
+        ).documents.length,
+      ).toBe(1);
+      expect(
+        resultOf<{ document: { storage_path: string } }>(
+          await alpha.client.callTool({ name: 'documents_get', arguments: { document_id: ingested.document_id } }),
+        ).document.storage_path,
+      ).toBe('incoming/alpha-note.txt');
       expect(
         resultOf<{ fields: unknown[] }>(
           await alpha.client.callTool({ name: 'providers_list_pending', arguments: { provider_id: recordId } }),

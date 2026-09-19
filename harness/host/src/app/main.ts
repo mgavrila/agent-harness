@@ -51,7 +51,11 @@ const health = startHealthServer({
       ),
     );
     if (dedicatedClient !== null && entries.length === 1) return entries[0][1];
-    return { ok: entries.every(([, snapshot]) => snapshot.ok), tenants: Object.fromEntries(entries) };
+    // A dedicated host between tenants — its one client is reloading — has nothing serving, and
+    // `every` over an empty list would call that healthy. `ok: false` is the true answer, and the
+    // shape says which tenants there are, which is none.
+    const serving = entries.length > 0 && entries.every(([, snapshot]) => snapshot.ok);
+    return { ok: serving, tenants: Object.fromEntries(entries) };
   },
 });
 

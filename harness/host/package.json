@@ -34,7 +34,6 @@
     "zod": "^4.6.5"
   },
   "devDependencies": {
-    "@harness/config-files": "workspace:*",
     "@harness/pack-healthcare": "workspace:*",
     "@harness/runtime-scripted": "workspace:*",
     "@types/node": "^26.5.1",

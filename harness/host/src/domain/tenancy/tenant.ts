@@ -10,7 +10,7 @@ import { parsePlaybooksFile, surfaceNamesOf, surfaceSecretsOf } from '@harness/c
 import { buildKernelConfig, loadIdentity, reconcile } from '@harness/core-tools';
 import { outRoot } from '@harness/core-tools/storage';
 import { parseIdentityFileWithDefaults } from '@harness/identity-api';
-import { ConfigError, describeError, envOrDefault, numberFromEnv, optionalEnv } from '@harness/shared';
+import { ConfigError, describeError, envOrDefault, numberFromEnv, optionalEnv, type Logger } from '@harness/shared';
 import { TIMEOUT_MARGIN_MS } from '../conversation.js';
 import type { Host } from '../host.js';
 import { syncPlaybooks } from '../playbooks/repository.js';
@@ -47,6 +47,31 @@ function assertSecretsPresent(document: LoadedDocument['document'], env: Record<
   }
 }
 
+/** One thing a tenant holds open, and how to let go of it. */
+interface Stoppable {
+  what: string;
+  stop: () => Promise<void>;
+}
+
+/**
+ * Stop every one of these, in order, and never throw.
+ *
+ * `Tenant.close()` promises exactly this, and a rejecting `session.stop()` that skipped the stops
+ * after it would leave a runtime and a database client running for a tenant the pool has already
+ * forgotten — and, inside `invalidate`, would skip the reopen and leave the client unserved until
+ * the process restarts. A failure here is a log line and nothing else, because there is no caller
+ * left who could do anything about it.
+ */
+async function stopEach(steps: readonly Stoppable[], client: string, log: Logger): Promise<void> {
+  for (const step of steps) {
+    try {
+      await step.stop();
+    } catch (err) {
+      log.error(`tenant ${client}: could not stop ${step.what}: ${describeError(err)}`);
+    }
+  }
+}
+
 /**
  * Open one client: its configuration, its plug-ins, its playbooks, its loops.
  *
@@ -57,6 +82,20 @@ function assertSecretsPresent(document: LoadedDocument['document'], env: Record<
  * reads group membership from; then the runtime, last before the object is built.
  */
 export async function openTenant(pool: HostPool, loaded: LoadedDocument): Promise<Tenant> {
+  // What this open has already started, newest last. A tenant that fails halfway — a runtime that
+  // will not connect, a service principal the document does not declare — would otherwise leave a
+  // connected surface and a running loop behind with no handle to stop them, and `invalidate`
+  // reopens a tenant on the ordinary path every time a document changes.
+  const opened: Stoppable[] = [];
+  try {
+    return await buildTenant(pool, loaded, opened);
+  } catch (err) {
+    await stopEach([...opened].reverse(), loaded.document.id, pool.log);
+    throw err;
+  }
+}
+
+async function buildTenant(pool: HostPool, loaded: LoadedDocument, opened: Stoppable[]): Promise<Tenant> {
   const { document, version } = loaded;
   const env = pool.env as Record<string, string | undefined>;
   const log = pool.log;
@@ -78,6 +117,7 @@ export async function openTenant(pool: HostPool, loaded: LoadedDocument): Promis
     log,
     storageDir: config.storageDir,
   });
+  for (const session of surfaces.all) opened.push({ what: `surface "${session.name}"`, stop: () => session.stop() });
 
   // Identity comes after the surfaces, and that is a deliberate change of startup order: a
   // directory-backed plug-in resolves a level from group membership, so the surface it asks has
@@ -94,6 +134,7 @@ export async function openTenant(pool: HostPool, loaded: LoadedDocument): Promis
     settings: document.identityPlugin.settings,
     directories,
   });
+  opened.push({ what: 'the identity session', stop: () => identity.stop() });
   const servicePrincipalId = envOrDefault('HARNESS_HOST_PRINCIPAL', 'svc-host', pool.env);
   const servicePrincipal = await identity.get(servicePrincipalId);
   if (!servicePrincipal || servicePrincipal.kind !== 'service') {
@@ -112,6 +153,7 @@ export async function openTenant(pool: HostPool, loaded: LoadedDocument): Promis
     databaseUrl: optionalEnv('DATABASE_URL', pool.env) ?? '',
     storageDir: config.storageDir,
   });
+  opened.push({ what: 'the runtime', stop: () => runtime.stop() });
 
   const skillsDir = await materialiseSkills(document, path.join(config.storageDir, SKILLS_SUBDIR));
   const host: Host = {
@@ -152,6 +194,7 @@ export async function openTenant(pool: HostPool, loaded: LoadedDocument): Promis
     servicePrincipal,
     now: pool.now,
   });
+  opened.push({ what: 'the core-tools client', stop: () => core.close() });
   const deps = decisionDeps(host, core);
   for (const session of surfaces.all) registerApprovalHandlers(session, deps);
 
@@ -174,7 +217,9 @@ export async function openTenant(pool: HostPool, loaded: LoadedDocument): Promis
       staleAfterMinutes: 10,
     },
   );
+  opened.push({ what: 'the approvals runner', stop: () => runner.stop() });
   const scheduler = startScheduler(host, { tickMs: SCHEDULER_TICK_MS });
+  opened.push({ what: 'the scheduler', stop: () => scheduler.stop() });
 
   // This tenant's own startup repair, scoped to this tenant: a pooled host that repaired
   // everything each time a tenant opened would expire one client's approvals because another
@@ -190,6 +235,36 @@ export async function openTenant(pool: HostPool, loaded: LoadedDocument): Promis
     `tenant ${config.client} open (version=${version}, principal=${servicePrincipal.id}, runtime=${runtime.name}, identity=${identity.name}, surfaces=${surfaces.all.map((s) => s.name).join(',')}, primary=${surfaces.primary.name} on ${surfaces.primary.defaultConversation}, skills=${host.skills.length}, playbooks=${synced.upserted})`,
   );
 
+  // Everything that brings work into this tenant, stopped once and never twice: the scheduler so
+  // no tick starts, the runner's three loops so no approval or effect is picked up, and every
+  // surface so no message arrives. `invalidate` calls this *before* it evicts the tenant, so an
+  // event that lands mid-reload still finds its own tenant rather than being refused as another
+  // client's; `close` calls it first for the same reason a shutdown does.
+  let quiesced = false;
+  const quiesce = async (): Promise<void> => {
+    if (quiesced) return;
+    quiesced = true;
+    await stopEach(
+      [
+        {
+          what: 'the scheduler',
+          // Bounded: the tick in flight is waiting on a turn the caller's drain has already
+          // aborted, and a runtime that ignored the abort would otherwise hold the whole
+          // shutdown here.
+          stop: () =>
+            Promise.race([
+              scheduler.stop(),
+              new Promise<void>((resolve) => setTimeout(resolve, SCHEDULER_STOP_MS).unref()),
+            ]),
+        },
+        { what: 'the approvals runner', stop: () => runner.stop() },
+        ...surfaces.all.map((session) => ({ what: `surface "${session.name}"`, stop: () => session.stop() })),
+      ],
+      config.client,
+      log,
+    );
+  };
+
   return {
     clientId: config.client,
     version,
@@ -197,17 +272,18 @@ export async function openTenant(pool: HostPool, loaded: LoadedDocument): Promis
     host,
     runner,
     scheduler,
+    quiesce,
     close: async () => {
-      // The scheduler's stop is created first and awaited under a bound: the tick in flight is
-      // waiting on a turn the caller's drain has already aborted, and a runtime that ignored the
-      // abort would otherwise hold the whole shutdown here.
-      const stopping = scheduler.stop();
-      await Promise.race([stopping, new Promise<void>((resolve) => setTimeout(resolve, SCHEDULER_STOP_MS).unref())]);
-      await runner.stop();
-      for (const session of surfaces.all) await session.stop();
-      await runtime.stop();
-      await identity.stop();
-      await core.close();
+      await quiesce();
+      await stopEach(
+        [
+          { what: 'the runtime', stop: () => runtime.stop() },
+          { what: 'the identity session', stop: () => identity.stop() },
+          { what: 'the core-tools client', stop: () => core.close() },
+        ],
+        config.client,
+        log,
+      );
     },
   };
 }
