@@ -22,8 +22,8 @@ const { deps, close } = await buildDepsFromEnv();
 await assertEmbedDims(deps.db, deps.embedDims);
 
 try {
-  const repaired = await reconcile(deps.db, { now: deps.now });
-  log.info(`reconcile on startup: ${JSON.stringify(repaired)}`);
+  const repaired = await reconcile(deps.db, { now: deps.now, client: deps.client });
+  log.info(`reconcile on startup for ${deps.client}: ${JSON.stringify(repaired)}`);
   // A startup repair changes rows nobody asked it to change, so it leaves a
   // trace. Only when it actually repaired something: a no-op start would
   // otherwise write a row on every process launch.

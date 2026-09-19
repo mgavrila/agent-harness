@@ -291,12 +291,65 @@ describe('claimDuePlaybooks with two hosts on one database', () => {
   });
 });
 
+describe('the tenant column on playbook runs', () => {
+  it("claims only its own tenant's due playbooks and writes the tenant on the firing", async () => {
+    const at = new Date('2026-09-16T07:00:30Z');
+    for (const client of ['alpha', 'beta']) {
+      await syncPlaybooks(db, { client, now: NOW, file: 'document' }, [nightly]);
+    }
+    const claimed = await claimDuePlaybooks(db, { client: 'alpha', now: at });
+    expect(claimed).toHaveLength(1);
+    const [row] = await db.select().from(playbookRuns);
+    expect(row.client).toBe('alpha');
+    expect(await claimDuePlaybooks(db, { client: 'gamma', now: at })).toEqual([]);
+  });
+
+  it("claims and closes none of a firing another tenant's writer left behind", async () => {
+    const at = new Date('2026-09-16T07:00:30Z');
+    await syncPlaybooks(db, { client: 'alpha', now: NOW }, [nightly]);
+    const [playbook] = await db.select().from(playbooks);
+    // A writer that was not correct: a requested firing under alpha's playbook carrying another
+    // tenant's id. The join reaches alpha's playbook, so a claim that only joined would take it.
+    await db
+      .insert(playbookRuns)
+      .values({ client: 'beta', playbookId: playbook.id, scheduledAt: NOW, status: 'requested' });
+
+    const claimed = await claimDuePlaybooks(db, { client: 'alpha', now: at });
+    expect(claimed.map((c) => c.run.client)).toEqual(['alpha']);
+    const [theirs] = await db.select().from(playbookRuns).where(eq(playbookRuns.client, 'beta'));
+    expect(theirs.status).toBe('requested');
+
+    // And closing it as alpha does nothing: the id is not alpha's to close.
+    await finishPlaybookRun(db, 'alpha', theirs.id, {
+      status: 'done',
+      runId: null,
+      attempts: 1,
+      error: null,
+      endedAt: at,
+    });
+    const [after] = await db.select().from(playbookRuns).where(eq(playbookRuns.client, 'beta'));
+    expect(after.status).toBe('requested');
+  });
+
+  it("strands none of another tenant's firings when a playbook leaves the file", async () => {
+    await syncPlaybooks(db, { client: 'alpha', now: NOW }, [nightly]);
+    const [playbook] = await db.select().from(playbooks);
+    await db
+      .insert(playbookRuns)
+      .values({ client: 'beta', playbookId: playbook.id, scheduledAt: NOW, status: 'requested' });
+
+    await syncPlaybooks(db, { client: 'alpha', now: NOW }, []);
+    const [theirs] = await db.select().from(playbookRuns).where(eq(playbookRuns.client, 'beta'));
+    expect(theirs.status).toBe('requested');
+  });
+});
+
 describe('finishPlaybookRun', () => {
   it('closes the run row and stamps the playbook last_status', async () => {
     await syncPlaybooks(db, { client: 'test', now: NOW }, [nightly]);
     const [claimed] = await claimDuePlaybooks(db, { client: 'test', now: new Date('2026-09-16T07:00:30Z') });
     const ended = new Date('2026-09-16T07:02:00Z');
-    await finishPlaybookRun(db, claimed.run.id, {
+    await finishPlaybookRun(db, 'test', claimed.run.id, {
       status: 'failed',
       runId: null,
       attempts: 2,
@@ -315,7 +368,13 @@ describe('finishPlaybookRun', () => {
     const [before] = await db.select().from(playbooks);
     // An operator closed a stranded row by hand between the claim and here, as the runbook says.
     await expect(
-      finishPlaybookRun(db, randomUUID(), { status: 'done', runId: null, attempts: 1, error: null, endedAt: NOW }),
+      finishPlaybookRun(db, 'test', randomUUID(), {
+        status: 'done',
+        runId: null,
+        attempts: 1,
+        error: null,
+        endedAt: NOW,
+      }),
     ).resolves.toBeUndefined();
     expect(await db.select().from(playbookRuns)).toEqual([]);
     const [after] = await db.select().from(playbooks);

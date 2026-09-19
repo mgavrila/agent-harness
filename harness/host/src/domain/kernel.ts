@@ -34,6 +34,7 @@ export interface OpenedKernel {
  */
 export async function finishKernel(
   db: Db,
+  client: string,
   runId: string,
   status: RunStatus,
   now: () => Date,
@@ -44,7 +45,7 @@ export async function finishKernel(
   } catch (err) {
     log.error(`could not close the in-process core-tools client for run ${runId}`, err);
   }
-  await closeRun(db, runId, status, now);
+  await closeRun(db, client, runId, status, now);
 }
 
 /**
@@ -72,10 +73,10 @@ export async function openKernel(
       client,
       deps,
       context,
-      close: (status) => finishKernel(host.db, context.runId, status, host.now, close),
+      close: (status) => finishKernel(host.db, host.client, context.runId, status, host.now, close),
     };
   } catch (err) {
-    await closeRun(host.db, context.runId, 'error', host.now);
+    await closeRun(host.db, host.client, context.runId, 'error', host.now);
     throw err;
   }
 }

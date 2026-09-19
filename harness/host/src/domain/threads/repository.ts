@@ -62,12 +62,26 @@ export async function appendMessage(
   return content;
 }
 
-/** The newest `limit` turns of a thread, oldest first: the shape `RunRequest.history` takes. `seq` breaks a timestamp tie, so two rows one transaction wrote come back in the order they were written. */
-export async function recentHistory(db: Db, threadId: string, limit: number): Promise<RunHistoryTurn[]> {
+/**
+ * The newest `limit` turns of a thread, oldest first: the shape `RunRequest.history` takes. `seq`
+ * breaks a timestamp tie, so two rows one transaction wrote come back in the order they were
+ * written.
+ *
+ * Belt and braces (spec invariant 13). The foreign key already reaches a thread that carries the
+ * client, so a correct writer cannot produce a mismatch; a reader that relied on that would be one
+ * join away from another tenant's rows the first time a writer was not correct. A thread id asked
+ * for as somebody else is empty history, not an error.
+ */
+export async function recentHistory(
+  db: Db,
+  client: string,
+  threadId: string,
+  limit: number,
+): Promise<RunHistoryTurn[]> {
   const rows = await db
     .select({ role: messages.role, content: messages.content })
     .from(messages)
-    .where(eq(messages.threadId, threadId))
+    .where(and(eq(messages.client, client), eq(messages.threadId, threadId)))
     .orderBy(desc(messages.createdAt), desc(messages.seq))
     .limit(limit);
   return rows.reverse().map((r) => ({ role: r.role as RunHistoryTurn['role'], content: r.content }));

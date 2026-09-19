@@ -76,7 +76,7 @@ describe('finishRun', () => {
     const context = await openRun(db, { client: 'test', principal: HOST });
     const rejectingClose = () => Promise.reject(new Error('transport already gone'));
     await expect(
-      finishRun(db, context.runId, 'done', () => new Date('2026-09-15T12:00:00Z'), rejectingClose),
+      finishRun(db, 'test', context.runId, 'done', () => new Date('2026-09-15T12:00:00Z'), rejectingClose),
     ).resolves.toBeUndefined();
     const [run] = await db.select().from(runs).where(eq(runs.id, context.runId));
     expect(run).toMatchObject({ status: 'done' });

@@ -36,7 +36,12 @@ export async function searchSessions(
     })
     .from(messages)
     .innerJoin(threads, eq(threads.id, messages.threadId))
-    .where(and(eq(threads.client, deps.client), visible, sql`${messages.tsv} @@ ${query}`))
+    // Both predicates, belt and braces (spec invariant 13): the join proves the thread is this
+    // tenant's and the column proves the message is, and a row that disagrees is a writer's bug
+    // this search makes visible rather than one it ranks into somebody's recall.
+    .where(
+      and(eq(threads.client, deps.client), eq(messages.client, deps.client), visible, sql`${messages.tsv} @@ ${query}`),
+    )
     .orderBy(desc(rank), desc(messages.createdAt), desc(messages.seq))
     .limit(Math.max(1, Math.min(Math.trunc(args.limit), SESSION_SEARCH_LIMIT)));
   return {

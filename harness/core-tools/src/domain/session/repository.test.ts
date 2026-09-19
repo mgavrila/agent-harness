@@ -41,10 +41,22 @@ describe('openRun', () => {
 
   it('closes a run with its status and end time', async () => {
     const context = await openRun(db, { client: 'test', principal: TEST_PRINCIPAL, threadId: null });
-    await closeRun(db, context.runId, 'cancelled', () => new Date('2026-09-15T12:30:00Z'));
+    await closeRun(db, 'test', context.runId, 'cancelled', () => new Date('2026-09-15T12:30:00Z'));
     const [row] = await db.select().from(runs).where(eq(runs.id, context.runId));
     expect(row.status).toBe('cancelled');
     expect(row.endedAt?.toISOString()).toBe('2026-09-15T12:30:00.000Z');
     expect(row.principalId).toBe('u-test');
+  });
+
+  it("closes only its own tenant's run", async () => {
+    const alpha = await openRun(db, { client: 'alpha', principal: TEST_PRINCIPAL });
+    await closeRun(db, 'beta', alpha.runId, 'done');
+    const [stillRunning] = await db.select().from(runs).where(eq(runs.id, alpha.runId));
+    expect(stillRunning.status).toBe('running');
+    expect(stillRunning.endedAt).toBeNull();
+    await closeRun(db, 'alpha', alpha.runId, 'done');
+    const [closed] = await db.select().from(runs).where(eq(runs.id, alpha.runId));
+    expect(closed.status).toBe('done');
+    expect(closed.endedAt).not.toBeNull();
   });
 });

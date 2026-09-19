@@ -164,3 +164,42 @@ describe('readRecord, searchRecords and listPendingFields', () => {
     expect((await listPendingFields(deps, record_id)).fields.map((f) => f.name)).toEqual(['specialty']);
   });
 });
+
+describe('the tenant column on fields and attachments', () => {
+  it("writes it on every row, and never reads a row another tenant's writer left behind", async () => {
+    const alpha = makeTestDeps(db, { client: 'alpha' });
+    const { record_id } = await upsertRecord(alpha, provider());
+    const [field] = await db.select().from(fields).where(eq(fields.recordId, record_id));
+    expect(field.client).toBe('alpha');
+    const [attachment] = await db.select().from(attachments).where(eq(attachments.recordId, record_id));
+    expect(attachment.client).toBe('alpha');
+
+    // A writer that was not correct: rows hanging off alpha's record that carry another tenant's
+    // id. The foreign key says alpha owns them and the column says beta does, and a read that
+    // trusted the foreign key alone would hand alpha both.
+    await db.insert(fields).values({ client: 'beta', recordId: record_id, name: 'leaked', value: 'x' });
+    await db.insert(attachments).values({ client: 'beta', recordId: record_id, kind: 'license' });
+
+    const read = await readRecord(alpha, record_id);
+    expect(read.fields.map((f) => f.name)).toEqual(['specialty']);
+    expect(read.attachments.map((a) => a.kind)).toEqual(['license']);
+    expect((await listPendingFields(alpha, record_id)).fields.map((f) => f.name)).toEqual([]);
+  });
+
+  it("counts and overwrites only its own tenant's rows", async () => {
+    const alpha = makeTestDeps(db, { client: 'alpha' });
+    const { record_id } = await upsertRecord(alpha, provider());
+    await db.insert(fields).values({ client: 'beta', recordId: record_id, name: 'leaked', value: 'x' });
+    await db.insert(attachments).values({ client: 'beta', recordId: record_id, kind: 'license', state: 'NY' });
+
+    // The attachment count reported back is alpha's own, not every row hanging off the record.
+    const again = await upsertRecord(alpha, provider());
+    expect(again.attachments).toBe(1);
+
+    // And alpha's own licence upsert did not reach across and overwrite beta's row.
+    const [theirs] = await db.select().from(attachments).where(eq(attachments.client, 'beta'));
+    expect(theirs.state).toBe('NY');
+    expect(theirs.issuer).toBeNull();
+    expect(await db.$count(fields, eq(fields.client, 'beta'))).toBe(1);
+  });
+});

@@ -33,7 +33,13 @@ export async function recomputeDeadlines(
   recordKind?: string,
 ): Promise<DeadlinesComputeResult> {
   await requireRecord(deps, recordId, recordKind);
-  const rows = await deps.db.select().from(attachments).where(eq(attachments.recordId, recordId));
+  // Belt and braces (spec invariant 13). The foreign key already reaches a row that carries the
+  // client, so a correct writer cannot produce a mismatch; a reader that relied on that would be
+  // one join away from another tenant's rows the first time a writer was not correct.
+  const rows = await deps.db
+    .select()
+    .from(attachments)
+    .where(and(eq(attachments.client, deps.client), eq(attachments.recordId, recordId)));
   const computed = computeDeadlines(
     rows.map((a) => ({ id: a.id, kind: a.kind, expiresAt: a.expiresAt })),
     (kind) => deps.packs.attachmentKind(kind)?.leadDays ?? 0,
@@ -58,10 +64,10 @@ export async function recomputeDeadlines(
   const existingRows = await deps.db
     .select({ id: deadlines.id, attachmentId: deadlines.attachmentId, kind: deadlines.kind })
     .from(deadlines)
-    .where(eq(deadlines.recordId, recordId));
+    .where(and(eq(deadlines.client, deps.client), eq(deadlines.recordId, recordId)));
   const staleIds = existingRows.filter((r) => !computedKeys.has(deadlineKey(r))).map((r) => r.id);
   if (staleIds.length > 0) {
-    await deps.db.delete(deadlines).where(inArray(deadlines.id, staleIds));
+    await deps.db.delete(deadlines).where(and(eq(deadlines.client, deps.client), inArray(deadlines.id, staleIds)));
   }
   return { deadlines: computed.map((d) => ({ attachment_id: d.attachmentId, kind: d.kind, due_at: d.dueAt })) };
 }
@@ -77,7 +83,15 @@ export async function upcomingDeadlines(
   const todayDate = today ? new Date(`${today}T00:00:00Z`) : deps.now();
   const todayStr = todayDate.toISOString().slice(0, 10);
   const horizon = addDays(todayStr, within_days);
-  const scope = [eq(records.client, deps.client), lte(deadlines.dueAt, horizon)];
+  // The join to `records` proves the record is this tenant's and the column predicates prove the
+  // deadline row and the attachment are: a row that disagrees is a bug this makes visible rather
+  // than one the listing silently repairs.
+  const scope = [
+    eq(records.client, deps.client),
+    eq(deadlines.client, deps.client),
+    eq(attachments.client, deps.client),
+    lte(deadlines.dueAt, horizon),
+  ];
   if (record_kind !== undefined) scope.push(eq(records.kind, record_kind));
   const rows = await deps.db
     .select({

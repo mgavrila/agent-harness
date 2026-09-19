@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { runs, type Db } from '@harness/db';
 import type { Principal } from '@harness/identity-api';
 import type { RunContext, ToolDeps } from '../tooling/types.js';
@@ -48,20 +48,30 @@ export async function openRun(db: Db, input: OpenRunInput): Promise<RunContext &
 
 export type RunStatus = 'running' | 'done' | 'error' | 'cancelled';
 
-/** Close a run: the status it ended in and when. The one writer of `runs.status` after `openRun`. */
+/**
+ * Close a run: the status it ended in and when. The one writer of `runs.status` after `openRun`.
+ *
+ * Scoped to the client, even though a run id is a uuid and cannot collide, because a pooled host
+ * closes runs for several tenants from one process and a predicate that is only *probably* enough
+ * is not a predicate (spec invariant 13). A run id from another tenant matches nothing and the
+ * call is a no-op, which is what a caller that has been handed the wrong id should get.
+ */
 export async function closeRun(
   db: Db,
+  client: string,
   runId: string,
   status: RunStatus,
   now: () => Date = () => new Date(),
 ): Promise<void> {
-  await db.update(runs).set({ status, endedAt: now() }).where(eq(runs.id, runId));
+  await db
+    .update(runs)
+    .set({ status, endedAt: now() })
+    .where(and(eq(runs.id, runId), eq(runs.client, client)));
 }
 
 /**
  * `harness_reconcile`, scoped to the calling client: an agent repairs only its
- * own tenant's rows. Process startup runs `reconcile` unscoped instead, as an
- * operator-level task.
+ * own tenant's rows.
  */
 export async function reconcileForClient(deps: ToolDeps, staleAfterMinutes: number): Promise<ReconcileResult> {
   return reconcile(deps.db, { now: deps.now, staleAfterMs: staleAfterMinutes * 60_000, client: deps.client });

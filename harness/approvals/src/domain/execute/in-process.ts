@@ -47,6 +47,7 @@ function textOf(res: CallResult): string {
  */
 export async function finishRun(
   db: Db,
+  client: string,
   runId: string,
   status: 'done' | 'error',
   now: () => Date,
@@ -57,7 +58,7 @@ export async function finishRun(
   } catch (err) {
     log.error(`could not close the in-process core-tools client for run ${runId}`, err);
   }
-  await closeRun(db, runId, status, now);
+  await closeRun(db, client, runId, status, now);
 }
 
 /**
@@ -88,7 +89,7 @@ export function createInProcessCoreToolsClient(opts: InProcessCoreToolsOptions):
       status = 'error';
       throw err;
     } finally {
-      await finishRun(opts.db, context.runId, status, now, close ?? (() => Promise.resolve()));
+      await finishRun(opts.db, opts.client, context.runId, status, now, close ?? (() => Promise.resolve()));
     }
   }
 

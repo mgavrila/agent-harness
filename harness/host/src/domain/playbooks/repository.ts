@@ -105,11 +105,15 @@ async function failStrandedRuns(
     .from(playbooks)
     .where(and(eq(playbooks.client, opts.client), eq(playbooks.enabled, false)));
   if (off.length === 0) return;
+  // Belt and braces (spec invariant 13). The foreign key already reaches a row that carries the
+  // client, so a correct writer cannot produce a mismatch; a reader that relied on that would be
+  // one join away from another tenant's rows the first time a writer was not correct.
   const stranded = await tx
     .select({ id: playbookRuns.id, playbookId: playbookRuns.playbookId })
     .from(playbookRuns)
     .where(
       and(
+        eq(playbookRuns.client, opts.client),
         eq(playbookRuns.status, 'requested'),
         inArray(
           playbookRuns.playbookId,
@@ -128,7 +132,7 @@ async function failStrandedRuns(
     await tx
       .update(playbookRuns)
       .set({ status: 'preflight_failed', error: reason, endedAt: opts.now })
-      .where(inArray(playbookRuns.id, ids));
+      .where(and(eq(playbookRuns.client, opts.client), inArray(playbookRuns.id, ids)));
   }
 }
 
@@ -158,7 +162,16 @@ export async function claimDuePlaybooks(db: Db, opts: { client: string; now: Dat
       .select({ run: playbookRuns })
       .from(playbookRuns)
       .innerJoin(playbooks, eq(playbooks.id, playbookRuns.playbookId))
-      .where(and(eq(playbooks.client, opts.client), eq(playbooks.enabled, true), eq(playbookRuns.status, 'requested')))
+      // The join proves the playbook is this tenant's and the column proves the firing is: both,
+      // for the reason on `failStrandedRuns`.
+      .where(
+        and(
+          eq(playbooks.client, opts.client),
+          eq(playbookRuns.client, opts.client),
+          eq(playbooks.enabled, true),
+          eq(playbookRuns.status, 'requested'),
+        ),
+      )
       .orderBy(asc(playbookRuns.scheduledAt))
       .limit(CLAIM_BATCH)
       .for('update', { of: playbookRuns, skipLocked: true });
@@ -179,13 +192,13 @@ export async function claimDuePlaybooks(db: Db, opts: { client: string; now: Dat
         await tx
           .update(playbookRuns)
           .set({ status: 'preflight_failed', error: PLAYBOOK_DISABLED, endedAt: opts.now })
-          .where(eq(playbookRuns.id, run.id));
+          .where(and(eq(playbookRuns.client, opts.client), eq(playbookRuns.id, run.id)));
         continue;
       }
       const [started] = await tx
         .update(playbookRuns)
         .set({ status: 'running', startedAt: opts.now })
-        .where(eq(playbookRuns.id, run.id))
+        .where(and(eq(playbookRuns.client, opts.client), eq(playbookRuns.id, run.id)))
         .returning();
       claimed.push({ playbook, run: started });
     }
@@ -225,6 +238,7 @@ export async function claimDuePlaybooks(db: Db, opts: { client: string; now: Dat
 /** Close a claimed firing with its outcome and stamp the playbook's `last_status`. The error is truncated like `tool_effects.last_error`. */
 export async function finishPlaybookRun(
   db: Db,
+  client: string,
   id: string,
   outcome: {
     status: Exclude<PlaybookRunStatus, 'requested' | 'running'>;
@@ -244,15 +258,16 @@ export async function finishPlaybookRun(
         error: outcome.error?.slice(0, 500) ?? null,
         endedAt: outcome.endedAt,
       })
-      .where(eq(playbookRuns.id, id))
+      .where(and(eq(playbookRuns.client, client), eq(playbookRuns.id, id)))
       .returning({ playbookId: playbookRuns.playbookId });
     // No such firing: an operator closed it by hand between the claim and here, which the
     // runbook tells them to do for a row stranded `running`. Nothing to stamp, and a throw
-    // inside this transaction would only turn their cleanup into a scheduler error.
+    // inside this transaction would only turn their cleanup into a scheduler error. A firing of
+    // another tenant lands here too, and is the same no-op for the same reason.
     if (!row) return;
     await tx
       .update(playbooks)
       .set({ lastStatus: outcome.status, updatedAt: outcome.endedAt })
-      .where(eq(playbooks.id, row.playbookId));
+      .where(and(eq(playbooks.client, client), eq(playbooks.id, row.playbookId)));
   });
 }

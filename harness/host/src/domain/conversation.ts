@@ -266,7 +266,7 @@ export async function runTurn(host: Host, turn: TurnInput): Promise<TurnResult> 
       // The row just appended is always the newest, and it is the turn being run, not history:
       // it is dropped *before* the character budget is spent, so a long message cannot empty its
       // own history. `+ 1` fetches it so that exactly `maxHistoryMessages` real turns remain.
-      const rows = await recentHistory(host.db, turn.thread.id, host.budget.maxHistoryMessages + 1);
+      const rows = await recentHistory(host.db, host.client, turn.thread.id, host.budget.maxHistoryMessages + 1);
       const history = trimHistory(rows.slice(0, -1), {
         maxMessages: host.budget.maxHistoryMessages,
         maxChars: HISTORY_MAX_CHARS,
