@@ -141,6 +141,16 @@ describe('filesConfigSource', () => {
     await expect(filesConfigSource({ root, log }).load('alpha')).rejects.toThrow(/declares id "fixture"/);
   });
 
+  it('does not publish the host path in the id-mismatch error', async () => {
+    const root = await newRoot();
+    await mkdir(path.join(root, 'alpha'), { recursive: true });
+    await writeFile(path.join(root, 'alpha', 'client.yaml'), toYaml(fixtureDocument()), 'utf8');
+    await expect(filesConfigSource({ root, log }).load('alpha')).rejects.toThrow(/alpha\/client\.yaml/);
+    await expect(filesConfigSource({ root, log }).load('alpha')).rejects.not.toThrow(
+      new RegExp(tmpdir().replace(/[/\\]/g, '\\$&')),
+    );
+  });
+
   it('refuses a client id that is not one, rather than joining it into a path', async () => {
     const root = await newRoot();
     await expect(filesConfigSource({ root, log }).load('../escape')).rejects.toThrow(ConfigError);
