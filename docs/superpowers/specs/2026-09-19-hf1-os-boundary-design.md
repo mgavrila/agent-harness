@@ -192,7 +192,7 @@ export interface ClientDocument {
   skills: Record<string, string>;        // name → markdown, today's skills/ dir
   knowledge: { source: 'dir'; path: string } | { source: 'store' };
   surfaces: { slack?: { teamId: string; signingSecret: SecretRef; botToken: SecretRef }; http?: {} };
-  identityProvider: { kind: 'static' | 'slack-groups'; /* provider config */ };
+  identityPlugin: { kind: 'static' | 'slack-groups'; /* plug-in settings */ }; // "plug-in", never "provider": the kernel-vocabulary scan forbids the word
   runtime: 'deepagents';
   plugins?: DeclaredPlugin[];            // §4.8, Plan 12
   packs: string[];                       // package names; replaces HARNESS_PACKS

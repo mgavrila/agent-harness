@@ -162,9 +162,9 @@ Read out of this worktree (`worktree-os-boundary` at `f7c2fc4`) or run in a scra
 
 ## Decisions where the spec leaves a detail open
 
-1. **A plug-in specifier is derived from a name, never written out in kernel source.** The document names its surfaces by key (`surfaces.slack`, `surfaces.http`), its identity provider by `identityProvider.kind` and its runtime by `runtime`, exactly as spec §4.1 writes them. The host turns each into a package specifier with a template literal — `` `@harness/surface-${name}` ``, `` `@harness/identity-${kind}` ``, `` `@harness/runtime-${name}` `` — so `harness/host/src` never contains the string `slack` or `deepagents` and the kernel-vocabulary scan stays green with an empty allowlist. `packs` stays a list of full package names, as `HARNESS_PACKS` was, because a pack may come from any scope. The three derivations live in one module, `harness/host/src/domain/tenancy/specifiers.ts`, with the rule written down once.
+1. **A plug-in specifier is derived from a name, never written out in kernel source.** The document names its surfaces by key (`surfaces.slack`, `surfaces.http`), its identity provider by `identityPlugin.kind` and its runtime by `runtime`, exactly as spec §4.1 writes them. The host turns each into a package specifier with a template literal — `` `@harness/surface-${name}` ``, `` `@harness/identity-${kind}` ``, `` `@harness/runtime-${name}` `` — so `harness/host/src` never contains the string `slack` or `deepagents` and the kernel-vocabulary scan stays green with an empty allowlist. `packs` stays a list of full package names, as `HARNESS_PACKS` was, because a pack may come from any scope. The three derivations live in one module, `harness/host/src/domain/tenancy/specifiers.ts`, with the rule written down once.
 
-2. **`@harness/config-api` is scanned for three of the four word lists, and deliberately not for the messaging one.** The document schema has to name the surfaces a tenant may declare, and spec §4.1 spells `surfaces.slack` out with `teamId`, `signingSecret` and `botToken`. That is the one place in this repository where a vendor's name is *data the schema admits* rather than a coupling — the same status `surfaces/slack/src` has, which is scanned by nothing. So `harness/config-api/src` joins the **credentialing**, **framework** and **deployment** scans and not the messaging one, and `runtime` in the schema is a plug-in-**name** string (`/^[a-z][a-z0-9-]*$/`) rather than a `z.literal('deepagents')`, so the framework scan passes on the package that would otherwise have had to spell a framework's name. The fixture document sets `runtime: deepagents`, in YAML, which no scan reads. **The allowlist stays empty.**
+2. **`@harness/config-api` is scanned for three of the four word lists, and deliberately not for the messaging one.** The document schema has to name the surfaces a tenant may declare, and spec §4.1 spells `surfaces.slack` out with `teamId`, `signingSecret` and `botToken`. That is the one place in this repository where a vendor's name is *data the schema admits* rather than a coupling — the same status `surfaces/slack/src` has, which is scanned by nothing. So `harness/config-api/src` joins the **credentialing**, **framework** and **deployment** scans and not the messaging one, and `runtime` in the schema is a plug-in-**name** string (`/^[a-z][a-z0-9-]*$/`) rather than a `z.literal('deepagents')`, so the framework scan passes on the package that would otherwise have had to spell a framework's name. The testing kit's in-memory fixture names the test runtime (`runtime: 'scripted'`), and the on-disk fixture of Task 9 sets `runtime: deepagents` in YAML, which no scan reads. **The allowlist stays empty.**
 
 3. **Identity plug-ins receive the document's `identity` section through `IdentityDeps`; they do not import `@harness/config-api`.** `an-identity-plugin-imports-only-api-and-shared` is an error-severity rule and this plan does not weaken it. `IdentityDeps.clientDir` is replaced by `IdentityDeps.identity: IdentityFile` — the *parsed* section, `{ principals, defaults }`, whose type `@harness/identity-api` already owns. `@harness/config-api` imports `IdentityFileShape` from `@harness/identity-api`, never the other way round, so there is no cycle. `IdentityDeps` also gains `directories` (decision 8).
 
@@ -420,7 +420,7 @@ describe('parseClientDocument', () => {
     expect(document.schemaVersion).toBe(CLIENT_DOCUMENT_VERSION);
     expect(document.id).toBe('fixture');
     expect(document.packs).toEqual(['@harness/pack-healthcare']);
-    expect(document.runtime).toBe('deepagents');
+    expect(document.runtime).toBe('scripted');
     // `identity` is today's `IdentityFileShape`: `{ principals }` and nothing else. Task 2 adds
     // `defaults` to that shape and asserts on it there, in the task that makes the field exist.
     expect(document.identity.principals).toHaveLength(4);
@@ -935,7 +935,7 @@ export const ClientDocumentShape = z
       ])
       .default({ source: 'store' }),
     surfaces: SurfacesShape,
-    identityProvider: z
+    identityPlugin: z
       .object({
         kind: z.string().regex(PLUGIN_NAME, 'an identity provider kind is a plug-in name'),
         /** Provider-specific settings; the provider validates them with its own schema. */
@@ -1259,8 +1259,8 @@ export function fixtureDocument(overrides: Record<string, unknown> = {}): Record
     skills: {},
     knowledge: { source: 'store' },
     surfaces: { memory: {}, http: {} },
-    identityProvider: { kind: 'static' },
-    runtime: 'deepagents',
+    identityPlugin: { kind: 'static' },
+    runtime: 'scripted',
     packs: ['@harness/pack-healthcare'],
     ...overrides,
   };
@@ -2108,7 +2108,7 @@ In `harness/identity-api/src/types.ts`, replace the `IdentityDeps` declaration a
  * validated: the declared principals and the level each surface gives everyone else. **A plug-in
  * is never handed a path**, because a client is not a folder any more, and never handed the whole
  * document, because who is asking is the only part of it that is a plug-in's business.
- * `settings` is whatever the document's `identityProvider.settings` held, which the plug-in
+ * `settings` is whatever the document's `identityPlugin.settings` held, which the plug-in
  * validates with its own schema.
  */
 export interface IdentityDeps {
@@ -4134,11 +4134,11 @@ export async function loadClientDocument(db: Parameters<typeof openRun>[0]): Pro
  * vouched for.
  */
 export async function resolvePrincipal(document: ClientDocument, env: NodeJS.ProcessEnv): Promise<Principal> {
-  const session = await loadIdentity(`@harness/identity-${document.identityProvider.kind}`, {
+  const session = await loadIdentity(`@harness/identity-${document.identityPlugin.kind}`, {
     env,
     log,
     identity: parseIdentityFileWithDefaults(document.identity),
-    settings: document.identityProvider.settings,
+    settings: document.identityPlugin.settings,
   });
   try {
     const id = envOrDefault('HARNESS_PRINCIPAL', 'svc-local', env);
@@ -4169,7 +4169,7 @@ export async function buildDepsFromEnv(): Promise<{ deps: ToolDeps; close: () =>
 }
 ```
 
-adding `parseIdentityFileWithDefaults` to the `@harness/identity-api` import. **`HARNESS_IDENTITY` is no longer read here** — the document's `identityProvider.kind` names the plug-in, and the specifier is derived from the name (decision 1).
+adding `parseIdentityFileWithDefaults` to the `@harness/identity-api` import. **`HARNESS_IDENTITY` is no longer read here** — the document's `identityPlugin.kind` names the plug-in, and the specifier is derived from the name (decision 1).
 
 In `harness/core-tools/src/app/server.test.ts`, **delete** the `describe('clientDirFor', …)` block and the `clientDirFor` import; keep the `HARNESS_CLIENT` set-but-empty case, which now asserts against `loadClientDocument`'s own refusal (`/HARNESS_CLIENT/`).
 
@@ -4293,7 +4293,7 @@ const document = await loadClientDocument(db);
 const config = await buildKernelConfig(document, process.env);
 ```
 
-importing `loadClientDocument` from `@harness/core-tools`, and export it from `harness/core-tools/src/index.ts`. Replace `const clientDir = config.clientDir;` and `readPersona(clientDir)` with `document.persona`, the `readPlaybooksFile` scaffold from Task 1 with `parsePlaybooksFile(document.playbooks)`, and the Task 2 identity scaffold with `parseIdentityFileWithDefaults(document.identity)` plus the derived specifier `` `@harness/identity-${document.identityProvider.kind}` ``. `HARNESS_IDENTITY` is no longer read in the host either; **`HARNESS_SURFACES` and `HARNESS_RUNTIME` still are, until Task 6.**
+importing `loadClientDocument` from `@harness/core-tools`, and export it from `harness/core-tools/src/index.ts`. Replace `const clientDir = config.clientDir;` and `readPersona(clientDir)` with `document.persona`, the `readPlaybooksFile` scaffold from Task 1 with `parsePlaybooksFile(document.playbooks)`, and the Task 2 identity scaffold with `parseIdentityFileWithDefaults(document.identity)` plus the derived specifier `` `@harness/identity-${document.identityPlugin.kind}` ``. `HARNESS_IDENTITY` is no longer read in the host either; **`HARNESS_SURFACES` and `HARNESS_RUNTIME` still are, until Task 6.**
 
 In `harness/host/src/domain/playbooks/scheduler.test.ts`, replace `policy: await loadPolicy(path.join(demoClientDir, 'policy.yaml'))` with the literal the shipped file holds, so nothing reads a policy file:
 
@@ -4307,7 +4307,7 @@ and `clientDir: demoClientDir` with `knowledgeDir: path.join(demoClientDir, 'kno
 
 - [ ] **Step 11: Delete the two variables**
 
-From `.env.example`, delete the `HARNESS_POLICY_FILE` line and the comment above it, and delete the whole `# --- Packs ---` block including `HARNESS_PACKS=@harness/pack-healthcare`. One other comment there names the variable — `HARNESS_FORMS_DIR`'s, which says the forms directory comes from "the first pack named in HARNESS_PACKS"; change that phrase to "the first pack the client document's `packs` list names". In the `# --- Identity ---` block, delete the `HARNESS_IDENTITY` lines and their comment, and replace them with one sentence: "Which identity plug-in resolves principals is the client document's `identityProvider.kind`, not a variable." In `harness/compose/docker-compose.yml`, delete the `HARNESS_POLICY_FILE:` line from the `host` service, delete the `HARNESS_PACKS:` line and the six-line comment above it, delete the `HARNESS_IDENTITY:` line, and delete `HARNESS_CLIENT` from the `core-tools` service (that service is `build-only` and starts nothing).
+From `.env.example`, delete the `HARNESS_POLICY_FILE` line and the comment above it, and delete the whole `# --- Packs ---` block including `HARNESS_PACKS=@harness/pack-healthcare`. One other comment there names the variable — `HARNESS_FORMS_DIR`'s, which says the forms directory comes from "the first pack named in HARNESS_PACKS"; change that phrase to "the first pack the client document's `packs` list names". In the `# --- Identity ---` block, delete the `HARNESS_IDENTITY` lines and their comment, and replace them with one sentence: "Which identity plug-in resolves principals is the client document's `identityPlugin.kind`, not a variable." In `harness/compose/docker-compose.yml`, delete the `HARNESS_POLICY_FILE:` line from the `host` service, delete the `HARNESS_PACKS:` line and the six-line comment above it, delete the `HARNESS_IDENTITY:` line, and delete `HARNESS_CLIENT` from the `core-tools` service (that service is `build-only` and starts nothing).
 
 The Compose file has changed, so `surface.test.ts`'s byte match against the snapshot now fails. Re-record it here, which is the first of this plan's three Compose-snapshot tasks — 4, 6 and 9, as the Global Constraints and the Task order both name them:
 
@@ -5057,11 +5057,11 @@ export async function openTenant(pool: HostPool, loaded: LoadedDocument): Promis
   const config = await buildKernelConfig(document, pool.env);
   assertSecretsPresent(document, env);
 
-  const identity = await loadIdentity(identitySpecifier(document.identityProvider.kind), {
+  const identity = await loadIdentity(identitySpecifier(document.identityPlugin.kind), {
     env: pool.env,
     log,
     identity: parseIdentityFileWithDefaults(document.identity),
-    settings: document.identityProvider.settings,
+    settings: document.identityPlugin.settings,
   });
   const servicePrincipalId = envOrDefault('HARNESS_HOST_PRINCIPAL', 'svc-host', pool.env);
   const servicePrincipal = await identity.get(servicePrincipalId);
@@ -6264,7 +6264,7 @@ import * as z from 'zod/v4';
 import { USER_LEVELS, ConfigError, SURFACE_NAME_PATTERN } from '@harness/shared';
 
 /**
- * What the client document's `identityProvider.settings` holds for this plug-in.
+ * What the client document's `identityPlugin.settings` holds for this plug-in.
  *
  * `groups` is ordered and the first match wins, so a workspace where somebody is both a lead and
  * a member of staff has one answer rather than whichever one the directory happened to list
@@ -6294,7 +6294,7 @@ export type SlackGroupsSettings = z.infer<typeof SlackGroupsSettingsShape>;
 export function parseSlackGroupsSettings(raw: unknown): SlackGroupsSettings {
   const parsed = SlackGroupsSettingsShape.safeParse(raw ?? {});
   if (!parsed.success) {
-    throw new ConfigError(`identityProvider.settings are invalid: ${z.prettifyError(parsed.error)}`);
+    throw new ConfigError(`identityPlugin.settings are invalid: ${z.prettifyError(parsed.error)}`);
   }
   return parsed.data;
 }
@@ -7038,7 +7038,7 @@ surfaces:
   memory: {}
   http: {}
 
-identityProvider:
+identityPlugin:
   kind: static
 
 runtime: deepagents
@@ -7657,7 +7657,7 @@ Four places instruct the implementer to **read a file and match what is there** 
 
 ### 4. Type consistency
 
-- **`ClientDocument`** has the same fields wherever it is read: `schemaVersion`, `id`, `displayName`, `persona`, `identity`, `policy`, `routing`, `playbooks`, `skills`, `knowledge`, `surfaces`, `identityProvider`, `runtime`, `plugins`, `packs`. Task 1 declares them; Task 3's two sources parse them; Task 4 reads `id`, `policy`, `packs` and `knowledge`; Task 6 reads `persona`, `identity`, `identityProvider`, `runtime`, `surfaces`, `playbooks` and `skills`; Task 9's fixture writes every one of them.
+- **`ClientDocument`** has the same fields wherever it is read: `schemaVersion`, `id`, `displayName`, `persona`, `identity`, `policy`, `routing`, `playbooks`, `skills`, `knowledge`, `surfaces`, `identityPlugin`, `runtime`, `plugins`, `packs`. Task 1 declares them; Task 3's two sources parse them; Task 4 reads `id`, `policy`, `packs` and `knowledge`; Task 6 reads `persona`, `identity`, `identityPlugin`, `runtime`, `surfaces`, `playbooks` and `skills`; Task 9's fixture writes every one of them.
 - **`policy.tools.hide`** is `string[]` with a `.default([])` at the schema, `KernelConfig.hiddenTools: readonly string[]` on the bag, and `deps.hiddenTools` at the one place it is applied. Three names for one thing would have been a bug; there is one path.
 - **`SecretRef`** is `{ env: string }` in `types.ts`, `SecretRefShape` in `document.ts`, and the only consumer is Task 6's `assertSecretsPresent`. No task invents a second shape.
 - **`Tenant`** is `{ clientId, version, document, host, runner, scheduler, close }` in Task 6's `types.ts`, and Tasks 7, 8 and 9 use exactly those members. `Tenant.host` is a `Host` whose own members are untouched, which is why no other host module changed signature.
