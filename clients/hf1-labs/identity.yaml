@@ -6,46 +6,52 @@
 #   level  member < practitioner < lead < admin for a person; service for a scheduled job's
 #          or a process's own identity. A service is never "at least" a user level.
 #
-# Replace the two Slack member ids with the real ones before the first run; see the runbook's
-# onboarding section for how to read a member id.
-#
-# `defaults:` is optional and this client does not use it: a surface named there
-# (`defaults: { slack: member }`) admits anyone the file does not list, at that level, under
-# `u-<surface>-<their user id>-<digest>` — derived from their surface user id, so their audit trail
-# is their own across restarts. A user level only — never `service` — and never for `http`, whose
-# one bearer token is shared by every caller of the run API. A surface with no default refuses an
-# unknown user, which is what every principal below relies on; so does a surface misspelled here,
-# silently, since a default for a surface that is not loaded simply never applies.
+# Everyone in the HF1 Labs workspace who is not listed below is a `member` (see `defaults`):
+# they get their own memory and read access; a write to shared memory is parked for an admin.
+# A default admits an undeclared Slack user as `u-slack-<their member id>-<digest>`, an id derived
+# from theirs rather than minted, so their audit trail is their own across restarts. A user level
+# only — `service` is a startup error — and a surface left out of `defaults`, `http` here, goes on
+# refusing everyone this file does not name. `http` could not have one in any case: the run API's
+# bearer is a single shared secret, so everyone who may drive it is declared below. Mistype a
+# surface name here and the default silently never applies; the startup line names the surfaces
+# that got one.
 #
 # An `http:` entry is the id that principal is named by over the run API (docs/runbook.md, "The
 # run API"): any stable string, because the API resolves it here exactly as it resolves a Slack
 # member id. A principal with no `http:` entry cannot drive a run over the API, which is the
 # right default.
+defaults:
+  slack: member
 principals:
-  - id: u-practice-manager
+  - id: u-mihai
     kind: user
     level: admin
-    displayName: Practice manager
+    displayName: Mihai Alexandru Schiop
     surfaces:
-      slack: U0123ABCD
-      http: practice-manager
-  - id: u-coordinator
+      slack: U0C0KEB8W3X
+  - id: u-andrei-giura
     kind: user
-    level: lead
-    displayName: Credentialing coordinator
+    level: admin
+    displayName: Andrei Giura
     surfaces:
-      slack: U0456EFGH
-      http: coordinator
+      slack: U0C0Q8EU8BC
+  - id: u-andrei
+    kind: user
+    level: admin
+    displayName: Andrei Gavrila
+    surfaces:
+      slack: U0C0HQHGY8K
+      http: andrei
   # The host's own identity (HARNESS_HOST_PRINCIPAL): reconciliation runs as it.
   - id: svc-host
     kind: service
     level: service
     displayName: Harness host
-  # The identity the scheduled playbooks in playbooks.yaml run as (spec 3.3).
+  # The identity scheduled playbooks run as.
   - id: svc-playbooks
     kind: service
     level: service
-    displayName: Nightly playbooks
+    displayName: Scheduled playbooks
   # The stdio server's default: the MCP inspector and the eval runner on an operator's machine.
   - id: svc-local
     kind: service

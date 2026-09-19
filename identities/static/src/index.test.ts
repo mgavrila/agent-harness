@@ -22,6 +22,9 @@ const FILE = `principals:
     displayName: Local operator
 `;
 
+/** The same file, with the key that says what someone nobody declared gets. */
+const WITH_DEFAULTS = `defaults:\n  memory: member\n${FILE}`;
+
 let dir: string;
 afterEach(() => {
   if (dir) rmSync(dir, { recursive: true, force: true });
@@ -64,6 +67,91 @@ describe('@harness/identity-static', () => {
     await expect(identity.connect({ env: {}, log, clientDir: dir })).rejects.toThrow(/identity\.yaml/);
     const bad = clientDir('principals:\n  - id: nobody\n    kind: user\n    level: lead\n    displayName: x\n');
     await expect(identity.connect({ env: {}, log, clientDir: bad })).rejects.toThrow(/identity file is invalid/);
+  });
+
+  it('gives an undeclared user the level its surface defaults to, under an id derived from theirs', async () => {
+    const session = await identity.connect({ env: {}, log, clientDir: clientDir(WITH_DEFAULTS) });
+    const minted = await session.resolve({ surface: 'memory', userId: 'U0C0KEB8W3X' });
+    expect(minted).toEqual({
+      id: 'u-memory-u0c0keb8w3x-6774a381',
+      kind: 'user',
+      level: 'member',
+      displayName: 'U0C0KEB8W3X',
+      surfaces: { memory: 'U0C0KEB8W3X' },
+      attributes: {},
+    });
+    // The same person is the same principal on the next turn, and on the next process.
+    expect(await session.resolve({ surface: 'memory', userId: 'U0C0KEB8W3X' })).toEqual(minted);
+    expect(await session.get('u-memory-u0c0keb8w3x-6774a381')).toEqual(minted);
+  });
+
+  it('leaves a declared principal alone, and names only the newly minted ones in the log', async () => {
+    const lines: string[] = [];
+    const recording = { ...log, info: (message: string) => lines.push(message) };
+    const session = await identity.connect({ env: {}, log: recording, clientDir: clientDir(WITH_DEFAULTS) });
+    expect((await session.resolve({ surface: 'memory', userId: 'U0456EFGH' }))?.id).toBe('u-coordinator');
+    await session.resolve({ surface: 'memory', userId: 'U9' });
+    await session.resolve({ surface: 'memory', userId: 'U9' });
+    expect(lines.filter((line) => line.includes('u-memory-u9-c5f6f2a2'))).toHaveLength(1);
+    // `list()` stays the file's own answer: what was declared, in the order it was declared.
+    expect((await session.list()).map((p) => p.id)).toEqual(['u-coordinator', 'svc-local']);
+  });
+
+  it('still refuses an undeclared user when the file names no default at all', async () => {
+    const session = await identity.connect({ env: {}, log, clientDir: clientDir(FILE) });
+    expect(await session.resolve({ surface: 'memory', userId: 'U9' })).toBeNull();
+  });
+
+  it('still refuses an undeclared user on a surface the defaults leave out', async () => {
+    const session = await identity.connect({ env: {}, log, clientDir: clientDir(WITH_DEFAULTS) });
+    expect(await session.resolve({ surface: 'http', userId: 'nobody' })).toBeNull();
+  });
+
+  it('answers for a principal a previous process minted, which is where an approval outlives a restart', async () => {
+    const dirName = clientDir(WITH_DEFAULTS);
+    const first = await identity.connect({ env: {}, log, clientDir: dirName });
+    const minted = await first.resolve({ surface: 'memory', userId: 'U0C0KEB8W3X' });
+    await first.stop();
+
+    // A second session over the same file, having minted nothing: the approval raised before the
+    // restart names its requester by id, and that id has to resolve to the same person.
+    const second = await identity.connect({ env: {}, log, clientDir: dirName });
+    const recovered = await second.get(minted?.id ?? '');
+    expect(recovered?.id).toBe(minted?.id);
+    expect(recovered?.level).toBe('member');
+    expect(recovered?.kind).toBe('user');
+    // An id of the same shape on a surface the file gives no default is still nobody.
+    expect(await second.get('u-http-someone-deadbeef')).toBeNull();
+    expect(await second.get('u-memory-nobody')).toBeNull();
+  });
+
+  it('refuses a caller whose derived id is already declared, and says so once', async () => {
+    // `U9` on `memory` derives `u-memory-u9-c5f6f2a2`. Declaring that id outright would otherwise
+    // hand whoever holds it the declared principal's memory, approvals and audit trail.
+    const warnings: string[] = [];
+    const recording = { ...log, warn: (message: string) => warnings.push(message) };
+    const collides = `defaults:\n  memory: member\n${FILE}  - id: u-memory-u9-c5f6f2a2\n    kind: user\n    level: admin\n    displayName: Someone else\n`;
+    const session = await identity.connect({ env: {}, log: recording, clientDir: clientDir(collides) });
+
+    expect(await session.resolve({ surface: 'memory', userId: 'U9' })).toBeNull();
+    expect(await session.resolve({ surface: 'memory', userId: 'U9' })).toBeNull();
+    expect(warnings).toEqual([
+      'static identity: derived id "u-memory-u9-c5f6f2a2" is already declared; refusing the caller',
+    ]);
+    // The declared principal is untouched, and everyone else on the surface still gets a default.
+    expect((await session.get('u-memory-u9-c5f6f2a2'))?.level).toBe('admin');
+    expect((await session.resolve({ surface: 'memory', userId: 'U8' }))?.level).toBe('member');
+  });
+
+  it('refuses a file that defaults the run API surface, whatever level it names', async () => {
+    const bad = clientDir(`defaults:\n  http: member\n${FILE}`);
+    await expect(identity.connect({ env: {}, log, clientDir: bad })).rejects.toThrow(ConfigError);
+    await expect(identity.connect({ env: {}, log, clientDir: dir })).rejects.toThrow(/"http" may not have a default/);
+  });
+
+  it('refuses a file that defaults a surface to the service level', async () => {
+    const bad = clientDir(`defaults:\n  memory: service\n${FILE}`);
+    await expect(identity.connect({ env: {}, log, clientDir: bad })).rejects.toThrow(ConfigError);
   });
 
   it('parses the demo client file, which names the five principals Compose and the configs use', async () => {

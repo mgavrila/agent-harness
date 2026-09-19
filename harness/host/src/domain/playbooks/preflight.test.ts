@@ -1,7 +1,8 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { loadIdentity, type PlaybookRow } from '@harness/core-tools';
+import { decide, loadIdentity, loadPolicy, readKnowledgeFolder, type PlaybookRow } from '@harness/core-tools';
+import { createLogger } from '@harness/shared';
 import { COORDINATOR, PLAYBOOKS_PRINCIPAL, hostFixture, testKernelConfig, useTestDb } from '../../testing.js';
 import { kernelSkillsDir, readSkillCatalogue } from '../skills.js';
 import { preflightPlaybook } from './preflight.js';
@@ -135,5 +136,91 @@ describe('the shipped demo playbooks (I1)', () => {
       );
       expect(result, playbook.name).toMatchObject({ ok: true });
     }
+  });
+});
+
+describe('the shipped hf1-labs client', () => {
+  const clientDir = path.join(repoRoot, 'clients', 'hf1-labs');
+
+  it('syncs its knowledge folder every morning, and preflights on the kernel skill alone', async () => {
+    const { playbooks } = await readPlaybooksFile(clientDir);
+    expect(playbooks.map((p) => p.name)).toEqual(['knowledge-sync']);
+    const [sync] = playbooks;
+    expect(sync).toMatchObject({
+      schedule: '0 7 * * *',
+      timezone: 'Europe/Bucharest',
+      skill: 'knowledge-sync',
+      principal: 'svc-playbooks',
+      deliver: 'none',
+      cost_cap_usd: 0.5,
+      timeout_s: 300,
+      enabled: true,
+    });
+
+    const f = await hostFixture(db, { trajectory: [] });
+    f.host.identity = await loadIdentity('@harness/identity-static', { env: {}, log: f.host.log, clientDir });
+    // The kernel's own skills directory and nothing else: this client loads no pack of its own,
+    // so a playbook that needed one would fail here rather than on the first firing.
+    f.host.skills = await readSkillCatalogue([kernelSkillsDir()]);
+    const result = await preflightPlaybook(
+      f.host,
+      row({
+        name: sync.name,
+        schedule: sync.schedule,
+        timezone: sync.timezone,
+        skill: sync.skill,
+        principalId: sync.principal,
+        surface: sync.surface ?? null,
+        costCapUsd: sync.cost_cap_usd,
+        timeoutS: sync.timeout_s,
+      }),
+    );
+    expect(result).toMatchObject({ ok: true });
+  });
+
+  it('ships one knowledge document, which parses and every member may read', async () => {
+    const docs = await readKnowledgeFolder(path.join(clientDir, 'knowledge'));
+    expect(docs.map((d) => [d.path, d.title, d.minLevel])).toEqual([['team.md', 'The HF1 Labs team', 'member']]);
+    // Nobody is named on it, so `min_level` alone decides who sees it, and every teammate the
+    // `defaults` rule admits is a member.
+    expect(docs[0].principals).toEqual([]);
+    expect(docs[0].body).toContain('Who does what at HF1 Labs');
+  });
+
+  it('declares its three admins and admits everyone else in the workspace as a member', async () => {
+    const log = createLogger('test');
+    const session = await loadIdentity('@harness/identity-static', { env: {}, log, clientDir });
+
+    const admins = await Promise.all(
+      ['U0C0KEB8W3X', 'U0C0Q8EU8BC', 'U0C0HQHGY8K'].map((userId) => session.resolve({ surface: 'slack', userId })),
+    );
+    expect(admins.map((p) => `${p?.id}:${p?.level}`)).toEqual([
+      'u-mihai:admin',
+      'u-andrei-giura:admin',
+      'u-andrei:admin',
+    ]);
+
+    // Anyone else in the workspace: a member, under an id derived from their member id, so the
+    // same teammate is the same principal on Monday as on Friday.
+    const teammate = await session.resolve({ surface: 'slack', userId: 'U07NEWJOINER' });
+    expect(teammate).toMatchObject({ id: 'u-slack-u07newjoiner-9c7b8d95', kind: 'user', level: 'member' });
+    expect(await session.resolve({ surface: 'slack', userId: 'U07NEWJOINER' })).toEqual(teammate);
+
+    // The run API can have no default at all, so a caller the file does not name drives nothing.
+    expect(await session.resolve({ surface: 'http', userId: 'nobody' })).toBeNull();
+    expect((await session.resolve({ surface: 'http', userId: 'andrei' }))?.id).toBe('u-andrei');
+  });
+
+  it("parks a member's shared write for an admin, and lets an admin's through", async () => {
+    const policy = await loadPolicy(path.join(clientDir, 'policy.yaml'));
+    expect(decide('write.internal', 'member', policy)).toBe('approval');
+    expect(decide('write.internal', 'admin', policy)).toBe('auto');
+    // What the file itself says, over the kernel's defaults.
+    expect(decide('external', 'admin', policy)).toBe('approval');
+    // And the rule that surprises everyone once: `financial: blocked` in `classes` blocks a
+    // member, but the kernel gives lead and admin their own `financial` cell and a level cell
+    // always wins — so an admin's would be parked, not refused.
+    expect(decide('financial', 'member', policy)).toBe('blocked');
+    expect(decide('financial', 'admin', policy)).toBe('approval');
   });
 });

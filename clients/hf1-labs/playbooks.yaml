@@ -1,0 +1,24 @@
+# Scheduled work for AMA, read by the host at startup into the `playbooks` table. `name` is the
+# key: edit an entry and restart the host; remove one and it is disabled, not deleted, so its run
+# history stays. A firing missed while the host was down is not replayed.
+#
+#   schedule      cron, five or six fields, in `timezone` (an IANA name; default UTC)
+#   skill         a skill of the kernel or of a loaded pack; the run is offered that one skill
+#   principal     a service principal declared in identity.yaml; the run acts as it
+#   deliver       none (default): the run's own reply is recorded and posted nowhere
+#   cost_cap_usd  required; see "Playbooks" in docs/runbook.md for what it bounds today
+#   timeout_s     the run's budget timeout (default 600)
+playbooks:
+  # Re-read clients/hf1-labs/knowledge/ into the knowledge base, at the start of the working day.
+  # `knowledge-sync` is a kernel skill, so this runs without any pack of its own. It delivers
+  # nothing: a routine refresh is not news, and the skill stages a notice only when a document
+  # was skipped.
+  - name: knowledge-sync
+    schedule: '0 7 * * *'
+    timezone: Europe/Bucharest
+    skill: knowledge-sync
+    prompt: Refresh the knowledge base for today. Follow the skill exactly, including its silence rule.
+    principal: svc-playbooks
+    deliver: none
+    cost_cap_usd: 0.5
+    timeout_s: 300

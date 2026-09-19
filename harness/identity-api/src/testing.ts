@@ -3,11 +3,11 @@ import type { IdentitySession, Principal } from './types.js';
 /**
  * An identity session over a list that is already in hand.
  *
- * It is two things at once and deliberately so: the whole of `@harness/identity-static`, which
- * wraps it around a parsed `identity.yaml`, and the fake every kernel test drives. One
- * implementation means the thing the suite proves the kernel against is the thing that runs. It
- * lives under the `testing` subpath because that is where a package's fakes live in this
- * repository.
+ * It is two things at once and deliberately so: the declared half of `@harness/identity-static`,
+ * which wraps it around a parsed `identity.yaml` and adds that file's `defaults` rule around it,
+ * and the fake every kernel test drives. One implementation means the thing the suite proves the
+ * kernel against is the thing that answers for everyone the file names. It lives under the
+ * `testing` subpath because that is where a package's fakes live in this repository.
  */
 export class StaticIdentity implements IdentitySession {
   readonly name: string;

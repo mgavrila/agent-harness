@@ -1,6 +1,10 @@
+import { createHash } from 'node:crypto';
 import * as z from 'zod/v4';
-import { ConfigError, LEVELS, SURFACE_NAME_PATTERN } from '@harness/shared';
+import { ConfigError, LEVELS, SURFACE_NAME_PATTERN, USER_LEVELS } from '@harness/shared';
 import type { Principal } from './types.js';
+
+/** The four levels a person may hold. A `service` level belongs to a declared service, never to a default. */
+export type UserLevel = (typeof USER_LEVELS)[number];
 
 /** `u-` for a person, `svc-` for a service, then a lowercase slug. */
 export const PRINCIPAL_ID_PATTERN = /^(u|svc)-[a-z0-9][a-z0-9-]*$/;
@@ -36,19 +40,69 @@ export const PrincipalShape = z.object({
   attributes: z.record(z.string(), z.string()).default({}),
 });
 
+/**
+ * `defaults:` in `clients/<name>/identity.yaml`: the level a surface gives someone nobody
+ * declared. A surface with no entry here refuses an unknown user, which is the right default for
+ * a deployment whose members are all named in the file.
+ *
+ * User levels only. `service` is the level of a scheduled job's own identity, and a default is by
+ * definition what a person who walked in gets, so the two can never be the same thing.
+ *
+ * A surface this deployment does not load is not an error here and does nothing: the startup line
+ * names the surfaces that have a default, which is where a typo shows up.
+ */
+export const IdentityDefaultsShape = z.record(
+  z.string().regex(SURFACE_NAME_PATTERN),
+  z.enum(USER_LEVELS, { error: 'a surface default is a user level: member, practitioner, lead or admin' }),
+);
+
 export const IdentityFileShape = z.object({
+  defaults: IdentityDefaultsShape.default({}),
   principals: z.array(PrincipalShape).min(1),
 });
 
 /**
- * Read the principals out of a parsed `identity.yaml`, then apply the four rules zod cannot say:
- * ids are unique, a user has a `u-` id and a user level, a service has a `svc-` id and the
- * `service` level, and no surface user id is claimed twice — `resolve()` has to answer with one
- * principal or none, never a guess.
+ * The one surface a default may never name.
+ *
+ * The run API authenticates with a single shared bearer token and takes the surface user id
+ * straight from the request body, so a default there would let one token holder open runs as any
+ * number of principals of their own choosing, each writing its own memory and audit rows. Every
+ * principal that may drive the API is declared, by name, in the file.
  */
+export const UNDEFAULTABLE_SURFACE = 'http';
+
+/** The digest appended to a derived id, in hex characters. */
+const DIGEST_LENGTH = 8;
+
+/** What follows `u-<surface>-` in a derived id: an optional slug, then the digest. */
+const DERIVED_TAIL = /^(?:(.+)-)?([0-9a-f]{8})$/;
+
+/** A parsed `identity.yaml`: who is declared, and what each surface gives everyone else. */
+export interface IdentityFile {
+  principals: Principal[];
+  defaults: Record<string, UserLevel>;
+}
+
+/** The principals alone, for the callers that never wanted anything else. */
 export function parseIdentityFile(raw: unknown): Principal[] {
+  return parseIdentityFileWithDefaults(raw).principals;
+}
+
+/**
+ * Read a parsed `identity.yaml`, then apply the four rules zod cannot say: ids are unique, a user
+ * has a `u-` id and a user level, a service has a `svc-` id and the `service` level, and no
+ * surface user id is claimed twice — `resolve()` has to answer with one principal or none, never
+ * a guess. The `defaults` table comes back beside the principals, for the plug-in that reads it,
+ * and may not name `UNDEFAULTABLE_SURFACE`.
+ */
+export function parseIdentityFileWithDefaults(raw: unknown): IdentityFile {
   const parsed = IdentityFileShape.safeParse(raw);
   if (!parsed.success) throw new ConfigError(`identity file is invalid: ${z.prettifyError(parsed.error)}`);
+  if (parsed.data.defaults[UNDEFAULTABLE_SURFACE] !== undefined) {
+    throw new ConfigError(
+      `identity file: "${UNDEFAULTABLE_SURFACE}" may not have a default; the run API's bearer is one shared secret, so every ${UNDEFAULTABLE_SURFACE} user must be declared`,
+    );
+  }
   const seen = new Set<string>();
   const claims = new Map<string, string>();
   for (const p of parsed.data.principals) {
@@ -78,5 +132,73 @@ export function parseIdentityFile(raw: unknown): Principal[] {
       claims.set(key, p.id);
     }
   }
-  return parsed.data.principals;
+  return { principals: parsed.data.principals, defaults: parsed.data.defaults };
+}
+
+/**
+ * The principal a surface's `defaults` level gives someone who is not in the file.
+ *
+ * The id is derived, never random, so the same person is the same principal across restarts and
+ * across processes: every audit row, approval and run they leave behind is theirs tomorrow too.
+ * It is `u-<surface>-<slug>-<digest>`: the surface user id lowercased, with everything an id may
+ * not carry replaced by a hyphen, then the first eight hex characters of its SHA-256.
+ *
+ * **The digest is what makes the derivation injective, and it is not decoration.** Lowercasing and
+ * replacing punctuation maps many user ids onto one slug — `Bob.Smith@example.com`,
+ * `bob-smith-example-com` and `BOB_SMITH_EXAMPLE_COM` all slug alike — and two people sharing one
+ * principal id share per-person memory, an audit trail and an approval history. The digest is over
+ * the raw user id, so ids that slug alike land on different principals and the same user id always
+ * lands on the same one.
+ *
+ * Null when no id can be derived — an empty user id, or a surface name that is not one — because a
+ * caller that cannot be named is a caller that runs nothing.
+ */
+export function principalFromDefault(surface: string, userId: string, level: UserLevel): Principal | null {
+  if (!SURFACE_NAME_PATTERN.test(surface)) return null;
+  if (userId === '') return null;
+  const slug = userId
+    .toLowerCase()
+    .replaceAll(/[^a-z0-9-]/g, '-')
+    .replaceAll(/-+/g, '-')
+    .replaceAll(/^-|-$/g, '');
+  const digest = createHash('sha256').update(userId, 'utf8').digest('hex').slice(0, DIGEST_LENGTH);
+  const id = slug === '' ? `u-${surface}-${digest}` : `u-${surface}-${slug}-${digest}`;
+  // Belt and braces: the two rules above already produce an id of this shape.
+  if (!PRINCIPAL_ID_PATTERN.test(id)) return null;
+  return { id, kind: 'user', level, displayName: userId, surfaces: { [surface]: userId }, attributes: {} };
+}
+
+/**
+ * The principal a derived id names, for a process that never minted it.
+ *
+ * `minted` in the plug-in is process-local, so after a restart nothing remembers the people a
+ * default admitted — and an approval raised before the restart names its requester by id. This
+ * reads the id back: `u-<surface>-<slug>-<digest>`, where `<surface>` is one the file gives a
+ * default, is that surface's default level. Null for anything else, including a derived id on a
+ * surface whose default has since been removed: the file is the authority, and a level nobody
+ * grants any more is not a level.
+ *
+ * `surfaces` comes back empty, and that is not an oversight. The digest is one-way and the slug
+ * has already lost case and punctuation, so the raw surface user id is not recoverable from the
+ * id; a guess would be a claim that this principal speaks as someone. Nothing needs it: a
+ * resumed turn is delivered to the thread's own conversation, not looked up from the person, and
+ * `resolve` — the only path that starts from a surface user id — mints the full principal itself.
+ *
+ * Surfaces are tried longest first, so a file that defaults both `chat` and `chat-web` reads
+ * `u-chat-web-a-user-0e7aed07` as the second surface's, not as the first's with a slug that
+ * happens to start `web-`.
+ */
+export function principalFromDerivedId(id: string, defaults: Readonly<Record<string, UserLevel>>): Principal | null {
+  for (const surface of Object.keys(defaults).sort((a, b) => b.length - a.length)) {
+    const prefix = `u-${surface}-`;
+    if (!id.startsWith(prefix)) continue;
+    const match = DERIVED_TAIL.exec(id.slice(prefix.length));
+    if (!match) continue;
+    const level = defaults[surface];
+    if (level === undefined) continue;
+    // A user id that sanitised away entirely leaves the digest alone; there is no slug to show,
+    // so the id is the most honest display name available.
+    return { id, kind: 'user', level, displayName: match[1] ?? id, surfaces: {}, attributes: {} };
+  }
+  return null;
 }

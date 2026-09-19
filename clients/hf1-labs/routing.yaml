@@ -1,0 +1,43 @@
+# Model routing for AMA (HF1 Labs). Routes are jobs, not providers: change a model here, run
+#   pnpm gateway:config && docker compose --env-file .env -f harness/compose/docker-compose.yml up -d litellm
+# and nothing in the TypeScript changes. One Gemini key serves every route.
+#
+# No fallbacks: one provider, so a fallback would only be the same provider twice. The budgets
+# are a day's worth of an internal team's traffic, not a customer-facing deployment's.
+routes:
+  # Interactive Slack turns.
+  chat:
+    model: gemini/gemini-3.6-flash
+    fallbacks:
+      - gemini/gemini-3.5-flash-lite
+    daily_budget_usd: 3
+
+  # Document classification and field extraction. Needs a response schema.
+  extract:
+    model: gemini/gemini-3-flash-preview
+    daily_budget_usd: 2
+
+  # Multi-step planning.
+  reason:
+    model: gemini/gemini-3.6-flash
+    fallbacks:
+      - gemini/gemini-3.5-flash-lite
+    daily_budget_usd: 2
+
+  # LLM-as-judge in evals. The same family as `extract`, because this deployment has one
+  # provider key: a judge grading its own family is a known weakness of these numbers, not an
+  # oversight. Point it at a second provider before anyone treats an eval score as evidence.
+  judge:
+    model: gemini/gemini-3-flash-preview
+    daily_budget_usd: 1
+
+  # Embeddings for the knowledge base; the harness asks for HARNESS_EMBED_DIMS dimensions and
+  # refuses any other width — confirm once before the first sync (docs/runbook.md, "Knowledge").
+  embed:
+    model: gemini/gemini-embedding-001
+    daily_budget_usd: 1
+
+defaults:
+  daily_budget_usd: 1
+  num_retries: 2
+  request_timeout_s: 120

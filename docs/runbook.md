@@ -664,7 +664,15 @@ nothing to edit under `harness/compose/`:
 2. Declare the people and services in `clients/<slug>/identity.yaml`: `svc-host` for the
    container, `svc-local` for the operator, and one `u-…` principal per human with their level
    and their Slack member id ("Finding a Slack member id" above). A container whose principal
-   is missing from the file refuses to start.
+   is missing from the file refuses to start. For a deployment that serves a whole team rather
+   than a named few, add the optional `defaults:` block — `defaults: { slack: member }` — and
+   anyone the file does not list is admitted on that surface at that level, as
+   `u-slack-<their member id>-<digest>`, an id derived from theirs so their audit trail is their
+   own across restarts. It takes a user level only (`service` is a startup error), and a surface
+   with no default goes on refusing everyone the file does not name. Two things to know before
+   adding one: `http` may not have a default at all, because the run API's bearer is one shared
+   secret and everyone who may drive it is declared; and a default on any other loaded surface is
+   reachable *through* the run API as well, since a caller names the surface it is speaking for.
 3. Create one Slack app as described under **Slack credentials** above and paste its tokens and
    the approvals channel id.
 4. Review `clients/<slug>/SOUL.md` and `policy.yaml` before the first run, and the markdown in
@@ -679,6 +687,11 @@ nothing to edit under `harness/compose/`:
 
 `pnpm demo:up` is the same command under the default project name; with `HARNESS_CLIENT` set
 in `.env` it starts that client.
+
+Two client folders ship, and they are worth reading side by side. `clients/demo-practice` names
+everyone who may act and schedules two playbooks; `clients/hf1-labs` names three admins, admits
+the rest of the workspace through `defaults`, schedules nothing and starts with an empty
+knowledge folder.
 
 `policy.yaml`'s `classes:` block sets the default for every level, but a level cell — the
 kernel's own `DEFAULT_POLICY` or a `levels:` block in the client's file — always wins over

@@ -4,6 +4,8 @@ The identity plug-in that reads `clients/<name>/identity.yaml`. It is the one th
 (`HARNESS_IDENTITY=@harness/identity-static`, the default) and the one every kernel test loads.
 
 ```yaml
+defaults:
+  slack: member # optional: the level anyone this file does not list gets on that surface
 principals:
   - id: u-coordinator # u- for a person, svc- for a service; stable, never reused
     kind: user
@@ -13,9 +15,21 @@ principals:
 ```
 
 `connect` reads `HARNESS_IDENTITY_FILE` when it is set and `<clientDir>/identity.yaml` otherwise,
-parses it with `parseIdentityFile` from `@harness/identity-api` — unique ids, `u-` for users and
-`svc-` for services, `service` level for services only, no surface user id claimed twice — and
-answers with a `StaticIdentity` from `@harness/identity-api/testing`. A missing or invalid file is
-a `ConfigError` at startup: a deployment with nobody in it runs nothing.
+parses it with `parseIdentityFileWithDefaults` from `@harness/identity-api` — unique ids, `u-` for
+users and `svc-` for services, `service` level for services only, no surface user id claimed twice
+— and answers with a session over a `StaticIdentity` from `@harness/identity-api/testing`. A
+missing or invalid file is a `ConfigError` at startup: a deployment with nobody in it runs nothing.
+
+`defaults` is what makes a whole-team deployment practical. A surface listed there admits someone
+the file never mentions, at that level, as `u-<surface>-<their surface user id>-<digest>` —
+derived, never random, so the same person is the same principal across restarts and carries their
+own audit trail. The digest is the first eight hex characters of the user id's SHA-256, and it is
+load-bearing: lowercasing and replacing punctuation maps many user ids onto one slug, and two
+people on one principal id share memory, approvals and an audit trail. It takes a user level only;
+`service` is a `ConfigError`, because a default is by definition what a person who walked in gets.
+`http` may not have one at all: the run API authenticates with a single shared bearer token, so
+every principal that may drive it is declared by name. A surface with no default refuses an unknown user,
+which is the right behaviour for a deployment whose members are all named in the file, and
+`list()` still answers with the declared principals alone.
 
 `CONTRIBUTING.md`, "Adding an identity provider", is the worked how-to for the next plug-in.
