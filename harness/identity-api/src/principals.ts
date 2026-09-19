@@ -73,8 +73,8 @@ export const UNDEFAULTABLE_SURFACE = 'http';
 /** The digest appended to a derived id, in hex characters. */
 const DIGEST_LENGTH = 8;
 
-/** What follows `u-<surface>-` in a derived id: an optional slug, then the digest. */
-const DERIVED_TAIL = /^(?:(.+)-)?([0-9a-f]{8})$/;
+/** What follows `u-<surface>-` in a derived id: an optional slug, then the digest (unread — only its length and alphabet matter here). */
+const DERIVED_TAIL = new RegExp(`^(?:(.+)-)?(?:[0-9a-f]{${DIGEST_LENGTH}})$`);
 
 /** The longest a display name may be, and the characters it may not carry. Both from `PrincipalShape`. */
 const DISPLAY_NAME_MAX = 80;
@@ -222,11 +222,9 @@ export function principalFromDerivedId(id: string, defaults: Readonly<Record<str
     if (!id.startsWith(prefix)) continue;
     const match = DERIVED_TAIL.exec(id.slice(prefix.length));
     if (!match) continue;
-    const level = defaults[surface];
-    if (level === undefined) continue;
     // A user id that sanitised away entirely leaves the digest alone; there is no slug to show,
     // so the id is the most honest display name available.
-    return { id, kind: 'user', level, displayName: match[1] ?? id, surfaces: {}, attributes: {} };
+    return { id, kind: 'user', level: defaults[surface], displayName: match[1] ?? id, surfaces: {}, attributes: {} };
   }
   return null;
 }

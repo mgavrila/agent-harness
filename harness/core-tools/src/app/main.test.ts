@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomBytes } from 'node:crypto';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { afterAll, beforeAll, describe, it, expect } from 'vitest';
 import { Client } from '@modelcontextprotocol/client';
@@ -14,9 +14,15 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 // `resolvePrincipal` reads `clients/<client>/identity.yaml` off disk until Task 4 replaces that
 // read with the resolved client document (see server.ts); `HARNESS_IDENTITY_FILE` no longer
 // exists, so the spawned entrypoint needs a real client folder rather than an override variable.
+// `server.test.ts` writes the same `clients/smoke/` path for its own tests; the two never collide
+// because `fileParallelism: false` (vitest.config.ts) runs test files one at a time.
 const smokeDir = clientDirFor('smoke');
 
 beforeAll(() => {
+  // Never delete something this suite did not create: refuse rather than overwrite a real folder.
+  if (existsSync(smokeDir)) {
+    throw new Error(`${smokeDir} already exists; refusing to overwrite a real clients/smoke folder`);
+  }
   mkdirSync(smokeDir, { recursive: true });
   writeFileSync(
     path.join(smokeDir, 'identity.yaml'),

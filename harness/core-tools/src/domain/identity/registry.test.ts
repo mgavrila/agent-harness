@@ -1,18 +1,14 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
-import { afterEach, describe, expect, it } from 'vitest';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { parseIdentityFileWithDefaults } from '@harness/identity-api';
 import { ConfigError, createLogger } from '@harness/shared';
 import { DEFAULT_POLICY, decide } from '../tooling/policy.js';
 import { loadIdentity } from './registry.js';
 
+const here = path.dirname(fileURLToPath(import.meta.url));
 const log = createLogger('test');
-let dir: string;
-afterEach(() => {
-  if (dir) rmSync(dir, { recursive: true, force: true });
-});
 
 const section = parseIdentityFileWithDefaults({
   principals: [{ id: 'u-coordinator', kind: 'user', level: 'lead', displayName: 'Coordinator' }],
@@ -37,24 +33,67 @@ describe('loadIdentity', () => {
     );
     expect((err as Error).message).not.toContain('node_modules');
   });
+});
 
-  it('refuses a module that exports no identity', async () => {
-    dir = mkdtempSync(path.join(tmpdir(), 'harness-identity-registry-'));
-    const empty = path.join(dir, 'empty.mjs');
-    writeFileSync(empty, 'export const nothing = 1;\n');
-    await expect(loadIdentity(pathToFileURL(empty).href, deps)).rejects.toThrow(/exports no `identity`/);
+/**
+ * `loadIdentity` tells three kinds of failure apart the way `loadPacks` does. Each fixture is a
+ * throwaway module written under a temp directory next to this test and loaded by its absolute
+ * `file://` URL, so a fixture can still `import` a workspace package (`@harness/shared`'s
+ * `ConfigError`) without touching a real plug-in. Every temp directory is removed after its test,
+ * pass or fail.
+ */
+describe('loadIdentity failure modes', () => {
+  const tempDirs: string[] = [];
+
+  afterEach(() => {
+    for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
   });
 
-  it('re-raises a plug-in ConfigError with its name in front when connect throws', async () => {
-    dir = mkdtempSync(path.join(tmpdir(), 'harness-identity-registry-'));
-    const throwing = path.join(dir, 'throwing.mjs');
-    const specifier = pathToFileURL(throwing).href;
-    writeFileSync(
-      throwing,
-      "export const identity = { name: 'throwing', version: '0.0.0', secrets: [], connect: async () => { throw new Error('boom'); } };\n",
-    );
-    const err = await loadIdentity(specifier, deps).catch((caught: unknown) => caught);
-    expect(err).toBeInstanceOf(ConfigError);
-    expect((err as Error).message).toBe(`identity plug-in "${specifier}" failed to connect`);
+  function fixture(contents: string): string {
+    const dir = mkdtempSync(path.join(here, '.tmp-identity-fixture-'));
+    tempDirs.push(dir);
+    const file = path.join(dir, 'identity.ts');
+    writeFileSync(file, contents, 'utf8');
+    return pathToFileURL(file).href;
+  }
+
+  it('refuses a module that exports no identity', async () => {
+    const url = fixture('export const nothing = 1;\n');
+    await expect(loadIdentity(url, deps)).rejects.toThrow(/exports no `identity`/);
+  });
+
+  it('re-raises a ConfigError a plug-in throws while connecting, named', async () => {
+    const url = fixture(`
+      import { ConfigError } from '@harness/shared';
+      export const identity = {
+        name: 'broken',
+        version: '0.0.0',
+        secrets: [],
+        connect: async () => { throw new ConfigError('directory is unreachable'); },
+      };
+    `);
+    await expect(loadIdentity(url, deps)).rejects.toThrow(ConfigError);
+    await expect(loadIdentity(url, deps)).rejects.toThrow(`identity plug-in "${url}": directory is unreachable`);
+  });
+
+  it('replaces any other connect failure with a message naming only the plug-in, and logs the original', async () => {
+    const secret = '/etc/only-the-log-should-see-this';
+    const url = fixture(`
+      export const identity = {
+        name: 'broken',
+        version: '0.0.0',
+        secrets: [],
+        connect: async () => { throw new Error('could not read ${secret}'); },
+      };
+    `);
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      await expect(loadIdentity(url, deps)).rejects.toThrow(ConfigError);
+      await expect(loadIdentity(url, deps)).rejects.toThrow(`identity plug-in "${url}" failed to connect`);
+      await expect(loadIdentity(url, deps)).rejects.not.toThrow(new RegExp(secret.replace(/\//g, '\\/')));
+      expect(errorSpy.mock.calls.some((call) => call.some((arg) => String(arg).includes(secret)))).toBe(true);
+    } finally {
+      errorSpy.mockRestore();
+    }
   });
 });

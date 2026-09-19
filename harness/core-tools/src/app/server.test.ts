@@ -1,4 +1,4 @@
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, it, expect } from 'vitest';
 import { ConfigError, envOrDefault } from '@harness/shared';
@@ -41,9 +41,13 @@ describe('resolvePrincipal', () => {
   // Task 4 replaces this file read with the resolved client document's `identity` section; until
   // then `resolvePrincipal` reads `clients/<client>/identity.yaml` off disk, so this test writes
   // one into a scratch client folder rather than pointing a deleted `HARNESS_IDENTITY_FILE` at it.
+  // `main.test.ts` writes the same `clients/smoke/` path for its own spawn tests; the two never
+  // collide because `fileParallelism: false` (vitest.config.ts) runs test files one at a time.
   const dir = clientDirFor('smoke');
   const saved = { ...process.env };
   beforeEach(() => {
+    // Never delete something this test did not create: refuse rather than overwrite a real folder.
+    if (existsSync(dir)) throw new Error(`${dir} already exists; refusing to overwrite a real clients/smoke folder`);
     mkdirSync(dir, { recursive: true });
     writeFileSync(
       path.join(dir, 'identity.yaml'),
