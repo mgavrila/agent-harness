@@ -1,7 +1,7 @@
 /**
  * The public API of @harness/shared.
  *
- * Nine modules of pure helpers with no domain knowledge and no workspace dependency, so the
+ * Ten modules of pure helpers with no domain knowledge and no workspace dependency, so the
  * packages at the bottom of the graph — @harness/db and every pack — can import them. Nothing
  * that knows what a provider, a document or an approval is belongs here; that lives in a
  * domain folder in the package that owns the concept. Redaction is the named exception and
@@ -28,7 +28,7 @@ export {
   type NumberEnvOptions,
 } from './env.js';
 export { assertInsideRoot, realOrNearestAncestor, type EscapeReason, type InsideRootOptions } from './paths.js';
-export { canonicalize, hashArgs } from './hash.js';
+export { hashArgs } from './hash.js';
 export { createLogger, type Logger } from './log.js';
 export { runBounded, type RunBoundedOptions, type RunBoundedOutcome } from './subprocess.js';
 export { readJsonl, writeJsonl, type JsonlRow } from './jsonl.js';
