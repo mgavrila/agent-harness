@@ -256,6 +256,7 @@ export async function runTurn(host: Host, turn: TurnInput): Promise<TurnResult> 
     await emit({ type: 'run', runId });
     try {
       await appendMessage(host.db, {
+        client: host.client,
         threadId: turn.thread.id,
         runId,
         role: turn.role,
@@ -405,6 +406,7 @@ export async function runTurn(host: Host, turn: TurnInput): Promise<TurnResult> 
       }
       if (status !== 'cancelled' && text !== '') {
         await appendMessage(host.db, {
+          client: host.client,
           threadId: turn.thread.id,
           runId,
           role: 'assistant',

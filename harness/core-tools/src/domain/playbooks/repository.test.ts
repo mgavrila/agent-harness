@@ -34,7 +34,12 @@ describe('playbooks repository', () => {
   it('requests a run: a playbook_runs row waiting for the scheduler, stamped with who asked', async () => {
     const playbook = await seed('nightly');
     const now = new Date('2026-09-15T12:00:00Z');
-    const run = await requestPlaybookRun(db, { playbookId: playbook.id, now, requestedBy: 'u-practice-manager' });
+    const run = await requestPlaybookRun(db, {
+      client: 'test',
+      playbookId: playbook.id,
+      now,
+      requestedBy: 'u-practice-manager',
+    });
     expect(run).toMatchObject({
       playbookId: playbook.id,
       status: 'requested',

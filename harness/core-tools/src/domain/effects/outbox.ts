@@ -37,10 +37,12 @@ export async function stageEffect(
       summary: input.summary.slice(0, 200),
       runId: deps.context.runId ?? null,
     })
-    .onConflictDoNothing({ target: toolEffects.idempotencyKey })
+    .onConflictDoNothing({ target: [toolEffects.client, toolEffects.idempotencyKey] })
     .returning({ id: toolEffects.id });
   if (inserted.length > 0) return { effect_id: inserted[0].id, staged: true };
-  const existing = await deps.db.query.toolEffects.findFirst({ where: eq(toolEffects.idempotencyKey, scopedKey) });
+  const existing = await deps.db.query.toolEffects.findFirst({
+    where: and(eq(toolEffects.client, deps.client), eq(toolEffects.idempotencyKey, scopedKey)),
+  });
   if (!existing) throw new Error('effect row missing after insert');
   return { effect_id: existing.id, staged: false };
 }

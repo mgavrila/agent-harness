@@ -19,6 +19,8 @@
   },
   "dependencies": {
     "@harness/config-api": "workspace:*",
+    "@harness/config-files": "workspace:*",
+    "@harness/config-postgres": "workspace:*",
     "@harness/db": "workspace:*",
     "@harness/identity-api": "workspace:*",
     "@harness/identity-static": "workspace:*",

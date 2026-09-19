@@ -21,9 +21,6 @@ export interface AuditEntry {
   skill?: string | null;
   skillVersion?: string | null;
   derivedFrom?: string[];
-  inputTokens?: number | null;
-  outputTokens?: number | null;
-  costUsd?: number | null;
 }
 
 export async function writeAudit(db: Db, entry: AuditEntry): Promise<void> {
@@ -41,8 +38,5 @@ export async function writeAudit(db: Db, entry: AuditEntry): Promise<void> {
     skill: entry.skill ?? null,
     skillVersion: entry.skillVersion ?? null,
     derivedFrom: entry.derivedFrom ?? [],
-    inputTokens: entry.inputTokens ?? null,
-    outputTokens: entry.outputTokens ?? null,
-    costUsd: entry.costUsd ?? null,
   });
 }

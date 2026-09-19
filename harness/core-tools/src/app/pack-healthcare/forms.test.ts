@@ -32,18 +32,34 @@ async function seedCompleteProvider(): Promise<string> {
     .values({ client: 'test', pack: 'healthcare', kind: 'provider', name: 'Dr. Ada Reyes', externalId: '1234567893' })
     .returning();
   await db.insert(fields).values([
-    { recordId: p.id, name: 'primary_specialty', value: 'Family Medicine', status: 'verified', confidence: 1 },
     {
+      client: 'test',
+      recordId: p.id,
+      name: 'primary_specialty',
+      value: 'Family Medicine',
+      status: 'verified',
+      confidence: 1,
+    },
+    {
+      client: 'test',
       recordId: p.id,
       name: 'practice_address',
       value: '12 Elm St, Austin TX',
       status: 'extracted',
       confidence: 0.95,
     },
-    { recordId: p.id, name: 'practice_name', value: 'Elm Street Family Care', status: 'extracted', confidence: 0.92 },
+    {
+      client: 'test',
+      recordId: p.id,
+      name: 'practice_name',
+      value: 'Elm Street Family Care',
+      status: 'extracted',
+      confidence: 0.92,
+    },
   ]);
   await db.insert(attachments).values([
     {
+      client: 'test',
       recordId: p.id,
       kind: 'license',
       issuer: 'Texas Medical Board',
@@ -51,8 +67,8 @@ async function seedCompleteProvider(): Promise<string> {
       expiresAt: '2027-03-31',
       numberEncrypted: Buffer.from('enc'),
     },
-    { recordId: p.id, kind: 'malpractice', issuer: 'MedPro', expiresAt: '2027-01-15' },
-    { recordId: p.id, kind: 'board_cert', issuer: 'ABFM', expiresAt: '2029-06-30' },
+    { client: 'test', recordId: p.id, kind: 'malpractice', issuer: 'MedPro', expiresAt: '2027-01-15' },
+    { client: 'test', recordId: p.id, kind: 'board_cert', issuer: 'ABFM', expiresAt: '2029-06-30' },
   ]);
   return p.id;
 }
@@ -293,8 +309,15 @@ describe('forms_roster', () => {
       .values({ client: 'test', pack: 'healthcare', kind: 'provider', name: 'Dr. No Number', externalId: '1234567893' })
       .returning();
     await db.insert(attachments).values([
-      { recordId: p.id, kind: 'license', issuer: 'Texas Medical Board', state: 'TX', expiresAt: '2027-03-31' },
-      { recordId: p.id, kind: 'dea', issuer: 'DEA', expiresAt: '2028-02-28' },
+      {
+        client: 'test',
+        recordId: p.id,
+        kind: 'license',
+        issuer: 'Texas Medical Board',
+        state: 'TX',
+        expiresAt: '2027-03-31',
+      },
+      { client: 'test', recordId: p.id, kind: 'dea', issuer: 'DEA', expiresAt: '2028-02-28' },
     ]);
     const client = await connectTools('forms-test', healthcarePack.tools!(deps), deps);
     const out = resultOf<{ file_id: string }>(
@@ -323,6 +346,7 @@ describe('forms_roster', () => {
       })
       .returning();
     await db.insert(attachments).values({
+      client: 'test',
       recordId: p.id,
       kind: 'dea',
       issuer: 'DEA',

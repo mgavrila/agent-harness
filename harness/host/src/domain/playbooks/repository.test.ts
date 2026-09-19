@@ -50,7 +50,7 @@ describe('syncPlaybooks', () => {
     expect(second.nextRunAt?.toISOString()).toBe('2026-09-21T06:30:00.000Z');
 
     // Gone from the file: disabled, not deleted; its history stays attached.
-    await requestPlaybookRun(db, { playbookId: first.id, now: later, requestedBy: 'u-x' });
+    await requestPlaybookRun(db, { client: 'test', playbookId: first.id, now: later, requestedBy: 'u-x' });
     expect(await syncPlaybooks(db, { client: 'test', now: later }, [])).toEqual({ upserted: 0, disabled: 1 });
     const [third] = await db.select().from(playbooks);
     expect(third).toMatchObject({ id: first.id, enabled: false, nextRunAt: null });
@@ -98,6 +98,7 @@ describe('claimDuePlaybooks', () => {
       .where(and(eq(playbooks.client, 'test'), eq(playbooks.name, 'nightly')))
       .limit(1);
     const requested = await requestPlaybookRun(db, {
+      client: 'test',
       playbookId: mine.id,
       now: NOW,
       requestedBy: 'u-practice-manager',
@@ -118,7 +119,7 @@ describe('claimDuePlaybooks', () => {
   it('never runs a playbook the file has disabled: the sync fails its pending request in preflight', async () => {
     await syncPlaybooks(db, { client: 'test', now: NOW }, [nightly]);
     const [row] = await db.select().from(playbooks);
-    await requestPlaybookRun(db, { playbookId: row.id, now: NOW, requestedBy: 'u-practice-manager' });
+    await requestPlaybookRun(db, { client: 'test', playbookId: row.id, now: NOW, requestedBy: 'u-practice-manager' });
 
     // The operator takes the playbook out of the file and the host restarts.
     expect(await syncPlaybooks(db, { client: 'test', now: NOW }, [])).toEqual({ upserted: 0, disabled: 1 });
@@ -134,7 +135,7 @@ describe('claimDuePlaybooks', () => {
     // A request that arrives for a disabled playbook after that sync is not claimed either. The
     // claim selects enabled playbooks only, so it passes the row over untouched rather than
     // closing it; the next sync is what closes it.
-    await requestPlaybookRun(db, { playbookId: row.id, now: NOW, requestedBy: 'u-practice-manager' });
+    await requestPlaybookRun(db, { client: 'test', playbookId: row.id, now: NOW, requestedBy: 'u-practice-manager' });
     expect(await claimDuePlaybooks(db, { client: 'test', now: new Date('2026-09-16T07:00:30Z') })).toEqual([]);
     const late = await db.select().from(playbookRuns).orderBy(playbookRuns.createdAt);
     expect(late.map((r) => r.status)).toEqual(['preflight_failed', 'requested']);
@@ -154,7 +155,7 @@ describe('claimDuePlaybooks', () => {
   it('returns the playbook as it stands at the claim, not as it was when the run was requested', async () => {
     await syncPlaybooks(db, { client: 'test', now: NOW }, [nightly]);
     const [row] = await db.select().from(playbooks);
-    await requestPlaybookRun(db, { playbookId: row.id, now: NOW, requestedBy: 'u-practice-manager' });
+    await requestPlaybookRun(db, { client: 'test', playbookId: row.id, now: NOW, requestedBy: 'u-practice-manager' });
     // A re-sync between the request and the tick: a different prompt, and a different principal.
     await syncPlaybooks(db, { client: 'test', now: NOW }, [
       { ...nightly, prompt: 'Run the edited one.', principal: 'svc-renewals' },
@@ -235,7 +236,7 @@ describe('claimDuePlaybooks with two hosts on one database', () => {
   it('a sync cannot edit a playbook out from under a claim that is taking it', async () => {
     await syncPlaybooks(db, { client: 'test', now: NOW }, [nightly]);
     const [row] = await db.select().from(playbooks);
-    await requestPlaybookRun(db, { playbookId: row.id, now: NOW, requestedBy: 'u-practice-manager' });
+    await requestPlaybookRun(db, { client: 'test', playbookId: row.id, now: NOW, requestedBy: 'u-practice-manager' });
     const other = createDb(TEST_DATABASE_URL);
     let signal!: (runs: ClaimedRun[]) => void;
     const claimedByFirst = new Promise<ClaimedRun[]>((resolve) => {
@@ -278,7 +279,7 @@ describe('claimDuePlaybooks with two hosts on one database', () => {
   it('the second host does not take a requested run the first host has locked', async () => {
     await syncPlaybooks(db, { client: 'test', now: NOW }, [nightly]);
     const [row] = await db.select().from(playbooks);
-    await requestPlaybookRun(db, { playbookId: row.id, now: NOW, requestedBy: 'u-practice-manager' });
+    await requestPlaybookRun(db, { client: 'test', playbookId: row.id, now: NOW, requestedBy: 'u-practice-manager' });
     // At NOW nothing is due, so the requested branch is the only one with anything to take.
     const { first, second: other } = await tickWhileHeld(async (claimedByFirst) => {
       await claimedByFirst;

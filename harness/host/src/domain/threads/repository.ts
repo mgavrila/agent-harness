@@ -46,6 +46,7 @@ export async function findOrCreateThread(
 export async function appendMessage(
   db: Db,
   m: {
+    client: string;
     threadId: string;
     runId: string | null;
     role: 'user' | 'assistant' | 'host';

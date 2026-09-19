@@ -33,6 +33,7 @@ export { expireApprovals, parkStuckDispatches, reconcile, type ReconcileResult }
 export { connectInProcess } from './domain/tooling/in-process.js';
 export { depsForRun, type KernelConfig, type RunDeps } from './domain/tooling/deps.js';
 export { buildKernelConfig, clientDirFor } from './domain/tooling/config.js';
+export { configSourceNameFrom, loadConfigSource, type ConfigSourceDeps } from './domain/config/registry.js';
 export {
   DEFAULT_CONFIDENCE_THRESHOLD,
   type AnyToolDef,

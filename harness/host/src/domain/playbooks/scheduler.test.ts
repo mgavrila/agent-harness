@@ -414,6 +414,7 @@ describe('the scheduler', () => {
     await syncPlaybooks(db, { client: 'test', now: f.host.now() }, [{ ...NIGHTLY, skill: 'sample-skill' }]);
     const [playbook] = await db.select().from(playbooks);
     const requested = await requestPlaybookRun(db, {
+      client: 'test',
       playbookId: playbook.id,
       now: f.host.now(),
       requestedBy: 'u-practice-manager',

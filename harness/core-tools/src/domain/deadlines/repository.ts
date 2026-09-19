@@ -41,7 +41,7 @@ export async function recomputeDeadlines(
   for (const d of computed) {
     await deps.db
       .insert(deadlines)
-      .values({ recordId, attachmentId: d.attachmentId, kind: d.kind, dueAt: d.dueAt })
+      .values({ client: deps.client, recordId, attachmentId: d.attachmentId, kind: d.kind, dueAt: d.dueAt })
       .onConflictDoUpdate({
         target: [deadlines.attachmentId, deadlines.kind],
         // A moved due date invalidates any notification already sent for the old one, so clear

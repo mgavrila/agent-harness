@@ -200,6 +200,7 @@ export async function claimDuePlaybooks(db: Db, opts: { client: string; now: Dat
       const [run] = await tx
         .insert(playbookRuns)
         .values({
+          client: opts.client,
           playbookId: playbook.id,
           scheduledAt: playbook.nextRunAt ?? opts.now,
           status: 'running',

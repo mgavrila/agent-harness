@@ -4,6 +4,12 @@ import { TEST_DATABASE_URL, resetDatabase } from '../testing.js';
 import { createDb, type Db } from './client.js';
 import { rejectionMessage } from './postgres-error.test-helpers.js';
 import {
+  approvals,
+  attachments,
+  clientDocumentVersions,
+  clientDocuments,
+  deadlines,
+  fields,
   records,
   auditLog,
   toolEffects,
@@ -129,9 +135,6 @@ describe('schema', () => {
         skill: 'credentialing-intake',
         skillVersion: '1.0.0',
         derivedFrom: [effect.id],
-        inputTokens: 10,
-        outputTokens: 5,
-        costUsd: 0.001,
       })
       .returning();
     expect(row.derivedFrom).toEqual([effect.id]);
@@ -145,8 +148,8 @@ describe('schema', () => {
       .returning();
     const at = new Date('2026-09-15T12:00:00Z');
     await db.insert(messages).values([
-      { threadId: thread.id, role: 'user', principalId: 'u-1', content: 'first', createdAt: at },
-      { threadId: thread.id, role: 'assistant', principalId: 'u-1', content: 'second', createdAt: at },
+      { client: 'test', threadId: thread.id, role: 'user', principalId: 'u-1', content: 'first', createdAt: at },
+      { client: 'test', threadId: thread.id, role: 'assistant', principalId: 'u-1', content: 'second', createdAt: at },
     ]);
     const rows = await db.select({ content: messages.content, seq: messages.seq }).from(messages).orderBy(messages.seq);
     expect(rows.map((r) => r.content)).toEqual(['first', 'second']);
@@ -174,7 +177,7 @@ describe('schema', () => {
     expect(playbook).toMatchObject({ timezone: 'UTC', deliver: 'none', timeoutS: 600, enabled: true, nextRunAt: null });
     const [run] = await db
       .insert(playbookRuns)
-      .values({ playbookId: playbook.id, scheduledAt: new Date('2026-09-16T07:00:00Z') })
+      .values({ client: 'test', playbookId: playbook.id, scheduledAt: new Date('2026-09-16T07:00:00Z') })
       .returning();
     expect(run).toMatchObject({ status: 'requested', attempts: 0, runId: null, requestedBy: null });
     await expect(
@@ -242,6 +245,94 @@ describe('schema', () => {
     await db.delete(knowledgeDocuments).where(eq(knowledgeDocuments.id, document.id));
     expect(await db.$count(knowledgeChunks)).toBe(0);
   });
+
+  it('scopes every row of the five tables that used to be reachable only through a foreign key', async () => {
+    const [record] = await db
+      .insert(records)
+      .values({ client: 'alpha', pack: 'p', kind: 'k', name: 'Alpha record', externalId: 'r1', status: 'active' })
+      .returning();
+    await db.insert(fields).values({ client: 'alpha', recordId: record.id, name: 'n', value: 'v' });
+    const [attachment] = await db
+      .insert(attachments)
+      .values({ client: 'alpha', recordId: record.id, kind: 'licence' })
+      .returning();
+    await db.insert(deadlines).values({
+      client: 'alpha',
+      recordId: record.id,
+      attachmentId: attachment.id,
+      kind: 'renewal',
+      dueAt: '2026-10-01',
+    });
+    expect(await db.$count(fields, eq(fields.client, 'alpha'))).toBe(1);
+    expect(await db.$count(deadlines, eq(deadlines.client, 'alpha'))).toBe(1);
+  });
+
+  it('lets two clients mint the same idempotency key, which a global unique index forbade', async () => {
+    const common = {
+      action: 'forms_release',
+      payload: {},
+      summary: 's',
+      requestedBy: 'u-one',
+      expiresAt: new Date('2026-10-01T00:00:00Z'),
+      idempotencyKey: 'the-same-key',
+    };
+    await db.insert(approvals).values([
+      { ...common, client: 'alpha' },
+      { ...common, client: 'beta' },
+    ]);
+    expect(await db.$count(approvals)).toBe(2);
+    // And within one client it is still one live pending request per key.
+    await expect(db.insert(approvals).values({ ...common, client: 'alpha' })).rejects.toThrow();
+  });
+
+  it("carries a run's totals, and no longer carries them on the audit row", async () => {
+    const [run] = await db
+      .insert(runs)
+      .values({ client: 'alpha', principalId: 'u-one', inputTokens: 120, outputTokens: 34, costUsd: 0.002 })
+      .returning();
+    expect(run).toMatchObject({ inputTokens: 120, outputTokens: 34 });
+    expect(Object.keys(auditLog)).not.toContain('inputTokens');
+  });
+
+  it('exports usage without a word of what anybody said', async () => {
+    const columns = await db.execute(
+      sql`select column_name from information_schema.columns where table_name = 'usage_runs' order by column_name`,
+    );
+    expect(columns.rows.map((r) => r.column_name)).toEqual([
+      'approvals_decided',
+      'approvals_requested',
+      'client',
+      'cost_usd',
+      'day',
+      'duration_seconds',
+      'input_tokens',
+      'output_tokens',
+      'principal_id',
+      'runs',
+      'runs_cancelled',
+      'runs_done',
+      'runs_error',
+      'runs_running',
+      'sandbox_seconds',
+    ]);
+  });
+
+  it('stores a client document and its versions', async () => {
+    await db.insert(clientDocuments).values({
+      clientId: 'alpha',
+      schemaVersion: 1,
+      document: { id: 'alpha' },
+      version: 'v1',
+    });
+    await db
+      .insert(clientDocumentVersions)
+      .values({ clientId: 'alpha', version: 'v1', document: { id: 'alpha' }, createdBy: 'u-one' });
+    expect(await db.$count(clientDocumentVersions, eq(clientDocumentVersions.clientId, 'alpha'))).toBe(1);
+    // One row per client in the live table; the history is where the versions pile up.
+    await expect(
+      db.insert(clientDocuments).values({ clientId: 'alpha', schemaVersion: 1, document: {}, version: 'v2' }),
+    ).rejects.toThrow();
+  });
 });
 
 describe('threads and messages', () => {
@@ -272,8 +363,14 @@ describe('threads and messages', () => {
   it('indexes message content for full-text search through the generated tsv column', async () => {
     const t = await thread();
     await db.insert(messages).values([
-      { threadId: t.id, role: 'user', principalId: 'u-1', content: 'When does the licence for Dr Reyes expire?' },
-      { threadId: t.id, role: 'assistant', principalId: 'u-1', content: 'It expires on 2027-03-31.' },
+      {
+        client: 'test',
+        threadId: t.id,
+        role: 'user',
+        principalId: 'u-1',
+        content: 'When does the licence for Dr Reyes expire?',
+      },
+      { client: 'test', threadId: t.id, role: 'assistant', principalId: 'u-1', content: 'It expires on 2027-03-31.' },
     ]);
     const hits = await db
       .select({ content: messages.content })

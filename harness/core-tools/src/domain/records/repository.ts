@@ -84,6 +84,7 @@ async function upsertField(deps: ToolDeps, recordId: string, f: FieldInput) {
   const confidence = f.confidence ?? 1;
   const status = confidence >= deps.confidenceThreshold ? 'extracted' : 'pending';
   const values = {
+    client: deps.client,
     recordId,
     name: f.name,
     ...fieldValueColumns(f.value, restricted, deps.encryptionKey),
@@ -136,6 +137,7 @@ async function upsertAttachment(deps: ToolDeps, recordId: string, a: AttachmentI
     ),
   });
   const values = {
+    client: deps.client,
     recordId,
     kind: a.kind,
     issuer: a.issuer ?? null,
@@ -229,6 +231,7 @@ export async function confirmField(
   });
   const restricted = existing?.restricted === true || isRestrictedName(field);
   const values = {
+    client: deps.client,
     recordId: record_id,
     name: field,
     ...fieldValueColumns(value, restricted, deps.encryptionKey),

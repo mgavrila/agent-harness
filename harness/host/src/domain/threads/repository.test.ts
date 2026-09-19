@@ -25,7 +25,7 @@ describe('threads', () => {
       ['host', 'three'],
       ['user', 'four'],
     ] as const) {
-      await appendMessage(db, { threadId: t.id, runId: null, role, principalId: 'u-1', content });
+      await appendMessage(db, { client: 'test', threadId: t.id, runId: null, role, principalId: 'u-1', content });
     }
     expect(await recentHistory(db, t.id, 3)).toEqual([
       { role: 'assistant', content: 'two' },
@@ -37,6 +37,7 @@ describe('threads', () => {
   it('withholds a message that carries a restricted identifier instead of storing it', async () => {
     const t = await findOrCreateThread(db, key);
     const stored = await appendMessage(db, {
+      client: 'test',
       threadId: t.id,
       runId: null,
       role: 'assistant',
@@ -53,7 +54,9 @@ describe('threads', () => {
     const at = new Date('2026-09-15T12:00:00Z');
     // Straight into the table with one clock value, which is what one transaction does.
     for (const content of ['one', 'two', 'three', 'four', 'five', 'six']) {
-      await db.insert(messages).values({ threadId: t.id, role: 'user', principalId: 'u-1', content, createdAt: at });
+      await db
+        .insert(messages)
+        .values({ client: 'test', threadId: t.id, role: 'user', principalId: 'u-1', content, createdAt: at });
     }
     expect((await recentHistory(db, t.id, 3)).map((m) => m.content)).toEqual(['four', 'five', 'six']);
   });

@@ -139,9 +139,13 @@ describe('memory tools', () => {
       .insert(threads)
       .values({ client: 'test', surface: 'memory', conversation: 'c1', principalId: 'u-lead' })
       .returning({ id: threads.id });
-    await db
-      .insert(messages)
-      .values({ threadId: mine.id, role: 'user', principalId: 'u-lead', content: 'When is the Aetna roster due?' });
+    await db.insert(messages).values({
+      client: 'test',
+      threadId: mine.id,
+      role: 'user',
+      principalId: 'u-lead',
+      content: 'When is the Aetna roster due?',
+    });
     const lead = await connectAs(LEAD);
     const { hits } = resultOf<{ hits: { thread_id: string; role: string; snippet: string; created_at: string }[] }>(
       await lead.callTool({ name: 'session_search', arguments: { query: 'roster' } }),
