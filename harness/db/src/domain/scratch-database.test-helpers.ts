@@ -32,6 +32,11 @@ export interface ScratchDatabase {
    */
   create(maintenanceUrl: string, ddl: string): Promise<{ db: Db; close: () => Promise<void> }>;
   /**
+   * `maintenanceUrl` with its path swapped for this database's name, for a test that connects to
+   * it on its own rather than through `create` — `runMigrations` takes a URL, not a handle.
+   */
+  url(maintenanceUrl: string): string;
+  /**
    * Drop it. Safe to call when it was never created, and safe to call twice. The caller closes
    * its own pool on the scratch database *first*, or the drop blocks behind it — `WITH (FORCE)`
    * covers the case where it forgot.
@@ -57,6 +62,7 @@ export function scratchDatabase(name: string): ScratchDatabase {
 
   return {
     drop,
+    url,
     async create(maintenanceUrl, ddl) {
       const maintenance = createDb(maintenanceUrl);
       try {
