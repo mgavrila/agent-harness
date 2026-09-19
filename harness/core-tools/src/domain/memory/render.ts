@@ -19,9 +19,9 @@ const SECTIONS: readonly { title: string; scope: MemoryScope }[] = [
  * characters of text (2,500 + 4,000), 100 entries each carrying 45 characters of list
  * punctuation and id (`- ` + ` (id: ` + a 36-character uuid + `)`), 100 newlines inside the two
  * sections — one under each heading and one between the lines — two headings of 31 and 30, and
- * 13 more for `# Memory`, the blank line under it, the
- * separator between the sections and the trailing newline. That is 11,174 at both caps, which
- * is why the test asserts 12,000 rather than the 11,000 an earlier draft claimed.
+ * 13 more for `# Memory`, the blank line under it, the separator between the sections and the
+ * trailing newline. That is 11,174 at both caps, which is the ceiling `render.test.ts` asserts
+ * 12,000 against.
  */
 export function renderMemorySnapshot(entries: readonly MemoryEntry[]): string {
   if (entries.length === 0) return '';

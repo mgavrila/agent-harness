@@ -47,9 +47,9 @@ export async function executeApproval(deps: ToolDeps, approvalId: string): Promi
   // Policy is re-read at replay time: an approval granted before the class was blocked must not
   // become a way around the current policy. It is re-checked at the level the action was parked
   // under; a row parked before that level was recorded falls back to the replaying principal's
-  // own level, which since Plan 8 is the approver's — the in-process client opens the run as
-  // whoever decided the approval, always a lead or admin — so a legitimate approval is never
-  // blocked on that fallback, while a policy tightened after the row was parked still applies.
+  // own level, which is the approver's — the in-process client opens the run as whoever decided
+  // the approval, always a lead or admin — so a legitimate approval is never blocked on that
+  // fallback, while a policy tightened after the row was parked still applies.
   // Throwing here rolls the `executed` transition back to `approved`.
   const parkedLevel = parsed.level && (LEVELS as readonly string[]).includes(parsed.level) ? parsed.level : undefined;
   // Resolved again here, not read off the row: the class of a call is a function of its
@@ -59,7 +59,7 @@ export async function executeApproval(deps: ToolDeps, approvalId: string): Promi
     throw new ToolError(`approval ${approvalId} cannot execute: ${target.name} is now blocked by policy`);
   }
   // A `write.self` write belongs to whoever asked for it. The replay runs on the *approver's*
-  // deps — Plan 8 opens the run as whoever decided — and a `write.self` handler takes its owner
+  // deps — the run is opened as whoever decided — and a `write.self` handler takes its owner
   // from `deps.principal.id`, so replaying someone else's would file their note in the approver's
   // own scope: wrong owner, invisible to the requester, and silent. The approver cannot stand in
   // for them, so the replay is refused rather than impersonating the requester. Throwing rolls

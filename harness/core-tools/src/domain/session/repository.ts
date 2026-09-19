@@ -26,7 +26,7 @@ export interface OpenRunInput {
 /**
  * Open a run: write the `runs` row and hand back the context every row of the run will carry.
  * The one way a run comes to exist — the stdio server calls it once per process, the eval
- * pipeline once per handle, the host once per turn from Plan 8 — and nothing a model sends can.
+ * pipeline once per handle, the host once per turn — and nothing a model sends can.
  */
 export async function openRun(db: Db, input: OpenRunInput): Promise<RunContext & { runId: string }> {
   const threadId = input.threadId ?? null;

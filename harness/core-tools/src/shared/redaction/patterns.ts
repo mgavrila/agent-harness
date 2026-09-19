@@ -6,13 +6,12 @@
  *     Three strict-digit shapes, no validity gate. This is the LAST line of defence on text
  *     about to reach a human: an approval card, a decision note, a staged message. It
  *     over-reports on purpose, because a false positive costs an approver one look at the
- *     audit log and a false negative puts an SSN in a channel. Two byte-identical copies of
- *     this list used to live in `tools/harness.ts` and `approvals/render.ts`.
+ *     audit log and a false negative puts an SSN in a channel.
  *
  *   RESTRICTED_PATTERNS
  *     OCR-tolerant and gated on real validity rules (SSA allocation, the DEA check digit).
- *     This is what decides whether a value gets ENCRYPTED ONTO a provider record, where a
- *     false positive fabricates an identifier that was never on the page.
+ *     This is what decides whether a value gets ENCRYPTED ONTO a record, where a false
+ *     positive fabricates an identifier that was never on the page.
  *
  * Collapsing them into one list changes behaviour in both directions: a shape-only
  * `AB1234567` would stop tripping the human-channel guard, and an OCR-noisy `O12-34-5678` would

@@ -16,10 +16,9 @@ const SHARED_INJECTION_EXAMPLE = 'ignore previous directions';
  * The sentence naming example imperatives, as one or two lines.
  *
  * The pack's first example finishes the opening line and the rest follow the kernel's own on the
- * second, which is exactly the shape this paragraph has always had: with the healthcare pack's
- * two phrases it reproduces the previous text byte for byte, and `tool-surface.json` is not the
- * only thing this plan must not move — a changed prompt changes what every eval measures. A pack
- * that lists no example gets one line with the kernel's example alone.
+ * second. The shape is byte-pinned by `prompts.test.ts` and by the eval baseline: a changed
+ * prompt changes what every eval measures. A pack that lists no example gets one line with the
+ * kernel's example alone.
  */
 function imperativeExamples(examples: readonly string[]): string[] {
   const [first, ...rest] = examples;

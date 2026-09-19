@@ -13,8 +13,8 @@ import type { AuditEntry } from './audit.js';
 /**
  * What one run knows about itself, stamped onto every audit row, effect and model call it
  * produces. Built once per run — by `openRun` for the stdio server and the eval pipeline, by the
- * host per turn from Plan 8 — and never shared between runs: one `ToolDeps` per run, never a
- * process-wide mutable object.
+ * host per turn — and never shared between runs: one `ToolDeps` per run, never a process-wide
+ * mutable object.
  */
 export interface RunContext {
   /**
@@ -23,12 +23,12 @@ export interface RunContext {
    * point opens one.
    */
   runId: string | null;
-  /** The conversation thread (a `threads` row from Plan 8). Null until a host opens threads. */
+  /** The conversation thread this run belongs to: a `threads` row. Null where no host opened one. */
   threadId: string | null;
   /** The surface and conversation the run was started from. Null for the stdio server. */
   surface: string | null;
   conversation: string | null;
-  /** The skill the runtime activated, when it said so. Nothing in this plan sets them. */
+  /** The skill the runtime activated, when it said so. Absent when it named none. */
   skill?: string;
   skillVersion?: string;
   /** The tool currently executing; set by `withCurrentTool`, read by `stageEffect`. */
@@ -53,10 +53,10 @@ export const DEFAULT_CONFIDENCE_THRESHOLD = 0.85;
  * not constructed objects: a test overrides a URL or a directory rather than assembling an
  * interface. See ARCHITECTURE.md for why.
  *
- * One adapter is built by the domain from that configuration and is on the live path today:
+ * One adapter is built by the domain from that configuration and is on the live path:
  * `httpGateway(deps.gateway)` inside `callModel`. The other, `fileStorage(root)`, is a declared
- * seam with no caller yet: every storage call still goes through the free functions with
- * `deps.storageDir` threaded in. Wiring it is a later task, not a behaviour change here.
+ * seam with no caller: every storage call still goes through the free functions with
+ * `deps.storageDir` threaded in.
  */
 export interface ToolDeps {
   /** Drizzle database handle; every handler runs inside a transaction opened on it. */
@@ -127,7 +127,10 @@ export interface ToolDeps {
    * that requires a BAA with the model vendor (spec section 4.4).
    */
   restrictedToModel: boolean;
-  /** External-effect senders keyed by sink name (e.g. 'surface_message'). Empty in Plan 1.1; Plan 3 registers real ones. */
+  /**
+   * External-effect senders keyed by sink name (e.g. 'surface_message'). Empty unless the
+   * composition root fills it; the host registers `surfaceSinks` from `@harness/approvals`.
+   */
   sinks: SinkRegistry;
   /** This run's context, stamped on audit rows; see `context.ts`. One per run. */
   context: RunContext;
