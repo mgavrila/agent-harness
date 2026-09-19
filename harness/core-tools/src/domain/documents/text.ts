@@ -5,8 +5,6 @@ import { PDFParse } from 'pdf-parse';
 import { ToolError, runBounded } from '@harness/shared';
 import type { ExtractedText, PageRange, PageText } from './types.js';
 
-export type { ExtractedText, PageRange, PageText };
-
 /** Below this many characters a page is treated as having no usable text layer. */
 export const MIN_CHARS_PER_PAGE = 40;
 
