@@ -2,7 +2,7 @@ import type { Client } from '@modelcontextprotocol/client';
 import { tool, type StructuredToolInterface } from '@langchain/core/tools';
 import type { JsonSchema7Type } from '@langchain/core/utils/json_schema';
 import { hashArgs } from '@harness/shared';
-import type { RunEvent } from '@harness/runtime-api';
+import { toolResultStatus, type RunEvent } from '@harness/runtime-api';
 
 export interface BridgeSink {
   emit(event: RunEvent): void;
@@ -30,12 +30,6 @@ export function textOf(res: { content?: unknown }): string {
     .filter((p) => p.type === 'text' && typeof p.text === 'string')
     .map((p) => p.text ?? '')
     .join('\n');
-}
-
-function statusOf(res: CallResult): 'ok' | 'pending' | 'error' {
-  if (res.isError) return 'error';
-  const status = (res.structuredContent as { status?: unknown } | undefined)?.status;
-  return status === 'pending' ? 'pending' : 'ok';
 }
 
 /**
@@ -75,7 +69,7 @@ export async function bridgeTools(client: Client, sink: BridgeSink): Promise<Str
           sink.emit({ type: 'tool_result', name: def.name, status: 'error' });
           return `Tool ${def.name} could not be reached: ${err instanceof Error ? err.name : 'error'}.`;
         }
-        sink.emit({ type: 'tool_result', name: def.name, status: statusOf(res) });
+        sink.emit({ type: 'tool_result', name: def.name, status: toolResultStatus(res) });
         return textOf(res);
       },
       { name: def.name, description: def.description ?? '', schema: def.inputSchema as JsonSchema7Type },

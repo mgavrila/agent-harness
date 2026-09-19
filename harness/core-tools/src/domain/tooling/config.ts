@@ -73,9 +73,12 @@ export function parserFromEnv(storageDir: string, filesUrl?: string): DocumentPa
 // under it, so this resolves to the client folder in a checkout and in a container alike.
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../../..');
 
-/** `clients/<name>/`, the folder spec section 7 lays out. */
-export function clientDirFor(client: string): string {
-  return path.join(repoRoot, 'clients', client);
+/**
+ * `clients/<name>/`, the folder spec section 7 lays out. `root` is the repository root and
+ * defaults to the one resolved above; only a test names its own.
+ */
+export function clientDirFor(client: string, root: string = repoRoot): string {
+  return path.join(root, 'clients', client);
 }
 
 /**

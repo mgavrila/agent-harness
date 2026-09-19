@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import { eq, sql } from 'drizzle-orm';
 import { TEST_DATABASE_URL, resetDatabase } from '../testing.js';
 import { createDb, type Db } from './client.js';
+import { rejectionMessage } from './postgres-error.test-helpers.js';
 import {
   records,
   auditLog,
@@ -29,24 +30,6 @@ afterAll(async () => {
 beforeEach(async () => {
   await resetDatabase(db);
 });
-
-/**
- * The message a query's rejection really carries, or a sentence saying it did
- * not reject at all. drizzle-orm wraps the driver error as "Failed query: ..."
- * and puts the underlying Postgres error — the trigger's RAISE EXCEPTION
- * message — on `.cause`, so the cause is what the append-only assertions below
- * have to read.
- */
-async function rejectionMessage(query: PromiseLike<unknown>): Promise<string> {
-  try {
-    await query;
-    return 'the query succeeded';
-  } catch (err) {
-    const cause = err instanceof Error ? err.cause : undefined;
-    if (cause instanceof Error) return cause.message;
-    return err instanceof Error ? err.message : String(err);
-  }
-}
 
 describe('schema', () => {
   it('inserts and reads a record', async () => {

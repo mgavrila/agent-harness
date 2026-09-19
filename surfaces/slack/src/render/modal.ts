@@ -10,7 +10,7 @@ import type { Form, FormField } from '@harness/surface-api';
  */
 
 /** The element id Slack reports an answer under. Derived, so the host declares one id per field. */
-export function inputActionId(field: FormField): string {
+function inputActionId(field: FormField): string {
   return `${field.id}_input`;
 }
 
@@ -51,8 +51,7 @@ export function formView(form: Form): Record<string, unknown> {
  *
  * Derived from the payload alone, with no `Form` in hand, so this adapter remembers nothing
  * between opening a modal and its submission: a note box opened before a restart still submits
- * afterwards. That is what today's `main.ts` does when it reads the note straight out of
- * `view.state.values` under the two ids it already knows.
+ * afterwards.
  *
  * A field left blank arrives with a null value and becomes `''`, so a handler reading
  * `values[id]` never has to tell "left blank" from "Slack changed its payload shape".

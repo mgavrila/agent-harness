@@ -6,6 +6,7 @@ import { TEST_DATABASE_URL } from '../testing.js';
 import type { Db } from './client.js';
 import { LEGACY_0011_DDL } from './legacy-0011.test-helpers.js';
 import { migrationStatements } from './migration-sql.test-helpers.js';
+import { rejectionMessage } from './postgres-error.test-helpers.js';
 import { scratchDatabase } from './scratch-database.test-helpers.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -15,23 +16,6 @@ const THREAD = '22222222-2222-4222-8222-222222222222';
 
 let db: Db;
 let close: () => Promise<void>;
-
-/**
- * The message a query's rejection really carries, or a sentence saying it did not reject at all.
- * drizzle-orm wraps the driver error as "Failed query: ..." and puts the underlying Postgres
- * error — the constraint's own message — on `.cause`, so the cause is what the constraint-name
- * assertion below has to read. Mirrors the helper of the same name in schema.test.ts.
- */
-async function rejectionMessage(query: PromiseLike<unknown>): Promise<string> {
-  try {
-    await query;
-    return 'the query succeeded';
-  } catch (err) {
-    const cause = err instanceof Error ? err.cause : undefined;
-    if (cause instanceof Error) return cause.message;
-    return err instanceof Error ? err.message : String(err);
-  }
-}
 
 /**
  * Unlike the 0011 test, the migration is applied once, up front, and not rolled back: the

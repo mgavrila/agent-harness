@@ -17,7 +17,7 @@ import {
 import { loadPolicy, requestPlaybookRun } from '@harness/core-tools';
 import { RUN_FAILED_MESSAGE, type RunEvent, type RuntimeSession } from '@harness/runtime-api';
 import { startFakeGateway } from '@harness/runtime-api/testing';
-import { hostFixture, testKernelConfig, useTestDb, type HostFixture } from '../../testing.js';
+import { hostFixture, testKernelConfig, useTestDb, waitFor, type HostFixture } from '../../testing.js';
 import { drainActive } from '../conversation.js';
 import { kernelSkillsDir, readSkillCatalogue } from '../skills.js';
 import { stagePlaybookNotice } from './notice.js';
@@ -52,15 +52,6 @@ const shippedSkills = () => readSkillCatalogue(testKernelConfig(db).packs.skills
 async function due(f: HostFixture, definition: PlaybookDefinition = NIGHTLY): Promise<void> {
   await syncPlaybooks(db, { client: 'test', now: f.host.now() }, [definition]);
   await db.update(playbooks).set({ nextRunAt: f.host.now() }).where(eq(playbooks.name, definition.name));
-}
-
-/** Poll until `ready` holds, so a test waits on the signal it means rather than on a fixed delay. */
-async function waitFor(ready: () => boolean, timeoutMs = 2_000): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (!ready()) {
-    if (Date.now() > deadline) throw new Error('timed out waiting for the condition');
-    await new Promise((r) => setTimeout(r, 5));
-  }
 }
 
 /** A runtime whose answer is scripted per request number. */

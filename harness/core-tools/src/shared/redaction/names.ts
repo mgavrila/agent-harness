@@ -19,7 +19,7 @@ export const MASKED = '[restricted]';
  * The trailing ordinal matters: `fieldNameFor` in redaction/text.ts names a
  * second distinct value of a kind `ssn_2`, `ein_2`, `dea_number_2`. Those are
  * names this harness generates itself, so a caller replaying an earlier
- * extraction through `providers_upsert` must not be able to land one in the
+ * extraction through `records_upsert` must not be able to land one in the
  * plaintext `fields.value` column just because it carries a suffix.
  */
 export function isRestrictedName(name: string): boolean {

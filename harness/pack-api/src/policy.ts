@@ -7,10 +7,10 @@ import type { Level } from '@harness/shared';
  * `decide` stay in core-tools: reading a YAML file and deciding what to do with a class is the
  * kernel's job, not the contract's.
  *
- * Eight classes since Plan 7. `write.self` is a write to the caller's own scope (their memory,
- * their preferences); `write.assign` gives work to someone else; `admin` changes who may do what.
- * None of the three is used by a shipped tool yet — they exist so the level matrix can say what
- * happens when one arrives.
+ * Eight classes. `write.self` is a write to the caller's own scope (their memory, their
+ * preferences); `write.assign` gives work to someone else; `admin` changes who may do what. None
+ * of the three is used by a shipped tool yet — they exist so the level matrix can say what happens
+ * when one arrives.
  */
 export const ACTION_CLASSES = [
   'read',

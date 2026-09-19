@@ -3,20 +3,14 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { hashArgs } from '@harness/shared';
-import type { RunEvent } from './types.js';
 import { ScriptedRuntime, parseTrajectory, readTrajectory, scriptedRuntime, type TrajectoryStep } from './scripted.js';
-import { fixtureRequest, toolServerFixture, type ToolServerFixture } from './tool-server.js';
-import { runtimeConformance } from './conformance.js';
+import { RECORDS_SEARCH, fixtureRequest, toolServerFixture, type ToolServerFixture } from './tool-server.js';
+import { collectRunEvents, runtimeConformance } from './conformance.js';
 
 let fixture: ToolServerFixture;
 beforeEach(async () => {
   fixture = await toolServerFixture([
-    {
-      name: 'records_search',
-      description: 'search',
-      inputSchema: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] },
-      handler: ({ query }) => ({ status: 'ok', result: { hits: [String(query)] } }),
-    },
+    RECORDS_SEARCH,
     {
       name: 'forms_release',
       description: 'release',
@@ -33,16 +27,10 @@ beforeEach(async () => {
 });
 afterEach(() => fixture.close());
 
-async function collect(events: AsyncIterable<RunEvent>): Promise<RunEvent[]> {
-  const out: RunEvent[] = [];
-  for await (const e of events) out.push(e);
-  return out;
-}
-
 describe('ScriptedRuntime', () => {
   it('replays tool steps through request.tools and says the final text', async () => {
     const runtime = new ScriptedRuntime([{ tool: 'records_search', args: { query: 'ada' } }, { say: 'Found one.' }]);
-    const events = await collect(runtime.run(fixtureRequest({ tools: fixture.client })).events);
+    const events = await collectRunEvents(runtime.run(fixtureRequest({ tools: fixture.client })).events);
     expect(fixture.calls).toEqual([{ name: 'records_search', args: { query: 'ada' } }]);
     expect(events).toEqual([
       { type: 'tool_call', name: 'records_search', argsHash: hashArgs({ query: 'ada' }) },
@@ -59,14 +47,14 @@ describe('ScriptedRuntime', () => {
       { tool: 'forms_release', args: { file_id: 'roster/x.csv' } },
       { say: 'Waiting for approval.' },
     ]);
-    const events = await collect(runtime.run(fixtureRequest({ tools: fixture.client })).events);
+    const events = await collectRunEvents(runtime.run(fixtureRequest({ tools: fixture.client })).events);
     expect(events.map((e) => e.type)).toEqual(['skill_activated', 'tool_call', 'tool_result', 'text', 'done']);
     expect(events[2]).toEqual({ type: 'tool_result', name: 'forms_release', status: 'pending' });
   });
 
   it('reports a tool the server does not have as an error result and keeps going', async () => {
     const runtime = new ScriptedRuntime([{ tool: 'no_such_tool', args: {} }, { say: 'x' }]);
-    const events = await collect(runtime.run(fixtureRequest({ tools: fixture.client })).events);
+    const events = await collectRunEvents(runtime.run(fixtureRequest({ tools: fixture.client })).events);
     expect(events[1]).toEqual({ type: 'tool_result', name: 'no_such_tool', status: 'error' });
     expect(events.at(-1)).toEqual({ type: 'done', text: 'x' });
   });
@@ -76,7 +64,7 @@ describe('ScriptedRuntime', () => {
     const controller = new AbortController();
     const handle = runtime.run(fixtureRequest({ tools: fixture.client, signal: controller.signal }));
     setTimeout(() => controller.abort(), 10);
-    expect(await collect(handle.events)).toEqual([{ type: 'error', message: 'cancelled' }]);
+    expect(await collectRunEvents(handle.events)).toEqual([{ type: 'error', message: 'cancelled' }]);
   });
 
   it('ends with error "cancelled" when the signal aborts during a tool call, with no tool_result', async () => {
@@ -84,7 +72,7 @@ describe('ScriptedRuntime', () => {
     const controller = new AbortController();
     const handle = runtime.run(fixtureRequest({ tools: fixture.client, signal: controller.signal }));
     setTimeout(() => controller.abort(), 10);
-    const events = await collect(handle.events);
+    const events = await collectRunEvents(handle.events);
     expect(events.filter((e) => e.type === 'tool_result')).toEqual([]);
     const terminal = events.filter((e) => e.type === 'done' || e.type === 'error');
     expect(terminal).toEqual([{ type: 'error', message: 'cancelled' }]);
@@ -93,7 +81,7 @@ describe('ScriptedRuntime', () => {
 
   it('takes a trajectory chosen per request', async () => {
     const runtime = new ScriptedRuntime((request) => [{ say: `echo: ${request.input.text}` }]);
-    const events = await collect(
+    const events = await collectRunEvents(
       runtime.run(fixtureRequest({ tools: fixture.client, input: { text: 'hi', attachments: [] } })).events,
     );
     expect(events.at(-1)).toEqual({ type: 'done', text: 'echo: hi' });

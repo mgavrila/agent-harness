@@ -35,9 +35,8 @@ describe('payloadPreview', () => {
 
 describe('approvalCard', () => {
   /**
-   * The whole card, as one object. The Slack adapter's own test holds the Block Kit this
-   * renders to against what the app produced before Plan 6, so the pair of them is the proof
-   * that the demo deployment's card did not move.
+   * The whole card, as one object. The Slack adapter's own test pins the Block Kit this renders
+   * to, so the pair of them is the proof that the demo deployment's card did not move.
    */
   it('is exactly the card the Slack adapter pins its rendering against', () => {
     expect(approvalCard(row(), CAN)).toEqual({

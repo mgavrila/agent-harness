@@ -6,11 +6,7 @@ import { runMigrations } from './migrate.js';
 import { scratchDatabase } from './scratch-database.test-helpers.js';
 
 const scratch = scratchDatabase(`harness_test_migrate_all_${process.pid}`);
-const scratchUrl = (): string => {
-  const parsed = new URL(TEST_DATABASE_URL);
-  parsed.pathname = `/harness_test_migrate_all_${process.pid}`;
-  return parsed.toString();
-};
+const scratchUrl = scratch.url(TEST_DATABASE_URL);
 
 afterAll(async () => {
   await scratch.drop(TEST_DATABASE_URL);
@@ -23,9 +19,9 @@ describe('runMigrations', () => {
     const { close } = await scratch.create(TEST_DATABASE_URL, 'SELECT 1');
     await close();
 
-    await runMigrations(scratchUrl());
+    await runMigrations(scratchUrl);
 
-    const { db, close: closeScratch } = createDb(scratchUrl());
+    const { db, close: closeScratch } = createDb(scratchUrl);
     try {
       const [extension] = (await db.execute(sql.raw(`SELECT extname FROM pg_extension WHERE extname = 'vector'`))).rows;
       expect(extension).toEqual({ extname: 'vector' });
@@ -33,7 +29,7 @@ describe('runMigrations', () => {
         .rows;
       expect(chunks).toEqual({ table_name: 'knowledge_chunks' });
       // Idempotent: a second run is the ordinary case (every test-global-setup calls it).
-      await runMigrations(scratchUrl());
+      await runMigrations(scratchUrl);
     } finally {
       await closeScratch();
     }

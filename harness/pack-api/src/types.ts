@@ -195,10 +195,10 @@ export type AnyToolDef<TDeps = PackToolDeps> = ToolDef<any, any, TDeps>;
  * What core loads when it loads an area of the product.
  *
  * A pack is content plus a declaration: what it stores, which documents exist, what to pull out
- * of them, which forms and skills ship with them, what the default policy for its actions is,
- * and — since Plan 5 — which tools it contributes and which kernel tools those replace. It
- * depends on this package and on `@harness/shared`, and on nothing else in the workspace: never
- * on `@harness/core-tools` and never on `@harness/db`, which is what lets core load it by name.
+ * of them, which forms and skills ship with them, what the default policy for its actions is, and
+ * which tools it contributes and which kernel tools those replace. It depends on this package and
+ * on `@harness/shared`, and on nothing else in the workspace: never on `@harness/core-tools` and
+ * never on `@harness/db`, which is what lets core load it by name.
  */
 export interface Pack {
   /** Short, stable, lowercase. `deps.packs.byName('healthcare')`. */

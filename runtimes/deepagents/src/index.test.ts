@@ -1,7 +1,12 @@
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import type { RunEvent } from '@harness/runtime-api';
-import { fixtureRequest, startFakeGateway, toolServerFixture } from '@harness/runtime-api/testing';
+import {
+  RECORDS_SEARCH,
+  collectRunEvents,
+  fixtureRequest,
+  startFakeGateway,
+  toolServerFixture,
+} from '@harness/runtime-api/testing';
 import type { FakeGateway, ToolServerFixture } from '@harness/runtime-api/testing';
 import { runtime } from './index.js';
 
@@ -13,25 +18,12 @@ let fixture: ToolServerFixture;
 
 beforeAll(async () => {
   gateway = await startFakeGateway();
-  fixture = await toolServerFixture([
-    {
-      name: 'records_search',
-      description: 'search',
-      inputSchema: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] },
-      handler: ({ query }) => ({ status: 'ok', result: { hits: [String(query)] } }),
-    },
-  ]);
+  fixture = await toolServerFixture([RECORDS_SEARCH]);
 });
 afterAll(async () => {
   await gateway.close();
   await fixture.close();
 });
-
-async function collect(events: AsyncIterable<RunEvent>): Promise<RunEvent[]> {
-  const out: RunEvent[] = [];
-  for await (const e of events) out.push(e);
-  return out;
-}
 
 describe('the deepagents runtime', () => {
   it('declares its name and no secrets: the gateway key arrives on every request', () => {
@@ -75,12 +67,12 @@ describe('the deepagents runtime', () => {
       });
     try {
       gateway.setResponder(() => ({ content: 'first answer' }));
-      const first = await collect(session.run(request('remember the number nine')).events);
+      const first = await collectRunEvents(session.run(request('remember the number nine')).events);
       expect(first.at(-1)).toEqual({ type: 'done', text: 'first answer' });
 
       gateway.setResponder(() => ({ content: 'second answer' }));
       const before = gateway.calls.length;
-      const second = await collect(session.run(request('what was the number?')).events);
+      const second = await collectRunEvents(session.run(request('what was the number?')).events);
       expect(second.at(-1)).toEqual({ type: 'done', text: 'second answer' });
 
       // The second turn carries the first turn, and the request said nothing about it: the only

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { ConfigError } from '@harness/shared';
-import { defineRuntime, type Runtime } from './runtime.js';
+import { defineRuntime } from './runtime.js';
+import type { Runtime } from './types.js';
 
 const session = { name: 'x', run: () => ({ events: (async function* () {})() }), stop: async () => {} };
 const base: Runtime = { name: 'scripted', version: '0.1.0', secrets: [], connect: async () => session };

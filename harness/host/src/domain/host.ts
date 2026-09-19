@@ -44,7 +44,7 @@ export interface Host {
   skills: readonly RunSkill[];
   model: { baseUrl: string; apiKey: string; route: string; fallbackRoute?: string };
   budget: HostBudget;
-  /** The host's own identity, for reconcile and, from Plan 9, for playbooks. */
+  /** The host's own identity: who reconcile runs as, and who stages a playbook's failure notice. */
   servicePrincipal: Principal;
   log: Logger;
   now: () => Date;

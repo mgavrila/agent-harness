@@ -2,10 +2,10 @@ import type { Client } from '@modelcontextprotocol/client';
 import type { EnvSource, Level, Logger } from '@harness/shared';
 
 /**
- * Every declaration of the runtime contract, in one leaf module. `runtime.ts`, `scripted.ts` and
- * `testing.ts` re-export from here and keep their own runtime functions, so no two modules of this
- * package can end up importing each other. It imports types from `@harness/shared` and the MCP
- * client, and nothing else.
+ * Every declaration of the runtime contract, in one leaf module. The package's other modules take
+ * their types from here and keep their own runtime functions, so no two of them can end up
+ * importing each other. It imports types from `@harness/shared` and the MCP client, and nothing
+ * else.
  */
 
 /**
@@ -17,11 +17,28 @@ import type { EnvSource, Level, Logger } from '@harness/shared';
  */
 export const RUN_FAILED_MESSAGE = 'the run failed; see the host log';
 
+/** How one kernel tool call ended: it failed, a human has to approve it first, or it ran. */
+export type ToolResultStatus = 'ok' | 'pending' | 'error';
+
+/**
+ * That status, read off an MCP tool result the way the host reads it: an `isError` result is the
+ * kernel refusing or the tool failing, and a `{ status: 'pending', approval_id }` envelope is an
+ * action parked for a human.
+ *
+ * Every runtime reads it here, so the scripted runtime and a model-backed one cannot end up
+ * reporting the same result as two different things.
+ */
+export function toolResultStatus(result: { isError?: boolean; structuredContent?: unknown }): ToolResultStatus {
+  if (result.isError) return 'error';
+  const status = (result.structuredContent as { status?: unknown } | undefined)?.status;
+  return status === 'pending' ? 'pending' : 'ok';
+}
+
 /** What the runtime learns as it runs. `error.message` is safe to post: never a payload value. */
 export type RunEvent =
   | { type: 'text'; delta: string }
   | { type: 'tool_call'; name: string; argsHash: string }
-  | { type: 'tool_result'; name: string; status: 'ok' | 'pending' | 'error' }
+  | { type: 'tool_result'; name: string; status: ToolResultStatus }
   | { type: 'skill_activated'; name: string; version: string }
   | { type: 'usage'; inputTokens: number; outputTokens: number; costUsd: number }
   | { type: 'done'; text: string }

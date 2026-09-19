@@ -3,7 +3,7 @@ import { eq } from 'drizzle-orm';
 import { registryOf } from '@harness/core-tools';
 import type { RunEvent, RuntimeSession } from '@harness/runtime-api';
 import { approvals, auditLog, memoryEntries, messages, runs, threads } from '@harness/db';
-import { COORDINATOR, hostFixture, useTestDb, type HostFixture } from '../testing.js';
+import { COORDINATOR, hostFixture, useTestDb, waitFor, type HostFixture } from '../testing.js';
 import {
   COST_CAP_EXCEEDED,
   EMPTY_REPLY,
@@ -19,20 +19,11 @@ import {
   type TurnEvent,
   type TurnInput,
 } from './conversation.js';
-import { findOrCreateThread } from './threads/repository.js';
+import { findOrCreateThread, type ThreadRow } from './threads/repository.js';
 import * as threadsRepository from './threads/repository.js';
 import { HISTORY_MAX_CHARS } from './threads/trim.js';
 
 const db = useTestDb();
-
-/** Poll until `ready` holds, so a test waits on the signal it means rather than on a fixed delay. */
-async function waitFor(ready: () => boolean, timeoutMs = 2_000): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (!ready()) {
-    if (Date.now() > deadline) throw new Error('timed out waiting for the condition');
-    await new Promise((r) => setTimeout(r, 5));
-  }
-}
 
 describe('a message on a surface', () => {
   it('runs as the resolved principal, replies once on a surface without streaming, and records both turns', async () => {
@@ -331,15 +322,24 @@ describe('a message on a surface', () => {
 describe('two turns on one thread', () => {
   it('runs them one at a time, in the order they arrived, and lets the second see the first in its history', async () => {
     const f = await hostFixture(db, {
-      trajectory: (request) => (request.input.text === 'first' ? [{ sleep: 150 }, { say: 'one' }] : [{ say: 'two' }]),
+      trajectory: (request) => (request.input.text === 'first' ? [{ sleep: 1_000 }, { say: 'one' }] : [{ say: 'two' }]),
     });
     attachMessageHandlers(f.host);
-    // Both messages are in flight at once, the way two Slack messages a moment apart arrive.
-    const turns = [f.surface.say('U012', 'first'), f.surface.say('U012', 'second')];
-    await new Promise((r) => setTimeout(r, 60));
+    // Two messages a moment apart, the way two Slack messages arrive — but sent in an order the
+    // host can be held to. Started together they reach the thread's chain in whichever order their
+    // identity and thread lookups finish in, so "second" can be the one that arrives first, which
+    // is the host ordering what it was given and not the bug this test is about.
+    const first = f.surface.say('U012', 'first');
+    await waitFor(() => f.runtime.requests.length === 1);
+    const [threadId] = [...f.host.turns.keys()];
+    const chain = f.host.turns.get(threadId);
+    const second = f.surface.say('U012', 'second');
+    // `serialize` replaces the chain's tail as it takes a turn, so a new promise there is the
+    // signal that the second message has been queued rather than that it is still on its way.
+    await waitFor(() => f.host.turns.get(threadId) !== chain);
     // The second turn has not opened a run while the first is still inside the runtime.
     expect(f.runtime.requests.map((r) => r.input.text)).toEqual(['first']);
-    await Promise.all(turns);
+    await Promise.all([first, second]);
 
     expect(f.runtime.requests.map((r) => r.input.text)).toEqual(['first', 'second']);
     expect(f.runtime.requests[1].history).toEqual([
@@ -525,14 +525,19 @@ function spender(costUsd: number): RuntimeSession {
   };
 }
 
-/** One `runTurn` on a fresh thread, the way the scheduler will call it: no surface handler involved. */
-async function turnOn(f: HostFixture, deliver: TurnDelivery, extra: Partial<TurnInput> = {}) {
-  const thread = await findOrCreateThread(db, {
+/** The coordinator's thread on the memory surface: what a turn driven by hand runs on. */
+function coordinatorThread(): Promise<ThreadRow> {
+  return findOrCreateThread(db, {
     client: 'test',
     surface: 'memory',
     conversation: 'memory',
-    principalId: 'u-coordinator',
+    principalId: COORDINATOR.id,
   });
+}
+
+/** One `runTurn` on a fresh thread, the way the scheduler will call it: no surface handler involved. */
+async function turnOn(f: HostFixture, deliver: TurnDelivery, extra: Partial<TurnInput> = {}) {
+  const thread = await coordinatorThread();
   return runTurn(f.host, {
     thread,
     principal: COORDINATOR,
@@ -710,12 +715,7 @@ describe('a watcher on a turn', () => {
       ],
     });
     onTestFinished(() => f.close());
-    const thread = await findOrCreateThread(db, {
-      client: 'test',
-      surface: 'memory',
-      conversation: 'memory',
-      principalId: COORDINATOR.id,
-    });
+    const thread = await coordinatorThread();
     const seen: TurnEvent[] = [];
     const result = await runTurn(f.host, {
       thread,
@@ -741,12 +741,7 @@ describe('a watcher on a turn', () => {
   it('tells a watcher that a cancelled run was cancelled, with the run id it can cancel by', async () => {
     const f = await hostFixture(db, { trajectory: [{ sleep: 150 }, { say: 'too late' }] });
     onTestFinished(() => f.close());
-    const thread = await findOrCreateThread(db, {
-      client: 'test',
-      surface: 'memory',
-      conversation: 'memory',
-      principalId: COORDINATOR.id,
-    });
+    const thread = await coordinatorThread();
     const seen: TurnEvent[] = [];
     let cancelledFromEvent: boolean | null = null;
     const turn = runTurn(f.host, {
@@ -775,12 +770,7 @@ describe('a watcher on a turn', () => {
   it('is not failed by a watcher that throws', async () => {
     const f = await hostFixture(db, { trajectory: [{ say: 'fine' }] });
     onTestFinished(() => f.close());
-    const thread = await findOrCreateThread(db, {
-      client: 'test',
-      surface: 'memory',
-      conversation: 'memory',
-      principalId: COORDINATOR.id,
-    });
+    const thread = await coordinatorThread();
     const result = await runTurn(f.host, {
       thread,
       principal: COORDINATOR,

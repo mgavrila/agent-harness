@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm';
 import { modelCalls, type Db } from '@harness/db';
 import { ConfigError, ToolError } from '@harness/shared';
+import { costFromResponse, gatewayError, gatewayUnreachable } from '../models/gateway.js';
 import { EMBED_ROUTE } from '../models/types.js';
 import type { ToolDeps } from '../tooling/types.js';
 
@@ -17,25 +18,6 @@ interface EmbeddingsResponse {
   model?: string;
   data?: { index?: number; embedding?: number[] }[];
   usage?: { prompt_tokens?: number };
-}
-
-/**
- * A gateway failure reported to the caller carries the route and the HTTP status and nothing
- * else — the same rule `callModel` follows, and for the same reason: a vendor's error body
- * routinely quotes the input back, and this message reaches `audit_log.error` and the agent.
- */
-function embedError(status: number, body: string): ToolError {
-  if (/budget/i.test(body)) {
-    return new ToolError(
-      `model route "${EMBED_ROUTE}" is over its daily budget; raise it in clients/<name>/routing.yaml`,
-    );
-  }
-  if (status === 401 || status === 403) {
-    return new ToolError(
-      `model route "${EMBED_ROUTE}" was rejected by the gateway (HTTP ${status}); check LITELLM_MASTER_KEY`,
-    );
-  }
-  return new ToolError(`model route "${EMBED_ROUTE}" failed at the gateway (HTTP ${status})`);
 }
 
 /**
@@ -65,13 +47,9 @@ async function embedBatch(deps: ToolDeps, texts: readonly string[]): Promise<num
       signal: AbortSignal.timeout(deps.gateway.timeoutMs),
     });
   } catch (err) {
-    const name = err instanceof Error ? err.name : '';
-    if (name === 'TimeoutError' || name === 'AbortError') {
-      throw new ToolError(`model route "${EMBED_ROUTE}" timed out after ${deps.gateway.timeoutMs}ms`);
-    }
-    throw new ToolError(`model route "${EMBED_ROUTE}" could not reach the gateway at ${deps.gateway.baseUrl}`);
+    throw gatewayUnreachable(EMBED_ROUTE, deps.gateway, err);
   }
-  if (!response.ok) throw embedError(response.status, await response.text().catch(() => ''));
+  if (!response.ok) throw gatewayError(EMBED_ROUTE, response.status, await response.text().catch(() => ''));
 
   const payload = (await response.json()) as EmbeddingsResponse;
   const data = [...(payload.data ?? [])].sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
@@ -87,8 +65,6 @@ async function embedBatch(deps: ToolDeps, texts: readonly string[]): Promise<num
     }
   }
 
-  const costHeader = response.headers.get('x-litellm-response-cost');
-  const parsedCost = costHeader === null ? Number.NaN : Number(costHeader);
   await deps.db.insert(modelCalls).values({
     runId: deps.context.runId ?? null,
     client: deps.client,
@@ -98,7 +74,7 @@ async function embedBatch(deps: ToolDeps, texts: readonly string[]): Promise<num
     // An embeddings deployment produces no completion tokens; the column stays 0 rather than null
     // so a sum over model_calls needs no special case for this route.
     outputTokens: 0,
-    costUsd: Number.isFinite(parsedCost) ? parsedCost : 0,
+    costUsd: costFromResponse(response),
   });
 
   return vectors;

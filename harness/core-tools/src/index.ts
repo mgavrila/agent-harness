@@ -43,7 +43,7 @@ export {
 } from './domain/tooling/types.js';
 
 // --- The tool catalogue -------------------------------------------------------------------
-export { allTools, createCoreToolsServer, kernelTools, publishedTools } from './tools/catalog.js';
+export { createCoreToolsServer, kernelTools, publishedTools } from './tools/catalog.js';
 
 // --- Domains ------------------------------------------------------------------------------
 export { closeRun, openRun, type OpenRunInput, type RunStatus } from './domain/session/repository.js';

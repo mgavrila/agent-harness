@@ -2,28 +2,13 @@ import { describe, expect, it } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { approvals, auditLog, runs } from '@harness/db';
 import { openRun } from '@harness/core-tools';
-import type { Principal } from '@harness/identity-api';
 import { TEST_PRINCIPAL, makeTestDeps } from '@harness/core-tools/testing';
-import { pendingApproval, useTestDb } from '../../testing.js';
+import { pendingApproval, principal, useTestDb } from '../../testing.js';
 import { createInProcessCoreToolsClient, finishRun } from './in-process.js';
 
 const db = useTestDb();
-const LEAD: Principal = {
-  id: 'u-coordinator',
-  kind: 'user',
-  level: 'lead',
-  displayName: 'Coordinator',
-  surfaces: {},
-  attributes: {},
-};
-const HOST: Principal = {
-  id: 'svc-host',
-  kind: 'service',
-  level: 'service',
-  displayName: 'Host',
-  surfaces: {},
-  attributes: {},
-};
+const LEAD = principal({ surfaces: {} });
+const HOST = principal({ id: 'svc-host', kind: 'service', level: 'service', displayName: 'Host', surfaces: {} });
 
 /** The startup-only half of a test bag: what `buildKernelConfig` would have built. */
 function config() {

@@ -1,23 +1,16 @@
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { createDb } from '@harness/db';
 import type { Principal } from '@harness/identity-api';
 import { ConfigError, createLogger, envOrDefault } from '@harness/shared';
 import { loadIdentity } from '../domain/identity/registry.js';
-import { buildKernelConfig } from '../domain/tooling/config.js';
+import { buildKernelConfig, clientDirFor } from '../domain/tooling/config.js';
 import { depsForRun, type KernelConfig } from '../domain/tooling/deps.js';
 import type { ToolDeps } from '../domain/tooling/types.js';
 import { openRun } from '../domain/session/repository.js';
 
 const log = createLogger('core-tools');
 
-// src/app -> src -> core-tools -> harness -> <repo>. The same resolution main.ts uses for .env.
-const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../..');
-
-/** `clients/<name>/` under the repository root: `/srv/agent-harness/clients/<name>` in a container. */
-export function clientDirFor(client: string, repoRoot: string = REPO_ROOT): string {
-  return path.join(repoRoot, 'clients', client);
-}
+/** Re-exported for `server.test.ts`, which pins the folder layout through this module. */
+export { clientDirFor };
 
 /**
  * The principal this process acts as: `HARNESS_PRINCIPAL`, an id the identity plug-in

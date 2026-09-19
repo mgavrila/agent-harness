@@ -1,8 +1,6 @@
 import { ConfigError, SURFACE_NAME_PATTERN } from '@harness/shared';
 import type { Surface } from './types.js';
 
-export type { Surface, SurfaceDeps, SurfaceSession } from './types.js';
-
 /** An environment variable name, which is what every entry of `Surface.secrets` has to be. */
 const ENV_NAME = /^[A-Z][A-Z0-9_]*$/;
 

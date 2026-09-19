@@ -137,8 +137,8 @@ async function failStrandedRuns(
  * A bound, not a setting: a tick that claimed every due row would run them all before the next
  * one, and with two hosts on one database the bound is also what keeps one of them from taking the
  * whole queue. Ten is more than any client schedules in one minute, and what a tick leaves behind
- * is still due thirty seconds later. This was a `limit?` option until Plan 10; nothing ever passed
- * one, so it is a constant now and there is one number to find rather than two places to look.
+ * is still due thirty seconds later. A constant rather than an argument nothing would ever pass,
+ * so there is one number to find rather than two places to look.
  */
 export const CLAIM_BATCH = 10;
 

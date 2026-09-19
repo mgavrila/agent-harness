@@ -45,7 +45,7 @@ export async function findRunFor(
  * going. The caller wants the recent end, and gets it in reading order.
  *
  * Ordered by `(created_at, seq)`: two rows written by one transaction carry one timestamp, and
- * `seq` is the tiebreak the whole codebase orders by since Plan 9.
+ * `seq` is the tiebreak every ordered read of `messages` uses.
  */
 export async function readThreadFor(
   db: Db,

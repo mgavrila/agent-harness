@@ -34,15 +34,6 @@ export function kernelTools(packs: PackRegistry): AnyToolDef[] {
 }
 
 /**
- * Kept for `src/index.ts`, which re-exports it.
- *
- * It is **not** what a skill's declared tools are checked against any more: that has to be the
- * published catalogue, because from this task onwards the kernel list and the published list
- * differ. `tools/skills-frontmatter.test.ts` uses `publishedTools`.
- */
-export const allTools = kernelTools;
-
-/**
  * What the MCP server publishes: the kernel's tools, less the ones a source replaced, less the
  * two kinds of tool nothing loaded can serve — the generic `records_*` tools when no loaded
  * record kind wants them, and `documents_classify`, `documents_extract` and `deadlines_compute`

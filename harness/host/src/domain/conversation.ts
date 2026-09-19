@@ -176,9 +176,9 @@ function replyTarget(
  * One turn of a thread, from the text to the reply (spec 3.2 steps 3–6; spec 3.3 step 3 for a
  * playbook).
  *
- * Callable from an adapter's `onMessage` today, from the scheduler, and from an HTTP route in
- * Plan 10: everything it needs is on `host` and `turn`, and nothing it does depends on where the
- * text came from. One kernel per run, one `RunRequest` per run — with the caller's memory
+ * Callable from an adapter's `onMessage`, from the scheduler and from the run API's route:
+ * everything it needs is on `host` and `turn`, and nothing it does depends on where the text came
+ * from. One kernel per run, one `RunRequest` per run — with the caller's memory
  * rendered into it once, before the runtime starts — the events forwarded as they arrive, both
  * turns recorded as `messages` rows, the run closed with the status it ended in. The skill the
  * runtime activates is stamped on the run's own context, which is what `auditBaseFor` reads.
@@ -570,7 +570,7 @@ export function attachMessageHandlers(host: Host): void {
 /**
  * Abort a run in flight. False when no such run is active, or when its controller was already
  * aborted — by the host's own backstop, say — so a cancel arriving after a timeout cannot claim
- * the run and flip its status. Plan 10's run API calls this.
+ * the run and flip its status. The run API's cancel route and the shutdown drain call this.
  */
 export function cancelRun(host: Host, runId: string): boolean {
   const run = host.active.get(runId);
