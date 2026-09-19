@@ -70,20 +70,24 @@ export function filesConfigSource(opts: FilesConfigSourceOptions): ConfigSource 
   const read = async (clientId: string): Promise<LoadedDocument | null> => {
     const dir = dirFor(clientId);
     const blueprintFile = path.join(dir, 'blueprint.yaml');
+    let document: LoadedDocument['document'];
+    let sourceFile: string;
     if (await exists(blueprintFile)) {
       const blueprint = (await parseWithIncludes(blueprintFile)) as Blueprint;
       const overlayFile = path.join(dir, 'overlay.yaml');
       const overlay = (await exists(overlayFile))
         ? ((await parseWithIncludes(overlayFile)) as Overlay)
         : ({ patch: [], version: 'empty' } satisfies Overlay);
-      const document = resolveOverlay(blueprint, overlay);
-      return { document, version: versionOf(document) };
+      document = resolveOverlay(blueprint, overlay);
+      sourceFile = overlayFile;
+    } else {
+      const file = path.join(dir, 'client.yaml');
+      if (!(await exists(file))) return null;
+      document = migrate(await parseWithIncludes(file));
+      sourceFile = file;
     }
-    const file = path.join(dir, 'client.yaml');
-    if (!(await exists(file))) return null;
-    const document = migrate(await parseWithIncludes(file));
     if (document.id !== clientId) {
-      throw new ConfigError(`${file} declares id "${document.id}" but lives in the directory "${clientId}"`);
+      throw new ConfigError(`${sourceFile} declares id "${document.id}" but lives in the directory "${clientId}"`);
     }
     return { document, version: versionOf(document) };
   };
@@ -137,7 +141,9 @@ export function filesConfigSource(opts: FilesConfigSourceOptions): ConfigSource 
     },
 
     async list() {
-      const entries = await readdir(root, { withFileTypes: true });
+      const entries = await readdir(root, { withFileTypes: true }).catch((err: unknown) => {
+        throw new ConfigError(`config-files: cannot list ${root}: ${describeError(err)}`);
+      });
       return entries
         .filter((entry) => entry.isDirectory() && CLIENT_ID.test(entry.name))
         .map((entry) => entry.name)

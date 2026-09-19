@@ -106,6 +106,33 @@ describe('filesConfigSource', () => {
     await expect(filesConfigSource({ root, log }).load('acme')).rejects.toThrow(/which blueprint bp-1 locks/);
   });
 
+  it('refuses a blueprint/overlay document whose overlay claims another client id', async () => {
+    const root = await newRoot();
+    const dir = path.join(root, 'acme');
+    await mkdir(dir, { recursive: true });
+    const { id: _id, displayName: _displayName, ...document } = fixtureDocument();
+    await writeFile(
+      path.join(dir, 'blueprint.yaml'),
+      toYaml({ document, lockset: ['/persona'], version: 'bp-1' }),
+      'utf8',
+    );
+    await writeFile(
+      path.join(dir, 'overlay.yaml'),
+      toYaml({
+        version: 'ov-1',
+        patch: [
+          { op: 'add', path: '/id', value: 'other-tenant' },
+          { op: 'add', path: '/displayName', value: 'Acme' },
+        ],
+      }),
+      'utf8',
+    );
+    await expect(filesConfigSource({ root, log }).load('acme')).rejects.toThrow(ConfigError);
+    await expect(filesConfigSource({ root, log }).load('acme')).rejects.toThrow(
+      /declares id "other-tenant" but lives in the directory "acme"/,
+    );
+  });
+
   it('refuses a document whose id is not the directory it sits in', async () => {
     const root = await newRoot();
     await mkdir(path.join(root, 'alpha'), { recursive: true });
@@ -117,6 +144,14 @@ describe('filesConfigSource', () => {
   it('refuses a client id that is not one, rather than joining it into a path', async () => {
     const root = await newRoot();
     await expect(filesConfigSource({ root, log }).load('../escape')).rejects.toThrow(ConfigError);
+  });
+
+  it('names the missing directory when the clients root does not exist, rather than a raw ENOENT', async () => {
+    const root = path.join(tmpdir(), 'harness-clients-does-not-exist');
+    await expect(filesConfigSource({ root, log }).list?.()).rejects.toThrow(ConfigError);
+    await expect(filesConfigSource({ root, log }).list?.()).rejects.toThrow(
+      new RegExp(`cannot list ${root}`),
+    );
   });
 
   it('tells a watcher the new version once the writes settle, and only once', async () => {

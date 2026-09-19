@@ -1,6 +1,6 @@
 import { eq } from 'drizzle-orm';
 import { migrate, type ClientDocument, type ConfigSource, type LoadedDocument } from '@harness/config-api';
-import { clientDocumentVersions, clientDocuments, type Db } from '@harness/db';
+import { clientDocumentVersions, clientDocuments, withTransaction, type Db } from '@harness/db';
 import { describeError, type Logger } from '@harness/shared';
 
 /**
@@ -33,17 +33,19 @@ export async function writeClientDocument(
   createdBy: string | null = null,
 ): Promise<void> {
   const row = { document: document as unknown as Record<string, unknown>, version };
-  await db
-    .insert(clientDocuments)
-    .values({ clientId: document.id, schemaVersion: document.schemaVersion, ...row })
-    .onConflictDoUpdate({
-      target: clientDocuments.clientId,
-      set: { schemaVersion: document.schemaVersion, ...row, updatedAt: new Date() },
-    });
-  await db
-    .insert(clientDocumentVersions)
-    .values({ clientId: document.id, version, document: row.document, createdBy })
-    .onConflictDoNothing();
+  await withTransaction(db, async (tx) => {
+    await tx
+      .insert(clientDocuments)
+      .values({ clientId: document.id, schemaVersion: document.schemaVersion, ...row })
+      .onConflictDoUpdate({
+        target: clientDocuments.clientId,
+        set: { schemaVersion: document.schemaVersion, ...row, updatedAt: new Date() },
+      });
+    await tx
+      .insert(clientDocumentVersions)
+      .values({ clientId: document.id, version, document: row.document, createdBy })
+      .onConflictDoNothing();
+  });
 }
 
 /**
