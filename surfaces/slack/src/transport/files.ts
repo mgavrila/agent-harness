@@ -121,7 +121,7 @@ class UntrustedHostError extends Error {
  * at the call site keeps the answer from moving the request somewhere else afterwards. Node's
  * `fetch` does drop `Authorization` across origins, which is a second line, not the first.
  */
-export function isSlackFileUrl(raw: string): boolean {
+function isSlackFileUrl(raw: string): boolean {
   let url: URL;
   try {
     url = new URL(raw);

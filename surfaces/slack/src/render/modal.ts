@@ -10,7 +10,7 @@ import type { Form, FormField } from '@harness/surface-api';
  */
 
 /** The element id Slack reports an answer under. Derived, so the host declares one id per field. */
-export function inputActionId(field: FormField): string {
+function inputActionId(field: FormField): string {
   return `${field.id}_input`;
 }
 
