@@ -13,6 +13,9 @@ describe('parseClientDocument', () => {
     // `identity` is today's `IdentityFileShape`: `{ principals }` and nothing else. Task 2 adds
     // `defaults` to that shape and asserts on it there, in the task that makes the field exist.
     expect(document.identity.principals).toHaveLength(4);
+    // `defaults` arrives with this task: an absent `defaults:` is the empty table, which means
+    // nobody the file does not declare gets a level, which is what today's behaviour is.
+    expect(document.identity.defaults).toEqual({});
     expect(document.plugins).toEqual([]);
   });
 
@@ -104,6 +107,22 @@ describe('parseClientDocument', () => {
   it("names a memory surface's workspace as a tenant key too, which is what a pooled test routes on", () => {
     const pooled = parseClientDocument(fixtureDocument({ surfaces: { memory: { workspace: 'W-ALPHA' }, http: {} } }));
     expect(tenantKeysOf(pooled)).toEqual([{ surface: 'memory', key: 'W-ALPHA' }]);
+  });
+
+  it('carries the identity defaults through, and refuses a level for the surface that cannot have one', () => {
+    const principals = [
+      { id: 'u-coordinator', kind: 'user', level: 'lead', displayName: 'Coordinator', surfaces: { memory: 'U012' } },
+      { id: 'svc-host', kind: 'service', level: 'service', displayName: 'Host' },
+    ];
+    const withDefaults = parseClientDocument(
+      fixtureDocument({ identity: { principals, defaults: { memory: 'member' } } }),
+    );
+    expect(withDefaults.identity.defaults).toEqual({ memory: 'member' });
+    // `http` is the run API: a caller there is a bearer token, not a person, so there is nobody
+    // for a default level to be about.
+    expect(() =>
+      parseClientDocument(fixtureDocument({ identity: { principals, defaults: { http: 'member' } } })),
+    ).toThrow(ConfigError);
   });
 });
 

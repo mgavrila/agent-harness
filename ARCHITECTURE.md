@@ -354,11 +354,14 @@ levels:
 of that run carries. `buildKernelConfig()` does the startup-only work once; `depsForRun(config,
 { db, principal, context })` clones it per run. The stdio server opens one run per process.
 
-`identities/static` is the first plug-in: it reads `clients/<name>/identity.yaml`
-(`HARNESS_IDENTITY_FILE` overrides the path) through `parseIdentityFile`, which refuses a
-duplicate id, a user without a `u-` id or a service without `svc-`, a user at level `service`,
-and two principals claiming one surface user id. `CONTRIBUTING.md`, "Adding an identity
-provider", is the worked how-to.
+`identities/static` is the first plug-in: it reads no file and no environment variable. It is
+handed the client document's already-validated `identity` section — `parseIdentityFileWithDefaults`
+applies the rules zod cannot say (a duplicate id, a user without a `u-` id or a service without
+`svc-`, a user at level `service`, two principals claiming one surface user id, and a `defaults`
+entry on the run API surface) — and answers for the declared principals plus, on a surface
+`identity.defaults` names, an undeclared caller at that surface's default level, under an id
+`principalFromDefault` derives from theirs. `CONTRIBUTING.md`, "Adding an identity provider", is
+the worked how-to.
 
 ## Knowledge
 

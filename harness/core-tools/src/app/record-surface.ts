@@ -166,11 +166,12 @@ export const ENV_READING_HELPERS = [
  * while missing them. `surfaces/` is there for the same reason `packs/` is: an adapter reads its
  * own variables, and a scan that did not walk it would let them go undocumented — including the
  * primary adapter's conversation variable, which `surface.test.ts` anchors on. `identities/` is
- * there for the same reason `surfaces/` is: a plug-in reads its own variables off `deps.env`
- * through the shared helpers, and `HARNESS_IDENTITY_FILE` is one of them. `runtimes/` is there
- * for the same reason again: a runtime plug-in reads its configuration off `RuntimeDeps.env`
- * rather than the ambient environment, and the scan walks it so that a variable it reads is
- * documented like every other one.
+ * there for the same reason `surfaces/` is: a directory-backed identity plug-in reads its own
+ * secret off `deps.env` through the shared helpers, the way `identities/static` no longer needs
+ * to now that its section arrives through `IdentityDeps.identity`. `runtimes/` is there for the
+ * same reason again: a runtime plug-in reads its configuration off `RuntimeDeps.env` rather than
+ * the ambient environment, and the scan walks it so that a variable it reads is documented like
+ * every other one.
  */
 const SOURCE_ROOTS = ['harness', 'packs', 'surfaces', 'identities', 'runtimes', 'evals', 'scripts'];
 const DIRECT_ENV = /process\.env\.([A-Z][A-Z0-9_]*)/g;

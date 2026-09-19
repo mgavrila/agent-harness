@@ -372,7 +372,10 @@ user id. `identities/static` is the smallest complete one; read it alongside thi
 
 3. **Read configuration from `deps.env`, never `process.env`,** through `@harness/shared`'s env
    helpers with `deps.env` as their last argument, and document every name in `.env.example` in
-   the same commit — the env scan walks `identities/`. `deps.clientDir` is `clients/<name>/`.
+   the same commit — the env scan walks `identities/`. `deps.identity` is the client document's
+   own identity section, already validated — the declared principals and the level each surface
+   gives everyone else — and `deps.settings` is whatever the document's `identityPlugin.settings`
+   held. **A plug-in is never handed a path or the whole document.**
 
 4. **Implement `IdentitySession`.** `resolve({ surface, userId })` answers a `Principal` or
    `null`, and null means "not authorised" — never invent a guest. `get(id)`, `list()` and

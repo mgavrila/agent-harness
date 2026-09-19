@@ -1,5 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, it, expect } from 'vitest';
 import { ConfigError, envOrDefault } from '@harness/shared';
@@ -39,15 +38,17 @@ describe('clientDirFor', () => {
  * declared: a server that started as "somebody" would audit every call as somebody.
  */
 describe('resolvePrincipal', () => {
-  let dir: string;
+  // Task 4 replaces this file read with the resolved client document's `identity` section; until
+  // then `resolvePrincipal` reads `clients/<client>/identity.yaml` off disk, so this test writes
+  // one into a scratch client folder rather than pointing a deleted `HARNESS_IDENTITY_FILE` at it.
+  const dir = clientDirFor('smoke');
   const saved = { ...process.env };
   beforeEach(() => {
-    dir = mkdtempSync(path.join(tmpdir(), 'harness-server-identity-'));
+    mkdirSync(dir, { recursive: true });
     writeFileSync(
       path.join(dir, 'identity.yaml'),
       'principals:\n  - id: u-coordinator\n    kind: user\n    level: lead\n    displayName: Coordinator\n  - id: svc-local\n    kind: service\n    level: service\n    displayName: Local\n',
     );
-    process.env.HARNESS_IDENTITY_FILE = path.join(dir, 'identity.yaml');
     delete process.env.HARNESS_IDENTITY;
   });
   afterEach(() => {

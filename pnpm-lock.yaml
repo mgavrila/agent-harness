@@ -500,9 +500,6 @@ importers:
       '@harness/shared':
         specifier: workspace:*
         version: link:../../harness/shared
-      yaml:
-        specifier: ^2.9.1
-        version: 2.9.1
     devDependencies:
       '@types/node':
         specifier: ^26.5.1

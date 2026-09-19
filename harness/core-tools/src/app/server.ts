@@ -1,5 +1,8 @@
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
+import { parse as parseYaml } from 'yaml';
 import { createDb } from '@harness/db';
-import type { Principal } from '@harness/identity-api';
+import { parseIdentityFileWithDefaults, type Principal } from '@harness/identity-api';
 import { ConfigError, createLogger, envOrDefault } from '@harness/shared';
 import { loadIdentity } from '../domain/identity/registry.js';
 import { buildKernelConfig, clientDirFor } from '../domain/tooling/config.js';
@@ -21,7 +24,11 @@ export { clientDirFor };
  */
 export async function resolvePrincipal(config: Pick<KernelConfig, 'client' | 'env'>): Promise<Principal> {
   const specifier = envOrDefault('HARNESS_IDENTITY', '@harness/identity-static');
-  const session = await loadIdentity(specifier, { env: config.env, log, clientDir: clientDirFor(config.client) });
+  // Task 4 replaces this read with the resolved client document's `identity` section; the stdio
+  // server has no ConfigSource until then, and a plug-in is never handed a path.
+  const file = path.join(clientDirFor(config.client), 'identity.yaml');
+  const section = parseIdentityFileWithDefaults(parseYaml(await readFile(file, 'utf8')));
+  const session = await loadIdentity(specifier, { env: config.env, log, identity: section, settings: {} });
   try {
     const id = envOrDefault('HARNESS_PRINCIPAL', 'svc-local');
     const principal = await session.get(id);

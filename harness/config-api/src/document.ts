@@ -1,5 +1,5 @@
 import * as z from 'zod/v4';
-import { IdentityFileShape, parseIdentityFile } from '@harness/identity-api';
+import { IdentityFileShape, parseIdentityFileWithDefaults } from '@harness/identity-api';
 import { ConfigError } from '@harness/shared';
 import { PlaybooksFileShape, parsePlaybooksFile } from './playbooks.js';
 import { ClientPolicyShape } from './policy.js';
@@ -142,7 +142,7 @@ export function parseClientDocument(raw: unknown): ClientDocument {
   if (!parsed.success) throw new ConfigError(`client document is invalid: ${z.prettifyError(parsed.error)}`);
   const document = parsed.data;
   // Delegated to the contracts that own each section, so one implementation of each rule exists.
-  parseIdentityFile(document.identity);
+  parseIdentityFileWithDefaults(document.identity);
   parsePlaybooksFile(document.playbooks);
   const surfaces = surfaceNamesOf(document);
   if (surfaces.length === 0)

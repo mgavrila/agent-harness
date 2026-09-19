@@ -17,6 +17,7 @@ import { assertEmbedDims, buildKernelConfig, loadIdentity } from '@harness/core-
 import { outRoot } from '@harness/core-tools/storage';
 import { parsePlaybooksFile, type PlaybookDefinition } from '@harness/config-api';
 import { createDb } from '@harness/db';
+import { parseIdentityFileWithDefaults } from '@harness/identity-api';
 import {
   ConfigError,
   createLogger,
@@ -68,10 +69,16 @@ const clientDir = config.clientDir;
 await assertEmbedDims(db, config.embedDims);
 
 // The three plug-ins, by name. Identity first: the host's own principal has to be declared.
+// Task 6 replaces this read with the resolved client document's `identity` section, loaded
+// through the ConfigSource; a plug-in is never handed a path.
+const identitySection = parseIdentityFileWithDefaults(
+  parseYaml(await readFile(path.join(clientDir, 'identity.yaml'), 'utf8')),
+);
 const identity = await loadIdentity(envOrDefault('HARNESS_IDENTITY', '@harness/identity-static'), {
   env: process.env,
   log,
-  clientDir,
+  identity: identitySection,
+  settings: {},
 });
 const servicePrincipalId = envOrDefault('HARNESS_HOST_PRINCIPAL', 'svc-host');
 const servicePrincipal = await identity.get(servicePrincipalId);

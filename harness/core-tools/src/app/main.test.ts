@@ -1,23 +1,36 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomBytes } from 'node:crypto';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { describe, it, expect } from 'vitest';
+import { afterAll, beforeAll, describe, it, expect } from 'vitest';
 import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import { TEST_DATABASE_URL } from '@harness/db/testing';
+import { clientDirFor } from '../domain/tooling/config.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
+
+// `resolvePrincipal` reads `clients/<client>/identity.yaml` off disk until Task 4 replaces that
+// read with the resolved client document (see server.ts); `HARNESS_IDENTITY_FILE` no longer
+// exists, so the spawned entrypoint needs a real client folder rather than an override variable.
+const smokeDir = clientDirFor('smoke');
+
+beforeAll(() => {
+  mkdirSync(smokeDir, { recursive: true });
+  writeFileSync(
+    path.join(smokeDir, 'identity.yaml'),
+    'principals:\n  - id: svc-local\n    kind: service\n    level: service\n    displayName: Local\n',
+  );
+});
+
+afterAll(() => {
+  rmSync(smokeDir, { recursive: true, force: true });
+});
 
 describe('stdio entrypoint', () => {
   it('spawns and lists tools', async () => {
     const storageDir = mkdtempSync(path.join(tmpdir(), 'harness-smoke-storage-'));
-    const identityFile = path.join(storageDir, 'identity.yaml');
-    writeFileSync(
-      identityFile,
-      'principals:\n  - id: svc-local\n    kind: service\n    level: service\n    displayName: Local\n',
-    );
     const client = new Client({ name: 'smoke', version: '0.0.0' });
     const transport = new StdioClientTransport({
       command: 'pnpm',
@@ -29,7 +42,6 @@ describe('stdio entrypoint', () => {
         HARNESS_ENCRYPTION_KEY: randomBytes(32).toString('base64'),
         HARNESS_CLIENT: 'smoke',
         HARNESS_PRINCIPAL: 'svc-local',
-        HARNESS_IDENTITY_FILE: identityFile,
         HARNESS_STORAGE_DIR: storageDir,
       },
     });
@@ -47,11 +59,6 @@ describe('stdio entrypoint', () => {
     // no pack is a configuration, so the entrypoint comes up and serves rather than dying on the
     // primary pack.
     const storageDir = mkdtempSync(path.join(tmpdir(), 'harness-smoke-storage-'));
-    const identityFile = path.join(storageDir, 'identity.yaml');
-    writeFileSync(
-      identityFile,
-      'principals:\n  - id: svc-local\n    kind: service\n    level: service\n    displayName: Local\n',
-    );
     const client = new Client({ name: 'smoke', version: '0.0.0' });
     const transport = new StdioClientTransport({
       command: 'pnpm',
@@ -63,7 +70,6 @@ describe('stdio entrypoint', () => {
         HARNESS_ENCRYPTION_KEY: randomBytes(32).toString('base64'),
         HARNESS_CLIENT: 'smoke',
         HARNESS_PRINCIPAL: 'svc-local',
-        HARNESS_IDENTITY_FILE: identityFile,
         HARNESS_STORAGE_DIR: storageDir,
         HARNESS_PACKS: '',
       },
@@ -85,11 +91,6 @@ describe('stdio entrypoint', () => {
     // contract allows. Before the forms fallback, resolving the templates directory at startup
     // threw `pack "stories" ships no forms directory` and the server never served.
     const storageDir = mkdtempSync(path.join(tmpdir(), 'harness-smoke-storage-'));
-    const identityFile = path.join(storageDir, 'identity.yaml');
-    writeFileSync(
-      identityFile,
-      'principals:\n  - id: svc-local\n    kind: service\n    level: service\n    displayName: Local\n',
-    );
     const client = new Client({ name: 'smoke', version: '0.0.0' });
     const transport = new StdioClientTransport({
       command: 'pnpm',
@@ -101,7 +102,6 @@ describe('stdio entrypoint', () => {
         HARNESS_ENCRYPTION_KEY: randomBytes(32).toString('base64'),
         HARNESS_CLIENT: 'smoke',
         HARNESS_PRINCIPAL: 'svc-local',
-        HARNESS_IDENTITY_FILE: identityFile,
         HARNESS_STORAGE_DIR: storageDir,
         HARNESS_PACKS: '@harness/pack-stories',
       },
@@ -123,11 +123,6 @@ describe('stdio entrypoint', () => {
     // serves, so the client's connect rejects. What matters is that no server ever came up as
     // "u-ghost".
     const storageDir = mkdtempSync(path.join(tmpdir(), 'harness-smoke-storage-'));
-    const identityFile = path.join(storageDir, 'identity.yaml');
-    writeFileSync(
-      identityFile,
-      'principals:\n  - id: svc-local\n    kind: service\n    level: service\n    displayName: Local\n',
-    );
     const client = new Client({ name: 'smoke', version: '0.0.0' });
     const transport = new StdioClientTransport({
       command: 'pnpm',
@@ -139,7 +134,6 @@ describe('stdio entrypoint', () => {
         HARNESS_ENCRYPTION_KEY: randomBytes(32).toString('base64'),
         HARNESS_CLIENT: 'smoke',
         HARNESS_PRINCIPAL: 'u-ghost',
-        HARNESS_IDENTITY_FILE: identityFile,
         HARNESS_STORAGE_DIR: storageDir,
       },
     });

@@ -5,6 +5,7 @@ import { parse as parseYaml } from 'yaml';
 import { describe, expect, it } from 'vitest';
 import { loadIdentity, type PlaybookRow } from '@harness/core-tools';
 import { parsePlaybooksFile } from '@harness/config-api';
+import { parseIdentityFileWithDefaults } from '@harness/identity-api';
 import { COORDINATOR, PLAYBOOKS_PRINCIPAL, hostFixture, testKernelConfig, useTestDb } from '../../testing.js';
 import { kernelSkillsDir, readSkillCatalogue } from '../skills.js';
 import { preflightPlaybook } from './preflight.js';
@@ -114,11 +115,17 @@ describe('the shipped demo playbooks (I1)', () => {
     }
 
     const f = await hostFixture(db, { trajectory: [] });
-    // Identity, loaded the way main.ts loads it: the static plug-in over the demo's own file.
+    // Identity, loaded the way main.ts loads it: the static plug-in over the demo's own section,
+    // read and parsed here for the length of two tasks (Task 6 replaces this with the resolved
+    // client document's `identity` section).
+    const identitySection = parseIdentityFileWithDefaults(
+      parseYaml(await readFile(path.join(demoClientDir, 'identity.yaml'), 'utf8')),
+    );
     f.host.identity = await loadIdentity('@harness/identity-static', {
       env: {},
       log: f.host.log,
-      clientDir: demoClientDir,
+      identity: identitySection,
+      settings: {},
     });
     // Skills, loaded the way main.ts loads them — the kernel's own directory first, then the
     // shipped pack's. `knowledge-sync` lives in the first and `credentialing-expirations` in the
