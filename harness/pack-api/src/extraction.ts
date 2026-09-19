@@ -45,8 +45,8 @@ export interface ExtractionTarget {
   /**
    * The **JSON-Schema** `description` of the attachment array, sent to the model inside
    * `response_format`. A separate string from `attachment_instruction` on purpose: today's
-   * healthcare pipeline puts different text in the two places, and the `response_format` bytes
-   * are part of what this plan must not change. Omit for a target with no attachments.
+   * healthcare pipeline puts different text in the two places, and the `response_format` bytes are
+   * frozen. Omit for a target with no attachments.
    */
   attachment_schema_description?: string;
   /**
