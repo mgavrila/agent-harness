@@ -4,6 +4,7 @@ import path from 'node:path';
 import * as z from 'zod/v4';
 import { containsRestrictedPattern } from '@harness/core-tools/redaction';
 import type { Principal } from '@harness/identity-api';
+import { RUN_FAILED_MESSAGE } from '@harness/runtime-api';
 import { CONVERSATION_ID_PATTERN, SURFACE_NAME_PATTERN, assertInsideRoot } from '@harness/shared';
 import { cancelRun, runTurn, serialize, type TurnEvent } from '../conversation.js';
 import type { Host } from '../host.js';
@@ -207,7 +208,9 @@ async function openRunRoute(host: Host, req: IncomingMessage, res: ServerRespons
     }
   } catch (err) {
     host.log.error(`the run API failed a turn on thread ${thread.id}`, err);
-    stream.send('error', { type: 'error', message: 'the run failed; see the host log' });
+    // The same sentence a runtime puts on its own `error` event: a caller streaming from this
+    // API reads one wording for a broken run, whether the loop or the turn around it broke.
+    stream.send('error', { type: 'error', message: RUN_FAILED_MESSAGE });
   } finally {
     stream.end();
   }
