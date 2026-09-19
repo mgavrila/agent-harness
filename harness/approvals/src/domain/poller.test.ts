@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { approvals, type Db } from '@harness/db';
-import { SurfaceAcceptedError } from '@harness/shared';
+import { SurfaceAcceptedError, SurfaceError } from '@harness/shared';
 import type { Card, MessageRef } from '@harness/surface-api';
 import { MemorySurface, pendingApproval, useTestDb } from '../testing.js';
 import { postPendingApprovals, type PollResult } from './poller.js';
@@ -57,6 +57,25 @@ class RacingSurface extends MemorySurface {
       this.second = await postPendingApprovals({ db, surface: this, client: 'demo-practice', now });
     }
     return super.postCard(conversation, card);
+  }
+}
+
+/**
+ * Another host's tick folded into this one's in-flight post. This poller claims the row and calls
+ * `postCard`; while that call is still hanging, host B's stale sweep releases the claim, reclaims
+ * the row under its own later `claimedAt` and starts its own post. Only then does this call
+ * reject, so the release that follows must leave B's claim alone.
+ */
+class ReclaimedDuringPostSurface extends MemorySurface {
+  static readonly reclaimedAt = new Date(now().getTime() + 2 * 60 * 1000);
+
+  override async postCard(conversation: string): Promise<MessageRef> {
+    await db.update(approvals).set({
+      surface: this.name,
+      conversationId: conversation,
+      claimedAt: ReclaimedDuringPostSurface.reclaimedAt,
+    });
+    throw new SurfaceError(`${this.name}: conversation_not_found`);
   }
 }
 
@@ -215,5 +234,30 @@ describe('postPendingApprovals', () => {
     expect(surface.second).toMatchObject({ posted: 0, orphaned: 0 });
     expect(out).toMatchObject({ posted: 1, orphaned: 0 });
     expect(surface.cards).toHaveLength(1);
+  });
+
+  it('releases only the claim it took, so a reclaim by another host survives a failed post', async () => {
+    await db.insert(approvals).values(pendingApproval());
+    const surface = new ReclaimedDuringPostSurface();
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    const out1 = await postPendingApprovals({ db, surface, client: 'demo-practice', now });
+    expect(out1).toMatchObject({ posted: 0, orphaned: 0 });
+
+    // The claim on the row is now the other host's, and its card is in flight: releasing it here
+    // would strand a live card with no surface to edit it on.
+    const [afterFailure] = await db.select().from(approvals);
+    expect(afterFailure.claimedAt).toEqual(ReclaimedDuringPostSurface.reclaimedAt);
+    expect(afterFailure.conversationId).not.toBeNull();
+    expect(afterFailure.surface).not.toBeNull();
+
+    // The other host's post lands and records its reference; a later tick posts nothing more.
+    await db.update(approvals).set({ messageRef: 'm1' });
+    const healthy = new MemorySurface();
+    const out2 = await postPendingApprovals({ db, surface: healthy, client: 'demo-practice', now });
+    expect(out2).toMatchObject({ posted: 0, orphaned: 0 });
+    expect(healthy.cards).toHaveLength(0);
+
+    errors.mockRestore();
   });
 });

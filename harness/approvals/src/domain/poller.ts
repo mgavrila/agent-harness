@@ -96,8 +96,10 @@ export async function postPendingApprovals(deps: PollDeps, limit = 20): Promise<
 
     // Two separate try/catch pairs, because the right recovery differs on each side of the post.
     // Before it, nothing was sent, so the claim is released and the next tick retries
-    // immediately. After it, a card is live: releasing the claim there would put a second card
-    // with a second set of working buttons next to it on the next tick.
+    // immediately — this tick's claim only (`claimed_at = now`), because a slow post can outlive
+    // the stale window and another host may already have swept the row and reclaimed it under a
+    // claim of its own. After it, a card is live: releasing the claim there would put a second
+    // card with a second set of working buttons next to it on the next tick.
     let ref: MessageRef;
     try {
       ref = await deps.surface.postCard(conversation, approvalCard(row, deps.surface.capabilities));
@@ -117,7 +119,7 @@ export async function postPendingApprovals(deps: PollDeps, limit = 20): Promise<
       await deps.db
         .update(approvals)
         .set(UNCLAIMED)
-        .where(and(eq(approvals.id, row.id), isNull(approvals.messageRef)));
+        .where(and(eq(approvals.id, row.id), isNull(approvals.messageRef), eq(approvals.claimedAt, now)));
       continue;
     }
 
