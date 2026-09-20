@@ -65,8 +65,16 @@ function surfaceFailed(specifier: string, err: unknown, stage: 'initialise' | 'c
  * Connecting happens here too, in order, and through the same funnel, so a surface that cannot be
  * reached is a startup failure naming the adapter rather than an approval nobody sees. Each entry
  * keeps the specifier it was named by, so that is the string every message here quotes.
+ *
+ * `tenantKeys` is the client's declared key per surface name — `tenantKeysOf(document)`, which is
+ * where the typed surface sections are read — handed to each adapter as its own `tenantKey`. A
+ * surface whose transport reports the workspace an event came from has no use for it.
  */
-export async function loadSurfaces(names: string[], deps: SurfaceDeps): Promise<LoadedSurfaces> {
+export async function loadSurfaces(
+  names: string[],
+  deps: SurfaceDeps,
+  tenantKeys: Readonly<Record<string, string>> = {},
+): Promise<LoadedSurfaces> {
   if (names.length === 0) throw new ConfigError(NO_SURFACES_MESSAGE);
   const declared: { specifier: string; surface: Surface }[] = [];
   for (const specifier of names) {
@@ -102,7 +110,9 @@ export async function loadSurfaces(names: string[], deps: SurfaceDeps): Promise<
   const sessions: SurfaceSession[] = [];
   for (const { specifier, surface } of declared) {
     try {
-      sessions.push(await surface.connect(deps));
+      sessions.push(
+        await surface.connect(surface.name in tenantKeys ? { ...deps, tenantKey: tenantKeys[surface.name] } : deps),
+      );
     } catch (err) {
       surfaceFailed(specifier, err, 'connect');
     }

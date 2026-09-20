@@ -171,6 +171,10 @@ export function createSlackSession(transport: SlackTransport, config: SlackConfi
           attachments: message.files.map((f) => ({ name: f.name, path: f.path })),
           message: ref(message.channel, message.ts),
           mentioned: message.mentioned,
+          // The workspace, for the host to route on. Omitted rather than sent as null when the
+          // transport could not name one: the contract's field is optional, and a hint of "none"
+          // is what a surface with no notion of a workspace reports.
+          ...(message.teamId === null ? {} : { tenantHint: message.teamId }),
         });
       });
     },

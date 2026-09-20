@@ -6,7 +6,13 @@ import {
   startRunner,
   surfaceSinks,
 } from '@harness/approvals';
-import { parsePlaybooksFile, surfaceNamesOf, surfaceSecretsOf, type ClientDocument } from '@harness/config-api';
+import {
+  parsePlaybooksFile,
+  surfaceNamesOf,
+  surfaceSecretsOf,
+  tenantKeysOf,
+  type ClientDocument,
+} from '@harness/config-api';
 import { buildKernelConfig, loadIdentity, reconcile, type GatewayConfig } from '@harness/core-tools';
 import { outRoot } from '@harness/core-tools/storage';
 import { parseIdentityFileWithDefaults } from '@harness/identity-api';
@@ -150,11 +156,14 @@ async function buildTenant(pool: HostPool, loaded: LoadedDocument, opened: Stopp
     parsePlaybooksFile(document.playbooks),
   );
 
-  const surfaces = await loadSurfaces(surfaceNamesOf(document).map(surfaceSpecifier), {
-    env: pool.env,
-    log,
-    storageDir: config.storageDir,
-  });
+  const surfaces = await loadSurfaces(
+    surfaceNamesOf(document).map(surfaceSpecifier),
+    { env: pool.env, log, storageDir: config.storageDir },
+    // The keys this client claims, per surface, for an adapter that has no transport to read the
+    // workspace off an event. `tenantKeysOf` is what reads the typed surface sections, so this
+    // file names no surface's own field, exactly as `assertSecretsPresent` does not.
+    Object.fromEntries(tenantKeysOf(document).map(({ surface, key }) => [surface, key])),
+  );
   for (const session of surfaces.all) opened.push({ what: `surface "${session.name}"`, stop: () => session.stop() });
 
   // Identity comes after the surfaces, and that is a deliberate change of startup order: a

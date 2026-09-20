@@ -290,7 +290,7 @@ export function boltTransport(config: SlackConfig, log: Logger, storageDir: stri
     });
   });
 
-  const deliver = async (raw: RawMessage, bot: BotIdentity): Promise<void> => {
+  const deliver = async (raw: RawMessage, bot: BotIdentity, teamId: string | undefined): Promise<void> => {
     if (!messageHandler) {
       log.warn('a Slack message arrived before a handler was registered');
       return;
@@ -311,14 +311,21 @@ export function boltTransport(config: SlackConfig, log: Logger, storageDir: stri
       threadTs: raw.thread_ts ?? null,
       mentioned: classified.mentioned,
       files,
+      // The payload's own `team` where Slack sends one, and the connection's context otherwise:
+      // Socket Mode carries the workspace on every event it delivers, and the two agree.
+      teamId: raw.team ?? teamId ?? null,
     });
   };
   const identity = (context: { botUserId?: string; botId?: string }): BotIdentity => ({
     userId: context.botUserId,
     botId: context.botId,
   });
-  bolt.event('message', async ({ event, context }) => deliver(event as unknown as RawMessage, identity(context)));
-  bolt.event('app_mention', async ({ event, context }) => deliver(event as unknown as RawMessage, identity(context)));
+  bolt.event('message', async ({ event, context }) =>
+    deliver(event as unknown as RawMessage, identity(context), context.teamId),
+  );
+  bolt.event('app_mention', async ({ event, context }) =>
+    deliver(event as unknown as RawMessage, identity(context), context.teamId),
+  );
 
   const events: SlackEvents = {
     onAction(handler) {

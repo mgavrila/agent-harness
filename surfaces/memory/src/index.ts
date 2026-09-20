@@ -17,6 +17,15 @@ export const surface: Surface = defineSurface({
   name: 'memory',
   version: '0.1.0',
   secrets: [],
-  // Not `async`: a surface with no transport has nothing to await on the way up.
-  connect: () => Promise.resolve(new MemorySurface({ name: 'memory', conversation: 'memory' })),
+  // Not `async`: a surface with no transport has nothing to await on the way up. There is no
+  // event to read a workspace off either, so every event this surface delivers carries the key
+  // the client document declared for it — which is what makes pooled routing provable end to end.
+  connect: (deps) =>
+    Promise.resolve(
+      new MemorySurface({
+        name: 'memory',
+        conversation: 'memory',
+        ...(deps.tenantKey === undefined ? {} : { tenantHint: deps.tenantKey }),
+      }),
+    ),
 });

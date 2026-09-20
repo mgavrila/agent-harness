@@ -316,6 +316,7 @@ describe('inbound messages', () => {
       threadTs: null,
       mentioned: true,
       files: [{ name: 'w9.pdf', path: '1789000000-000001-w9.pdf' }],
+      teamId: 'T0WORKSPACE',
     });
     expect(seen).toEqual([
       {
@@ -326,7 +327,30 @@ describe('inbound messages', () => {
         attachments: [{ name: 'w9.pdf', path: '1789000000-000001-w9.pdf' }],
         message: { surface: 'slack', conversation: 'C0DEMO', id: '1789000000.000001' },
         mentioned: true,
+        // The workspace the event came from, which is what the host matches against the key each
+        // client's document claims. Without it a pooled host refuses every Slack event and a
+        // dedicated one accepts every one, whichever workspace it arrived from.
+        tenantHint: 'T0WORKSPACE',
       },
     ]);
+  });
+
+  it('carries no tenant hint for an event whose workspace the transport could not name', async () => {
+    const { session, events } = fakeSlackSession();
+    const seen: MessageEvent[] = [];
+    session.onMessage(async (e) => {
+      seen.push(e);
+    });
+    await events.emitMessage({
+      userId: 'U012',
+      channel: 'C0DEMO',
+      text: 'hello',
+      ts: '1789000000.000002',
+      threadTs: null,
+      mentioned: true,
+      files: [],
+      teamId: null,
+    });
+    expect(seen[0]).not.toHaveProperty('tenantHint');
   });
 });

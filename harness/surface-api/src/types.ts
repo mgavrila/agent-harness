@@ -278,6 +278,16 @@ export interface SurfaceDeps {
   log: Logger;
   /** The root of the file store. An adapter that stages nothing may ignore it. */
   storageDir: string;
+  /**
+   * The opaque key this client's document declares for *this* surface, when it declares one.
+   *
+   * The counterpart of `MessageEvent.tenantHint`: the host matches an inbound event's hint
+   * against these keys. An adapter whose transport reports the workspace an event came from
+   * ignores this and reports what it saw; one with no such notion — the memory surface — has
+   * nothing to read it off an event and answers with what the document declared. Absent for a
+   * client that declared no key for this surface.
+   */
+  tenantKey?: string;
 }
 
 /** What a `@harness/surface-*` package exports as `surface`. */
