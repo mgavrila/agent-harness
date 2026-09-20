@@ -48,7 +48,9 @@ describe('readUsage', () => {
     });
     expect(rows).toHaveLength(2);
     const first = rows.find((row) => row.principal_id === 'u-one')!;
-    expect(first).toMatchObject({ runs: 2, input_tokens: 150, output_tokens: 30, runs_done: 2 });
+    expect(first).toMatchObject({ day: '2026-09-10', runs: 2, input_tokens: 150, output_tokens: 30, runs_done: 2 });
+    // A date, not a timestamp: the bucket is a whole UTC day and an invoice groups by the day.
+    expect(rows.find((row) => row.principal_id === 'u-two')!.day).toBe('2026-09-11');
     expect(first.cost_usd).toBeCloseTo(0.015, 6);
     expect(first.duration_seconds).toBe(60);
     expect(first.sandbox_seconds).toBe(0);

@@ -13,7 +13,7 @@ import type { HostPool } from '../tenancy/types.js';
 import { WITHHELD, findOrCreateThread } from '../threads/repository.js';
 import { findRunFor, readThreadFor } from './repository.js';
 import { sseStream } from './sse.js';
-import { USAGE_DEFAULT_DAYS, USAGE_MAX_DAYS, readUsage } from './usage.js';
+import { USAGE_DEFAULT_DAYS, USAGE_MAX_DAYS, readUsage, startOfUtcDay } from './usage.js';
 import {
   API_MAX_ATTACHMENTS,
   API_MAX_BODY_BYTES,
@@ -283,6 +283,11 @@ function statusRoute(host: Host, res: ServerResponse, scheduler: { status(): Sch
  * route, and there is no way to widen it: the client is the one the request resolved to, never
  * one the caller asked for.
  *
+ * Both bounds are rounded down to UTC midnight, because a row's `day` is a whole day: a `from` of
+ * noon would otherwise drop that whole day's usage, and a caller who asked after breakfast would
+ * be sent an invoice missing today. `to` stays exclusive, so the answer covers whole days up to
+ * but not including the day `to` falls in. The window the answer reports is the one it read.
+ *
  * Counts, tokens, cost and seconds, and nothing anybody wrote — the view is what guarantees that
  * (invariant 16), and `usage.test.ts` asserts its column list whole.
  */
@@ -298,11 +303,12 @@ async function usageRoute(host: Host, url: URL, res: ServerResponse): Promise<vo
   if (to.getTime() - from.getTime() > USAGE_MAX_DAYS * DAY_MS) {
     return json(res, 400, { error: `the window may not exceed ${USAGE_MAX_DAYS} days` });
   }
+  const days = { from: startOfUtcDay(from), to: startOfUtcDay(to) };
   return json(res, 200, {
     client: host.client,
-    from: from.toISOString(),
-    to: to.toISOString(),
-    rows: await readUsage(host.db, { client: host.client, from, to }),
+    from: days.from.toISOString(),
+    to: days.to.toISOString(),
+    rows: await readUsage(host.db, { client: host.client, ...days }),
   });
 }
 

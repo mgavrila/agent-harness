@@ -301,6 +301,25 @@ describe('the run API: a thread and the status', () => {
     expect(JSON.stringify(body)).not.toContain('nothing is overdue');
   });
 
+  it('reads whole UTC days, so a from inside today does not drop today', async () => {
+    const a = await api([{ usage: { inputTokens: 10, outputTokens: 2, costUsd: 0.001 } }, { say: 'done' }]);
+    await collect(await a.open(asCoordinator('anything overdue?')));
+
+    // Noon today and midnight tomorrow. The run's bucket is today's midnight, which is *before*
+    // this `from` read as a timestamp and inside it read as a day — the whole of today's usage
+    // would otherwise vanish from an invoice for anybody who asked after breakfast.
+    const now = new Date();
+    const utc = (dayOffset: number, hour = 0): Date =>
+      new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + dayOffset, hour));
+    const response = await a.get(`/v1/usage?from=${utc(0, 12).toISOString()}&to=${utc(1).toISOString()}`);
+    const body = (await response.json()) as { from: string; to: string; rows: UsageRow[] };
+    expect(body.rows).toHaveLength(1);
+    expect(body.rows[0].day).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    // And the window the answer reports is the one it read: whole days, `to` still exclusive.
+    expect(body.from).toBe(utc(0).toISOString());
+    expect(body.to).toBe(utc(1).toISOString());
+  });
+
   it('refuses a window that is not one, and one wider than a year', async () => {
     const a = await api([]);
     expect((await a.get('/v1/usage?from=not-a-date&to=2030-01-01')).status).toBe(400);
