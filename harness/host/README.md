@@ -75,10 +75,12 @@ a bind-mounted storage directory still has both.
 - **A playbook** (`executePlaybook`, driven by `startScheduler`'s tick every `SCHEDULER_TICK_MS`):
   claim the due rows and the requested ones (`claimDuePlaybooks`, skip-locked), preflight each
   (`preflightPlaybook`), open or reuse the playbook's own thread and run one turn as its service
-  principal with `deliver` from the file, its one skill, its timeout and its cost cap; retry once
+  principal with `deliver` from its entry, its one skill, its timeout and its cost cap; retry once
   on a transport failure; close the `playbook_runs` row; stage one failure notice
-  (`stagePlaybookNotice`) through the outbox. `syncPlaybooks` reads `playbooks.yaml` into the
-  table at startup.
+  (`stagePlaybookNotice`) through the outbox. `syncPlaybooks(db, opts, definitions)` takes the
+  client document's own `playbooks` section, already parsed (`parsePlaybooksFile`), and upserts it
+  into the table when the tenant opens — it reads no file itself; `opts.file` is only where a bad
+  schedule is named from in the error it throws.
 
 `openKernel`/`kernel.close` gives each run its own `ToolDeps` and in-process MCP client; the
 runtime never talks to Postgres or the kernel directly.
