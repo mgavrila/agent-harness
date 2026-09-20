@@ -63,6 +63,12 @@ describe('newClient', () => {
     expect((await source.load('internal-team'))?.document.runtime).toBe('scripted');
   });
 
+  it('creates the knowledge directory its own document declares, so the client loads at all', async () => {
+    const target = await newTarget();
+    const result = await newClient({ name: 'river-clinic', target });
+    await expect(readdir(path.join(result.dir, 'knowledge'))).resolves.toEqual([]);
+  });
+
   it('never writes inside this repository unless it was pointed at it', async () => {
     const target = await newTarget();
     const result = await newClient({ name: 'river-clinic', target });

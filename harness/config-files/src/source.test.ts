@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { stringify as toYaml } from 'yaml';
@@ -184,8 +184,51 @@ describe('filesConfigSource', () => {
       root,
       parseClientDocument(fixtureDocument({ knowledge: { source: 'dir', path: 'knowledge' } })),
     );
+    await mkdir(path.join(root, 'fixture', 'knowledge'), { recursive: true });
     const loaded = await filesConfigSource({ root, log }).load('fixture');
     expect(loaded?.document.knowledge).toEqual({ source: 'dir', path: path.join(root, 'fixture', 'knowledge') });
+  });
+
+  it("refuses a knowledge path that is a symlink out of the client's own directory", async () => {
+    const root = await newRoot();
+    await writeDocument(
+      root,
+      parseClientDocument(fixtureDocument({ knowledge: { source: 'dir', path: 'knowledge' } })),
+    );
+    // The escape a string check cannot see: the link sits inside the client's own directory, so
+    // the resolved path is under its root while the directory it names is another tenant's.
+    await mkdir(path.join(root, 'other-tenant', 'knowledge'), { recursive: true });
+    await symlink(path.join(root, 'other-tenant', 'knowledge'), path.join(root, 'fixture', 'knowledge'));
+    await expect(filesConfigSource({ root, log }).load('fixture')).rejects.toThrow(ConfigError);
+    await expect(filesConfigSource({ root, log }).load('fixture')).rejects.toThrow(/outside the client directory/);
+    await expect(filesConfigSource({ root, log }).load('fixture')).rejects.not.toThrow(
+      new RegExp(tmpdir().replace(/[/\\]/g, '\\$&')),
+    );
+  });
+
+  it("accepts a symlink that stays inside the client's own directory, because the target is what is checked", async () => {
+    const root = await newRoot();
+    await writeDocument(
+      root,
+      parseClientDocument(fixtureDocument({ knowledge: { source: 'dir', path: 'knowledge' } })),
+    );
+    await mkdir(path.join(root, 'fixture', 'documents'), { recursive: true });
+    await symlink(path.join(root, 'fixture', 'documents'), path.join(root, 'fixture', 'knowledge'));
+    const loaded = await filesConfigSource({ root, log }).load('fixture');
+    expect(loaded?.document.knowledge).toEqual({ source: 'dir', path: path.join(root, 'fixture', 'knowledge') });
+  });
+
+  it('refuses a knowledge directory it cannot resolve, without saying which of the three reasons it is', async () => {
+    const root = await newRoot();
+    await writeDocument(
+      root,
+      parseClientDocument(fixtureDocument({ knowledge: { source: 'dir', path: 'knowledge' } })),
+    );
+    await expect(filesConfigSource({ root, log }).load('fixture')).rejects.toThrow(ConfigError);
+    await expect(filesConfigSource({ root, log }).load('fixture')).rejects.toThrow(/cannot be read/);
+    await expect(filesConfigSource({ root, log }).load('fixture')).rejects.not.toThrow(
+      new RegExp(tmpdir().replace(/[/\\]/g, '\\$&')),
+    );
   });
 
   it("refuses a knowledge path that climbs out of the client's own directory", async () => {

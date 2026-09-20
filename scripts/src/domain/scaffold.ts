@@ -148,6 +148,10 @@ export async function newClient(opts: NewClientOptions): Promise<NewClientResult
   try {
     await writeFile(path.join(dir, 'client.yaml'), renderDocument(document), 'utf8');
     await writeFile(path.join(dir, 'persona.md'), document.persona, 'utf8');
+    // The directory the document above declares, empty. A `knowledge` section that names a
+    // directory which is not there is a document the files source refuses to load at all, so the
+    // two are written together or the client cannot start until somebody guesses why.
+    if (document.knowledge.source === 'dir') await mkdir(path.join(dir, document.knowledge.path), { recursive: true });
   } catch (err) {
     // Never leave a half-written client directory behind: a retry should see a clean slate, not
     // "already exists" for a directory nobody can use.

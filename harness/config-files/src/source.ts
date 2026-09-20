@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { watch, type FSWatcher } from 'node:fs';
-import { access, readdir } from 'node:fs/promises';
+import { access, readdir, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import {
   migrate,
@@ -46,20 +46,50 @@ function versionOf(document: unknown): string {
  *
  * The document says `knowledge: { source: 'dir', path: knowledge }` — a path *relative to the
  * client*, because a document is portable and a tenant does not know where the host mounted it.
- * The same escape check `readIncluded` applies to an `!include` applies here and for the same
- * reason: the path is written by a tenant, and `../../other-tenant/knowledge` would hand one
- * client's documents to another. An already-absolute path is taken as it is, so a deployment that
- * mounts its knowledge somewhere else still can.
+ * The path is written by a tenant, and `../../other-tenant/knowledge` would hand one client's
+ * documents to another, so it is confined to the client's own directory exactly as `readIncluded`
+ * confines an `!include`: twice, on two different things, because neither check subsumes the
+ * other. An absolute path is accepted only when it already lies inside that directory.
+ *
+ * The literal path is checked first, so `../../../etc` is refused as an escape rather than
+ * reported as a missing directory. Then both sides are collapsed with `realpath` and compared
+ * again, because the string check misses the one that matters: a symlink sitting inside the
+ * client's own directory and pointing out of it resolves to a string under the root while naming
+ * a directory anywhere the host can read, and the kernel would then index another tenant's
+ * documents (invariant 13). The root is resolved for a second reason as well — a temporary
+ * directory is itself a symlink on macOS, and comparing a real target against an unreal root
+ * would refuse every legitimate knowledge folder under one.
+ *
+ * A directory that cannot be resolved gets one answer for missing, unreadable and a symlink loop,
+ * for `readIncluded`'s reason: telling a tenant which of the three it is tells them what is on
+ * the host. Neither failure names a host path, for the same reason the id mismatch does not.
+ *
+ * What is handed back is the path as the mount spells it, not the one `realpath` returned: the
+ * link is what this deployment configured, reading through it lands where the check looked, and a
+ * canonical path would make the document's version depend on how the host happened to mount it.
+ * The residual is `readIncluded`'s residual — a tenant who can write into their own directory can
+ * replace the link between this check and the read — and it is open for the same reason.
  */
-function knowledgeAbsolute(document: ClientDocument, dir: string): ClientDocument {
+async function knowledgeAbsolute(document: ClientDocument, dir: string): Promise<ClientDocument> {
   if (document.knowledge.source !== 'dir') return document;
+  const written = document.knowledge.path;
+  const outside = new ConfigError(
+    `client "${document.id}": knowledge.path "${written}" is outside the client directory`,
+  );
   const root = path.resolve(dir);
-  const target = path.resolve(root, document.knowledge.path);
-  if (target !== root && !target.startsWith(`${root}${path.sep}`)) {
+  const target = path.resolve(root, written);
+  if (target !== root && !target.startsWith(`${root}${path.sep}`)) throw outside;
+  let realRoot: string;
+  let real: string;
+  try {
+    realRoot = await realpath(root);
+    real = await realpath(target);
+  } catch {
     throw new ConfigError(
-      `client "${document.id}": knowledge.path "${document.knowledge.path}" is outside the client directory ${root}`,
+      `client "${document.id}": knowledge.path "${written}" cannot be read; it is missing, or the host may not read it`,
     );
   }
+  if (real !== realRoot && !real.startsWith(`${realRoot}${path.sep}`)) throw outside;
   return { ...document, knowledge: { source: 'dir', path: target } };
 }
 
@@ -101,12 +131,12 @@ export function filesConfigSource(opts: FilesConfigSourceOptions): ConfigSource 
       const overlay = (await exists(overlayFile))
         ? ((await parseWithIncludes(overlayFile)) as Overlay)
         : ({ patch: [], version: 'empty' } satisfies Overlay);
-      document = knowledgeAbsolute(resolveOverlay(blueprint, overlay), dir);
+      document = await knowledgeAbsolute(resolveOverlay(blueprint, overlay), dir);
       sourceFile = overlayFile;
     } else {
       const file = path.join(dir, 'client.yaml');
       if (!(await exists(file))) return null;
-      document = knowledgeAbsolute(migrate(await parseWithIncludes(file)), dir);
+      document = await knowledgeAbsolute(migrate(await parseWithIncludes(file)), dir);
       sourceFile = file;
     }
     if (document.id !== clientId) {
