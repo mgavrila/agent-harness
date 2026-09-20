@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { modelCalls, runs } from '@harness/db';
 import { TEST_PRINCIPAL, useTestDb } from '../../testing.js';
-import { closeRun, openRun, sumRunTotals } from './repository.js';
+import { closeRun, finishRun, openRun, sumRunTotals } from './repository.js';
 
 const db = useTestDb();
 
@@ -97,5 +97,18 @@ describe('openRun', () => {
     const [closed] = await db.select().from(runs).where(eq(runs.id, alpha.runId));
     expect(closed.status).toBe('done');
     expect(closed.endedAt).not.toBeNull();
+  });
+});
+
+describe('finishRun', () => {
+  it("still closes the run with the call's status when closing the transport itself rejects", async () => {
+    const context = await openRun(db, { client: 'test', principal: TEST_PRINCIPAL });
+    const rejectingClose = () => Promise.reject(new Error('transport already gone'));
+    await expect(
+      finishRun(db, 'test', context.runId, 'done', () => new Date('2026-09-15T12:00:00Z'), rejectingClose),
+    ).resolves.toBeUndefined();
+    const [run] = await db.select().from(runs).where(eq(runs.id, context.runId));
+    expect(run).toMatchObject({ status: 'done' });
+    expect(run.endedAt).not.toBeNull();
   });
 });

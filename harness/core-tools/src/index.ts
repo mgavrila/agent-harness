@@ -52,6 +52,7 @@ export { createCoreToolsServer, kernelTools, publishedTools } from './tools/cata
 // --- Domains ------------------------------------------------------------------------------
 export {
   closeRun,
+  finishRun,
   openRun,
   sumRunTotals,
   type OpenRunInput,

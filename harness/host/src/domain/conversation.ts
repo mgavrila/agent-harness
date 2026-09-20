@@ -323,7 +323,7 @@ export async function runTurn(host: Host, turn: TurnInput): Promise<TurnResult> 
               spentUsd += event.costUsd;
               // And persisted, on the same table the kernel's own calls go to. Before this the
               // runtime's spend was added up here for the cap and then dropped, so the run's
-              // totals — which `finishKernel` sums from these rows, and which the usage export
+              // totals — which `finishRun` sums from these rows, and which the usage export
               // reads — reported the kernel's half of the bill as the whole of it (spec §4.5).
               // The route is the one the runtime was configured to talk on, not a literal, so a
               // deployment that moves the conversation to another route says so in the row.

@@ -1,10 +1,13 @@
 import { and, eq, sql } from 'drizzle-orm';
 import { modelCalls, runs, type Db } from '@harness/db';
 import type { Principal } from '@harness/identity-api';
+import { createLogger } from '@harness/shared';
 import type { RunContext, ToolDeps } from '../tooling/types.js';
 import { reconcile, type ReconcileResult } from '../tooling/reconcile.js';
 import { stageEffect } from '../effects/outbox.js';
 import { assertNoRestrictedPattern } from '../../shared/redaction/patterns.js';
+
+const log = createLogger('session');
 
 interface NotifyArgs {
   text: string;
@@ -103,6 +106,41 @@ export async function closeRun(
     .update(runs)
     .set({ status, endedAt: now(), ...totals })
     .where(and(eq(runs.id, runId), eq(runs.client, client)));
+}
+
+/**
+ * Close what the run held open, then close the run with what it spent — in that order, but never
+ * let the first step's failure skip the second.
+ *
+ * `close` tears down whatever served the run: for the host's turn and the approvals executor's
+ * call alike, that is an in-process core-tools transport. A `close()` that itself rejects (the
+ * client or its handler failing to tear down cleanly) is logged and swallowed rather than thrown,
+ * because the run ending with the call's real status matters more than a clean transport
+ * shutdown, and a throw here would escape the `finally` it runs in and skip `closeRun` entirely.
+ *
+ * The totals are read after `close`, so a tool call still in flight when the run ends has written
+ * its row by the time they are summed. The usage export reads `runs` alone for its tokens, which
+ * is why they are summed from the run's own `model_calls` rows rather than counted in memory by
+ * the caller.
+ *
+ * It lives here, beside `closeRun` and `sumRunTotals`, because both callers had the same ten
+ * lines and a run that ends two ways is a run whose totals can be right one way and wrong the
+ * other.
+ */
+export async function finishRun(
+  db: Db,
+  client: string,
+  runId: string,
+  status: RunStatus,
+  now: () => Date,
+  close: () => Promise<void>,
+): Promise<void> {
+  try {
+    await close();
+  } catch (err) {
+    log.error(`could not close the in-process core-tools client for run ${runId}`, err);
+  }
+  await closeRun(db, client, runId, status, now, await sumRunTotals(db, client, runId));
 }
 
 /**

@@ -1,10 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { approvals, auditLog, runs } from '@harness/db';
-import { openRun } from '@harness/core-tools';
 import { TEST_PRINCIPAL, makeTestDeps } from '@harness/core-tools/testing';
 import { pendingApproval, principal, useTestDb } from '../../testing.js';
-import { createInProcessCoreToolsClient, finishRun } from './in-process.js';
+import { createInProcessCoreToolsClient } from './in-process.js';
 
 const db = useTestDb();
 const LEAD = principal({ surfaces: {} });
@@ -67,19 +66,6 @@ describe('createInProcessCoreToolsClient', () => {
     await expect(client.reconcile(10)).rejects.toThrow();
     const [run] = await db.select().from(runs);
     expect(run.status).toBe('error');
-    expect(run.endedAt).not.toBeNull();
-  });
-});
-
-describe('finishRun', () => {
-  it("still closes the run with the call's status when closing the transport itself rejects", async () => {
-    const context = await openRun(db, { client: 'test', principal: HOST });
-    const rejectingClose = () => Promise.reject(new Error('transport already gone'));
-    await expect(
-      finishRun(db, 'test', context.runId, 'done', () => new Date('2026-09-15T12:00:00Z'), rejectingClose),
-    ).resolves.toBeUndefined();
-    const [run] = await db.select().from(runs).where(eq(runs.id, context.runId));
-    expect(run).toMatchObject({ status: 'done' });
     expect(run.endedAt).not.toBeNull();
   });
 });

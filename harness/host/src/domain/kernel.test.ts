@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { auditLog, runs } from '@harness/db';
-import { openRun, type KernelConfig } from '@harness/core-tools';
+import type { KernelConfig } from '@harness/core-tools';
 import type { Principal } from '@harness/identity-api';
 import { testKernelConfig, useTestDb } from '../testing.js';
-import { finishKernel, openKernel } from './kernel.js';
+import { openKernel } from './kernel.js';
 
 const db = useTestDb();
 const LEAD: Principal = {
@@ -57,19 +57,6 @@ describe('openKernel', () => {
     ).rejects.toThrow();
     const [run] = await db.select().from(runs);
     expect(run.status).toBe('error');
-    expect(run.endedAt).not.toBeNull();
-  });
-});
-
-describe('finishKernel', () => {
-  it("still closes the run with the call's status when closing the transport itself rejects", async () => {
-    const context = await openRun(db, { client: 'test', principal: LEAD });
-    const rejectingClose = () => Promise.reject(new Error('transport already gone'));
-    await expect(
-      finishKernel(db, 'test', context.runId, 'done', () => new Date('2026-09-15T12:00:00Z'), rejectingClose),
-    ).resolves.toBeUndefined();
-    const [run] = await db.select().from(runs).where(eq(runs.id, context.runId));
-    expect(run).toMatchObject({ status: 'done' });
     expect(run.endedAt).not.toBeNull();
   });
 });

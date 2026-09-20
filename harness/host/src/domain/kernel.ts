@@ -4,18 +4,14 @@ import {
   connectInProcess,
   createCoreToolsServer,
   depsForRun,
+  finishRun,
   openRun,
-  sumRunTotals,
   type RunContext,
   type RunStatus,
   type ToolDeps,
 } from '@harness/core-tools';
-import type { Db } from '@harness/db';
 import type { Principal } from '@harness/identity-api';
-import { createLogger } from '@harness/shared';
 import type { Host } from './host.js';
-
-const log = createLogger('host');
 
 export interface OpenedKernel {
   client: Client;
@@ -23,35 +19,6 @@ export interface OpenedKernel {
   deps: ToolDeps;
   context: RunContext & { runId: string };
   close(status: RunStatus): Promise<void>;
-}
-
-/**
- * Close the in-process transport, then close the run with what it spent — in that order, but
- * never let the first step's failure skip the second. A `close()` that itself rejects (the client
- * or its handler failing to tear down cleanly) is logged and swallowed rather than thrown,
- * because the run ending with the call's real status matters more than a clean transport
- * shutdown, and a throw here would otherwise skip `closeRun` entirely. Exported so this guarantee
- * is directly testable without needing the real transport to misbehave.
- *
- * The totals are read after the transport is closed, so a tool call still in flight when the run
- * ends has written its row by the time they are summed. `usage_runs` reads `runs` alone for its
- * tokens, which is why they are summed from the run's own `model_calls` rows here rather than
- * counted in memory by the turn: `sumRunTotals` is the one place they are computed.
- */
-export async function finishKernel(
-  db: Db,
-  client: string,
-  runId: string,
-  status: RunStatus,
-  now: () => Date,
-  close: () => Promise<void>,
-): Promise<void> {
-  try {
-    await close();
-  } catch (err) {
-    log.error(`could not close the in-process core-tools client for run ${runId}`, err);
-  }
-  await closeRun(db, client, runId, status, now, await sumRunTotals(db, client, runId));
 }
 
 /**
@@ -79,7 +46,7 @@ export async function openKernel(
       client,
       deps,
       context,
-      close: (status) => finishKernel(host.db, host.client, context.runId, status, host.now, close),
+      close: (status) => finishRun(host.db, host.client, context.runId, status, host.now, close),
     };
   } catch (err) {
     await closeRun(host.db, host.client, context.runId, 'error', host.now);
