@@ -5,6 +5,10 @@ const route = { model: 'gemini/gemini-3-flash-preview' };
 const routes = Object.fromEntries(ROUTES.map((name) => [name, route]));
 
 describe('RoutingFile', () => {
+  it('names exactly the five spec routes, in order', () => {
+    expect([...ROUTES]).toEqual(['chat', 'extract', 'reason', 'judge', 'embed']);
+  });
+
   it('names the five routes and supplies every default when `defaults` is absent', () => {
     const parsed = RoutingFile.parse({ routes });
     expect(Object.keys(parsed.routes).sort()).toEqual([...ROUTES].sort());

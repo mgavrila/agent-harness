@@ -8,8 +8,12 @@ const SOURCES = ['files', 'postgres'] as const;
 export interface ConfigSourceDeps {
   env: EnvSource;
   log: Logger;
-  /** Only the `postgres` source uses it; the registry does not know which one will. */
-  db: Db;
+  /**
+   * Only the `postgres` source uses it, so a caller that has already decided it is naming a
+   * directory may leave it out rather than open a connection pool to read a YAML file — and one
+   * that cannot know which source it will get passes the handle it has.
+   */
+  db?: Db;
 }
 
 /**
@@ -46,6 +50,7 @@ export async function loadConfigSource(name: string, deps: ConfigSourceDeps): Pr
     return filesConfigSource({ root, log: deps.log });
   }
   if (name === 'postgres') {
+    if (!deps.db) throw new ConfigError('the postgres config source reads its documents from a database; open one');
     const { postgresConfigSource } = await import('@harness/config-postgres');
     return postgresConfigSource({ db: deps.db, log: deps.log });
   }

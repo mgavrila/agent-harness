@@ -1,8 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import { parse as parseYaml } from 'yaml';
-import { parseRouting } from './parse.js';
+import { RoutingFile } from '@harness/config-api';
 import { apiKeyEnvFor, renderLiteLlmConfig } from './render.js';
 import { ROUTING } from './routing.test-helpers.js';
+
+/** The fixture as a routing table. The schema is the whole of the parse; the gateway owns none of it. */
+const routing = (yamlText: string): RoutingFile => RoutingFile.parse(parseYaml(yamlText));
 
 describe('apiKeyEnvFor', () => {
   it('maps known provider prefixes', () => {
@@ -19,7 +22,7 @@ describe('apiKeyEnvFor', () => {
 });
 
 describe('renderLiteLlmConfig', () => {
-  const rendered = renderLiteLlmConfig(parseRouting(ROUTING));
+  const rendered = renderLiteLlmConfig(routing(ROUTING));
   const parsed = parseYaml(rendered) as {
     model_list: { model_name: string; litellm_params: Record<string, unknown> }[];
     router_settings: { fallbacks: Record<string, string[]>[]; num_retries: number };
@@ -69,7 +72,7 @@ describe('renderLiteLlmConfig', () => {
   });
 
   it('passes api_base through for a local endpoint', () => {
-    const local = parseRouting(
+    const local = routing(
       ROUTING.replace(
         '  judge:\n    model: groq/openai/gpt-oss-120b\n    daily_budget_usd: 1\n',
         '  judge:\n    model: hosted_vllm/Qwen/Qwen3-8B\n    api_base: http://vllm:8000/v1\n',
@@ -83,6 +86,6 @@ describe('renderLiteLlmConfig', () => {
   });
 
   it('is deterministic', () => {
-    expect(renderLiteLlmConfig(parseRouting(ROUTING))).toBe(rendered);
+    expect(renderLiteLlmConfig(routing(ROUTING))).toBe(rendered);
   });
 });

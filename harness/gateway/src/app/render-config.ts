@@ -2,7 +2,7 @@ import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { configSourceNameFrom, loadConfigSource } from '@harness/core-tools';
-import { createDb, type Db } from '@harness/db';
+import { createDb } from '@harness/db';
 import { createLogger, requiredEnv } from '@harness/shared';
 import type { ConfigSource } from '@harness/config-api';
 import { renderLiteLlmConfig } from '../domain/routing/render.js';
@@ -25,18 +25,16 @@ export async function renderClientConfig(source: ConfigSource, clientId: string)
 /**
  * Render the client `HARNESS_CLIENT` names, through whatever source `HARNESS_CONFIG_SOURCE` does.
  *
- * The database handle is opened on the `postgres` branch and on no other: the registry takes one
- * because the stored source needs it, and reading a document out of a mounted directory should
- * not open a connection pool to render a YAML file. The handle is closed on the failure path too,
- * so a bad routing table exits rather than hanging on an open pool.
+ * The database handle is opened on the `postgres` branch and on no other: the stored source needs
+ * one, and reading a document out of a mounted directory should not open a connection pool to
+ * render a YAML file, which is why the registry's handle is optional. It is closed on the failure
+ * path too, so a bad routing table exits rather than hanging on an open pool.
  */
 async function main(): Promise<void> {
   const clientId = requiredEnv('HARNESS_CLIENT', ' (whose routing table to render)');
   const name = configSourceNameFrom(process.env);
   const opened = name === 'postgres' ? createDb() : null;
-  // The `files` branch hands the registry a handle it is typed to require and never reads.
-  const db = opened?.db as Db;
-  const source = await loadConfigSource(name, { env: process.env, log, db });
+  const source = await loadConfigSource(name, { env: process.env, log, db: opened?.db });
   try {
     const target = await renderClientConfig(source, clientId);
     console.log(`rendered ${clientId} routing to ${target}`);

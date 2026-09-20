@@ -413,11 +413,11 @@ export const memoryEntries = pgTable(
 );
 
 /**
- * Scheduled work (spec 5.6): one row per entry of `clients/<name>/playbooks.yaml`, upserted by
- * the host at startup and keyed by name. A playbook removed from the file is disabled, never
- * deleted, so its run history stays attached. `next_run_at` is what the scheduler claims on and
- * is recomputed from the file and the clock at every host start, so a firing missed while the
- * host was down is not replayed.
+ * Scheduled work (spec 5.6): one row per entry of a client document's `playbooks` section,
+ * upserted when the host opens that tenant and keyed by name. A playbook the document no longer
+ * declares is disabled, never deleted, so its run history stays attached. `next_run_at` is what
+ * the scheduler claims on and is recomputed from the document and the clock every time the tenant
+ * opens, so a firing missed while it was closed is not replayed.
  */
 export const playbooks = pgTable(
   'playbooks',

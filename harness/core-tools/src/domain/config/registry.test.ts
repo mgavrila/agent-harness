@@ -3,7 +3,8 @@ import { ConfigError } from '@harness/shared';
 import { configSourceNameFrom, loadConfigSource } from './registry.js';
 
 const log = { info() {}, warn() {}, error() {} };
-const db = null as never;
+/** A stand-in handle: the registry hands it to a source and neither of them reads it here. */
+const db = {} as never;
 
 describe('configSourceNameFrom', () => {
   it("has no default, because where a client comes from is a deployment's decision", () => {
