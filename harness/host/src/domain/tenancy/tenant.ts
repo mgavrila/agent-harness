@@ -7,12 +7,20 @@ import {
   surfaceSinks,
 } from '@harness/approvals';
 import { parsePlaybooksFile, surfaceNamesOf, surfaceSecretsOf } from '@harness/config-api';
-import { buildKernelConfig, loadIdentity, reconcile } from '@harness/core-tools';
+import { buildKernelConfig, loadIdentity, reconcile, type GatewayConfig } from '@harness/core-tools';
 import { outRoot } from '@harness/core-tools/storage';
 import { parseIdentityFileWithDefaults } from '@harness/identity-api';
-import { ConfigError, describeError, envOrDefault, numberFromEnv, optionalEnv, type Logger } from '@harness/shared';
+import {
+  ConfigError,
+  describeError,
+  envOrDefault,
+  numberFromEnv,
+  optionalEnv,
+  type EnvSource,
+  type Logger,
+} from '@harness/shared';
 import { TIMEOUT_MARGIN_MS } from '../conversation.js';
-import type { Host } from '../host.js';
+import type { Host, HostBudget } from '../host.js';
 import { syncPlaybooks } from '../playbooks/repository.js';
 import { SCHEDULER_TICK_MS, startScheduler } from '../playbooks/scheduler.js';
 import { decisionDeps } from '../resume.js';
@@ -45,6 +53,36 @@ function assertSecretsPresent(document: LoadedDocument['document'], env: Record<
       );
     }
   }
+}
+
+/**
+ * What one turn may spend, and the one check that the two per-run model-call limits agree.
+ *
+ * There are two of them and they bound the same run from different sides. The runtime stops
+ * itself after `HARNESS_RUN_MAX_MODEL_CALLS` calls; `callModel`'s breaker refuses a *tool* once
+ * the run has `HARNESS_GATEWAY_MAX_CALLS_PER_RUN` `model_calls` rows, and since the host began
+ * persisting the runtime's own spend those rows include the conversation's. So a budget that
+ * reaches the breaker spends the breaker's allowance on the conversation and has the kernel's
+ * tools refused partway through the turn, with a message that can only say the run is at its
+ * limit. Both numbers are known here and nowhere earlier, so they are compared here, before a
+ * surface or a plug-in is opened.
+ */
+function runBudget(client: string, gateway: GatewayConfig, env: EnvSource): HostBudget {
+  const maxModelCalls = numberFromEnv('HARNESS_RUN_MAX_MODEL_CALLS', 30, { min: 1, max: 1_000, integer: true }, env);
+  if (maxModelCalls >= gateway.maxCallsPerRun) {
+    throw new ConfigError(
+      `client "${client}": HARNESS_RUN_MAX_MODEL_CALLS (${maxModelCalls}) must be less than ` +
+        `HARNESS_GATEWAY_MAX_CALLS_PER_RUN (${gateway.maxCallsPerRun}); the conversation's own model calls count ` +
+        `against the gateway's per-run breaker, so a budget that reaches it has the kernel's tools refused mid-turn`,
+    );
+  }
+  return {
+    maxModelCalls,
+    maxToolCalls: numberFromEnv('HARNESS_RUN_MAX_TOOL_CALLS', 60, { min: 1, max: 5_000, integer: true }, env),
+    timeoutMs: numberFromEnv('HARNESS_RUN_TIMEOUT_S', 600, { min: 1, max: 86_400, unit: 'seconds' }, env) * 1000,
+    timeoutMarginMs: TIMEOUT_MARGIN_MS,
+    maxHistoryMessages: numberFromEnv('HARNESS_HISTORY_MAX_MESSAGES', 40, { min: 0, max: 500, integer: true }, env),
+  };
 }
 
 /** One thing a tenant holds open, and how to let go of it. */
@@ -101,6 +139,7 @@ async function buildTenant(pool: HostPool, loaded: LoadedDocument, opened: Stopp
   const log = pool.log;
   const config = await buildKernelConfig(document, pool.env);
   assertSecretsPresent(document, env);
+  const budget = runBudget(config.client, config.gateway, pool.env);
 
   // The document into the table, once per open, and before a surface or the runtime connects: a
   // playbook added or removed takes effect when the tenant is next opened, a firing missed while
@@ -170,18 +209,7 @@ async function buildTenant(pool: HostPool, loaded: LoadedDocument, opened: Stopp
     // The kernel's own skills first, then this client's, then every pack's.
     skills: await readSkillCatalogue([kernelSkillsDir(), skillsDir, ...config.packs.skillsDirs()]),
     model: { baseUrl: config.gateway.baseUrl, apiKey: config.gateway.apiKey, route: 'chat', fallbackRoute: 'reason' },
-    budget: {
-      maxModelCalls: numberFromEnv('HARNESS_RUN_MAX_MODEL_CALLS', 30, { min: 1, max: 1_000, integer: true }, pool.env),
-      maxToolCalls: numberFromEnv('HARNESS_RUN_MAX_TOOL_CALLS', 60, { min: 1, max: 5_000, integer: true }, pool.env),
-      timeoutMs: numberFromEnv('HARNESS_RUN_TIMEOUT_S', 600, { min: 1, max: 86_400, unit: 'seconds' }, pool.env) * 1000,
-      timeoutMarginMs: TIMEOUT_MARGIN_MS,
-      maxHistoryMessages: numberFromEnv(
-        'HARNESS_HISTORY_MAX_MESSAGES',
-        40,
-        { min: 0, max: 500, integer: true },
-        pool.env,
-      ),
-    },
+    budget,
     servicePrincipal,
     log,
     now: pool.now,
