@@ -22,7 +22,9 @@ pnpm demo:up
 `pnpm new-client` writes one client document, `../harness-tenants/demo-practice/client.yaml`, and
 a `persona.md` beside it — never into this repository. Add a `surfaces.slack` section to that
 document (`teamId`, and `signingSecret` and `botToken` as `{ env: <NAME> }` references naming the
-environment variables below) before creating the Slack app.
+environment variables below) before creating the Slack app. `teamId` is the id of the workspace
+the app is installed in — the `T…` segment of any workspace URL — and the host refuses an event
+from any other.
 
 Create one Slack app before filling in `.env`, with Socket Mode and Interactivity both on. Its
 bot scopes are `chat:write`, `app_mentions:read`, `channels:history`, `groups:history`,

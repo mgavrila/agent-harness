@@ -626,6 +626,13 @@ secret, under Basic Information -> App Credentials: a client document's
 `surfaces.slack.signingSecret` names it, and a tenant that names a variable the deployment does
 not set refuses to open.
 
+**The document's `surfaces.slack.teamId` must be the workspace the app is installed in.** It is
+what the host matches an inbound event's workspace against, so every event whose team id differs
+from it is refused and written to the audit log as `unauthorised` — on a dedicated host too, which
+is the one client that used to accept whatever arrived on its own socket. Find the id in the `T…`
+segment of any workspace URL (`https://app.slack.com/client/T0123456789/…`), or by calling
+`auth.test` with the bot token, which answers with `team_id`.
+
 **A reply inside a thread the bot has already posted in needs no mention**: the thread is the
 conversation, so a follow-up written there is answered as it stands. It is the bot's *own* posts
 that make a thread its own — another app's messages in a thread, a GitHub or an alerting bot's,
@@ -709,7 +716,9 @@ client must not go is this repository.
    people at all (see "Directory-backed identity" below). A tenant whose principal is missing from
    the document refuses to open.
 3. Add a `surfaces.slack` section (see "Slack credentials" above) and create one Slack app,
-   pasting its tokens, its signing secret and the approvals channel id into `.env`. **Every
+   pasting its tokens, its signing secret and the approvals channel id into `.env`. The section's
+   `teamId` is the id of the workspace that app is installed in, and an event from any other
+   workspace is refused. **Every
    `SecretRef` a document names must also be on the Compose host service's environment
    allowlist**, which is an explicit list and not an `env_file`: a variable that is set in `.env`
    but missing from that list reaches nothing inside the container, and the tenant refuses to
