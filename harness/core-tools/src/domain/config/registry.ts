@@ -58,13 +58,15 @@ export async function loadConfigSource(name: string, deps: ConfigSourceDeps): Pr
 }
 
 /**
- * The one client a dedicated process serves, resolved through whatever `HARNESS_CONFIG_SOURCE`
- * names.
+ * The one client the stdio server serves, resolved through whatever `HARNESS_CONFIG_SOURCE` names.
  *
- * `HARNESS_CLIENT` is required here, with no default: a stdio server or a dedicated host is one
- * client for its whole life, and a default would be a guess at which one. A client the source
- * does not hold is a startup failure naming both the id and the source, because a process that
- * started anyway would serve a client nobody configured.
+ * `HARNESS_CLIENT` is required here, with no default, and an empty value is refused: this process
+ * is one client for its whole life and a default would be a guess at which one. The host reads the
+ * same variable and reads it differently — unset *or* empty is a pooled host there, because
+ * Compose passes the variable through empty when it is unset — and that is the difference between
+ * a process that can serve many clients and one that cannot. A client the source does not hold is
+ * a startup failure naming both the id and the source, because a process that started anyway would
+ * serve a client nobody configured.
  *
  * The source is opened for this one read and closed again, on the failure path too: a process
  * that serves one client has nothing to watch, and a source left open would hold a connection or
@@ -72,7 +74,9 @@ export async function loadConfigSource(name: string, deps: ConfigSourceDeps): Pr
  */
 export async function loadClientDocument(deps: ConfigSourceDeps): Promise<ClientDocument> {
   const clientId = envOrDefault('HARNESS_CLIENT', '', deps.env);
-  if (clientId === '') throw new ConfigError('HARNESS_CLIENT names the client this process serves; set it');
+  if (clientId === '') {
+    throw new ConfigError('HARNESS_CLIENT names the one client this stdio server serves; set it to a client id');
+  }
   const source = await loadConfigSource(configSourceNameFrom(deps.env), deps);
   try {
     const loaded = await source.load(clientId);
