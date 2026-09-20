@@ -70,6 +70,17 @@ class GroupsIdentity implements IdentitySession {
     return this.now() - at < this.settings.sync.everySeconds * 1000;
   }
 
+  /**
+   * Nobody, remembered as such until the window is over.
+   *
+   * A caller the groups do not place is asked about again on every message otherwise, and each
+   * one is a round trip to the workspace for the same answer.
+   */
+  private refuse(key: string): null {
+    this.decided.set(key, { principal: null, at: this.now() });
+    return null;
+  }
+
   private levelFor(userId: string, groups: readonly string[]): UserLevel | 'refuse' | null {
     const exception = this.settings.exceptions.find((entry) => entry.userId === userId);
     if (exception) return exception.level;
@@ -89,10 +100,7 @@ class GroupsIdentity implements IdentitySession {
 
     const groups = await this.directory.groupsOf(ref.userId);
     const level = this.levelFor(ref.userId, groups);
-    if (level === null || level === 'refuse') {
-      this.decided.set(key, { principal: null, at: this.now() });
-      return null;
-    }
+    if (level === null || level === 'refuse') return this.refuse(key);
     // A name is cosmetic and a level is not, so a workspace that will not say what somebody is
     // called does not cost them the level it already told us. `principalFromDefault` falls back to
     // the surface user id. A refusal from `groupsOf`, above, is a different matter and escapes.
@@ -104,15 +112,11 @@ class GroupsIdentity implements IdentitySession {
         return undefined;
       });
     const minted = principalFromDefault(ref.surface, ref.userId, level, displayName);
-    if (!minted) {
-      this.decided.set(key, { principal: null, at: this.now() });
-      return null;
-    }
+    if (!minted) return this.refuse(key);
     // A derived id a declared principal already holds would hand one person another's history.
     if (await this.declared.get(minted.id)) {
       this.log.warn(`slack-groups: derived id "${minted.id}" is already declared; refusing the caller`);
-      this.decided.set(key, { principal: null, at: this.now() });
-      return null;
+      return this.refuse(key);
     }
     this.minted.set(minted.id, { principal: minted, at: this.now() });
     this.decided.set(key, { principal: minted, at: this.now() });

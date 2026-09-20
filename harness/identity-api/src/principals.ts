@@ -8,7 +8,7 @@ export type { IdentityFile, UserLevel };
 /** `u-` for a person, `svc-` for a service, then a lowercase slug. */
 export const PRINCIPAL_ID_PATTERN = /^(u|svc)-[a-z0-9][a-z0-9-]*$/;
 
-/** One entry of `principals:` in `clients/<name>/identity.yaml`. */
+/** One entry of `principals:` in the client document's identity section. */
 export const PrincipalShape = z.object({
   id: z.string().regex(PRINCIPAL_ID_PATTERN, 'a principal id is u-<slug> for a person or svc-<slug> for a service'),
   kind: z.enum(['user', 'service']),
@@ -18,8 +18,8 @@ export const PrincipalShape = z.object({
    *
    * Not cosmetic bounds. A runtime renders this string into the rules block it puts under the
    * persona, so a name carrying a line break adds a line that reads as another kernel rule and
-   * is typographically indistinguishable from the real ones. `identity.yaml` is the operator's
-   * file rather than anything an end user writes, which is why the shape is refused here rather
+   * is typographically indistinguishable from the real ones. The identity section is written by
+   * an operator rather than by an end user, which is why the shape is refused here rather
    * than quarantined further down — but nothing downstream can tell a name that was always two
    * lines from a rule that was, so this is the one place that sees it whole and can say no.
    * `.trim()` runs before the bounds, so the stored value is what the bounds describe.

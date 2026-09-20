@@ -56,7 +56,9 @@ export function slackDirectory(api: SlackApi, opts: SlackDirectoryOptions): Surf
       if (cached && fresh(cached.at)) return cached.value;
       const info = await api.users.info({ user: userId });
       const raw = info.user?.profile?.display_name || info.user?.real_name || info.user?.profile?.real_name || '';
-      const value = raw.trim() === '' ? null : raw.trim();
+      // `||` rather than `??`: a name that was nothing but whitespace is a workspace that will
+      // not say, which is what null means here.
+      const value = raw.trim() || null;
       names.set(userId, { value, at: opts.now().getTime() });
       return value;
     },
