@@ -2,6 +2,7 @@ import { readFile, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { parse as parseYaml } from 'yaml';
 import { ConfigError, describeError } from '@harness/shared';
+import { isInside } from './confine.js';
 
 /** The tag a client file uses to pull a long string out into a file beside it: `!include persona.md`. */
 export const INCLUDE_TAG = 'include';
@@ -51,7 +52,7 @@ async function readIncluded(relative: string, realRoot: string): Promise<string>
   // literal path and answers even when nothing is there, so `!include ../../../etc/passwd` is
   // refused as an escape rather than reported as a missing file.
   const target = path.resolve(realRoot, relative);
-  if (target !== realRoot && !target.startsWith(`${realRoot}${path.sep}`)) throw outside;
+  if (!isInside(target, realRoot)) throw outside;
   let real: string;
   try {
     real = await realpath(target);
@@ -61,7 +62,7 @@ async function readIncluded(relative: string, realRoot: string): Promise<string>
     throw new ConfigError(`!include "${relative}" ${UNREADABLE}`);
   }
   // And this one is on the real path, which is the only one that sees through a link.
-  if (real !== realRoot && !real.startsWith(`${realRoot}${path.sep}`)) throw outside;
+  if (!isInside(real, realRoot)) throw outside;
   try {
     // A tenant who can write into their own directory while this read is in flight can still
     // replace `real` with a symlink between the check above and this read, so this window is

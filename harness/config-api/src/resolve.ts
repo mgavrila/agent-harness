@@ -3,11 +3,6 @@ import { parseClientDocument, type ClientDocument } from './document.js';
 import { pointerSegments, writePointer } from './pointer.js';
 import type { Blueprint, Overlay } from './types.js';
 
-// `pointerSegments`, `readPointer` and `writePointer` are the pointer-level operations a JSON
-// Patch overlay is built from; they live in `./pointer.js` and are re-exported here so every
-// existing importer of `resolve.js` keeps working.
-export { pointerSegments, readPointer, writePointer } from './pointer.js';
-
 /**
  * Whether `a` and `b` overlap: either is a prefix of the other, or they are equal.
  *

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { ConfigError } from '@harness/shared';
-import { pointerSegments, readPointer, resolve } from './resolve.js';
+import { pointerSegments, readPointer } from './pointer.js';
+import { resolve } from './resolve.js';
 import { fixtureDocument } from './testing.js';
 import type { Blueprint, Overlay } from './types.js';
 

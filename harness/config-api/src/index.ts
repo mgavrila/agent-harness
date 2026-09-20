@@ -30,5 +30,6 @@ export {
   type PlaybookDefinition,
 } from './playbooks.js';
 export { ROUTES, RouteSpec, RoutingFile, type Route } from './routing.js';
-export { pointerSegments, readPointer, resolve, writePointer } from './resolve.js';
+export { pointerSegments, readPointer, writePointer } from './pointer.js';
+export { resolve } from './resolve.js';
 export type { Blueprint, ConfigSource, JsonPatch, LoadedDocument, Overlay, PatchOp, SecretRef } from './types.js';

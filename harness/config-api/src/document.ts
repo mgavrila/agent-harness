@@ -142,12 +142,9 @@ export function tenantKeysOf(document: ClientDocument): { surface: string; key: 
  */
 export function surfaceSecretsOf(document: ClientDocument): { surface: string; env: string }[] {
   const secrets: { surface: string; env: string }[] = [];
-  const withTokens = document.surfaces.slack;
-  if (withTokens) {
-    secrets.push(
-      { surface: 'slack', env: withTokens.signingSecret.env },
-      { surface: 'slack', env: withTokens.botToken.env },
-    );
+  const slack = document.surfaces.slack;
+  if (slack) {
+    secrets.push({ surface: 'slack', env: slack.signingSecret.env }, { surface: 'slack', env: slack.botToken.env });
   }
   return secrets;
 }

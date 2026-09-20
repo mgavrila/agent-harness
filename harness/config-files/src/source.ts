@@ -12,6 +12,7 @@ import {
   type Overlay,
 } from '@harness/config-api';
 import { ConfigError, describeError, type Logger } from '@harness/shared';
+import { isInside } from './confine.js';
 import { parseWithIncludes } from './include.js';
 
 /** How long a burst of filesystem events is allowed to settle before the document is re-read. */
@@ -78,18 +79,17 @@ async function knowledgeAbsolute(document: ClientDocument, dir: string): Promise
   );
   const root = path.resolve(dir);
   const target = path.resolve(root, written);
-  if (target !== root && !target.startsWith(`${root}${path.sep}`)) throw outside;
+  if (!isInside(target, root)) throw outside;
   let realRoot: string;
   let real: string;
   try {
-    realRoot = await realpath(root);
-    real = await realpath(target);
+    [realRoot, real] = await Promise.all([realpath(root), realpath(target)]);
   } catch {
     throw new ConfigError(
       `client "${document.id}": knowledge.path "${written}" cannot be read; it is missing, or the host may not read it`,
     );
   }
-  if (real !== realRoot && !real.startsWith(`${realRoot}${path.sep}`)) throw outside;
+  if (!isInside(real, realRoot)) throw outside;
   return { ...document, knowledge: { source: 'dir', path: target } };
 }
 
