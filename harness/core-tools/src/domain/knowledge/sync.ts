@@ -91,9 +91,10 @@ export async function syncKnowledge(deps: ToolDeps, opts: { dir?: string } = {})
   const now = deps.now();
   // A stable, readable label on the `knowledge_sources` row rather than the absolute path, which
   // differs between a checkout and a container and would rewrite the row on every start for no
-  // reason. Nothing opens it: `dir` above is what is read. It still spells the old client-folder
-  // layout, which Task 9 changes when it moves `clients/` out of the repository — changing the
-  // string rewrites existing rows, so it moves with them rather than ahead of them.
+  // reason. Nothing opens it: `dir` above is what is read. It still spells the layout a client
+  // had when clients lived in this repository, and goes on spelling it: the label is part of the
+  // row's identity, so changing it would rewrite every existing row to say the same thing
+  // differently.
   const location = opts.dir ?? path.posix.join('clients', deps.client, 'knowledge');
   const { id: sourceId } = await findOrCreateSource(
     deps.db,

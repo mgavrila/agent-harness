@@ -167,8 +167,8 @@ export const ENV_READING_HELPERS = [
 /**
  * The directories the environment scan walks. This is every place shipping TypeScript lives
  * today. `clients/` and the repository root are absent because neither holds a `.ts` file —
- * `clients/` is per-client configuration (`.env`, `policy.yaml`, `identity.yaml`, `SOUL.md`, the
- * runtime's config) and the root holds only config. Add the directory here if you put source in
+ * `clients/` is the one fixture client document and what it includes, and the root holds only
+ * config. Add the directory here if you put source in
  * either, or the variables it reads will go unrecorded and the `.env.example` check will pass
  * while missing them. `surfaces/` is there for the same reason `packs/` is: an adapter reads its
  * own variables, and a scan that did not walk it would let them go undocumented — including the
