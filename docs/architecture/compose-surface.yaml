@@ -125,8 +125,7 @@ services:
       - read_only: true
         source: ${HARNESS_CLIENTS_DIR:-../../clients}
         target: /srv/tenants
-        type: volume
-        volume: {}
+        type: bind
   litellm:
     command:
       - --config

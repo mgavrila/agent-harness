@@ -198,7 +198,14 @@ services:
     volumes:
       - storage:/srv/harness-storage
       - ../../packs:/srv/agent-harness/packs:ro
-      - ${HARNESS_CLIENTS_DIR:-../../clients}:/srv/tenants:ro
+      # Long form, because the source carries a `${VAR:-default}`: the short syntax splits on
+      # colons, and a Compose that does so before interpolating reads the default's own colon as
+      # another field and refuses the file ("too many colons"). The long form has no such
+      # ambiguity, and it is also what makes this render as the bind mount it is.
+      - type: bind
+        source: ${HARNESS_CLIENTS_DIR:-../../clients}
+        target: /srv/tenants
+        read_only: true
 
 networks:
   # The files worker's network. `internal: true` means no route out of it: the worker reaches
