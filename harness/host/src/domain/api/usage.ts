@@ -11,12 +11,25 @@ export const USAGE_DEFAULT_DAYS = 30;
  * The UTC midnight that starts `at`'s day.
  *
  * The view buckets with `date_trunc('day', ...)`, so every row's `day` is a UTC midnight and a
- * window bound that is anything else compares a whole day against an instant inside it. Rounding
- * both bounds down and keeping `to` exclusive makes the window a set of whole days, which is the
- * only shape this export has ever had.
+ * window bound that is anything else compares a whole day against an instant inside it. A window
+ * of whole days is the only shape this export has ever had.
  */
 export function startOfUtcDay(at: Date): Date {
   return new Date(Date.UTC(at.getUTCFullYear(), at.getUTCMonth(), at.getUTCDate()));
+}
+
+/**
+ * The UTC midnight that ends `at`'s day, and `at` itself when it is already one.
+ *
+ * The upper bound rounds **up** where the lower bound rounds down, and for the same reason: the
+ * comparison is `lt` against a column of midnights, so a bound inside a day excludes that whole
+ * day. Rounding down would drop today from every request that named no `to` — the bound is `now`
+ * — which is the day a caller asking about usage most wants. Identity at an exact midnight, so a
+ * caller who named a day boundary still gets a half-open window ending where they said.
+ */
+export function endOfUtcDay(at: Date): Date {
+  const start = startOfUtcDay(at);
+  return start.getTime() === at.getTime() ? start : new Date(start.getTime() + 24 * 60 * 60 * 1000);
 }
 
 /**

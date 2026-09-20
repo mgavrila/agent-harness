@@ -9,7 +9,7 @@ import { COORDINATOR, MEMBER, poolFixture, useTestDb, type PoolFixture } from '.
 import { WITHHELD } from '../threads/repository.js';
 import { startRunApi } from './server.js';
 import { API_MAX_BODY_BYTES, CLIENT_HEADER } from './types.js';
-import { USAGE_MAX_DAYS, type UsageRow } from './usage.js';
+import { USAGE_DEFAULT_DAYS, USAGE_MAX_DAYS, type UsageRow } from './usage.js';
 
 const db = useTestDb();
 const TOKEN = 'sk-run-api-test';
@@ -318,6 +318,22 @@ describe('the run API: a thread and the status', () => {
     // And the window the answer reports is the one it read: whole days, `to` still exclusive.
     expect(body.from).toBe(utc(0).toISOString());
     expect(body.to).toBe(utc(1).toISOString());
+  });
+
+  it('includes today in the window a request that names none gets', async () => {
+    const a = await api([{ usage: { inputTokens: 10, outputTokens: 2, costUsd: 0.001 } }, { say: 'done' }]);
+    await collect(await a.open(asCoordinator('anything overdue?')));
+
+    // No `from`, no `to`: the last thirty days, which has to end *after* today rather than at this
+    // morning's midnight. A caller who asks at noon is asking about a day that is under way.
+    const body = (await (await a.get('/v1/usage')).json()) as { from: string; to: string; rows: UsageRow[] };
+    expect(body.rows).toHaveLength(1);
+    expect(body.rows[0]).toMatchObject({ input_tokens: 10, output_tokens: 2 });
+    const now = new Date();
+    const utcDay = (offset: number): string =>
+      new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + offset)).toISOString();
+    expect(body.to).toBe(utcDay(1));
+    expect(body.from).toBe(utcDay(-USAGE_DEFAULT_DAYS));
   });
 
   it('refuses a window that is not one, and one wider than a year', async () => {

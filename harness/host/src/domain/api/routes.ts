@@ -13,7 +13,7 @@ import type { HostPool } from '../tenancy/types.js';
 import { WITHHELD, findOrCreateThread } from '../threads/repository.js';
 import { findRunFor, readThreadFor } from './repository.js';
 import { sseStream } from './sse.js';
-import { USAGE_DEFAULT_DAYS, USAGE_MAX_DAYS, readUsage, startOfUtcDay } from './usage.js';
+import { USAGE_DEFAULT_DAYS, USAGE_MAX_DAYS, endOfUtcDay, readUsage, startOfUtcDay } from './usage.js';
 import {
   API_MAX_ATTACHMENTS,
   API_MAX_BODY_BYTES,
@@ -283,10 +283,12 @@ function statusRoute(host: Host, res: ServerResponse, scheduler: { status(): Sch
  * route, and there is no way to widen it: the client is the one the request resolved to, never
  * one the caller asked for.
  *
- * Both bounds are rounded down to UTC midnight, because a row's `day` is a whole day: a `from` of
- * noon would otherwise drop that whole day's usage, and a caller who asked after breakfast would
- * be sent an invoice missing today. `to` stays exclusive, so the answer covers whole days up to
- * but not including the day `to` falls in. The window the answer reports is the one it read.
+ * The window is read as whole UTC days, because a row's `day` is one: `from` rounds down and `to`
+ * rounds up, so a bound inside a day keeps that day rather than dropping it. Both directions
+ * matter — a `from` of noon would drop that morning's usage, and a `to` of `now`, which is what a
+ * request naming no window gets, would drop today altogether. A `to` that is already a midnight is
+ * left where it is, so a caller who named a day boundary still gets the half-open window they
+ * asked for. The bounds are checked after rounding and the answer reports the window it read.
  *
  * Counts, tokens, cost and seconds, and nothing anybody wrote — the view is what guarantees that
  * (invariant 16), and `usage.test.ts` asserts its column list whole.
@@ -299,11 +301,11 @@ async function usageRoute(host: Host, url: URL, res: ServerResponse): Promise<vo
   if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) {
     return json(res, 400, { error: 'from and to are ISO timestamps' });
   }
-  if (to <= from) return json(res, 400, { error: 'to must be after from' });
-  if (to.getTime() - from.getTime() > USAGE_MAX_DAYS * DAY_MS) {
+  const days = { from: startOfUtcDay(from), to: endOfUtcDay(to) };
+  if (days.to <= days.from) return json(res, 400, { error: 'to must be after from' });
+  if (days.to.getTime() - days.from.getTime() > USAGE_MAX_DAYS * DAY_MS) {
     return json(res, 400, { error: `the window may not exceed ${USAGE_MAX_DAYS} days` });
   }
-  const days = { from: startOfUtcDay(from), to: startOfUtcDay(to) };
   return json(res, 200, {
     client: host.client,
     from: days.from.toISOString(),
