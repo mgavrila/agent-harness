@@ -13,7 +13,7 @@ import type { HostPool } from '../tenancy/types.js';
 import { WITHHELD, findOrCreateThread } from '../threads/repository.js';
 import { findRunFor, readThreadFor } from './repository.js';
 import { sseStream } from './sse.js';
-import { USAGE_MAX_DAYS, readUsage } from './usage.js';
+import { USAGE_DEFAULT_DAYS, USAGE_MAX_DAYS, readUsage } from './usage.js';
 import {
   API_MAX_ATTACHMENTS,
   API_MAX_BODY_BYTES,
@@ -287,9 +287,10 @@ function statusRoute(host: Host, res: ServerResponse, scheduler: { status(): Sch
  * (invariant 16), and `usage.test.ts` asserts its column list whole.
  */
 async function usageRoute(host: Host, url: URL, res: ServerResponse): Promise<void> {
-  const asked = { from: url.searchParams.get('from'), to: url.searchParams.get('to') };
-  const to = asked.to === null ? new Date() : new Date(asked.to);
-  const from = asked.from === null ? new Date(to.getTime() - 30 * DAY_MS) : new Date(asked.from);
+  const askedFrom = url.searchParams.get('from');
+  const askedTo = url.searchParams.get('to');
+  const to = askedTo === null ? new Date() : new Date(askedTo);
+  const from = askedFrom === null ? new Date(to.getTime() - USAGE_DEFAULT_DAYS * DAY_MS) : new Date(askedFrom);
   if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) {
     return json(res, 400, { error: 'from and to are ISO timestamps' });
   }

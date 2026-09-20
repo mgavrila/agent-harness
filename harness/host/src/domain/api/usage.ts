@@ -4,6 +4,9 @@ import { usageRuns, type Db } from '@harness/db';
 /** The widest window one request may ask for: a year and a leap day. */
 export const USAGE_MAX_DAYS = 366;
 
+/** How far back a request that names no window reaches. */
+export const USAGE_DEFAULT_DAYS = 30;
+
 /**
  * One tenant's usage for one principal on one day.
  *

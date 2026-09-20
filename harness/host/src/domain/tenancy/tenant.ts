@@ -6,7 +6,7 @@ import {
   startRunner,
   surfaceSinks,
 } from '@harness/approvals';
-import { parsePlaybooksFile, surfaceNamesOf, surfaceSecretsOf } from '@harness/config-api';
+import { parsePlaybooksFile, surfaceNamesOf, surfaceSecretsOf, type ClientDocument } from '@harness/config-api';
 import { buildKernelConfig, loadIdentity, reconcile, type GatewayConfig } from '@harness/core-tools';
 import { outRoot } from '@harness/core-tools/storage';
 import { parseIdentityFileWithDefaults } from '@harness/identity-api';
@@ -45,9 +45,9 @@ const SCHEDULER_STOP_MS = 10_000;
  * with a transport error nobody can attribute. `surfaceSecretsOf` is what reads the typed surface
  * sections, so this file names no surface's own fields.
  */
-function assertSecretsPresent(document: LoadedDocument['document'], env: Record<string, string | undefined>): void {
+function assertSecretsPresent(document: ClientDocument, env: EnvSource): void {
   for (const ref of surfaceSecretsOf(document)) {
-    if ((env[ref.env] ?? '').trim() === '') {
+    if ((optionalEnv(ref.env, env) ?? '').trim() === '') {
       throw new ConfigError(
         `client "${document.id}" declares the "${ref.surface}" surface, which needs ${ref.env}; this deployment does not set it`,
       );
@@ -135,10 +135,9 @@ export async function openTenant(pool: HostPool, loaded: LoadedDocument): Promis
 
 async function buildTenant(pool: HostPool, loaded: LoadedDocument, opened: Stoppable[]): Promise<Tenant> {
   const { document, version } = loaded;
-  const env = pool.env as Record<string, string | undefined>;
   const log = pool.log;
   const config = await buildKernelConfig(document, pool.env);
-  assertSecretsPresent(document, env);
+  assertSecretsPresent(document, pool.env);
   const budget = runBudget(config.client, config.gateway, pool.env);
 
   // The document into the table, once per open, and before a surface or the runtime connects: a

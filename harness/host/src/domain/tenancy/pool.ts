@@ -42,15 +42,16 @@ export async function createHost(deps: HostDeps): Promise<HostPool> {
 
   const keysOf = (clientId: string): readonly { surface: string; key: string }[] => claimed.get(clientId) ?? [];
 
+  /** Drop everything the client claims: it is gone, not merely between tenants. */
+  const forget = (clientId: string): void => {
+    for (const [indexed, owner] of keys) if (owner === clientId) keys.delete(indexed);
+    claimed.delete(clientId);
+  };
   /** Make these the client's keys, dropping whatever it claimed before. */
   const claim = (clientId: string, own: readonly { surface: string; key: string }[]): void => {
     forget(clientId);
     for (const { surface, key } of own) keys.set(`${surface}:${key}`, clientId);
     claimed.set(clientId, own);
-  };
-  const forget = (clientId: string): void => {
-    for (const [indexed, owner] of keys) if (owner === clientId) keys.delete(indexed);
-    claimed.delete(clientId);
   };
   const resolver: ClientResolver =
     deps.dedicatedClient === null
