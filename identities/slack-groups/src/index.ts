@@ -17,6 +17,12 @@ interface Decided {
   at: number;
 }
 
+/** A principal this process minted, and when — the same window bounds it. */
+interface Minted {
+  principal: Principal;
+  at: number;
+}
+
 /**
  * Levels from group membership, never from a list.
  *
@@ -41,7 +47,7 @@ class GroupsIdentity implements IdentitySession {
   private readonly log: Logger;
   private readonly now: () => number;
   private readonly decided = new Map<string, Decided>();
-  private readonly minted = new Map<string, Principal>();
+  private readonly minted = new Map<string, Minted>();
 
   constructor(args: {
     declared: StaticIdentity;
@@ -59,6 +65,11 @@ class GroupsIdentity implements IdentitySession {
     this.now = args.now ?? (() => Date.now());
   }
 
+  /** Whether something decided at `at` may still be served, by the one window this plug-in has. */
+  private fresh(at: number): boolean {
+    return this.now() - at < this.settings.sync.everySeconds * 1000;
+  }
+
   private levelFor(userId: string, groups: readonly string[]): UserLevel | 'refuse' | null {
     const exception = this.settings.exceptions.find((entry) => entry.userId === userId);
     if (exception) return exception.level;
@@ -74,7 +85,7 @@ class GroupsIdentity implements IdentitySession {
 
     const key = `${ref.surface}:${ref.userId}`;
     const cached = this.decided.get(key);
-    if (cached && this.now() - cached.at < this.settings.sync.everySeconds * 1000) return cached.principal;
+    if (cached && this.fresh(cached.at)) return cached.principal;
 
     const groups = await this.directory.groupsOf(ref.userId);
     const level = this.levelFor(ref.userId, groups);
@@ -82,7 +93,16 @@ class GroupsIdentity implements IdentitySession {
       this.decided.set(key, { principal: null, at: this.now() });
       return null;
     }
-    const displayName = (await this.directory.displayNameOf(ref.userId)) ?? undefined;
+    // A name is cosmetic and a level is not, so a workspace that will not say what somebody is
+    // called does not cost them the level it already told us. `principalFromDefault` falls back to
+    // the surface user id. A refusal from `groupsOf`, above, is a different matter and escapes.
+    const displayName = await this.directory
+      .displayNameOf(ref.userId)
+      .then((name) => name ?? undefined)
+      .catch((err: unknown) => {
+        this.log.warn(`slack-groups: no display name for "${ref.userId}": ${String(err)}`);
+        return undefined;
+      });
     const minted = principalFromDefault(ref.surface, ref.userId, level, displayName);
     if (!minted) {
       this.decided.set(key, { principal: null, at: this.now() });
@@ -94,17 +114,26 @@ class GroupsIdentity implements IdentitySession {
       this.decided.set(key, { principal: null, at: this.now() });
       return null;
     }
-    this.minted.set(minted.id, minted);
+    this.minted.set(minted.id, { principal: minted, at: this.now() });
     this.decided.set(key, { principal: minted, at: this.now() });
     return minted;
   }
 
+  /**
+   * Who a principal id names — and this is an authorisation path, not a lookup.
+   *
+   * A resumed turn asks by id after an approval decision and then runs as whoever it gets back,
+   * so a group-derived level must not outlive the sync window here any more than it does in
+   * `resolve`. Past the window the minted entry is skipped and the answer falls to what the id
+   * alone can prove: the document's own default for that surface, which cannot drift. That is
+   * also the answer a restarted process gives, so how long this one has been up stops mattering.
+   */
   async get(principalId: string): Promise<Principal | null> {
-    return (
-      (await this.declared.get(principalId)) ??
-      this.minted.get(principalId) ??
-      principalFromDerivedId(principalId, this.defaults)
-    );
+    const declared = await this.declared.get(principalId);
+    if (declared) return declared;
+    const minted = this.minted.get(principalId);
+    if (minted && this.fresh(minted.at)) return minted.principal;
+    return principalFromDerivedId(principalId, this.defaults);
   }
 
   async list(): Promise<Principal[]> {
@@ -120,6 +149,9 @@ export const identity: IdentityProvider = defineIdentityProvider({
   name: 'slack-groups',
   version: '0.1.0',
   secrets: [],
+  // `async` with nothing to await is deliberate: both refusals below must reject rather than
+  // throw synchronously, which is what `connect(deps): Promise<IdentitySession>` promises.
+  // eslint-disable-next-line @typescript-eslint/require-await
   connect: async (deps) => {
     const settings = parseSlackGroupsSettings(deps.settings);
     const directory = deps.directories[settings.surface];

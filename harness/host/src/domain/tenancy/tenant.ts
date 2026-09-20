@@ -122,8 +122,11 @@ async function buildTenant(pool: HostPool, loaded: LoadedDocument, opened: Stopp
   // Identity comes after the surfaces, and that is a deliberate change of startup order: a
   // directory-backed plug-in resolves a level from group membership, so the surface it asks has
   // to be connected before it can ask anything. The consequence is that this host's own service
-  // principal is checked after the surfaces are up rather than before — a document that names a
-  // principal nobody declares now fails with sockets open, and `close()` shuts them again.
+  // principal is checked after the surfaces are up rather than before. Nothing is listening at
+  // that point — every shipped surface builds a session here and is only started once the pool
+  // has a `Tenant` — so a document that names a principal nobody declares fails with no socket
+  // open; and a surface that did take a resource in `connect` is stopped by the unwind in
+  // `openTenant`, which is why each one is pushed onto `opened` as it is built.
   const directories = Object.fromEntries(
     surfaces.all.filter((session) => session.directory).map((session) => [session.name, session.directory!]),
   );

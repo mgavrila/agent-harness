@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ConfigError, type SurfaceDirectory } from '@harness/shared';
 import { parseIdentityFileWithDefaults } from '@harness/identity-api';
 import { identity } from './index.js';
@@ -133,5 +133,81 @@ describe('the slack-groups identity plug-in', () => {
   it('answers nothing on a surface it was not configured for', async () => {
     const session = await connect({ slack: directory({ U1: ['S-LEADS'] }) });
     expect(await session.resolve({ surface: 'memory', userId: 'U1' })).toBeNull();
+  });
+
+  it('refuses rather than defaulting when the workspace will not say what groups someone is in', async () => {
+    const unreachable: SurfaceDirectory = {
+      groupsOf: async () => {
+        throw new Error('slack: missing_scope');
+      },
+      displayNameOf: async () => null,
+    };
+    const session = await connect({ slack: unreachable });
+    // The document has a `slack: member` default. An unanswerable lookup must not reach it:
+    // a level nobody vouched for is worse than no answer at all.
+    await expect(session.resolve({ surface: 'slack', userId: 'U-LEAD' })).rejects.toThrow(/missing_scope/);
+    // And nothing was cached, so the next message asks again rather than serving the refusal.
+    await expect(session.resolve({ surface: 'slack', userId: 'U-LEAD' })).rejects.toThrow(/missing_scope/);
+  });
+
+  it('still answers when only the display name is unavailable, because a name is cosmetic', async () => {
+    const namelessly: SurfaceDirectory = {
+      groupsOf: async () => ['S-LEADS'],
+      displayNameOf: async () => {
+        throw new Error('slack: ratelimited');
+      },
+    };
+    const session = await connect({ slack: namelessly });
+    const principal = await session.resolve({ surface: 'slack', userId: 'U-LEAD' });
+    expect(principal?.level).toBe('lead');
+    expect(principal?.displayName).toBe('U-LEAD');
+  });
+});
+
+/**
+ * How long a level the directory gave is allowed to outlive the directory's own answer.
+ *
+ * `sync.everySeconds` is the whole bound, on both paths a level can be read by: `resolve`, which
+ * every message takes, and `get`, which a resumed turn takes after an approval decision. Both
+ * tests below move an injected clock rather than waiting; the settings floor is thirty seconds
+ * and no test may sleep.
+ */
+describe('the sync window bounds a group-derived level', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('drops someone to the default at the next sync once the workspace has removed them', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-09-19T00:00:00Z'));
+    let groups = ['S-LEADS'];
+    const moving: SurfaceDirectory = {
+      groupsOf: async () => groups,
+      displayNameOf: async () => null,
+    };
+    const session = await connect({ slack: moving }, { sync: { everySeconds: 300 } });
+    expect((await session.resolve({ surface: 'slack', userId: 'U-LEAD' }))?.level).toBe('lead');
+
+    groups = [];
+    // Still inside the window: the cached decision stands, which is what the window is for.
+    vi.setSystemTime(new Date('2026-09-19T00:04:00Z'));
+    expect((await session.resolve({ surface: 'slack', userId: 'U-LEAD' }))?.level).toBe('lead');
+
+    vi.setSystemTime(new Date('2026-09-19T00:05:00Z'));
+    expect((await session.resolve({ surface: 'slack', userId: 'U-LEAD' }))?.level).toBe('member');
+  });
+
+  it('stops serving a minted level through `get` once the window is over', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-09-19T00:00:00Z'));
+    const session = await connect({ slack: directory({ 'U-LEAD': ['S-LEADS'] }) }, { sync: { everySeconds: 300 } });
+    const minted = await session.resolve({ surface: 'slack', userId: 'U-LEAD' });
+    expect(minted?.level).toBe('lead');
+    expect((await session.get(minted!.id))?.level).toBe('lead');
+
+    // `get` is an authorisation path — a resumed turn runs as whoever it answers with — so past
+    // the window it falls to what the id alone can prove, which is the document's own default.
+    vi.setSystemTime(new Date('2026-09-19T00:05:00Z'));
+    expect((await session.get(minted!.id))?.level).toBe('member');
   });
 });

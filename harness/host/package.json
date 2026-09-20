@@ -18,6 +18,7 @@
     "@harness/core-tools": "workspace:*",
     "@harness/db": "workspace:*",
     "@harness/identity-api": "workspace:*",
+    "@harness/identity-slack-groups": "workspace:*",
     "@harness/identity-static": "workspace:*",
     "@harness/runtime-api": "workspace:*",
     "@harness/runtime-deepagents": "workspace:*",

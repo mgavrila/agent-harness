@@ -49,8 +49,8 @@ export function createSlackSession(transport: SlackTransport, config: SlackConfi
     name: NAME,
     capabilities: { forms: true, privateReply: true, update: true, streaming: true, inlineConfirm: false },
     defaultConversation: config.defaultConversation,
-    // Built once per session and cached inside, so every tenant's identity plug-in that asks this
-    // surface who someone is shares one set of workspace requests.
+    // Built once per session and cached inside, so this tenant's identity plug-in shares one set
+    // of workspace requests across every caller that asks.
     directory: slackDirectory(api, { now: () => new Date() }),
 
     mention: (userId) => `<@${userId}>`,

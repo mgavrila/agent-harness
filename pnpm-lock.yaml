@@ -232,6 +232,9 @@ importers:
       '@harness/identity-api':
         specifier: workspace:*
         version: link:../identity-api
+      '@harness/identity-slack-groups':
+        specifier: workspace:*
+        version: link:../../identities/slack-groups
       '@harness/identity-static':
         specifier: workspace:*
         version: link:../../identities/static
@@ -392,6 +395,9 @@ importers:
       '@harness/identity-api':
         specifier: workspace:*
         version: link:../identity-api
+      '@harness/identity-slack-groups':
+        specifier: workspace:*
+        version: link:../../identities/slack-groups
       '@harness/identity-static':
         specifier: workspace:*
         version: link:../../identities/static

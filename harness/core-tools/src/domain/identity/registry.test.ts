@@ -25,6 +25,18 @@ describe('loadIdentity', () => {
     await session.stop();
   });
 
+  it('loads the directory-backed plug-in by its package name, with the directories it is handed', async () => {
+    // The one path a deployment takes: a document names `slack-groups`, the loader imports it by
+    // package specifier, and the plug-in reads levels from the directory map rather than a list.
+    const session = await loadIdentity('@harness/identity-slack-groups', {
+      ...deps,
+      settings: { surface: 'slack', groups: [{ id: 'S-LEADS', level: 'lead' }] },
+      directories: { slack: { groupsOf: async () => ['S-LEADS'], displayNameOf: async () => null } },
+    });
+    expect((await session.resolve({ surface: 'slack', userId: 'U-LEAD' }))?.level).toBe('lead');
+    await session.stop();
+  });
+
   it('names the module, and nothing about the filesystem, when one cannot be resolved', async () => {
     const err = await loadIdentity('@harness/identity-nope', deps).catch((caught: unknown) => caught);
     expect(err).toBeInstanceOf(ConfigError);
