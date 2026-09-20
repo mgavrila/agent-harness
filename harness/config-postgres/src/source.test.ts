@@ -91,6 +91,21 @@ describe('postgresConfigSource', () => {
     expect(seen).toEqual(['v2']);
   });
 
+  it('refuses a row whose document names another client than the row key does', async () => {
+    // Only a corrupt write produces one, and the files source refuses the same mismatch in its
+    // own terms. Without the check the pool would hold a tenant under key "fixture" whose every
+    // row, every audit line and every claim said "other" — a tenant boundary crossed by a typo.
+    await db.insert(clientDocuments).values({
+      clientId: 'fixture',
+      schemaVersion: 1,
+      version: 'v1',
+      document: parseClientDocument(fixtureDocument({ id: 'other' })) as unknown as Record<string, unknown>,
+    });
+    await expect(postgresConfigSource({ db, log }).load('fixture')).rejects.toThrow(
+      'the row keyed "fixture" holds a document that declares id "other"',
+    );
+  });
+
   it('refuses a stored document whose knowledge path is relative, because a row has no directory', async () => {
     await writeClientDocument(
       db,

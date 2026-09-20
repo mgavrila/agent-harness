@@ -83,7 +83,17 @@ export function postgresConfigSource(opts: PostgresConfigSourceOptions): ConfigS
       .where(eq(clientDocuments.clientId, clientId))
       .limit(1);
     if (!row) return null;
-    return { document: assertAbsoluteKnowledge(migrate(row.document)), version: row.version };
+    const document = assertAbsoluteKnowledge(migrate(row.document));
+    // The same check the directory source makes of a document against the directory it sits in.
+    // Only a corrupt write produces a mismatch, and what it produces is a tenant opened under one
+    // key whose every row, audit line and routing claim names another — a boundary crossed by a
+    // bad write rather than by a decision.
+    if (document.id !== clientId) {
+      throw new ConfigError(
+        `the row keyed "${clientId}" holds a document that declares id "${document.id}"; a client's key and its document must name the same client`,
+      );
+    }
+    return { document, version: row.version };
   };
 
   return {
