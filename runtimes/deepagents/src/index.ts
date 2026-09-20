@@ -4,7 +4,8 @@ import { EventQueue } from './domain/events.js';
 import { runDeepAgent } from './domain/run.js';
 
 /**
- * Deep Agents JS as a runtime plug-in. The host loads this by name from `HARNESS_RUNTIME` and
+ * Deep Agents JS as a runtime plug-in. The host loads this by the name a client document's
+ * `runtime` gives and
  * holds nothing but the contract; every framework word lives under this directory. It reads no
  * environment of its own: the model gateway arrives on every request, the database URL on the
  * deps, and `storageDir` is not needed — the model reaches no filesystem.

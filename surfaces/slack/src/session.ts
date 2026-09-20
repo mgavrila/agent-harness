@@ -10,6 +10,7 @@ import type {
   UploadRequest,
 } from '@harness/surface-api';
 import type { SlackConfig } from './config.js';
+import { slackDirectory } from './directory.js';
 import { toMrkdwn } from './format.js';
 import { guarded, NAME } from './guarded.js';
 import { cardBlocks } from './render/blocks.js';
@@ -48,6 +49,9 @@ export function createSlackSession(transport: SlackTransport, config: SlackConfi
     name: NAME,
     capabilities: { forms: true, privateReply: true, update: true, streaming: true, inlineConfirm: false },
     defaultConversation: config.defaultConversation,
+    // Built once per session and cached inside, so this tenant's identity plug-in shares one set
+    // of workspace requests across every caller that asks.
+    directory: slackDirectory(api, { now: () => new Date() }),
 
     mention: (userId) => `<@${userId}>`,
 
@@ -167,6 +171,10 @@ export function createSlackSession(transport: SlackTransport, config: SlackConfi
           attachments: message.files.map((f) => ({ name: f.name, path: f.path })),
           message: ref(message.channel, message.ts),
           mentioned: message.mentioned,
+          // The workspace, for the host to route on. Omitted rather than sent as null when the
+          // transport could not name one: the contract's field is optional, and a hint of "none"
+          // is what a surface with no notion of a workspace reports.
+          ...(message.teamId === null ? {} : { tenantHint: message.teamId }),
         });
       });
     },

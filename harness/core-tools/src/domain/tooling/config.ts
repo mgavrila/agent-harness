@@ -1,7 +1,7 @@
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import type { ClientDocument } from '@harness/config-api';
 import { loadKey } from '@harness/db';
-import { booleanFromEnv, envOrDefault, numberFromEnv, optionalEnv, type EnvSource } from '@harness/shared';
+import { booleanFromEnv, numberFromEnv, optionalEnv, type EnvSource } from '@harness/shared';
 import { localParser, remoteParser } from '../documents/parser.js';
 import type { DocumentParser } from '../documents/types.js';
 import { gatewayFromEnv } from '../models/gateway.js';
@@ -9,15 +9,15 @@ import { loadPacks } from '../packs/registry.js';
 import type { PackRegistry } from '../packs/types.js';
 import { storageRoot } from '../storage/layout.js';
 import type { KernelConfig } from './deps.js';
-import { loadPolicy } from './policy.js';
+import { DEFAULT_POLICY, mergePolicy } from './policy.js';
 import { DEFAULT_CONFIDENCE_THRESHOLD } from './types.js';
 
 /**
  * Where the form templates live.
  *
- * The pack owns them, so the primary pack's own directory — the first pack named in
- * `HARNESS_PACKS` — is the answer for every deployment that has not said otherwise, and swapping
- * the pack swaps the templates with it. `HARNESS_FORMS_DIR` is an explicit override for a
+ * The pack owns them, so the primary pack's own directory — the first pack the client document's
+ * `packs` list names — is the answer for every deployment that has not said otherwise, and
+ * swapping the pack swaps the templates with it. `HARNESS_FORMS_DIR` is an explicit override for a
  * deployment that keeps its templates somewhere else; set, it wins and is resolved against the
  * process working directory, exactly as it did before the registry existed. The directory is read
  * off the pack here rather than through `registry.formsDir()`, which answers a stricter question —
@@ -30,33 +30,11 @@ import { DEFAULT_CONFIDENCE_THRESHOLD } from './types.js';
  * consumer, the healthcare pack's forms tools, and a pack that ships forms tools ships a
  * `formsDir` with them. The cost is that such a pack, having forgotten one, no longer fails at
  * startup; what it loses is a loud failure over a directory nothing would have opened, and what
- * it buys is that `HARNESS_PACKS=@harness/pack-stories` starts at all.
+ * it buys is that a document naming `@harness/pack-stories` alone starts at all.
  */
 export function formsDirFrom(packs: Pick<PackRegistry, 'all'>, raw: string | undefined, storageDir: string): string {
   if (raw) return path.resolve(raw);
   return packs.all[0]?.formsDir ?? storageDir;
-}
-
-/** What a deployment that has never heard of `HARNESS_PACKS` serves. */
-const DEFAULT_PACKS = '@harness/pack-healthcare';
-
-/**
- * Which packs this process serves, comma-separated package names.
- *
- * Three answers, not two. **Unset** keeps the default, so a deployment that has never set the
- * variable behaves exactly as it did. **Set to a list** serves those packs. **Set to the empty
- * string** serves none: a client whose team wants the kernel's own tools — memory, playbooks,
- * knowledge, approvals, files — and no product area at all. A client is a folder and not code,
- * so having no domain pack has to be something the folder can say.
- *
- * The variable is read here rather than through `optionalEnv`, which reads an empty value as
- * absent and so cannot tell the first case from the third.
- */
-export function packNames(env: EnvSource): string[] {
-  return (env.HARNESS_PACKS ?? DEFAULT_PACKS)
-    .split(',')
-    .map((name) => name.trim())
-    .filter((name) => name !== '');
 }
 
 /**
@@ -68,39 +46,31 @@ export function parserFromEnv(storageDir: string, filesUrl?: string): DocumentPa
   return filesUrl ? remoteParser(filesUrl, storageDir) : localParser(storageDir);
 }
 
-// src/domain/tooling -> src/domain -> src -> core-tools -> harness -> the repository root. The
-// same root the image has: node.Dockerfile sets WORKDIR /srv/agent-harness and copies `clients`
-// under it, so this resolves to the client folder in a checkout and in a container alike.
-const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../../..');
-
 /**
- * `clients/<name>/`, the folder spec section 7 lays out. `root` is the repository root and
- * defaults to the one resolved above; only a test names its own.
+ * Everything every run shares, read and loaded once per tenant.
+ *
+ * The **document** decides what this client is — its id, its policy, its packs, where its
+ * knowledge is — and the **environment** decides what this deployment is: where files live, which
+ * key encrypts them, which gateway to call. Nothing here reads the ambient environment, and
+ * nothing here resolves a path from where this file happens to sit: both are what stopped one
+ * process from serving two clients.
  */
-export function clientDirFor(client: string, root: string = repoRoot): string {
-  return path.join(root, 'clients', client);
-}
-
-/**
- * Everything every run shares, read and loaded once per process. Nothing here is per run:
- * the database handle, the principal and the run context arrive through `depsForRun`.
- */
-export async function buildKernelConfig(env: EnvSource): Promise<KernelConfig> {
-  const packs = await loadPacks(packNames(env));
+export async function buildKernelConfig(document: ClientDocument, env: EnvSource): Promise<KernelConfig> {
+  const packs = await loadPacks(document.packs);
   // One root for the whole file store, required and with no default (see storageRoot).
-  const storageDir = storageRoot();
+  const storageDir = storageRoot(env);
 
-  const client = envOrDefault('HARNESS_CLIENT', 'default', env);
   return {
-    client,
-    policy: await loadPolicy(),
-    encryptionKey: loadKey(),
+    client: document.id,
+    policy: mergePolicy(DEFAULT_POLICY, document.policy),
+    hiddenTools: document.policy.tools.hide,
+    encryptionKey: loadKey(env),
     now: () => new Date(),
     approvalTtlHours: numberFromEnv('APPROVAL_TTL_HOURS', 24, { min: 1, max: 720 }, env),
     confidenceThreshold: numberFromEnv('CONFIDENCE_THRESHOLD', DEFAULT_CONFIDENCE_THRESHOLD, { min: 0, max: 1 }, env),
-    gateway: gatewayFromEnv(),
+    gateway: gatewayFromEnv(env),
     storageDir,
-    clientDir: clientDirFor(client),
+    knowledgeDir: document.knowledge.source === 'dir' ? document.knowledge.path : null,
     // 1,024 is what migration 0013 created the column at; `assertEmbedDims` is what proves a
     // deployment has not drifted from it. The ceiling is pgvector's own HNSW limit.
     embedDims: numberFromEnv('HARNESS_EMBED_DIMS', 1_024, { min: 8, max: 2_000, integer: true }, env),

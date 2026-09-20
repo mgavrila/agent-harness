@@ -74,8 +74,11 @@ async function findOrCreateRecord(deps: ToolDeps, kind: string, name: string, ex
 }
 
 async function upsertField(deps: ToolDeps, recordId: string, f: FieldInput) {
+  // Belt and braces (spec invariant 13). The foreign key already reaches a row that carries the
+  // client, so a correct writer cannot produce a mismatch; a reader that relied on that would be
+  // one join away from another tenant's rows the first time a writer was not correct.
   const existing = await deps.db.query.fields.findFirst({
-    where: and(eq(fields.recordId, recordId), eq(fields.name, f.name)),
+    where: and(eq(fields.client, deps.client), eq(fields.recordId, recordId), eq(fields.name, f.name)),
   });
   if (existing?.status === 'verified') {
     return 'verified' as const;
@@ -84,6 +87,7 @@ async function upsertField(deps: ToolDeps, recordId: string, f: FieldInput) {
   const confidence = f.confidence ?? 1;
   const status = confidence >= deps.confidenceThreshold ? 'extracted' : 'pending';
   const values = {
+    client: deps.client,
     recordId,
     name: f.name,
     ...fieldValueColumns(f.value, restricted, deps.encryptionKey),
@@ -130,12 +134,14 @@ async function upsertAttachment(deps: ToolDeps, recordId: string, a: AttachmentI
   // state — null included — is part of the match.
   const existing = await deps.db.query.attachments.findFirst({
     where: and(
+      eq(attachments.client, deps.client),
       eq(attachments.recordId, recordId),
       eq(attachments.kind, a.kind),
       sql`${attachments.state} IS NOT DISTINCT FROM ${a.state ?? null}`,
     ),
   });
   const values = {
+    client: deps.client,
     recordId,
     kind: a.kind,
     issuer: a.issuer ?? null,
@@ -147,7 +153,10 @@ async function upsertAttachment(deps: ToolDeps, recordId: string, a: AttachmentI
     sourceDocId: a.source_doc_id ?? null,
   };
   if (existing) {
-    await deps.db.update(attachments).set(values).where(eq(attachments.id, existing.id));
+    await deps.db
+      .update(attachments)
+      .set(values)
+      .where(and(eq(attachments.client, deps.client), eq(attachments.id, existing.id)));
   } else {
     await deps.db.insert(attachments).values(values);
   }
@@ -174,15 +183,24 @@ export async function upsertRecord(deps: ToolDeps, args: UpsertRecordInput): Pro
   for (const a of args.attachments) {
     await upsertAttachment(deps, recordId, a);
   }
-  const count = await deps.db.$count(attachments, eq(attachments.recordId, recordId));
+  const count = await deps.db.$count(
+    attachments,
+    and(eq(attachments.client, deps.client), eq(attachments.recordId, recordId)),
+  );
   return { record_id: recordId, fields_pending: pending, fields_extracted: extracted, attachments: count };
 }
 
 /** `records_get`: the record with its fields and attachments, restricted values masked. */
 export async function readRecord(deps: ToolDeps, recordId: string, kind?: string): Promise<RecordsGetResult> {
   const r = await requireRecord(deps, recordId, kind);
-  const fieldRows = await deps.db.select().from(fields).where(eq(fields.recordId, recordId));
-  const attachmentRows = await deps.db.select().from(attachments).where(eq(attachments.recordId, recordId));
+  const fieldRows = await deps.db
+    .select()
+    .from(fields)
+    .where(and(eq(fields.client, deps.client), eq(fields.recordId, recordId)));
+  const attachmentRows = await deps.db
+    .select()
+    .from(attachments)
+    .where(and(eq(attachments.client, deps.client), eq(attachments.recordId, recordId)));
   return {
     record: { id: r.id, kind: r.kind, name: r.name, external_id: r.externalId, status: r.status },
     fields: fieldRows.map(maskField),
@@ -225,10 +243,11 @@ export async function confirmField(
   const { record_id, field, value, confirmed_by, kind } = args;
   await requireRecord(deps, record_id, kind);
   const existing = await deps.db.query.fields.findFirst({
-    where: and(eq(fields.recordId, record_id), eq(fields.name, field)),
+    where: and(eq(fields.client, deps.client), eq(fields.recordId, record_id), eq(fields.name, field)),
   });
   const restricted = existing?.restricted === true || isRestrictedName(field);
   const values = {
+    client: deps.client,
     recordId: record_id,
     name: field,
     ...fieldValueColumns(value, restricted, deps.encryptionKey),
@@ -254,6 +273,6 @@ export async function listPendingFields(
   const rows = await deps.db
     .select()
     .from(fields)
-    .where(and(eq(fields.recordId, recordId), eq(fields.status, 'pending')));
+    .where(and(eq(fields.client, deps.client), eq(fields.recordId, recordId), eq(fields.status, 'pending')));
   return { fields: rows.map((r) => ({ name: r.name, confidence: r.confidence, source_page: r.sourcePage })) };
 }

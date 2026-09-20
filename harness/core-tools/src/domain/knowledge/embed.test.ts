@@ -86,7 +86,7 @@ describe('embedTexts', () => {
     }));
     const overBudget = (await embedTexts(deps, ['one']).catch((err: unknown) => err as Error)) as Error;
     expect(overBudget.message).toBe(
-      'model route "embed" is over its daily budget; raise it in clients/<name>/routing.yaml',
+      'model route "embed" is over its daily budget; raise it in the client document\'s routing section',
     );
     expect(overBudget.message).not.toContain('secret prompt echo');
 

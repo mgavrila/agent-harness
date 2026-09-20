@@ -16,11 +16,11 @@ function pluginFailed(specifier: string, err: unknown, stage: 'initialise' | 'co
 }
 
 /**
- * Load and connect the runtime plug-in `HARNESS_RUNTIME` names.
+ * Load and connect the runtime plug-in the client document names.
  *
- * The specifier is a variable, so this is the one place in the host that reaches a runtime at
- * all, and it reaches it the way `loadPacks` and `loadIdentity` reach their own plug-ins: by
- * name, at startup, with no build-time edge. `pnpm arch` forbids a static `runtimes/*` import
+ * The specifier is derived from that name, so this is the one place in the host that reaches a
+ * runtime at all, and it reaches it the way `loadPacks` and `loadIdentity` reach their own
+ * plug-ins: by name, at startup, with no build-time edge. `pnpm arch` forbids a static `runtimes/*` import
  * anywhere else under `src/`. The three failure modes are told apart the same way, so an
  * operator who has debugged one has debugged all three: an unresolvable specifier is replaced,
  * because the resolver's own message carries absolute paths and a node_modules layout that does

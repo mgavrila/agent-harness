@@ -1,5 +1,5 @@
 import { stringify as stringifyYaml } from 'yaml';
-import { ROUTES, type RoutingFile } from './types.js';
+import { ROUTES, type RoutingFile } from '@harness/config-api';
 
 /**
  * Which environment variable holds the credential for a provider prefix. The
@@ -48,7 +48,7 @@ function deployment(name: string, model: string, budget: number, apiBase?: strin
 }
 
 const HEADER = `# GENERATED FILE - do not edit by hand.
-# Rendered from clients/<name>/routing.yaml by harness/gateway/src/app/render-config.ts.
+# Rendered from a client document's routing section by harness/gateway/src/app/render-config.ts.
 # Regenerate with: pnpm gateway:config
 `;
 

@@ -39,6 +39,13 @@ harness/shared      generic helpers: env, errors, paths, log, subprocess, jsonl,
                     No domain knowledge, no workspace dependency. Bottom of the graph.
 harness/pack-api    the Pack contract and definePack(). Depends on @harness/shared and zod
                     only, so a pack never has to depend on core-tools.
+harness/config-api  the ClientDocument contract: the schema, blueprint + overlay + lock set,
+                    resolve(), and the ConfigSource interface a source implements. Depends on
+                    @harness/shared, @harness/identity-api and @harness/pack-api only.
+harness/config-files a ConfigSource that reads HARNESS_CLIENTS_DIR/<id>/client.yaml, with
+                    !include for the persona and the skills.
+harness/config-postgres a ConfigSource over versioned rows: client_documents (one live row per
+                    client) and client_document_versions (the history).
 harness/db          schema, migrations, the pool, the encryption primitives.
 harness/gateway     the routing schema and the LiteLLM config renderer.
 harness/surface-api the Surface contract and defineSurface(): cards, forms, conversations, and
@@ -56,46 +63,83 @@ harness/runtime-api the Runtime contract and defineRuntime(): RunRequest, RunEve
 harness/core-tools  the MCP server: the pack-agnostic kernel, every domain, every kernel tool.
 harness/approvals   a library the host composes: cards, decisions, the poller, the sinks, the
                     runner, health, the in-process core-tools client. Loads its messaging
-                    adapters from HARNESS_SURFACES.
-harness/host        the one process per client: loads the runtime, the surfaces and the
-                    identity plug-in by name, runs one conversation turn per message, and
-                    resumes a thread when an approval is decided.
+                    adapters by name, from the surfaces the caller's client document declares.
+harness/host        a pool of tenants: loads each client's runtime, surfaces and identity
+                    plug-in by name from its document, runs one conversation turn per message,
+                    and resumes a thread when an approval is decided.
 surfaces/slack      the Slack adapter: Block Kit, Bolt in Socket Mode, the Web API slice.
 surfaces/memory     the in-process adapter: no transport, used by the suite and for local runs.
 surfaces/http       the surface a headless caller speaks as; opens no socket, posts nothing, and
                     exists so a run driven over the run API has a thread key and an identity
                     namespace.
-identities/static   the identity plug-in that reads clients/<name>/identity.yaml.
+identities/static   the identity plug-in that answers for the principals a client document's
+                    identity section declares, plus its surface defaults.
+identities/slack-groups the identity plug-in that resolves a level from a Slack workspace's own
+                    user groups, through a SurfaceDirectory rather than a list of people.
 runtimes/deepagents the Deep Agents JS runtime, behind the runtime contract: the only place
                     deepagents, langchain and langgraph may be spelled.
+runtimes/scripted   a runtime plug-in that replays a script instead of asking a model; what a
+                    host test drives so the suite proves the real loader against a real plug-in.
 evals               the eval runner, scorers, judge and report.
 packs/healthcare    a pack: the provider record kind, credential attachment kinds, form
                     templates, skills, the synthetic corpus, and eighteen tools
 packs/stories       the proof pack: one record kind, one document kind, one skill, no tools
-scripts             the client scaffolder.
+scripts             the client scaffolder: pnpm new-client writes a document.
 ```
 
 The dependency graph in one line per layer, with every arrow pointing at something lower:
 
 ```
 shared  <-  pack-api  <-  { core-tools, packs/* }
+shared  <-  identity-api  <-  { config-api, core-tools, host, identities/* }
+{ shared, identity-api, pack-api }  <-  config-api  <-  { config-files, config-postgres, core-tools,
+                                                          gateway, host, scripts }
 shared  <-  surface-api  <-  { approvals, host, surfaces/* }
-shared  <-  identity-api  <-  { core-tools, host, identities/* }
 shared  <-  runtime-api  <-  { host, runtimes/* }
 shared  <-  files
-shared  <-  db        <-  core-tools  <-  { approvals, host, evals }
-gateway   <-  core-tools      (gateway is the one package with no edge to shared: it needs none)
-{ core-tools, approvals, runtime-api, identity-api, surface-api }  <-  host
+shared  <-  db  <-  { config-postgres, core-tools, gateway }
+{ config-api, config-files, config-postgres, db }  <-  core-tools  <-  { approvals, host, evals, gateway }
+{ core-tools, approvals, runtime-api, identity-api, surface-api, config-api }  <-  host
 core-tools  ..>  packs/*        (runtime only: dynamic import, never a static one)
-evals       ..>  packs/*        (runtime only: HARNESS_PACKS, --pack; no static import)
-approvals   ..>  surfaces/*     (runtime only: HARNESS_SURFACES, never a static import)
-core-tools  ..>  identities/*   (runtime only: HARNESS_IDENTITY, never a static import)
-host        ..>  { surfaces/*, identities/*, runtimes/* }   (runtime only: HARNESS_SURFACES,
-                                                              HARNESS_IDENTITY, HARNESS_RUNTIME;
-                                                              never a static import)
+core-tools  ..>  identities/*   (runtime only: dynamic import from the document's identityPlugin.kind)
+evals       ..>  packs/*        (runtime only: --packs, --pack; no static import)
+approvals   ..>  surfaces/*     (runtime only: dynamic import from the document's surfaces, never a
+                                 static import)
+host        ..>  { surfaces/*, identities/*, runtimes/* }   (runtime only: dynamic import from the
+                                                              document's surfaces, identityPlugin
+                                                              and runtime; never a static import)
 ```
 
+`@harness/config-api` is the contract a `ConfigSource` implements and the one every reader of a
+client document imports; it is what keeps `core-tools`, `gateway`, `host` and `scripts` agreeing
+on what a document is without importing each other. `@harness/gateway` is no longer the one
+package with no edge to `@harness/shared`: `pnpm gateway:config` now opens the client's own
+`ConfigSource` through `@harness/core-tools`, which is where that edge, and the one to
+`@harness/db`, come from.
+
 `scripts` is a leaf. There are no cycles.
+
+## The client document
+
+A client is one document, validated against one schema (`@harness/config-api`), and it is not in
+this repository. It carries the persona, the principals and the level each surface gives everyone
+else, the policy and the tools the client withholds, the model routing, the playbooks, the skills,
+where the knowledge comes from, which surfaces the client serves, which identity plug-in and
+runtime it loads, and which packs. Onboarding a client writes a document; it changes nothing here.
+
+A document reaches a host through a **`ConfigSource`**. Two ship: `files`, which reads
+`HARNESS_CLIENTS_DIR/<id>/client.yaml` — with `!include` for the persona and the skills, so the
+prose a person edits is prose in a file — and `postgres`, which reads versioned rows the platform
+writes. `HARNESS_CONFIG_SOURCE` picks one and has no default, because a host that guessed would
+start and serve nobody.
+
+A **blueprint** is a complete document with placeholders and a **lock set** of JSON pointers; an
+**overlay** is a tenant's edits as a small JSON Patch. `resolve(blueprint, overlay)` applies the
+patch and refuses any operation that touches a locked pointer, naming both. A finished agent and a
+customisable one are the same object with different locks, and a subscription tier is a lock set.
+
+`clients/fixture/` is the one client in this repository. It exists so the suite has a document to
+read, and the scaffolder has one to copy.
 
 ## The kernel and a pack
 
@@ -111,14 +155,13 @@ excluded, because a test names what it tests, and so is `shared/redaction/`, who
 `RESTRICTED_NAME_KEYS` is a list of identifier stems the kernel keeps on purpose. **Its
 allowlist is empty.** A word that has to appear belongs in a pack.
 
-At startup `app/server.ts` reads `HARNESS_PACKS` — comma-separated package names, default
-`@harness/pack-healthcare`, and the empty string for a client with no pack at all — and
-`loadPacks` (`domain/packs/registry.ts`) imports each one dynamically into a `PackRegistry` on
-`ToolDeps`. No shipping module under `harness/core-tools/src/` names a pack: `pnpm arch` fails
-the build on a static `@harness/pack-*` import, with `src/testing.ts` and `*.test.ts` exempt
-because they need a registry synchronously. `evals/src` is held to the same rule, exempting
-`*.test.ts` and `*.test-helpers.ts`, and the runner reaches a pack only through `HARNESS_PACKS`
-and `--pack`.
+`buildKernelConfig(document, env)` reads the client document's own `packs` — package names, and an
+empty list for a client with no pack at all — and `loadPacks` (`domain/packs/registry.ts`) imports
+each one dynamically into a `PackRegistry` on `ToolDeps`. No shipping module under
+`harness/core-tools/src/` names a pack: `pnpm arch` fails the build on a static `@harness/pack-*`
+import, with `src/testing.ts` and `*.test.ts` exempt because they need a registry synchronously.
+`evals/src` is held to the same rule, exempting `*.test.ts` and `*.test-helpers.ts`, and the
+runner reaches a pack only through `--packs` and `--pack`.
 
 Those exemptions are the only reason the module graph shows an arrow from core-tools, or from
 evals, to a pack at all — the graph collapses each package's layers to one node, tests included.
@@ -190,7 +233,7 @@ one; then, **for a document with no kind at all**, the primary pack's first targ
 was declared and claimed by nobody is a `ToolError` from `documents_extract` naming the kind,
 not a document quietly written as the wrong record kind.
 
-The **primary pack** is the first entry of `HARNESS_PACKS`. It answers `manifest()`,
+The **primary pack** is the first entry of the client document's `packs` list. It answers `manifest()`,
 `formsDir()` and that unclassified-document target; a client with no pack has no primary pack,
 and each of those three then names what is missing rather than reading off an empty list.
 Nothing else depends on load order: `registryOf` refuses two loaded packs that claim the same
@@ -241,9 +284,9 @@ A pack reads configuration from `deps.env`, never from `process.env`; the ESLint
 it. Whoever builds the dependency bag decides what a pack sees, which is why an eval run on a
 developer's filled-in `.env` cannot switch an outbound lookup on.
 
-`Pack.policy` is part of the contract but `loadPolicy` (`domain/tooling/policy.ts`) does not
-read it yet: `deps.policy` is `DEFAULT_POLICY` merged with the client's `HARNESS_POLICY_FILE`
-only. A pack's policy is carried, not merged, unchanged from Plan 4's ruling.
+`Pack.policy` is part of the contract but `mergePolicy` (`domain/tooling/policy.ts`) does not
+read it yet: `deps.policy` is `DEFAULT_POLICY` merged with the client document's own `policy`
+section only. A pack's policy is carried, not merged, unchanged from Plan 4's ruling.
 
 `CONTRIBUTING.md`, "Adding a pack", is the worked how-to, with `packs/stories` as the example.
 
@@ -278,8 +321,10 @@ Which of those becomes a Block Kit `context` block, an Adaptive Card `TextBlock`
 is the adapter's business, and `harness/approvals/src/host-vocabulary.test.ts` fails the build if
 the host learns the difference.
 
-**The primary surface** is the first entry of `HARNESS_SURFACES`. Approval cards are posted there
-and only there: one approval, one card, one place to answer it. Every loaded surface is still
+**The primary surface** is the first surface the schema orders in the client document's `surfaces`
+section (`SURFACE_ORDER`: `slack`, `memory`, `http`, so `http` — which cannot post a card — is
+always last). Approval cards are posted there and only there: one approval, one card, one place
+to answer it. Every loaded surface is still
 live — a decision is accepted from whichever surface posted the card, which `approvals.surface`
 records, and a staged effect may name any loaded surface in its payload.
 
@@ -318,9 +363,10 @@ nothing was sent — and does release the claim.
 ## Identity
 
 A **principal** is who a run acts as: a person, or a service identity for a scheduled job. It
-is resolved by an **identity plug-in** loaded by name from `HARNESS_IDENTITY` — the same shape
-as a pack and a surface, for the same reasons — and bound to the run by whoever opens it: the
-stdio server from `HARNESS_PRINCIPAL` at startup, the host once per turn — `handleMessage`
+is resolved by an **identity plug-in** loaded by name from the client document's own
+`identityPlugin.kind` — the same shape as a pack and a surface, for the same reasons — and bound
+to the run by whoever opens it: the stdio server from `HARNESS_PRINCIPAL` at startup, the host
+once per turn — `handleMessage`
 resolves `{ surface, userId }` before anything else runs, and an unresolved sender gets one
 refusal and one audit row, never a run. A tool reads `deps.principal`. Nothing a model sends can
 set it; there is no tool to, and `harness/core-tools/src/tools/harness.test.ts` asserts that no
@@ -338,7 +384,7 @@ deciding principal's display name, never the bare id.
 from and `levels.<level>.<class>` is where a level differs; `decide(actionClass, level, policy)`
 reads the level's cell first. `DEFAULT_POLICY` in `domain/tooling/policy.ts` is spec 4.4's
 table, with its practitioner row equal to the flat table the kernel shipped before levels
-existed. A client's `policy.yaml` `classes:` entry replaces the kernel's `classes` default for
+existed. A client document's `policy.classes` entry replaces the kernel's `classes` default for
 that class; a kernel or client `levels` cell always wins over `classes` for that level, so
 `classes:` alone never loosens or tightens a level the kernel already gives its own cell —
 `levels.member.destructive: blocked` and `levels.service.write.assign: approval` ship in
@@ -354,17 +400,39 @@ levels:
 of that run carries. `buildKernelConfig()` does the startup-only work once; `depsForRun(config,
 { db, principal, context })` clones it per run. The stdio server opens one run per process.
 
-`identities/static` is the first plug-in: it reads `clients/<name>/identity.yaml`
-(`HARNESS_IDENTITY_FILE` overrides the path) through `parseIdentityFile`, which refuses a
-duplicate id, a user without a `u-` id or a service without `svc-`, a user at level `service`,
-and two principals claiming one surface user id. `CONTRIBUTING.md`, "Adding an identity
-provider", is the worked how-to.
+`identities/static` is the first plug-in: it reads no file and no environment variable. It is
+handed the client document's already-validated `identity` section — `parseIdentityFileWithDefaults`
+applies the rules zod cannot say (a duplicate id, a user without a `u-` id or a service without
+`svc-`, a user at level `service`, two principals claiming one surface user id, and a `defaults`
+entry on the run API surface) — and answers for the declared principals plus, on a surface
+`identity.defaults` names, an undeclared caller at that surface's default level, under an id
+`principalFromDefault` derives from theirs. `CONTRIBUTING.md`, "Adding an identity provider", is
+the worked how-to.
+
+A document may also give a surface a **default level**: everyone that surface admits who is not
+declared acts at that level, under a principal id derived from their surface user id —
+`u-<surface>-<slug>-<8 hex of sha256>` — so the same person is the same principal across restarts
+and across processes, and every audit row, approval and run they leave behind is still theirs
+tomorrow. The digest is what makes the derivation injective: lowercasing and replacing punctuation
+maps many user ids onto one slug, and two people sharing one principal id would share one memory
+and one audit trail. `http` may never have a default: the run API authenticates with one shared
+bearer token, so a default there would let one token holder mint principals at will.
+
+Levels can also come from **groups rather than lists**. `identities/slack-groups` maps a surface's
+own user groups to levels, in order, with named exceptions on top and the document's defaults
+underneath, cached for `sync.everySeconds`. Three hundred people are six lines of configuration: a
+new hire joins a group and exists, a leaver falls to the default or to refusal. It never imports a
+surface — `pnpm arch` forbids the edge — and receives a narrow `SurfaceDirectory` (`groupsOf`,
+`displayNameOf`) through `IdentityDeps` instead, which is why one implementation will serve any
+transport whose workspace has a notion of a group.
 
 ## Knowledge
 
-`knowledge_documents` is one row per markdown file of `clients/<name>/knowledge/`, keyed by its
-path within the source; `knowledge_chunks` is one row per retrievable passage, with a generated
-`tsvector` and a `vector(1024)` embedding from the gateway's `embed` route.
+`knowledge_documents` is one row per markdown file of the directory the client document's
+`knowledge` section names (`{ source: 'dir', path }`, resolved onto `ToolDeps.knowledgeDir`; a
+client whose section is `{ source: 'store' }` has none), keyed by its path within the source;
+`knowledge_chunks` is one row per retrievable passage, with a generated `tsvector` and a
+`vector(1024)` embedding from the gateway's `embed` route.
 
 A chunk carries a **copy** of its document's `min_level`, `min_rank` and `principals`. That
 denormalisation is the design, not an oversight: the access filter has to sit in the same `WHERE`
@@ -390,7 +458,7 @@ test forbids naming a framework in that package and what the splitter does is th
 
 ## The run API
 
-Four routes in `@harness/host`, not a surface: spec 5.8 puts the listener in the host, and the
+Five routes in `@harness/host`, not a surface: spec 5.8 puts the listener in the host, and the
 request body names which surface a run belongs to, so the API drives a run on _any_ loaded surface
 and names none itself. `@harness/surface-http` is what a headless caller names — it supplies a
 `threads.surface` value, a namespace for the identity plug-in to resolve `(surface, userId)` in,
@@ -404,23 +472,41 @@ a watcher handed a run id is told the outcome exactly once, whether the turn ret
 on its way there — and a watcher that throws is logged and dropped, because it is watching, not
 taking part.
 
+## Usage
+
+Every run closes with what it spent, summed from its own `model_calls` rows — the kernel's calls
+and, since Plan 11a, the runtime's own, which used to be counted for the cost cap and dropped. The
+`usage_runs` view groups those totals by client, principal and day, beside run outcomes, durations
+and approval counts, and `GET /v1/usage?from&to` returns it for the tenant the request resolved
+to, bearer-authenticated like the rest of the run API.
+
+It carries **no content**: no message, no tool argument, no document text, no conversation id. The
+view selects no text column at all, and a test asserts its whole column list rather than grepping
+a result. Billing, plans and entitlements live above this line; the kernel never knows a customer
+paid.
+
 ## The host and the runtime
 
-`@harness/host` is the one long-running process per client. It holds no transport and no agent
-framework of its own: it loads three plug-ins by name and drives them together, one conversation
-turn at a time.
+`createHost(deps)` returns a **pool** over a `Map<clientId, Tenant>`. A tenant is one client's
+whole world — its `KernelConfig`, its identity session, its surfaces with their own primary, its
+runtime, persona, skills, model, budget, scheduler and approvals runner — built from its resolved
+document and cached by that document's version. Two tenants are two of these, which is what makes
+the isolation invariant a property of the structure rather than of a predicate somebody remembered
+to write.
 
-| Plug-in  | Variable           | Default                                                |
-| -------- | ------------------ | ------------------------------------------------------ |
-| Surfaces | `HARNESS_SURFACES` | none — required, `@harness/approvals`'s `loadSurfaces` |
-| Identity | `HARNESS_IDENTITY` | `@harness/identity-static`                             |
-| Runtime  | `HARNESS_RUNTIME`  | none — required                                        |
+`HARNESS_CLIENT` decides the shape. **Set**, the host is _dedicated_: it opens that client and
+refuses an event for any other, with an audit row naming both. **Unset**, it is _pooled_: the
+client comes from the event — a surface's own tenant hint, matched against the keys each document
+declares, or the `x-harness-client` header on the run API. A `ConfigSource.watch` that reports a
+new version evicts the tenant once its turns have drained; the next event opens a fresh one, so no
+turn ever has its policy changed halfway through.
 
-`HARNESS_RUNTIME` has no code default, the same shape and the same reason as `HARNESS_SURFACES`:
-a default here would be one runtime plug-in's package name written into host source, which is
-exactly the coupling naming a plug-in by variable exists to remove. Compose's `host` service sets
-it for the demo. `pnpm arch` forbids a static edge from `harness/host/src` into `surfaces/*`,
-`identities/*` or `runtimes/*` — all three are `import(specifier)`, never a top-level import.
+Each tenant loads its three plug-ins by name from its own document — its `surfaces` (in the order
+the schema fixes, the first being where an approval card is posted), its `identityPlugin.kind`
+and its `runtime` — through `@harness/host/src/domain/tenancy/specifiers.ts`, which turns a name
+into `@harness/<kind>-<name>` and nothing else. No plug-in package name appears in host source,
+and `pnpm arch` forbids a static edge from `harness/host/src` into `surfaces/*`, `identities/*` or
+`runtimes/*` — all three are `import(specifier)`, never a top-level import.
 
 **One message, end to end.** `attachMessageHandlers` wires `handleMessage` to every loaded
 surface's `onMessage`. For each `MessageEvent`:
@@ -506,8 +592,8 @@ threads, plus playbook threads for `lead` and above, filtered before ranking —
 Every write passes the injection scan in `domain/memory/injection.ts` and the restricted-pattern
 check (invariant 8). The host renders `memorySnapshot` into `RunRequest.memory` once per run.
 
-**Playbooks (Plan 9, spec 5.6).** `clients/<name>/playbooks.yaml` is upserted into `playbooks` at
-host startup (`domain/playbooks/repository.ts`); `startScheduler` ticks every 30 seconds, claims
+**Playbooks (Plan 9, spec 5.6).** The client document's own `playbooks` section is upserted into
+`playbooks` at host startup (`domain/playbooks/repository.ts`); `startScheduler` ticks every 30 seconds, claims
 due and requested rows skip-locked, preflights, runs each on its own `kind: 'playbook'` thread as
 the service principal the file names, retries once on a transport failure, and stages one failure
 notice keyed `playbook:<name>:<scheduled_at>` through the outbox. `playbooks_list` and
@@ -523,11 +609,11 @@ principal of whoever wrote it, never the principal who started the thread.
 An agent calls `documents_extract`. Every module named here is under
 `harness/core-tools/src/`, and the steps run in this order:
 
-1. **Registration.** `app/server.ts` built a `KernelConfig` from the environment at startup,
-   resolved the process's principal, opened a run and cloned the two into one `ToolDeps` with
-   `depsForRun`, loaded the packs named by `HARNESS_PACKS`, and handed every definition from
-   `tools/catalog.ts` to `registerTools` (`domain/tooling/registry.ts`), which wrapped each one
-   in an MCP callback.
+1. **Registration.** `app/server.ts` loaded the client document, built a `KernelConfig` from it
+   and the environment with `buildKernelConfig` (which loads the packs the document's `packs`
+   names), resolved the process's principal, opened a run and cloned the two into one `ToolDeps`
+   with `depsForRun`, and handed every definition from `tools/catalog.ts` to `registerTools`
+   (`domain/tooling/registry.ts`), which wrapped each one in an MCP callback.
 2. **Lineage.** The callback splits `derived_from` off the arguments — it is the registry's
    own argument, audited as lineage and never passed to the handler or hashed by `hashArgs`
    (`domain/tooling/audit.ts`).
@@ -594,12 +680,13 @@ the files worker is the deployment's (`HARNESS_FILES_URL`) and the domain cannot
 URL alone.
 
 Two more arrived with Plan 10, and both are configuration in the same sense `storageDir` is.
-**`clientDir`** is `clients/<HARNESS_CLIENT>/`, derived from the client name rather than
-configured, because spec section 7 fixes that layout; it is where the persona, the policy, the
-identity file, the playbooks and the `knowledge/` folder live. **`embedDims`** is
-`HARNESS_EMBED_DIMS`, and it does not decide anything: `knowledge_chunks.embedding` was created at
-a fixed width by migration 0013 and `assertEmbedDims` refuses to start when the two disagree. It is
-on the bag so `embedTexts` can ask the gateway for that width and refuse a vector of any other.
+**`knowledgeDir`** (Plan 11a renamed it from `clientDir`) is the directory the client document's
+own `knowledge` section names — `null` when that section is `{ source: 'store' }` — because the
+document, not a fixed layout under a client name, is what says where knowledge lives now;
+`syncKnowledge` is its one consumer. **`embedDims`** is `HARNESS_EMBED_DIMS`, and it does not
+decide anything: `knowledge_chunks.embedding` was created at a fixed width by migration 0013 and
+`assertEmbedDims` refuses to start when the two disagree. It is on the bag so `embedTexts` can ask
+the gateway for that width and refuse a vector of any other.
 
 Three members exist for the **packs** rather than for the kernel, and a kernel handler should
 never reach for them:
@@ -676,7 +763,7 @@ not wrong, only indirect.
 | restricted field names        | core-tools `shared/redaction/names.ts`                                                                   | `isRestrictedName`, `MASKED`                                    |
 | redaction                     | core-tools `shared/redaction/text.ts`                                                                    | `redactPages`, `assertRedacted`, `fieldNameFor`                 |
 | who may talk to the assistant | `@harness/host` `domain/conversation.ts`                                                                 | `handleMessage`, `attachMessageHandlers`                        |
-| the loop                      | the runtime plug-in (`HARNESS_RUNTIME`)                                                                  | `RuntimeSession.run`                                            |
+| the loop                      | the runtime plug-in (the client document's `runtime`)                                                    | `RuntimeSession.run`                                            |
 | the conversation record       | `threads`/`messages` (`@harness/db`), read and written by `@harness/host` `domain/threads/repository.ts` | `findOrCreateThread`, `appendMessage`, `recentHistory`          |
 
 The three redaction modules stay in core-tools on purpose: deciding which field names are
@@ -748,7 +835,7 @@ every run:
 A renamed tool, a widened schema, an undocumented variable or a changed service definition
 fails the suite. Regenerate the snapshots with `pnpm surface:record` only when the change is
 intended, and say so in the commit message. A new variable name goes into `.env.example` in
-the same commit, or this test fails on it — that is how `HARNESS_PACKS` arrived. The same file
+the same commit, or this test fails on it — that is how `HARNESS_CONFIG_SOURCE` arrived. The same file
 also reads three things off the recorded Compose config: that the `files` service has exactly
 three environment variables and sits on an `internal: true` network with no published port
 (invariant 6), that no service mounts the Docker socket, and that no client name appears

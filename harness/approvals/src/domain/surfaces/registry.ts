@@ -4,12 +4,12 @@ import type { Surface, SurfaceDeps, SurfaceSession } from '@harness/surface-api'
 const log = createLogger('approvals');
 
 /** Shared between `loadSurfaces` and `surfacesOf`, which refuse an empty list the same way. */
-const NO_SURFACES_MESSAGE = 'HARNESS_SURFACES names no surface; at least one is required';
+const NO_SURFACES_MESSAGE = 'this client declares no surface; at least one is required';
 
 /**
  * The surfaces this host connected to.
  *
- * **The primary surface rule.** The first entry of `HARNESS_SURFACES` is where approval cards are
+ * **The primary surface rule.** The first surface the caller names is where approval cards are
  * posted. One approval, one card, one place to answer it; posting the same approval on several
  * surfaces at once is a feature, not a refactor, and waits for the deployment that needs it.
  * Every other surface is still live: a decision is accepted from whichever surface the row says
@@ -50,7 +50,8 @@ function surfaceFailed(specifier: string, err: unknown, stage: 'initialise' | 'c
 }
 
 /**
- * Load and connect the surfaces `HARNESS_SURFACES` names.
+ * Load and connect the surfaces the caller names — the client document's, in the order its
+ * schema fixes.
  *
  * The specifier is a variable, so this is the one place in the host that reaches an adapter at
  * all, and it reaches it the way a plug-in host does: by name, at startup, with no build-time
@@ -63,10 +64,17 @@ function surfaceFailed(specifier: string, err: unknown, stage: 'initialise' | 'c
  *
  * Connecting happens here too, in order, and through the same funnel, so a surface that cannot be
  * reached is a startup failure naming the adapter rather than an approval nobody sees. Each entry
- * keeps the specifier it was named by: that is the string the operator wrote in
- * `HARNESS_SURFACES`, so it is the string every message here quotes.
+ * keeps the specifier it was named by, so that is the string every message here quotes.
+ *
+ * `tenantKeys` is the client's declared key per surface name — `tenantKeysOf(document)`, which is
+ * where the typed surface sections are read — handed to each adapter as its own `tenantKey`. A
+ * surface whose transport reports the workspace an event came from has no use for it.
  */
-export async function loadSurfaces(names: string[], deps: SurfaceDeps): Promise<LoadedSurfaces> {
+export async function loadSurfaces(
+  names: string[],
+  deps: SurfaceDeps,
+  tenantKeys: Readonly<Record<string, string>> = {},
+): Promise<LoadedSurfaces> {
   if (names.length === 0) throw new ConfigError(NO_SURFACES_MESSAGE);
   const declared: { specifier: string; surface: Surface }[] = [];
   for (const specifier of names) {
@@ -102,7 +110,13 @@ export async function loadSurfaces(names: string[], deps: SurfaceDeps): Promise<
   const sessions: SurfaceSession[] = [];
   for (const { specifier, surface } of declared) {
     try {
-      sessions.push(await surface.connect(deps));
+      sessions.push(
+        await surface.connect(
+          // Own keys only: `in` would hand an adapter that called itself `constructor` whatever
+          // `Object.prototype` has under that name.
+          Object.hasOwn(tenantKeys, surface.name) ? { ...deps, tenantKey: tenantKeys[surface.name] } : deps,
+        ),
+      );
     } catch (err) {
       surfaceFailed(specifier, err, 'connect');
     }

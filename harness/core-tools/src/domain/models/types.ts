@@ -1,4 +1,4 @@
-import { ROUTES, type Route } from '@harness/gateway/routing';
+import { ROUTES, type Route } from '@harness/config-api';
 
 export { ROUTES, type Route };
 

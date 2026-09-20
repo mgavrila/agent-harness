@@ -8,8 +8,9 @@ import type { AnyToolDef, ToolDeps } from '../tooling/types.js';
  * (approved/declined) or has passed its TTL is history: it must not silently
  * satisfy a fresh request. An expired row is retired first, then a new one is
  * parked. Uniqueness is enforced by the partial index
- * `approvals_idempotency_pending_uq`, so concurrent callers race to one insert
- * and the loser re-reads the winner's row.
+ * `approvals_client_idempotency_pending_uq`, which is per client, so concurrent
+ * callers race to one insert and the loser re-reads the winner's row — and two
+ * tenants that mint the same key are two requests rather than one.
  */
 export async function createOrReuseApproval(
   db: Db,
@@ -52,7 +53,7 @@ export async function createOrReuseApproval(
       idempotencyKey,
       threadId: deps.context.threadId,
     })
-    .onConflictDoNothing({ target: approvals.idempotencyKey, where: sql`status = 'pending'` });
+    .onConflictDoNothing({ target: [approvals.client, approvals.idempotencyKey], where: sql`status = 'pending'` });
   const row = await db.query.approvals.findFirst({ where: pendingRow });
   if (!row) throw new Error('approval row missing after insert');
   return row;

@@ -35,7 +35,7 @@ export interface RunOptions {
   /** Threshold the pipeline applies and the scorers assert on. Defaults to the shipped one. */
   confidenceThreshold?: number;
   /**
-   * Packs to load, as `HARNESS_PACKS` would name them, first one first. Which of them is
+   * Packs to load, as `--packs` would name them, first one first. Which of them is
    * measured is `packName`, not the order: `--pack` picks it, and everything the run reads —
    * the corpus, the cases, the judged fields, the tools `runCase` drives — follows that one.
    */

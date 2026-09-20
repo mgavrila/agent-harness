@@ -36,10 +36,10 @@ imports it from where it always did.
 
 The product is a foundation onto which project-specific areas are plugged: healthcare
 credentialing today, document scanning that produces stories and epics tomorrow. If core
-imported a pack by name it could serve exactly one. So the direction is reversed: core reads
-`HARNESS_PACKS`, imports each name dynamically, and reaches everything through `PackRegistry`.
-`pnpm arch` fails the build on a static `@harness/pack-*` import from core-tools source, and on
-an import of core-tools or `@harness/db` from a pack.
+imported a pack by name it could serve exactly one. So the direction is reversed: core reads the
+client document's own `packs` list, imports each name dynamically, and reaches everything through
+`PackRegistry`. `pnpm arch` fails the build on a static `@harness/pack-*` import from core-tools
+source, and on an import of core-tools or `@harness/db` from a pack.
 
 `PackToolDeps` is a structural view of core-tools' `ToolDeps`: every member of the view is a
 member of the whole, so core hands a pack its real dependency bag with no cast at the call site,
@@ -52,5 +52,5 @@ because a pack cannot import those either.
 
 See CONTRIBUTING.md, "Adding a pack", which works through `packs/stories` line by line. The
 short version: create `packs/<name>/` exporting `pack` from `src/index.ts`, add it to
-`@harness/core-tools`'s `dependencies` so pnpm can resolve the dynamic import, and name it in
-`HARNESS_PACKS`.
+`@harness/core-tools`'s `dependencies` so pnpm can resolve the dynamic import, and name it in a
+client document's `packs` list.

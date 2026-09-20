@@ -3,6 +3,16 @@ import type { AddressInfo } from 'node:net';
 import { createLogger } from '@harness/shared';
 import type { HealthSnapshot } from './runner.js';
 
+/**
+ * What the route answers with: one client's snapshot, or one per tenant.
+ *
+ * A dedicated process has exactly one client and answers what it always answered, which is what
+ * a container health check and the runbook both read. A pooled process has no single client to
+ * report, so it answers a snapshot per tenant under `tenants` and an `ok` that is false when any
+ * of them is. The server itself reads `ok` and nothing else, so both shapes are one route.
+ */
+export type HealthPayload = HealthSnapshot | { ok: boolean; tenants: Record<string, HealthSnapshot> };
+
 const log = createLogger('approvals');
 
 /** Bind every interface by default: see the `bind` note on `startHealthServer`. */
@@ -31,7 +41,7 @@ export interface HealthServer {
 export function startHealthServer(opts: {
   port: number;
   bind?: string;
-  snapshot: () => Promise<HealthSnapshot>;
+  snapshot: () => Promise<HealthPayload>;
 }): HealthServer {
   const server: Server = createServer((req, res) => {
     if (req.url !== '/healthz') {

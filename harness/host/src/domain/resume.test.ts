@@ -8,8 +8,7 @@ import {
   registerApprovalHandlers,
 } from '@harness/approvals';
 import { approvals, messages, runs } from '@harness/db';
-import { COORDINATOR, HOST_PRINCIPAL, hostFixture, useTestDb } from '../testing.js';
-import { attachMessageHandlers } from './conversation.js';
+import { COORDINATOR, HOST_PRINCIPAL, attachTestHandlers, hostFixture, useTestDb } from '../testing.js';
 import { decisionDeps, resumeText } from './resume.js';
 
 const db = useTestDb();
@@ -30,7 +29,7 @@ async function parked() {
       HOST_PRINCIPAL,
     ],
   });
-  attachMessageHandlers(f.host);
+  attachTestHandlers(f.host);
   const core = createInProcessCoreToolsClient({
     db,
     config: f.host.config,

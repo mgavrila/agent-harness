@@ -1,10 +1,13 @@
-import { eq } from 'drizzle-orm';
-import { runs, type Db } from '@harness/db';
+import { and, eq, sql } from 'drizzle-orm';
+import { modelCalls, runs, type Db } from '@harness/db';
 import type { Principal } from '@harness/identity-api';
+import { createLogger } from '@harness/shared';
 import type { RunContext, ToolDeps } from '../tooling/types.js';
 import { reconcile, type ReconcileResult } from '../tooling/reconcile.js';
 import { stageEffect } from '../effects/outbox.js';
 import { assertNoRestrictedPattern } from '../../shared/redaction/patterns.js';
+
+const log = createLogger('session');
 
 interface NotifyArgs {
   text: string;
@@ -48,20 +51,101 @@ export async function openRun(db: Db, input: OpenRunInput): Promise<RunContext &
 
 export type RunStatus = 'running' | 'done' | 'error' | 'cancelled';
 
-/** Close a run: the status it ended in and when. The one writer of `runs.status` after `openRun`. */
+/** What a run spent, written onto its row when it closes. Zero for a run that called no model. */
+export interface RunTotals {
+  inputTokens: number;
+  outputTokens: number;
+  costUsd: number;
+}
+
+const NOTHING_SPENT: RunTotals = { inputTokens: 0, outputTokens: 0, costUsd: 0 };
+
+/**
+ * What one run spent, summed from its own `model_calls` rows.
+ *
+ * Summed from the rows rather than counted in memory, so a turn that crashed after writing a
+ * call still reports it and the run row and the call rows can never disagree. `usage_runs` reads
+ * `runs` alone for its tokens, so this is the one place a run's totals are computed — the host
+ * uses it when a turn ends and the approvals executor when an approved call does. Scoped to the
+ * client like every other query of a pooled host (spec invariant 13).
+ */
+export async function sumRunTotals(db: Db, client: string, runId: string): Promise<RunTotals> {
+  const [totals] = await db
+    .select({
+      inputTokens: sql<number>`coalesce(sum(${modelCalls.inputTokens}), 0)::int`,
+      outputTokens: sql<number>`coalesce(sum(${modelCalls.outputTokens}), 0)::int`,
+      costUsd: sql<number>`coalesce(sum(${modelCalls.costUsd}), 0)::real`,
+    })
+    .from(modelCalls)
+    .where(and(eq(modelCalls.runId, runId), eq(modelCalls.client, client)));
+  return totals;
+}
+
+/**
+ * Close a run: the status it ended in, when, and what it spent. The one writer of `runs.status`
+ * after `openRun`.
+ *
+ * Scoped to the client, even though a run id is a uuid and cannot collide, because a pooled host
+ * closes runs for several tenants from one process and a predicate that is only *probably* enough
+ * is not a predicate (spec invariant 13). A run id from another tenant matches nothing and the
+ * call is a no-op, which is what a caller that has been handed the wrong id should get.
+ *
+ * `totals` defaults to zero rather than to leaving the columns alone: a run closed without them
+ * is a run whose caller knows of no spend, and the usage export reads `runs` for its tokens, so
+ * "unset" and "nothing" have to be the same row.
+ */
 export async function closeRun(
   db: Db,
+  client: string,
   runId: string,
   status: RunStatus,
   now: () => Date = () => new Date(),
+  totals: RunTotals = NOTHING_SPENT,
 ): Promise<void> {
-  await db.update(runs).set({ status, endedAt: now() }).where(eq(runs.id, runId));
+  await db
+    .update(runs)
+    .set({ status, endedAt: now(), ...totals })
+    .where(and(eq(runs.id, runId), eq(runs.client, client)));
+}
+
+/**
+ * Close what the run held open, then close the run with what it spent — in that order, but never
+ * let the first step's failure skip the second.
+ *
+ * `close` tears down whatever served the run: for the host's turn and the approvals executor's
+ * call alike, that is an in-process core-tools transport. A `close()` that itself rejects (the
+ * client or its handler failing to tear down cleanly) is logged and swallowed rather than thrown,
+ * because the run ending with the call's real status matters more than a clean transport
+ * shutdown, and a throw here would escape the `finally` it runs in and skip `closeRun` entirely.
+ *
+ * The totals are read after `close`, so a tool call still in flight when the run ends has written
+ * its row by the time they are summed. The usage export reads `runs` alone for its tokens, which
+ * is why they are summed from the run's own `model_calls` rows rather than counted in memory by
+ * the caller.
+ *
+ * It lives here, beside `closeRun` and `sumRunTotals`, because both callers had the same ten
+ * lines and a run that ends two ways is a run whose totals can be right one way and wrong the
+ * other.
+ */
+export async function finishRun(
+  db: Db,
+  client: string,
+  runId: string,
+  status: RunStatus,
+  now: () => Date,
+  close: () => Promise<void>,
+): Promise<void> {
+  try {
+    await close();
+  } catch (err) {
+    log.error(`could not close the in-process core-tools client for run ${runId}`, err);
+  }
+  await closeRun(db, client, runId, status, now, await sumRunTotals(db, client, runId));
 }
 
 /**
  * `harness_reconcile`, scoped to the calling client: an agent repairs only its
- * own tenant's rows. Process startup runs `reconcile` unscoped instead, as an
- * operator-level task.
+ * own tenant's rows.
  */
 export async function reconcileForClient(deps: ToolDeps, staleAfterMinutes: number): Promise<ReconcileResult> {
   return reconcile(deps.db, { now: deps.now, staleAfterMs: staleAfterMinutes * 60_000, client: deps.client });

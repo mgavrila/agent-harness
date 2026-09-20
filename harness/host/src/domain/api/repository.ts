@@ -62,7 +62,10 @@ export async function readThreadFor(
   const newestFirst = await db
     .select({ role: messages.role, content: messages.content, createdAt: messages.createdAt })
     .from(messages)
-    .where(eq(messages.threadId, thread.id))
+    // Belt and braces (spec invariant 13): the thread above is already this client's, and a
+    // message row that says otherwise is a writer's bug this read makes visible rather than one
+    // it hands to the caller.
+    .where(and(eq(messages.client, input.client), eq(messages.threadId, thread.id)))
     .orderBy(desc(messages.createdAt), desc(messages.seq))
     .limit(API_THREAD_MESSAGES);
   const rows = newestFirst.reverse();

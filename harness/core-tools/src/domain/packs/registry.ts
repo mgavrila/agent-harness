@@ -8,7 +8,7 @@ const log = createLogger('packs');
 /**
  * What the three primary-pack answers say when no pack is loaded at all.
  *
- * `HARNESS_PACKS=''` is a client with no pack — an internal team that wants the kernel's own
+ * An empty `packs` list is a client with no pack — an internal team that wants the kernel's own
  * tools and nothing else — so the empty list is a configuration and not a mistake. Everything a
  * pack declares is then simply empty; only `manifest()`, `formsDir()` and an unclassified
  * document's target need a pack there to answer at all, and each of them says so by name rather
@@ -43,7 +43,7 @@ export function registryOf(all: Pack[]): PackRegistry {
 
   // No two loaded packs may claim the same document kind, and `'*'` is a kind for this purpose.
   //
-  // Without this, `targetFor` would be decided by HARNESS_PACKS order: two packs declaring a
+  // Without this, `targetFor` would be decided by load order: two packs declaring a
   // catch-all both claim every document, and the second one silently never receives a
   // document at all — its extractions would be built against the first pack's record kind and
   // would fail deep in the pipeline with a missing-name error that names the wrong domain.
@@ -131,14 +131,14 @@ export function registryOf(all: Pack[]): PackRegistry {
       }
       // An unclassified document is not the same failure as an unclaimed kind. Nobody has said
       // what this document is, so the answer is the primary pack's first target — the first entry
-      // of `HARNESS_PACKS`, the same pack `manifest()` and `formsDir()` answer for. That one rule
+      // of the list, the same pack `manifest()` and `formsDir()` answer for. That one rule
       // is written out on `PackRegistry` in `./types.ts`, and it is what every pack used to get
       // for free from a `'*'` target before packs began claiming their kinds by name.
       if (documentKind === undefined && all.length > 0) return resolve(all[0], all[0].extraction.targets[0]);
       // With no pack loaded there is no target for any document, classified or not: extraction is
       // a pack's business and this client has none.
       if (all.length === 0) {
-        throw new ToolError(`${NO_PACKS}; extracting a document needs one, so set HARNESS_PACKS`);
+        throw new ToolError(`${NO_PACKS}; extracting a document needs one, so name one in this client's packs`);
       }
       // A kind that was declared and claimed by nobody is a real error, named: the pack that
       // declares the kind and the pack that extracts it have come apart, and silently routing the
@@ -154,7 +154,7 @@ export function registryOf(all: Pack[]): PackRegistry {
     },
     manifest: () => {
       if (all.length === 0) {
-        throw new ToolError(`${NO_PACKS}; classifying a document needs one, so set HARNESS_PACKS`);
+        throw new ToolError(`${NO_PACKS}; classifying a document needs one, so name one in this client's packs`);
       }
       return all[0].extraction;
     },
@@ -173,7 +173,7 @@ export function registryOf(all: Pack[]): PackRegistry {
 }
 
 /**
- * Load the packs `HARNESS_PACKS` names, or none when it names none.
+ * Load the packs the client document names, or none when it names none.
  *
  * The specifier is a variable, so this is the one place in core-tools that reaches a pack at
  * all, and it reaches it the way a plug-in host does: by name, at startup, with no build-time

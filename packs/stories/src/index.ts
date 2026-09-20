@@ -12,7 +12,7 @@ const { root, version, records, attachments, extraction } = loadPackSchema(impor
  * Everything its skill does, it does through `documents_*` and `records_*`.
  *
  * `policy` is empty: it introduces no action class of its own, so `DEFAULT_POLICY` and the
- * client's `policy.yaml` decide, exactly as they do for every other pack.
+ * client's own policy section decide, exactly as they do for every other pack.
  */
 export const pack = definePack({
   name: 'stories',

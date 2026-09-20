@@ -33,6 +33,9 @@ const path = require('node:path');
 const PACKAGES = [
   { name: 'shared', src: 'harness/shared/src', severity: 'error' },
   { name: 'pack-api', src: 'harness/pack-api/src', severity: 'error' },
+  { name: 'config-api', src: 'harness/config-api/src', severity: 'error' },
+  { name: 'config-files', src: 'harness/config-files/src', severity: 'error' },
+  { name: 'config-postgres', src: 'harness/config-postgres/src', severity: 'error' },
   { name: 'surface-api', src: 'harness/surface-api/src', severity: 'error' },
   { name: 'identity-api', src: 'harness/identity-api/src', severity: 'error' },
   { name: 'runtime-api', src: 'harness/runtime-api/src', severity: 'error' },
@@ -49,7 +52,9 @@ const PACKAGES = [
   { name: 'surface-memory', src: 'surfaces/memory/src', severity: 'error' },
   { name: 'surface-http', src: 'surfaces/http/src', severity: 'error' },
   { name: 'identity-static', src: 'identities/static/src', severity: 'error' },
+  { name: 'identity-slack-groups', src: 'identities/slack-groups/src', severity: 'error' },
   { name: 'runtime-deepagents', src: 'runtimes/deepagents/src', severity: 'error' },
+  { name: 'runtime-scripted', src: 'runtimes/scripted/src', severity: 'error' },
   { name: 'scripts', src: 'scripts/src', severity: 'error' },
 ];
 
@@ -102,6 +107,9 @@ function layerRules({ name, src, severity }) {
 const WORKSPACE_DIRS = [
   'harness/shared',
   'harness/pack-api',
+  'harness/config-api',
+  'harness/config-files',
+  'harness/config-postgres',
   'harness/surface-api',
   'harness/identity-api',
   'harness/runtime-api',
@@ -118,7 +126,9 @@ const WORKSPACE_DIRS = [
   'surfaces/memory',
   'surfaces/http',
   'identities/static',
+  'identities/slack-groups',
   'runtimes/deepagents',
+  'runtimes/scripted',
   'scripts',
 ];
 
@@ -169,7 +179,7 @@ const GLOBAL_RULES = [
   {
     name: 'core-tools-never-statically-imports-a-pack',
     comment:
-      'Packs are loaded at runtime from HARNESS_PACKS through a dynamic import in domain/packs/registry.ts. A static import would wire core to one pack by name, which is the coupling the contract exists to remove. src/testing.ts and *.test.ts build a registry from the healthcare pack directly and are exempt: they are not shipped and they need a registry synchronously.',
+      'Packs are loaded at runtime from the `packs` list in a client document, through a dynamic import in domain/packs/registry.ts. A static import would wire core to one pack by name, which is the coupling the contract exists to remove. src/testing.ts and *.test.ts build a registry from the healthcare pack directly and are exempt: they are not shipped and they need a registry synchronously.',
     severity: 'error',
     from: {
       path: '^harness/core-tools/src/',
@@ -180,7 +190,7 @@ const GLOBAL_RULES = [
   {
     name: 'core-tools-never-statically-imports-an-identity-plugin',
     comment:
-      'Identity plug-ins are loaded at runtime from HARNESS_IDENTITY through a dynamic import in domain/identity/registry.ts. A static import would wire the kernel to one way of knowing who is asking, which is the coupling the identity contract exists to remove. src/testing.ts and *.test.ts are exempt for the same reason they are for packs.',
+      'Identity plug-ins are loaded at runtime from the `identityPlugin.kind` a client document names, through a dynamic import in domain/identity/registry.ts. A static import would wire the kernel to one way of knowing who is asking, which is the coupling the identity contract exists to remove. src/testing.ts and *.test.ts are exempt for the same reason they are for packs.',
     severity: 'error',
     from: {
       path: '^harness/core-tools/src/',
@@ -191,7 +201,7 @@ const GLOBAL_RULES = [
   {
     name: 'evals-never-statically-imports-a-pack',
     comment:
-      'The eval runner measures whichever pack HARNESS_PACKS names, loaded at runtime through loadPacks. A static import would wire it to one pack by name and put an opinion about what it measures back into the runner, which is the coupling this task removed. *.test.ts and *.test-helpers.ts are exempt: a test names a pack as a fixture because there is no other way to run against a real corpus, and neither is shipped.',
+      'The eval runner measures whichever pack --packs names, loaded at runtime through loadPacks. A static import would wire it to one pack by name and put an opinion about what it measures back into the runner, which is the coupling this task removed. *.test.ts and *.test-helpers.ts are exempt: a test names a pack as a fixture because there is no other way to run against a real corpus, and neither is shipped.',
     severity: 'error',
     from: {
       path: '^evals/src/',
@@ -202,7 +212,7 @@ const GLOBAL_RULES = [
   {
     name: 'the-host-never-statically-imports-a-surface',
     comment:
-      'Adapters are loaded at runtime from HARNESS_SURFACES through a dynamic import in domain/surfaces/registry.ts. A static import would wire the approvals host to one messaging transport by name, which is the coupling the surface contract exists to remove. *.test.ts is exempt: a test drives a real adapter on a fake transport because that is the only way to prove the host against the thing that ships, and it is not shipped itself.',
+      'Adapters are loaded at runtime from the surfaces a client document declares, through a dynamic import in domain/surfaces/registry.ts. A static import would wire the approvals host to one messaging transport by name, which is the coupling the surface contract exists to remove. *.test.ts is exempt: a test drives a real adapter on a fake transport because that is the only way to prove the host against the thing that ships, and it is not shipped itself.',
     severity: 'error',
     from: {
       path: '^harness/approvals/src/',
@@ -213,7 +223,7 @@ const GLOBAL_RULES = [
   {
     name: 'the-host-never-statically-imports-a-plugin',
     comment:
-      'The host loads its surfaces from HARNESS_SURFACES, its identity plug-in from HARNESS_IDENTITY and its runtime from HARNESS_RUNTIME, all through dynamic imports. A static edge from harness/host/src into surfaces/, identities/, runtimes/ or packs/ would wire the one process every client runs to one transport, one directory or one framework by name. src/testing.ts and *.test.ts are exempt: a host test drives the real memory surface and the real runtime loader against the packages that ship, and is not shipped itself.',
+      'The host loads its surfaces, its identity plug-in and its runtime by the names the client document gives them, turning each into a package specifier and reaching it through a dynamic import. A static edge from harness/host/src into surfaces/, identities/, runtimes/ or packs/ would wire the one process every client runs to one transport, one directory or one framework by name. src/testing.ts and *.test.ts are exempt: a host test drives the real memory surface and the real runtime loader against the packages that ship, and is not shipped itself.',
     severity: 'error',
     from: { path: '^harness/host/src/', pathNot: ['\\.test\\.ts$', '^harness/host/src/testing\\.ts$'] },
     to: { path: '^(surfaces|identities|runtimes|packs)/[^/]+/', dependencyTypesNot: ['dynamic-import'] },
@@ -274,6 +284,22 @@ const GLOBAL_RULES = [
     to: {
       path: '^(harness|packs|surfaces|identities|runtimes|evals|scripts)/',
       pathNot: ['^harness/identity-api/src/', '^harness/shared/src/'],
+    },
+  },
+  {
+    name: 'config-api-imports-only-the-contracts-and-shared',
+    comment:
+      '@harness/config-api is the contract that says what a client is. It may import @harness/shared, @harness/identity-api (whose IdentityFileShape is the document’s identity section), @harness/pack-api (whose action classes the policy section is keyed by), zod, croner and node built-ins — and no other workspace package. An edge into core-tools, the host or a source implementation would be a cycle: every one of them imports this. The direction is one-way on purpose, which is also why an identity plug-in receives its section through IdentityDeps rather than importing this package.',
+    severity: 'error',
+    from: { path: '^harness/config-api/src/' },
+    to: {
+      path: '^(harness|packs|surfaces|identities|runtimes|evals|scripts)/',
+      pathNot: [
+        '^harness/config-api/src/',
+        '^harness/shared/src/',
+        '^harness/identity-api/src/',
+        '^harness/pack-api/src/',
+      ],
     },
   },
   {

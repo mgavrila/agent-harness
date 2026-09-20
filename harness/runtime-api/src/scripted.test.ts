@@ -52,6 +52,18 @@ describe('ScriptedRuntime', () => {
     expect(events[2]).toEqual({ type: 'tool_result', name: 'forms_release', status: 'pending' });
   });
 
+  it('reports a usage step as the spend event a model-backed runtime emits', async () => {
+    // What a real runtime reports after a model call, and what the host now persists as a
+    // `model_calls` row: a scripted trajectory can say it so that path has a test.
+    const runtime = new ScriptedRuntime([
+      { usage: { inputTokens: 120, outputTokens: 34, costUsd: 0.002 } },
+      { say: 'Done.' },
+    ]);
+    const events = await collectRunEvents(runtime.run(fixtureRequest({ tools: fixture.client })).events);
+    expect(events[0]).toEqual({ type: 'usage', inputTokens: 120, outputTokens: 34, costUsd: 0.002 });
+    expect(events.at(-1)).toEqual({ type: 'done', text: 'Done.' });
+  });
+
   it('reports a tool the server does not have as an error result and keeps going', async () => {
     const runtime = new ScriptedRuntime([{ tool: 'no_such_tool', args: {} }, { say: 'x' }]);
     const events = await collectRunEvents(runtime.run(fixtureRequest({ tools: fixture.client })).events);

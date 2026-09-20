@@ -27,10 +27,10 @@ describe('storage paths', () => {
   });
 
   it('refuses to guess a storage root', () => {
-    expect(() => storageRoot(undefined)).toThrow(/HARNESS_STORAGE_DIR/);
-    expect(() => storageRoot('   ')).toThrow(/HARNESS_STORAGE_DIR/);
-    expect(() => storageRoot('./.harness-storage')).toThrow(/absolute/);
-    expect(storageRoot('/srv/x')).toBe('/srv/x');
+    expect(() => storageRoot({})).toThrow(/HARNESS_STORAGE_DIR/);
+    expect(() => storageRoot({ HARNESS_STORAGE_DIR: '   ' })).toThrow(/HARNESS_STORAGE_DIR/);
+    expect(() => storageRoot({ HARNESS_STORAGE_DIR: './.harness-storage' })).toThrow(/absolute/);
+    expect(storageRoot({ HARNESS_STORAGE_DIR: '/srv/x' })).toBe('/srv/x');
   });
 
   it('keeps every generated file under out/', async () => {

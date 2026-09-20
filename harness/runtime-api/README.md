@@ -30,7 +30,8 @@ and neither runtime may import the kernel.
 
 What a runtime is handed to produce one answer: `runId`/`threadId`, the `principal` acting,
 `input` (the human's text plus attachments), `history` (prior turns, already trimmed), `persona`
-(SOUL.md), the `skills` it may activate, a curated `memory` snapshot, an MCP `tools` client, the
+(the client document's own `persona` section), the `skills` it may activate, a curated `memory`
+snapshot, an MCP `tools` client, the
 `model` route (with the `user` every model request must carry, for attribution), a `budget`
 (model/tool call caps and a timeout), and the `signal` that ends the run early.
 

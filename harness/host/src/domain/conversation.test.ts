@@ -2,8 +2,8 @@ import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { registryOf } from '@harness/core-tools';
 import type { RunEvent, RuntimeSession } from '@harness/runtime-api';
-import { approvals, auditLog, memoryEntries, messages, runs, threads } from '@harness/db';
-import { COORDINATOR, hostFixture, useTestDb, waitFor, type HostFixture } from '../testing.js';
+import { approvals, auditLog, memoryEntries, messages, modelCalls, runs, threads } from '@harness/db';
+import { COORDINATOR, attachTestHandlers, hostFixture, useTestDb, waitFor, type HostFixture } from '../testing.js';
 import {
   COST_CAP_EXCEEDED,
   EMPTY_REPLY,
@@ -11,7 +11,6 @@ import {
   TIMED_OUT,
   TIMEOUT_MARGIN_MS,
   UNAUTHORISED_TEXT,
-  attachMessageHandlers,
   cancelRun,
   drainActive,
   runTurn,
@@ -30,7 +29,7 @@ describe('a message on a surface', () => {
     const f = await hostFixture(db, {
       trajectory: [{ tool: 'harness_reconcile', args: { stale_after_minutes: 10 } }, { say: 'Nothing was stale.' }],
     });
-    attachMessageHandlers(f.host);
+    attachTestHandlers(f.host);
     await f.surface.say('U012', 'Anything stale?');
 
     expect(f.surface.texts).toEqual([
@@ -77,14 +76,14 @@ describe('a message on a surface', () => {
 
   it('runs a turn for a host whose registry holds no pack, over the kernel’s own tools', async () => {
     // An internal team whose client is a folder with no product area in it. The registry is built
-    // here rather than through `HARNESS_PACKS` — `app/main.test.ts` in core-tools covers the
+    // here rather than through a document — `app/main.test.ts` in core-tools covers the
     // variable — so what this asserts is the turn: it reaches the kernel and comes back the same
     // way every other turn does.
     const f = await hostFixture(db, {
       packs: registryOf([]),
       trajectory: [{ tool: 'memory_list', args: {} }, { say: 'Nothing is remembered yet.' }],
     });
-    attachMessageHandlers(f.host);
+    attachTestHandlers(f.host);
     await f.surface.say('U012', 'What do you remember?');
 
     expect(f.surface.texts).toEqual([
@@ -98,7 +97,7 @@ describe('a message on a surface', () => {
 
   it('refuses a user the identity plug-in does not know, runs nothing, and audits the refusal', async () => {
     const f = await hostFixture(db, { trajectory: [{ say: 'never' }] });
-    attachMessageHandlers(f.host);
+    attachTestHandlers(f.host);
     await f.surface.say('U999', 'hello?');
     // A notice, not a reply: a surface that reads a thread the assistant spoke in as addressed to
     // it must not take this one as the start of a conversation with a sender it just refused.
@@ -114,7 +113,7 @@ describe('a message on a surface', () => {
 
   it('stays silent in a group conversation unless mentioned', async () => {
     const f = await hostFixture(db, { trajectory: [{ say: 'hi' }] });
-    attachMessageHandlers(f.host);
+    attachTestHandlers(f.host);
     await f.surface.say('U012', 'chatter', { mentioned: false, conversation: 'C1' });
     expect(f.runtime.requests).toHaveLength(0);
     await f.surface.say('U012', '@bot hi', { mentioned: true, conversation: 'C1' });
@@ -124,7 +123,7 @@ describe('a message on a surface', () => {
 
   it('streams when the surface can, and posts the withheld marker in place of a reply that trips the redaction check', async () => {
     const f = await hostFixture(db, { trajectory: [{ say: 'Part one.' }, { say: 'Part two.' }], streaming: true });
-    attachMessageHandlers(f.host);
+    attachTestHandlers(f.host);
     await f.surface.say('U012', 'go');
     expect(f.surface.streams).toEqual([
       { conversation: 'memory', text: 'Part one.Part two.', ended: true, replyTo: null },
@@ -132,7 +131,7 @@ describe('a message on a surface', () => {
     expect(f.surface.texts).toHaveLength(1);
 
     const g = await hostFixture(db, { trajectory: [{ say: 'The SSN is 123-45-6789.' }] });
-    attachMessageHandlers(g.host);
+    attachTestHandlers(g.host);
     await g.surface.say('U012', 'tell me');
     expect(g.surface.texts.at(-1)?.text).toBe('(withheld: it did not pass the redaction check)');
     const rows = await db.select().from(messages);
@@ -145,7 +144,7 @@ describe('a message on a surface', () => {
     const warnings: string[] = [];
     const f = await hostFixture(db, { trajectory: [{ tool: 'memory_list', args: {} }, { say: '' }] });
     f.host.log = { info() {}, error() {}, warn: (message) => warnings.push(message) };
-    attachMessageHandlers(f.host);
+    attachTestHandlers(f.host);
     await f.surface.say('U012', 'anything?');
 
     expect(f.surface.texts).toEqual([{ conversation: 'memory', text: EMPTY_REPLY, replyTo: null, kind: 'reply' }]);
@@ -170,7 +169,7 @@ describe('a message on a surface', () => {
       trajectory: [{ tool: 'memory_list', args: {} }, { say: '   ' }],
       streaming: true,
     });
-    attachMessageHandlers(f.host);
+    attachTestHandlers(f.host);
     await f.surface.say('U012', 'anything?');
 
     // Asserted on the stream alone rather than on a pool of streams and posts: pooling the two
@@ -194,7 +193,7 @@ describe('a message on a surface', () => {
       ],
       streaming: true,
     });
-    attachMessageHandlers(f.host);
+    attachTestHandlers(f.host);
     await f.surface.say('U012', 'anything?');
     expect(f.surface.streams).toEqual([]);
     expect(f.surface.texts).toEqual([{ conversation: 'memory', text: EMPTY_REPLY, replyTo: null, kind: 'reply' }]);
@@ -203,14 +202,14 @@ describe('a message on a surface', () => {
   it('leaves a non-empty reply alone, streamed or posted', async () => {
     // The guard above reads the final text only; it must not touch a run that answered.
     const f = await hostFixture(db, { trajectory: [{ say: '  spaced out  ' }] });
-    attachMessageHandlers(f.host);
+    attachTestHandlers(f.host);
     await f.surface.say('U012', 'go');
     expect(f.surface.texts.at(-1)?.text).toBe('  spaced out  ');
   });
 
   it('carries the prior turns of the thread as history, trimmed, and the attachments on the input', async () => {
     const f = await hostFixture(db, { trajectory: [{ say: 'ok' }], budget: { maxHistoryMessages: 2 } });
-    attachMessageHandlers(f.host);
+    attachTestHandlers(f.host);
     await f.surface.say('U012', 'first');
     await f.surface.say('U012', 'second', { attachments: [{ name: 'w9.pdf', path: 'w9.pdf' }] });
     const request = f.runtime.requests[1];
@@ -229,7 +228,7 @@ describe('a message on a surface', () => {
         { say: 'done' },
       ],
     });
-    attachMessageHandlers(f.host);
+    attachTestHandlers(f.host);
     await f.surface.say('U012', 'roster please');
     const [audit] = await db.select().from(auditLog).where(eq(auditLog.tool, 'harness_reconcile'));
     expect(audit).toMatchObject({ skill: 'sample-skill', skillVersion: '1.0.0' });
@@ -243,7 +242,7 @@ describe('a message on a surface', () => {
       ],
       principals: [{ ...COORDINATOR, level: 'member' }],
     });
-    attachMessageHandlers(f.host);
+    attachTestHandlers(f.host);
     await f.surface.say('U012', 'send the roster');
     const [parked] = await db.select().from(approvals);
     const [thread] = await db.select().from(threads);
@@ -253,7 +252,7 @@ describe('a message on a surface', () => {
 
   it('cancels a run in flight: no reply, status cancelled', async () => {
     const f = await hostFixture(db, { trajectory: [{ sleep: 10_000 }, { say: 'never' }] });
-    attachMessageHandlers(f.host);
+    attachTestHandlers(f.host);
     const turn = f.surface.say('U012', 'slow one');
     await waitFor(() => f.host.active.size === 1);
     const [run] = await db.select().from(runs);
@@ -273,7 +272,7 @@ describe('a message on a surface', () => {
       trajectory: [{ sleep: 10_000 }],
       budget: { timeoutMs: 20, timeoutMarginMs: 0 },
     });
-    attachMessageHandlers(f.host);
+    attachTestHandlers(f.host);
     await f.surface.say('U012', 'hang');
     const [run] = await db.select().from(runs);
     expect(run.status).toBe('error');
@@ -284,7 +283,7 @@ describe('a message on a surface', () => {
 
   it('closes the kernel and marks the run error, leaking neither the controller nor the run, when recording the reply fails', async () => {
     const f = await hostFixture(db, { trajectory: [{ say: 'hi' }] });
-    attachMessageHandlers(f.host);
+    attachTestHandlers(f.host);
     const original = threadsRepository.appendMessage;
     const spy = vi.spyOn(threadsRepository, 'appendMessage').mockImplementation(async (dbArg, m) => {
       if (m.role === 'assistant') throw new Error('simulated insert failure');
@@ -307,7 +306,7 @@ describe('a message on a surface', () => {
       streaming: true,
       budget: { timeoutMs: 20, timeoutMarginMs: 0 },
     });
-    attachMessageHandlers(f.host);
+    attachTestHandlers(f.host);
     await f.surface.say('U012', 'go');
     const [run] = await db.select().from(runs);
     expect(run.status).toBe('error');
@@ -324,7 +323,7 @@ describe('two turns on one thread', () => {
     const f = await hostFixture(db, {
       trajectory: (request) => (request.input.text === 'first' ? [{ sleep: 1_000 }, { say: 'one' }] : [{ say: 'two' }]),
     });
-    attachMessageHandlers(f.host);
+    attachTestHandlers(f.host);
     // Two messages a moment apart, the way two Slack messages arrive — but sent in an order the
     // host can be held to. Started together they reach the thread's chain in whichever order their
     // identity and thread lookups finish in, so "second" can be the one that arrives first, which
@@ -352,7 +351,7 @@ describe('two turns on one thread', () => {
 
   it('still runs two conversations at the same time', async () => {
     const f = await hostFixture(db, { trajectory: [{ sleep: 150 }, { say: 'done' }] });
-    attachMessageHandlers(f.host);
+    attachTestHandlers(f.host);
     const turns = [
       f.surface.say('U012', 'in C1', { conversation: 'C1' }),
       f.surface.say('U012', 'in C2', { conversation: 'C2' }),
@@ -367,7 +366,7 @@ describe('two turns on one thread', () => {
 describe('drainActive', () => {
   it('cancels every run in flight and returns only once its row is closed', async () => {
     const f = await hostFixture(db, { trajectory: [{ sleep: 10_000 }, { say: 'never' }] });
-    attachMessageHandlers(f.host);
+    attachTestHandlers(f.host);
     const turn = f.surface.say('U012', 'slow one');
     await waitFor(() => f.host.active.size === 1);
     expect(f.host.active.size).toBe(1);
@@ -387,7 +386,7 @@ describe('drainActive', () => {
     const f = await hostFixture(db, {
       trajectory: (request) => (request.input.text === 'first' ? [{ sleep: 10_000 }] : [{ say: 'two' }]),
     });
-    attachMessageHandlers(f.host);
+    attachTestHandlers(f.host);
     // Wait for the first turn's run to be in flight rather than for a fixed delay, and only then
     // send the second: under full-suite load the run can take well over 50 ms to open, and both
     // messages started together reach the thread's chain in whichever order their identity and
@@ -435,7 +434,7 @@ describe("the host's timeout backstop", () => {
       trajectory: [{ sleep: 120 }, { say: 'in time' }],
       budget: { timeoutMs: 20, timeoutMarginMs: 200 },
     });
-    attachMessageHandlers(f.host);
+    attachTestHandlers(f.host);
     await f.surface.say('U012', 'go');
     const [run] = await db.select().from(runs);
     expect(run.status).toBe('done');
@@ -448,7 +447,7 @@ describe('memory on the run', () => {
     const f = await hostFixture(db, {
       trajectory: [{ tool: 'memory_add', args: { text: 'Prefers bullet points.' } }, { say: 'Noted.' }],
     });
-    attachMessageHandlers(f.host);
+    attachTestHandlers(f.host);
     await db.insert(memoryEntries).values({
       client: 'test',
       scope: 'client',
@@ -468,12 +467,12 @@ describe('memory on the run', () => {
     const first = await hostFixture(db, {
       trajectory: [{ tool: 'memory_add', args: { text: 'Prefers bullet points.' } }, { say: 'Noted.' }],
     });
-    attachMessageHandlers(first.host);
+    attachTestHandlers(first.host);
     await first.surface.say('U012', 'remember that I like bullets');
     await first.close();
     // A second host over the same database is a restart: nothing survives but the tables.
     const second = await hostFixture(db, { trajectory: [{ say: 'hi' }] });
-    attachMessageHandlers(second.host);
+    attachTestHandlers(second.host);
     await second.surface.say('U012', 'hello again');
     expect(second.runtime.requests[0].memory).toContain('Prefers bullet points.');
     await second.surface.say('U345', 'hello from someone else');
@@ -484,7 +483,7 @@ describe('memory on the run', () => {
 describe('the history budget', () => {
   it('is spent on history only, never on the message being run', async () => {
     const f = await hostFixture(db, { trajectory: [{ say: 'ok' }] });
-    attachMessageHandlers(f.host);
+    attachTestHandlers(f.host);
     await f.surface.say('U012', 'first');
     await f.surface.say('U012', 'x'.repeat(HISTORY_MAX_CHARS + 1_000));
     expect(f.runtime.requests[1].history).toEqual([
@@ -855,5 +854,45 @@ describe('a watcher on a turn', () => {
     expect(seen.filter((event) => event.type === 'result')).toEqual([
       { type: 'result', status: 'error', text: '', error: RUNTIME_FAILED },
     ]);
+  });
+});
+
+describe("the runtime's own spend", () => {
+  it('persists every usage event as a model call and closes the run with its totals', async () => {
+    // Until now the runtime's spend was accumulated for the cost cap and dropped, so the only
+    // model calls the database knew about were the kernel's own — which made a usage export a
+    // report on the wrong half of the bill (spec section 4.5).
+    const f = await hostFixture(db, {
+      trajectory: [
+        { usage: { inputTokens: 120, outputTokens: 34, costUsd: 0.002 } },
+        { usage: { inputTokens: 30, outputTokens: 6, costUsd: 0.001 } },
+        { say: 'Done.' },
+      ],
+    });
+    const result = await turnOn(f, 'none');
+    expect(result.status).toBe('done');
+
+    const calls = await db.select().from(modelCalls).where(eq(modelCalls.runId, result.runId));
+    expect(calls).toHaveLength(2);
+    expect(calls.map((call) => [call.inputTokens, call.outputTokens]).sort()).toEqual([
+      [120, 34],
+      [30, 6],
+    ]);
+    expect(calls.every((call) => call.client === 'test' && call.route === 'chat')).toBe(true);
+
+    // The run's totals are summed from those rows, so the row and the calls cannot disagree.
+    const [run] = await db.select().from(runs).where(eq(runs.id, result.runId));
+    expect(run).toMatchObject({ status: 'done', inputTokens: 150, outputTokens: 40 });
+    expect(run.costUsd).toBeCloseTo(0.003, 6);
+    await f.close();
+  });
+
+  it('closes a run that spent nothing with zero totals rather than leaving them unset', async () => {
+    const f = await hostFixture(db, { trajectory: [{ say: 'Nothing to report.' }] });
+    const result = await turnOn(f, 'none');
+    const [run] = await db.select().from(runs).where(eq(runs.id, result.runId));
+    expect(run).toMatchObject({ status: 'done', inputTokens: 0, outputTokens: 0, costUsd: 0 });
+    expect(await db.select().from(modelCalls).where(eq(modelCalls.runId, result.runId))).toEqual([]);
+    await f.close();
   });
 });

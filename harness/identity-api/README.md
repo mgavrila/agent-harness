@@ -5,15 +5,15 @@ principal is behind a surface user id — and the kernel binds the answer to a r
 sees anything. Nothing a model sends can set it.
 
 It depends on `@harness/shared` and zod and on nothing else in the workspace, which is what lets
-the kernel load a plug-in by name at runtime (`HARNESS_IDENTITY`) instead of importing it at build
-time.
+the kernel load a plug-in by name at runtime (a client document's own `identityPlugin.kind`)
+instead of importing it at build time.
 
-| Module              | Holds                                                                                 |
-| ------------------- | ------------------------------------------------------------------------------------- |
-| `src/types.ts`      | every declaration: `Principal`, `IdentitySession`, `IdentityDeps`, `IdentityProvider` |
-| `src/identity.ts`   | `defineIdentityProvider`, `levelAtLeast`                                              |
-| `src/principals.ts` | the zod shape of `clients/<name>/identity.yaml` and `parseIdentityFile`               |
-| `src/testing.ts`    | `StaticIdentity`, reached as `@harness/identity-api/testing`                          |
+| Module              | Holds                                                                                                                                    |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/types.ts`      | every declaration: `Principal`, `IdentitySession`, `IdentityDeps`, `IdentityProvider`                                                    |
+| `src/identity.ts`   | `defineIdentityProvider`, `levelAtLeast`                                                                                                 |
+| `src/principals.ts` | `IdentityFileShape` (a document's `identity` section), `parseIdentityFileWithDefaults`, `principalFromDefault`, `principalFromDerivedId` |
+| `src/testing.ts`    | `StaticIdentity`, reached as `@harness/identity-api/testing`                                                                             |
 
 The five levels — `member`, `practitioner`, `lead`, `admin`, `service` — are declared in
 `@harness/shared` and re-exported here, because `@harness/pack-api`'s policy matrix is keyed by

@@ -1,11 +1,16 @@
+import { mkdtemp } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { loadIdentity, type PlaybookRow } from '@harness/core-tools';
-import { COORDINATOR, PLAYBOOKS_PRINCIPAL, hostFixture, testKernelConfig, useTestDb } from '../../testing.js';
+import { filesConfigSource } from '@harness/config-files';
+import type { PlaybookDefinition } from '@harness/config-api';
+import { parseIdentityFileWithDefaults } from '@harness/identity-api';
+import { COORDINATOR, PLAYBOOKS_PRINCIPAL, hostFixture, useTestDb } from '../../testing.js';
 import { kernelSkillsDir, readSkillCatalogue } from '../skills.js';
+import { materialiseSkills } from '../tenancy/skills.js';
 import { preflightPlaybook } from './preflight.js';
-import { readPlaybooksFile } from './schema.js';
 
 // src/domain/playbooks -> src -> host -> harness -> <repo>. The same resolution main.ts uses.
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../../..');
@@ -34,6 +39,18 @@ const row = (overrides: Partial<PlaybookRow> = {}): PlaybookRow => ({
   updatedAt: new Date('2026-09-15T12:00:00Z'),
   ...overrides,
 });
+
+/** The row the scheduler writes for one of the document's playbook entries. */
+const rowFor = (playbook: PlaybookDefinition): PlaybookRow =>
+  row({
+    name: playbook.name,
+    skill: playbook.skill,
+    principalId: playbook.principal,
+    surface: playbook.surface ?? null,
+    costCapUsd: playbook.cost_cap_usd,
+  });
+
+const log = { info() {}, warn() {}, error() {} };
 
 describe('preflightPlaybook', () => {
   it('passes a playbook whose skill, service principal and surface are all present', async () => {
@@ -94,46 +111,35 @@ describe('preflightPlaybook', () => {
   });
 });
 
-describe('the shipped demo playbooks (I1)', () => {
-  const demoClientDir = path.join(repoRoot, 'clients', 'demo-practice');
+describe('the shipped fixture client (I1)', () => {
+  const clientsDir = path.join(repoRoot, 'clients');
 
-  it('are valid entries, and pass preflight against the shipped skills and identity', async () => {
-    const { playbooks } = await readPlaybooksFile(demoClientDir);
-    expect(playbooks.map((p) => p.name)).toEqual(['credentialing-expirations', 'knowledge-sync']);
-    for (const playbook of playbooks) {
-      expect(playbook).toMatchObject({
-        timezone: 'America/New_York',
-        principal: 'svc-playbooks',
-        deliver: 'none',
-        cost_cap_usd: 0.5,
-        timeout_s: 300,
-      });
+  it('is a valid document whose playbooks pass preflight against the shipped skills and identity', async () => {
+    const loaded = await filesConfigSource({ root: clientsDir, log }).load('fixture');
+    expect(loaded, 'clients/fixture/client.yaml must load').toBeTruthy();
+    const document = loaded!.document;
+    expect(document.playbooks.playbooks.map((p) => p.name)).toEqual(['knowledge-refresh']);
+    for (const playbook of document.playbooks.playbooks) {
+      expect(playbook).toMatchObject({ timezone: 'America/New_York', principal: 'svc-playbooks', deliver: 'none' });
     }
 
     const f = await hostFixture(db, { trajectory: [] });
-    // Identity, loaded the way main.ts loads it: the static plug-in over the demo's own file.
+    // Identity, loaded the way main.ts loads it: the plug-in the document's `identityPlugin`
+    // names, over the document's own `identity` section.
     f.host.identity = await loadIdentity('@harness/identity-static', {
       env: {},
       log: f.host.log,
-      clientDir: demoClientDir,
+      identity: parseIdentityFileWithDefaults(document.identity),
+      settings: {},
+      directories: {},
     });
-    // Skills, loaded the way main.ts loads them — the kernel's own directory first, then the
-    // shipped pack's. `knowledge-sync` lives in the first and `credentialing-expirations` in the
-    // second, so a catalogue built from either alone would fail one of these two playbooks.
-    f.host.skills = await readSkillCatalogue([kernelSkillsDir(), ...testKernelConfig(db).packs.skillsDirs()]);
-
-    for (const playbook of playbooks) {
-      const result = await preflightPlaybook(
-        f.host,
-        row({
-          name: playbook.name,
-          skill: playbook.skill,
-          principalId: playbook.principal,
-          surface: playbook.surface ?? null,
-          costCapUsd: playbook.cost_cap_usd,
-        }),
-      );
-      expect(result, playbook.name).toMatchObject({ ok: true });
+    // Skills, the way a tenant gets them: the kernel's own directory, the document's own skills
+    // written out, and the packs the document names.
+    const skillsDir = await materialiseSkills(document, await mkdtemp(path.join(tmpdir(), 'harness-fixture-')));
+    f.host.skills = await readSkillCatalogue([kernelSkillsDir(), skillsDir, ...f.host.config.packs.skillsDirs()]);
+    for (const playbook of document.playbooks.playbooks) {
+      expect(await preflightPlaybook(f.host, rowFor(playbook)), playbook.name).toMatchObject({ ok: true });
     }
+    await f.close();
   });
 });

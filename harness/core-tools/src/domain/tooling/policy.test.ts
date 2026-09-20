@@ -1,11 +1,6 @@
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { describe, it, expect } from 'vitest';
 import type { ActionClass, Behavior, Level } from '@harness/pack-api';
-import { DEFAULT_POLICY, decide, loadPolicy, mergePolicy, parsePolicy } from './policy.js';
-
-// src/domain/tooling -> src/domain -> src -> core-tools -> harness -> the repository root.
-const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../../..');
+import { DEFAULT_POLICY, decide, mergePolicy } from './policy.js';
 
 /** Spec 4.4's table, cell for cell. Rows are action classes, columns the five levels. */
 const TABLE: Record<ActionClass, Record<Level, Behavior>> = {
@@ -19,14 +14,20 @@ const TABLE: Record<ActionClass, Record<Level, Behavior>> = {
   admin: { member: 'blocked', practitioner: 'blocked', lead: 'blocked', admin: 'auto', service: 'blocked' },
 };
 
-/** The demo client's file, verbatim. */
-const DEMO_POLICY = `classes:
-  read: auto
-  write.internal: auto
-  external: approval
-  financial: blocked
-  destructive: approval
-`;
+/**
+ * The `policy.classes` table a deployment's client document carries, as a literal.
+ *
+ * `@harness/config-api` validates that section and `mergePolicy` is what applies it, so nothing
+ * here reads a policy file or names a client folder. What is pinned below is the *merge*, against
+ * the principal a scheduled playbook runs as.
+ */
+const DEPLOYMENT_CLASSES = {
+  read: 'auto',
+  'write.internal': 'auto',
+  external: 'approval',
+  financial: 'blocked',
+  destructive: 'approval',
+} as const;
 
 describe('DEFAULT_POLICY', () => {
   for (const [cls, row] of Object.entries(TABLE) as [ActionClass, Record<Level, Behavior>][]) {
@@ -61,6 +62,13 @@ describe('mergePolicy', () => {
     expect(decide('financial', 'lead', merged)).toBe('approval');
   });
 
+  it('merges a levels block per level and per class', () => {
+    const merged = mergePolicy(DEFAULT_POLICY, { levels: { member: { external: 'auto' } } });
+    expect(decide('external', 'member', merged)).toBe('auto');
+    expect(decide('external', 'practitioner', merged)).toBe('approval');
+    expect(decide('write.internal', 'member', merged)).toBe('approval');
+  });
+
   it('does not mutate its inputs', () => {
     const before = JSON.stringify(DEFAULT_POLICY);
     mergePolicy(DEFAULT_POLICY, { classes: { read: 'blocked' }, levels: { admin: { read: 'blocked' } } });
@@ -68,65 +76,33 @@ describe('mergePolicy', () => {
   });
 });
 
-describe('parsePolicy', () => {
-  it('reads the demo file unchanged and keeps it meaning what it meant for a lead', () => {
-    const p = parsePolicy(DEMO_POLICY);
-    for (const cls of ['read', 'write.internal', 'external', 'financial', 'destructive'] as const) {
-      expect(decide(cls, 'lead', p)).toBe(TABLE[cls].lead);
-    }
-    expect(p.levels).toEqual(DEFAULT_POLICY.levels);
-  });
-
-  it('merges a classes block over the defaults', () => {
-    const p = parsePolicy('classes:\n  external: auto\n');
-    expect(p.classes.external).toBe('auto');
-    expect(p.classes.financial).toBe('blocked');
-  });
-
-  it('merges a levels block per level and per class', () => {
-    const p = parsePolicy('levels:\n  member:\n    external: auto\n');
-    expect(decide('external', 'member', p)).toBe('auto');
-    expect(decide('external', 'practitioner', p)).toBe('approval');
-    expect(decide('write.internal', 'member', p)).toBe('approval');
-  });
-
-  it('rejects unknown classes, behaviors and levels, naming them', () => {
-    expect(() => parsePolicy('classes:\n  bogus: auto\n')).toThrow(/bogus/);
-    expect(() => parsePolicy('classes:\n  read: maybe\n')).toThrow(/maybe/);
-    expect(() => parsePolicy('levels:\n  boss:\n    read: auto\n')).toThrow(/unknown level "boss"/);
-    expect(() => parsePolicy('levels:\n  lead:\n    bogus: auto\n')).toThrow(/bogus/);
-  });
-
-  it('loadPolicy returns defaults when no file is configured', async () => {
-    const saved = process.env.HARNESS_POLICY_FILE;
-    delete process.env.HARNESS_POLICY_FILE;
-    expect(await loadPolicy()).toEqual(DEFAULT_POLICY);
-    if (saved !== undefined) process.env.HARNESS_POLICY_FILE = saved;
-  });
-});
-
 /**
- * The shipped file, read off disk rather than the copy above, because the pairing this pins is one
- * a deployment actually runs and a hand copy can drift away from it.
+ * A deployment's own policy section, against the principal its nightly playbook runs as.
  *
- * The nightly `knowledge-sync` playbook in `clients/demo-practice/playbooks.yaml` calls one tool,
- * `knowledge_sync`, as `svc-playbooks`, which `identity.yaml` declares at `level: service`.
- * Nothing before this asked whether policy would let that call through: `preflightPlaybook` checks
- * the skill, the principal and the surface, never the class. When `knowledge_sync` was `admin` the
- * answer was `blocked`, so the refresh was refused every night with `deliver: none` and nobody
- * heard about it.
+ * The `knowledge-sync` playbook calls one tool, `knowledge_sync`, as `svc-playbooks`, which the
+ * client document declares at `level: service`. Nothing before this asked whether policy would
+ * let that call through: `preflightPlaybook` checks the skill, the principal and the surface,
+ * never the class. When `knowledge_sync` was `admin` the answer was `blocked`, so the refresh was
+ * refused every night with `deliver: none` and nobody heard about it.
  */
-describe('the shipped demo policy, against the principal the shipped playbook runs as', () => {
-  const demoPolicy = () => loadPolicy(path.join(repoRoot, 'clients', 'demo-practice', 'policy.yaml'));
+describe('a deployment policy section, against the principal a scheduled playbook runs as', () => {
+  const policy = mergePolicy(DEFAULT_POLICY, { classes: { ...DEPLOYMENT_CLASSES } });
 
-  it('lets a service principal run a write.internal tool unattended', async () => {
-    expect(decide('write.internal', 'service', await demoPolicy())).toBe('auto');
+  it('lets a service principal run a write.internal tool unattended', () => {
+    expect(decide('write.internal', 'service', policy)).toBe('auto');
   });
 
-  it('still parks that class for a member and blocks admin for a service, which is why the class moved', async () => {
-    const policy = await demoPolicy();
-    // The class-level `write.internal: auto` in the demo file does not reach a member: `decide`
-    // reads the level cell first, and `mergePolicy` keeps the default matrix's `member` override.
+  it('keeps every class it names meaning what it meant for a lead', () => {
+    for (const cls of Object.keys(DEPLOYMENT_CLASSES) as (keyof typeof DEPLOYMENT_CLASSES)[]) {
+      expect(decide(cls, 'lead', policy)).toBe(TABLE[cls].lead);
+    }
+    // A classes block leaves the kernel's level overrides exactly where they were.
+    expect(policy.levels).toEqual(DEFAULT_POLICY.levels);
+  });
+
+  it('still parks that class for a member and blocks admin for a service, which is why the class moved', () => {
+    // The class-level `write.internal: auto` does not reach a member: `decide` reads the level
+    // cell first, and `mergePolicy` keeps the default matrix's `member` override.
     expect(decide('write.internal', 'member', policy)).toBe('approval');
     // The reason `knowledge_sync` could not stay `admin`: no service principal can ever call one.
     expect(decide('admin', 'service', policy)).toBe('blocked');

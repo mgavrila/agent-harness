@@ -54,6 +54,23 @@ export interface SlackPostResult {
   channel?: string;
 }
 
+/** One user group. Only its id is read: the directory maps ids to levels, never names to them. */
+export interface SlackUsergroup {
+  id: string;
+}
+
+export interface SlackUsergroupsListResult {
+  usergroups?: SlackUsergroup[];
+}
+
+export interface SlackUsergroupUsersResult {
+  users?: string[];
+}
+
+export interface SlackUserInfoResult {
+  user?: { real_name?: string; profile?: { display_name?: string; real_name?: string } };
+}
+
 /**
  * The slice of Slack's Web API this app uses. Declaring it ourselves keeps the
  * tests free of a Slack client: `FakeSlack` implements this and nothing else,
@@ -73,6 +90,14 @@ export interface SlackApi {
   };
   conversations: {
     replies(args: SlackRepliesArgs): Promise<SlackRepliesResult>;
+  };
+  /** User groups, which is how a workspace says who is a lead and who is not. */
+  usergroups: {
+    list(): Promise<SlackUsergroupsListResult>;
+    users: { list(args: { usergroup: string }): Promise<SlackUsergroupUsersResult> };
+  };
+  users: {
+    info(args: { user: string }): Promise<SlackUserInfoResult>;
   };
 }
 
@@ -113,6 +138,15 @@ export interface SlackInbound {
   mentioned: boolean;
   /** `path` is relative to `<storageDir>/incoming`. */
   files: { name: string; path: string }[];
+  /**
+   * The workspace this event arrived from — Slack's team id — or null where the payload and the
+   * connection's own context both left it out.
+   *
+   * It travels because the host routes on it: a pooled host matches it against the key each
+   * client's document claims, and a dedicated one refuses an event from a workspace that is not
+   * its own rather than answering it with this tenant's data.
+   */
+  teamId: string | null;
 }
 
 /** The fields of a Bolt `message` or `app_mention` payload the classifier reads. */
@@ -127,6 +161,8 @@ export interface RawMessage {
   ts: string;
   thread_ts?: string;
   files?: { name?: string; url_private_download?: string }[];
+  /** The workspace the event belongs to. Absent on some payloads; the connection's context has it. */
+  team?: string;
 }
 
 /**

@@ -6,7 +6,8 @@ import { boltTransport } from './transport/bolt.js';
 /**
  * Slack, as one messaging surface among several.
  *
- * The host loads this by name from `HARNESS_SURFACES` and holds nothing but the contract, so
+ * The host loads this by the name a client document's `surfaces` gives and holds nothing but the
+ * contract, so
  * every Slack-shaped thing — Block Kit, Bolt, Socket Mode, a `C…` channel id, a `ts` — is behind
  * this package's boundary. What the renderers emit is pinned byte for byte by their own tests,
  * because the cards in the demo workspace must not change shape.

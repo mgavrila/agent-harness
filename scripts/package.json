@@ -7,6 +7,12 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
+  "dependencies": {
+    "@harness/config-api": "workspace:*",
+    "@harness/config-files": "workspace:*",
+    "@harness/shared": "workspace:*",
+    "yaml": "^2.9.1"
+  },
   "devDependencies": {
     "@types/node": "^26.5.1",
     "tsx": "^4.23.13",

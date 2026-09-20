@@ -14,9 +14,11 @@
   },
   "dependencies": {
     "@harness/approvals": "workspace:*",
+    "@harness/config-api": "workspace:*",
     "@harness/core-tools": "workspace:*",
     "@harness/db": "workspace:*",
     "@harness/identity-api": "workspace:*",
+    "@harness/identity-slack-groups": "workspace:*",
     "@harness/identity-static": "workspace:*",
     "@harness/runtime-api": "workspace:*",
     "@harness/runtime-deepagents": "workspace:*",
@@ -33,7 +35,9 @@
     "zod": "^4.6.5"
   },
   "devDependencies": {
+    "@harness/config-files": "workspace:*",
     "@harness/pack-healthcare": "workspace:*",
+    "@harness/runtime-scripted": "workspace:*",
     "@types/node": "^26.5.1",
     "tsx": "^4.23.13",
     "typescript": "^7.0.2",

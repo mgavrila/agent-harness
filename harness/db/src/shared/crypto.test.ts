@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { encrypt, decrypt, loadKey, generateKey } from './crypto.js';
 
 describe('crypto', () => {
-  const key = loadKey(generateKey());
+  const key = loadKey({ HARNESS_ENCRYPTION_KEY: generateKey() });
 
   it('round-trips utf8 text', () => {
     const blob = encrypt('123-45-6789', key);
@@ -22,11 +22,11 @@ describe('crypto', () => {
 
   it('throws on wrong key', () => {
     const blob = encrypt('secret', key);
-    expect(() => decrypt(blob, loadKey(generateKey()))).toThrow();
+    expect(() => decrypt(blob, loadKey({ HARNESS_ENCRYPTION_KEY: generateKey() }))).toThrow();
   });
 
   it('rejects keys that are not 32 bytes', () => {
-    expect(() => loadKey(Buffer.from('short').toString('base64'))).toThrow(/32 bytes/);
-    expect(() => loadKey(undefined)).toThrow(/HARNESS_ENCRYPTION_KEY/);
+    expect(() => loadKey({ HARNESS_ENCRYPTION_KEY: Buffer.from('short').toString('base64') })).toThrow(/32 bytes/);
+    expect(() => loadKey({})).toThrow(/HARNESS_ENCRYPTION_KEY/);
   });
 });

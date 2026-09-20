@@ -445,6 +445,10 @@ clients/<name>/
   knowledge/       markdown with frontmatter (§5.7)
 ```
 
+> **Superseded by `2026-09-19-hf1-os-boundary-design.md` (Plan 11a).** A client is a document
+> loaded through a `ConfigSource` from outside this repository; the six-file folder described here
+> is not read by anything.
+
 Compose after Plan 8: `postgres` (`pgvector/pgvector:pg16`), `litellm`, `files` (internal
 network), `host` (profile `demo`), `core-tools` (build-only, stdio). No Docker socket anywhere.
 Every client path is `/srv/agent-harness/clients/${HARNESS_CLIENT}/...`. The scaffolder writes

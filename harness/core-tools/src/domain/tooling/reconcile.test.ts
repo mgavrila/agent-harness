@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { approvals, toolEffects } from '@harness/db';
 import { useTestDb } from '../../testing.js';
 import { reconcile } from './reconcile.js';
@@ -17,41 +17,31 @@ describe('reconcile', () => {
       { ...base, idempotencyKey: 'k4', status: 'declined', expiresAt: new Date('2026-09-15T11:00:00Z') },
       { ...base, idempotencyKey: 'k5', status: 'executed', expiresAt: new Date('2026-09-15T11:00:00Z') },
     ]);
-    const out = await reconcile(db, { now });
+    const out = await reconcile(db, { now, client: 'test' });
     expect(out.approvals_expired).toBe(2);
     const rows = await db.select().from(approvals);
     const byKey = Object.fromEntries(rows.map((r) => [r.idempotencyKey, r.status]));
     expect(byKey).toEqual({ k1: 'expired', k2: 'expired', k3: 'pending', k4: 'declined', k5: 'executed' });
   });
 
-  it('expires only the given client when one is passed, and the rest when none is', async () => {
-    const base = {
-      action: 't',
-      payload: {},
-      summary: 's',
-      requestedBy: 'r',
-      expiresAt: new Date('2026-09-15T11:00:00Z'),
-    };
-    await db.insert(approvals).values([
-      { ...base, client: 'test', idempotencyKey: 'mine', status: 'pending' },
-      { ...base, client: 'other-clinic', idempotencyKey: 'theirs', status: 'pending' },
-    ]);
-
-    const scoped = await reconcile(db, { now, client: 'test' });
-    expect(scoped.approvals_expired).toBe(1);
-    let rows = await db.select().from(approvals);
-    expect(Object.fromEntries(rows.map((r) => [r.idempotencyKey, r.status]))).toEqual({
-      mine: 'expired',
-      theirs: 'pending',
-    });
-
-    const unscoped = await reconcile(db, { now });
-    expect(unscoped.approvals_expired).toBe(1);
-    rows = await db.select().from(approvals);
-    expect(Object.fromEntries(rows.map((r) => [r.idempotencyKey, r.status]))).toEqual({
-      mine: 'expired',
-      theirs: 'expired',
-    });
+  it("repairs one tenant's rows and leaves the other's alone", async () => {
+    // Two expired pending approvals, one per client. There is no unscoped repair to fall back on:
+    // a pooled host that ran one would expire a tenant's approvals because another restarted.
+    for (const client of ['alpha', 'beta']) {
+      await db.insert(approvals).values({
+        client,
+        action: 'forms_release',
+        payload: {},
+        summary: 's',
+        requestedBy: 'u-one',
+        expiresAt: new Date('2020-01-01T00:00:00Z'),
+        idempotencyKey: `k-${client}`,
+      });
+    }
+    const repaired = await reconcile(db, { now, client: 'alpha' });
+    expect(repaired.approvals_expired).toBe(1);
+    expect(await db.$count(approvals, and(eq(approvals.client, 'beta'), eq(approvals.status, 'pending')))).toBe(1);
+    expect(await db.$count(approvals, and(eq(approvals.client, 'alpha'), eq(approvals.status, 'expired')))).toBe(1);
   });
 
   it("parks only the given client's stuck dispatches when one is passed", async () => {
@@ -84,7 +74,7 @@ describe('reconcile', () => {
       { ...base, idempotencyKey: 'fresh', status: 'dispatching', updatedAt: new Date('2026-09-15T11:58:00Z') },
       { ...base, idempotencyKey: 'staged', status: 'staged', updatedAt: new Date('2026-09-15T11:00:00Z') },
     ]);
-    const out = await reconcile(db, { now, staleAfterMs: 10 * 60_000 });
+    const out = await reconcile(db, { now, client: 'test', staleAfterMs: 10 * 60_000 });
     expect(out.dispatches_parked).toBe(1);
     const [old] = await db.select().from(toolEffects).where(eq(toolEffects.idempotencyKey, 'old'));
     expect(old.status).toBe('needs_review');

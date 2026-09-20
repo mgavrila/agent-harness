@@ -55,7 +55,7 @@ export const TEST_PRINCIPAL: Principal = {
 /**
  * The base map plus every loaded pack's `evals.testEnv`, in load order.
  *
- * A pack later in `HARNESS_PACKS` wins a collision, which matches how a registry answers
+ * A pack later in the list wins a collision, which matches how a registry answers
  * singular questions in load order elsewhere. Two packs pinning the same variable to different
  * values is a configuration nobody should ship, and the merge is not the place to discover it.
  */
@@ -87,8 +87,9 @@ export function makeTestDeps(db: Db, overrides: TestDepsOverrides = {}): ToolDep
     gateway: { baseUrl: 'http://127.0.0.1:1', apiKey: 'sk-test', timeoutMs: 5_000, maxCallsPerRun: 100 },
     storageDir,
     // Not a real directory: a test that syncs knowledge passes its own, and one that does not
-    // gets a path that simply holds no `knowledge/` folder, which is an empty sync and not an error.
-    clientDir: path.join(storageDir, 'client'),
+    // gets a path that simply does not exist, which is an empty sync and not an error.
+    knowledgeDir: path.join(storageDir, 'knowledge'),
+    hiddenTools: [],
     embedDims: 1_024,
     parser: localParser(storageDir),
     // Resolved from `packs`, not from `TEST_PACKS`, and by the same rule `formsDirFrom` uses at

@@ -1,18 +1,16 @@
 import type { Client } from '@modelcontextprotocol/client';
 import {
-  closeRun,
   connectInProcess,
   createCoreToolsServer,
   depsForRun,
+  finishRun,
   openRun,
   type KernelConfig,
 } from '@harness/core-tools';
 import type { Db } from '@harness/db';
 import type { Principal } from '@harness/identity-api';
-import { createLogger, describeError } from '@harness/shared';
+import { describeError } from '@harness/shared';
 import type { CoreToolsClient, ExecuteOutcome } from './types.js';
-
-const log = createLogger('approvals');
 
 /** The slice of an MCP `callTool` response the two calls below read. */
 interface CallResult {
@@ -35,29 +33,6 @@ function textOf(res: CallResult): string {
     .map((c) => c.text ?? '')
     .join(' ')
     .trim();
-}
-
-/**
- * Close the in-process transport, then close the run — in that order, but never let the first
- * step's failure skip the second. A `close()` that itself rejects (the client or its handler
- * failing to tear down cleanly) is logged and swallowed rather than thrown, because the run
- * ending with the call's real status matters more than a clean transport shutdown, and a throw
- * here would otherwise escape the `finally` it runs in and skip `closeRun` entirely. Exported so
- * this guarantee is directly testable without needing the real transport to misbehave.
- */
-export async function finishRun(
-  db: Db,
-  runId: string,
-  status: 'done' | 'error',
-  now: () => Date,
-  close: () => Promise<void>,
-): Promise<void> {
-  try {
-    await close();
-  } catch (err) {
-    log.error(`could not close the in-process core-tools client for run ${runId}`, err);
-  }
-  await closeRun(db, runId, status, now);
 }
 
 /**
@@ -88,7 +63,7 @@ export function createInProcessCoreToolsClient(opts: InProcessCoreToolsOptions):
       status = 'error';
       throw err;
     } finally {
-      await finishRun(opts.db, context.runId, status, now, close ?? (() => Promise.resolve()));
+      await finishRun(opts.db, opts.client, context.runId, status, now, close ?? (() => Promise.resolve()));
     }
   }
 

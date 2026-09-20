@@ -140,17 +140,101 @@ importers:
         specifier: ^5.0.0
         version: 5.0.0(@types/node@26.5.1)(vite@8.3.0(@types/node@26.5.1)(esbuild@0.28.2)(tsx@4.23.13)(yaml@2.9.1))
 
-  harness/core-tools:
+  harness/config-api:
     dependencies:
-      '@harness/db':
-        specifier: workspace:*
-        version: link:../db
-      '@harness/gateway':
-        specifier: workspace:*
-        version: link:../gateway
       '@harness/identity-api':
         specifier: workspace:*
         version: link:../identity-api
+      '@harness/pack-api':
+        specifier: workspace:*
+        version: link:../pack-api
+      '@harness/shared':
+        specifier: workspace:*
+        version: link:../shared
+      croner:
+        specifier: 10.0.1
+        version: 10.0.1
+      zod:
+        specifier: ^4.6.5
+        version: 4.6.5
+    devDependencies:
+      '@types/node':
+        specifier: ^26.5.1
+        version: 26.5.1
+      typescript:
+        specifier: ^7.0.2
+        version: 7.0.2
+      vitest:
+        specifier: ^5.0.0
+        version: 5.0.0(@types/node@26.5.1)(vite@8.3.0(@types/node@26.5.1)(esbuild@0.28.2)(tsx@4.23.13)(yaml@2.9.1))
+
+  harness/config-files:
+    dependencies:
+      '@harness/config-api':
+        specifier: workspace:*
+        version: link:../config-api
+      '@harness/shared':
+        specifier: workspace:*
+        version: link:../shared
+      yaml:
+        specifier: ^2.9.1
+        version: 2.9.1
+    devDependencies:
+      '@types/node':
+        specifier: ^26.5.1
+        version: 26.5.1
+      typescript:
+        specifier: ^7.0.2
+        version: 7.0.2
+      vitest:
+        specifier: ^5.0.0
+        version: 5.0.0(@types/node@26.5.1)(vite@8.3.0(@types/node@26.5.1)(esbuild@0.28.2)(tsx@4.23.13)(yaml@2.9.1))
+
+  harness/config-postgres:
+    dependencies:
+      '@harness/config-api':
+        specifier: workspace:*
+        version: link:../config-api
+      '@harness/db':
+        specifier: workspace:*
+        version: link:../db
+      '@harness/shared':
+        specifier: workspace:*
+        version: link:../shared
+      drizzle-orm:
+        specifier: ^0.45.2
+        version: 0.45.2(@types/pg@8.23.1)(pg@8.23.0)
+    devDependencies:
+      '@types/node':
+        specifier: ^26.5.1
+        version: 26.5.1
+      typescript:
+        specifier: ^7.0.2
+        version: 7.0.2
+      vitest:
+        specifier: ^5.0.0
+        version: 5.0.0(@types/node@26.5.1)(vite@8.3.0(@types/node@26.5.1)(esbuild@0.28.2)(tsx@4.23.13)(yaml@2.9.1))
+
+  harness/core-tools:
+    dependencies:
+      '@harness/config-api':
+        specifier: workspace:*
+        version: link:../config-api
+      '@harness/config-files':
+        specifier: workspace:*
+        version: link:../config-files
+      '@harness/config-postgres':
+        specifier: workspace:*
+        version: link:../config-postgres
+      '@harness/db':
+        specifier: workspace:*
+        version: link:../db
+      '@harness/identity-api':
+        specifier: workspace:*
+        version: link:../identity-api
+      '@harness/identity-slack-groups':
+        specifier: workspace:*
+        version: link:../../identities/slack-groups
       '@harness/identity-static':
         specifier: workspace:*
         version: link:../../identities/static
@@ -271,6 +355,18 @@ importers:
 
   harness/gateway:
     dependencies:
+      '@harness/config-api':
+        specifier: workspace:*
+        version: link:../config-api
+      '@harness/core-tools':
+        specifier: workspace:*
+        version: link:../core-tools
+      '@harness/db':
+        specifier: workspace:*
+        version: link:../db
+      '@harness/shared':
+        specifier: workspace:*
+        version: link:../shared
       yaml:
         specifier: ^2.9.1
         version: 2.9.1
@@ -296,6 +392,9 @@ importers:
       '@harness/approvals':
         specifier: workspace:*
         version: link:../approvals
+      '@harness/config-api':
+        specifier: workspace:*
+        version: link:../config-api
       '@harness/core-tools':
         specifier: workspace:*
         version: link:../core-tools
@@ -305,6 +404,9 @@ importers:
       '@harness/identity-api':
         specifier: workspace:*
         version: link:../identity-api
+      '@harness/identity-slack-groups':
+        specifier: workspace:*
+        version: link:../../identities/slack-groups
       '@harness/identity-static':
         specifier: workspace:*
         version: link:../../identities/static
@@ -348,9 +450,15 @@ importers:
         specifier: ^4.6.5
         version: 4.6.5
     devDependencies:
+      '@harness/config-files':
+        specifier: workspace:*
+        version: link:../config-files
       '@harness/pack-healthcare':
         specifier: workspace:*
         version: link:../../packs/healthcare
+      '@harness/runtime-scripted':
+        specifier: workspace:*
+        version: link:../../runtimes/scripted
       '@types/node':
         specifier: ^26.5.1
         version: 26.5.1
@@ -458,6 +566,28 @@ importers:
         specifier: ^5.0.0
         version: 5.0.0(@types/node@26.5.1)(vite@8.3.0(@types/node@26.5.1)(esbuild@0.28.2)(tsx@4.23.13)(yaml@2.9.1))
 
+  identities/slack-groups:
+    dependencies:
+      '@harness/identity-api':
+        specifier: workspace:*
+        version: link:../../harness/identity-api
+      '@harness/shared':
+        specifier: workspace:*
+        version: link:../../harness/shared
+      zod:
+        specifier: ^4.6.5
+        version: 4.6.5
+    devDependencies:
+      '@types/node':
+        specifier: ^26.5.1
+        version: 26.5.1
+      typescript:
+        specifier: ^7.0.2
+        version: 7.0.2
+      vitest:
+        specifier: ^5.0.0
+        version: 5.0.0(@types/node@26.5.1)(vite@8.3.0(@types/node@26.5.1)(esbuild@0.28.2)(tsx@4.23.13)(yaml@2.9.1))
+
   identities/static:
     dependencies:
       '@harness/identity-api':
@@ -466,9 +596,6 @@ importers:
       '@harness/shared':
         specifier: workspace:*
         version: link:../../harness/shared
-      yaml:
-        specifier: ^2.9.1
-        version: 2.9.1
     devDependencies:
       '@types/node':
         specifier: ^26.5.1
@@ -588,7 +715,36 @@ importers:
         specifier: ^5.0.0
         version: 5.0.0(@types/node@26.5.1)(vite@8.3.0(@types/node@26.5.1)(esbuild@0.28.2)(tsx@4.23.13)(yaml@2.9.1))
 
+  runtimes/scripted:
+    dependencies:
+      '@harness/runtime-api':
+        specifier: workspace:*
+        version: link:../../harness/runtime-api
+    devDependencies:
+      '@types/node':
+        specifier: ^26.5.1
+        version: 26.5.1
+      typescript:
+        specifier: ^7.0.2
+        version: 7.0.2
+      vitest:
+        specifier: ^5.0.0
+        version: 5.0.0(@types/node@26.5.1)(vite@8.3.0(@types/node@26.5.1)(esbuild@0.28.2)(tsx@4.23.13)(yaml@2.9.1))
+
   scripts:
+    dependencies:
+      '@harness/config-api':
+        specifier: workspace:*
+        version: link:../harness/config-api
+      '@harness/config-files':
+        specifier: workspace:*
+        version: link:../harness/config-files
+      '@harness/shared':
+        specifier: workspace:*
+        version: link:../harness/shared
+      yaml:
+        specifier: ^2.9.1
+        version: 2.9.1
     devDependencies:
       '@types/node':
         specifier: ^26.5.1

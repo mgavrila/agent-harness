@@ -1,4 +1,7 @@
-import type { EnvSource, Level, Logger } from '@harness/shared';
+import type { EnvSource, Level, Logger, SurfaceDirectory } from '@harness/shared';
+
+/** The four levels a person may hold. A `service` level belongs to a declared service, never to a default. */
+export type UserLevel = Exclude<Level, 'service'>;
 
 /**
  * Every declaration of the identity contract, in one leaf module.
@@ -24,7 +27,7 @@ export interface Principal {
   readonly displayName: string;
   /**
    * This principal's user id on each surface it may speak from, keyed by the surface's name as
-   * `HARNESS_SURFACES` and `approvals.surface` spell it. Empty for a service.
+   * the client document's `surfaces` and `approvals.surface` spell it. Empty for a service.
    */
   readonly surfaces: Readonly<Record<string, string>>;
   /** Free-form, plug-in-defined: department, role, groups. Never a restricted value. */
@@ -33,7 +36,7 @@ export interface Principal {
 
 /** A connected identity plug-in. */
 export interface IdentitySession {
-  /** The plug-in's name, as `HARNESS_IDENTITY` named it. */
+  /** The plug-in's name, as the client document's `identityPlugin.kind` named it. */
   readonly name: string;
   /**
    * The principal behind a surface user id, or null. **Null is "not authorised", never a guest**:
@@ -46,15 +49,37 @@ export interface IdentitySession {
   stop(): Promise<void>;
 }
 
+/** A parsed identity section: who is declared, and what each surface gives everyone else. */
+export interface IdentityFile {
+  principals: Principal[];
+  defaults: Record<string, UserLevel>;
+}
+
 /**
- * What a plug-in is handed when it connects. `env` is the only environment it may read — never the
- * ambient one — for the same reason a pack reads `deps.env`. `clientDir` is `clients/<name>/`,
- * where a file-backed plug-in finds `identity.yaml`.
+ * What a plug-in is handed when it connects.
+ *
+ * `env` is the only environment it may read — never the ambient one — for the same reason a pack
+ * reads `deps.env`. `identity` is this client's own section of the client document, already
+ * validated: the declared principals and the level each surface gives everyone else. **A plug-in
+ * is never handed a path**, because a client is not a folder any more, and never handed the whole
+ * document, because who is asking is the only part of it that is a plug-in's business.
+ * `settings` is whatever the document's `identityPlugin.settings` held, which the plug-in
+ * validates with its own schema.
  */
 export interface IdentityDeps {
   env: EnvSource;
   log: Logger;
-  clientDir: string;
+  identity: IdentityFile;
+  settings: Readonly<Record<string, unknown>>;
+  /**
+   * The directories the loaded surfaces offer, by surface name.
+   *
+   * A directory-backed plug-in reads group membership through this and never imports a surface:
+   * `pnpm arch` forbids the edge, and the reason it forbids it is that a plug-in which knew one
+   * transport would have to be rewritten for the next one. A surface with no directory is simply
+   * absent from the map.
+   */
+  directories: Readonly<Record<string, SurfaceDirectory>>;
 }
 
 /** What an `identities/*` package exports as `identity`. */

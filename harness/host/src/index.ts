@@ -12,7 +12,6 @@ export { loadRuntime } from './domain/runtime/registry.js';
 export { WITHHELD, appendMessage, findOrCreateThread, recentHistory } from './domain/threads/repository.js';
 export { HISTORY_MAX_CHARS, trimHistory } from './domain/threads/trim.js';
 export { kernelSkillsDir, readSkillCatalogue } from './domain/skills.js';
-export { readPersona } from './domain/persona.js';
 export { openKernel } from './domain/kernel.js';
 export {
   COST_CAP_EXCEEDED,
@@ -32,16 +31,7 @@ export {
   type TurnResult,
 } from './domain/conversation.js';
 export { decisionDeps, resumeOnDecision, resumeText } from './domain/resume.js';
-export {
-  DELIVERIES,
-  PLAYBOOK_NAME_PATTERN,
-  PlaybookShape,
-  PlaybooksFileShape,
-  nextRunAfter,
-  parsePlaybooksFile,
-  readPlaybooksFile,
-  type PlaybookDefinition,
-} from './domain/playbooks/schema.js';
+export { nextRunAfter } from './domain/playbooks/schema.js';
 export {
   CLAIM_BATCH,
   claimDuePlaybooks,
@@ -61,11 +51,19 @@ export {
   type SchedulerStatus,
   type TickResult,
 } from './domain/playbooks/scheduler.js';
+export { createHost } from './domain/tenancy/pool.js';
+export { openTenant } from './domain/tenancy/tenant.js';
+export { materialiseSkills } from './domain/tenancy/skills.js';
+export { dedicatedResolver, pooledResolver } from './domain/tenancy/resolver.js';
+export { identitySpecifier, runtimeSpecifier, surfaceSpecifier } from './domain/tenancy/specifiers.js';
+export type { ClientResolver, InboundRef } from './domain/tenancy/resolver-types.js';
+export type { HostDeps, HostPool, Tenant } from './domain/tenancy/types.js';
 export {
   API_MAX_ATTACHMENTS,
   API_MAX_BODY_BYTES,
   API_MAX_TEXT_CHARS,
   API_THREAD_MESSAGES,
+  CLIENT_HEADER,
   DEFAULT_HOST_BIND,
   DEFAULT_HOST_PORT,
   SSE_KEEPALIVE_MS,

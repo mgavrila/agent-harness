@@ -97,7 +97,7 @@ export interface RunRequest {
   input: { text: string; attachments: readonly RunAttachment[] };
   /** Prior turns of this thread, newest last, already trimmed to the host's budget. */
   history: readonly RunHistoryTurn[];
-  /** The persona text (SOUL.md). */
+  /** The persona text, as the client document carries it. */
   persona: string;
   skills: readonly RunSkill[];
   /** The curated memory snapshot, rendered by the host before the run starts and frozen for it. Empty when the principal has none. */

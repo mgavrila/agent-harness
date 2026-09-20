@@ -13,6 +13,7 @@ import {
   customType,
   uniqueIndex,
   index,
+  pgView,
   vector,
 } from 'drizzle-orm/pg-core';
 
@@ -90,6 +91,12 @@ export const attachments = pgTable(
   'attachments',
   {
     id: uuid('id').primaryKey().defaultRandom(),
+    /**
+     * The tenant. Derivable through `record_id` and always equal to that record's, and stored
+     * here anyway: a repository that has to join to find out which client a row belongs to is a
+     * repository one `where` away from returning another client's row (spec invariant 13).
+     */
+    client: text('client').notNull(),
     recordId: uuid('record_id')
       .notNull()
       .references(() => records.id),
@@ -110,6 +117,12 @@ export const fields = pgTable(
   'fields',
   {
     id: uuid('id').primaryKey().defaultRandom(),
+    /**
+     * The tenant. Derivable through `record_id` and always equal to that record's, and stored
+     * here anyway: a repository that has to join to find out which client a row belongs to is a
+     * repository one `where` away from returning another client's row (spec invariant 13).
+     */
+    client: text('client').notNull(),
     recordId: uuid('record_id')
       .notNull()
       .references(() => records.id),
@@ -131,6 +144,12 @@ export const deadlines = pgTable(
   'deadlines',
   {
     id: uuid('id').primaryKey().defaultRandom(),
+    /**
+     * The tenant. Derivable through `record_id` and always equal to that record's, and stored
+     * here anyway: a repository that has to join to find out which client a row belongs to is a
+     * repository one `where` away from returning another client's row (spec invariant 13).
+     */
+    client: text('client').notNull(),
     recordId: uuid('record_id')
       .notNull()
       .references(() => records.id),
@@ -163,8 +182,8 @@ export const approvals = pgTable(
     expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
     idempotencyKey: text('idempotency_key').notNull(),
     /**
-     * The loaded surface this approval's card was posted on: `slack`, `memory`, whatever
-     * `HARNESS_SURFACES` names. Null until the poller claims the row, and the only thing that
+     * The loaded surface this approval's card was posted on: `slack`, `memory`, whichever the
+     * client document declares. Null until the poller claims the row, and the only thing that
      * says which adapter a decision arriving from somewhere is allowed to come from.
      */
     surface: text('surface'),
@@ -185,10 +204,11 @@ export const approvals = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
-    // Partial: only one live pending request per idempotency key. Decided and
-    // expired rows stay as history and must not block a fresh request.
-    uniqueIndex('approvals_idempotency_pending_uq')
-      .on(t.idempotencyKey)
+    // Partial: only one live pending request per idempotency key, **per client**. Decided and
+    // expired rows stay as history and must not block a fresh request; and two tenants that mint
+    // the same key are two requests, not one (spec section 6).
+    uniqueIndex('approvals_client_idempotency_pending_uq')
+      .on(t.client, t.idempotencyKey)
       .where(sql`status = 'pending'`),
   ],
 );
@@ -241,6 +261,16 @@ export const runs = pgTable('runs', {
   status: text('status').notNull().default('running'),
   startedAt: timestamp('started_at', { withTimezone: true }).notNull().defaultNow(),
   endedAt: timestamp('ended_at', { withTimezone: true }),
+  /**
+   * What this run spent, summed from its own `model_calls` rows when the host closes it.
+   *
+   * `model_calls` keeps the per-route detail; these three are the run's totals, so the usage
+   * export reads one row per run rather than re-aggregating every call. Zero until the run is
+   * closed, and zero for ever on a run that made no model call.
+   */
+  inputTokens: integer('input_tokens').notNull().default(0),
+  outputTokens: integer('output_tokens').notNull().default(0),
+  costUsd: real('cost_usd').notNull().default(0),
 });
 
 export const tsvector = customType<{ data: string; driverData: string }>({
@@ -265,6 +295,12 @@ export const messages = pgTable(
      * tiebreak every reader orders by. Never written by the application.
      */
     seq: bigint('seq', { mode: 'number' }).generatedAlwaysAsIdentity(),
+    /**
+     * The tenant. Derivable through `thread_id` and always equal to that thread's, and stored
+     * here anyway: a repository that has to join to find out which client a row belongs to is a
+     * repository one `where` away from returning another client's row (spec invariant 13).
+     */
+    client: text('client').notNull(),
     threadId: uuid('thread_id')
       .notNull()
       .references(() => threads.id),
@@ -312,7 +348,7 @@ export const toolEffects = pgTable(
     dispatchedAt: timestamp('dispatched_at', { withTimezone: true }),
   },
   (t) => [
-    uniqueIndex('tool_effects_idempotency_uq').on(t.idempotencyKey),
+    uniqueIndex('tool_effects_client_idempotency_uq').on(t.client, t.idempotencyKey),
     index('tool_effects_status_created_idx').on(t.status, t.createdAt),
   ],
 );
@@ -345,9 +381,6 @@ export const auditLog = pgTable(
     error: text('error'),
     skill: text('skill'),
     skillVersion: text('skill_version'),
-    inputTokens: integer('input_tokens'),
-    outputTokens: integer('output_tokens'),
-    costUsd: real('cost_usd'),
     derivedFrom: jsonb('derived_from').$type<string[]>().notNull().default([]),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
@@ -380,11 +413,11 @@ export const memoryEntries = pgTable(
 );
 
 /**
- * Scheduled work (spec 5.6): one row per entry of `clients/<name>/playbooks.yaml`, upserted by
- * the host at startup and keyed by name. A playbook removed from the file is disabled, never
- * deleted, so its run history stays attached. `next_run_at` is what the scheduler claims on and
- * is recomputed from the file and the clock at every host start, so a firing missed while the
- * host was down is not replayed.
+ * Scheduled work (spec 5.6): one row per entry of a client document's `playbooks` section,
+ * upserted when the host opens that tenant and keyed by name. A playbook the document no longer
+ * declares is disabled, never deleted, so its run history stays attached. `next_run_at` is what
+ * the scheduler claims on and is recomputed from the document and the clock every time the tenant
+ * opens, so a firing missed while it was closed is not replayed.
  */
 export const playbooks = pgTable(
   'playbooks',
@@ -429,6 +462,12 @@ export const playbookRuns = pgTable(
   'playbook_runs',
   {
     id: uuid('id').primaryKey().defaultRandom(),
+    /**
+     * The tenant. Derivable through `playbook_id` and always equal to that playbook's, and stored
+     * here anyway: a repository that has to join to find out which client a row belongs to is a
+     * repository one `where` away from returning another client's row (spec invariant 13).
+     */
+    client: text('client').notNull(),
     playbookId: uuid('playbook_id')
       .notNull()
       .references(() => playbooks.id),
@@ -548,4 +587,101 @@ export const knowledgeChunks = pgTable(
     index('knowledge_chunks_tsv_idx').using('gin', t.tsv),
     index('knowledge_chunks_principals_idx').using('gin', t.principals),
   ],
+);
+
+/**
+ * A client's resolved document, one row per client: what the host loads.
+ *
+ * `document` is a whole `ClientDocument` as jsonb, already resolved from its blueprint and
+ * overlay by whoever wrote it and validated again on load — a store the platform writes to is
+ * not a store the kernel trusts. `version` is what a host caches by and what `watch` reports;
+ * `blueprint_ref` records which catalogue entry it came from, for an operator reading the table.
+ */
+export const clientDocuments = pgTable('client_documents', {
+  clientId: text('client_id').primaryKey(),
+  schemaVersion: integer('schema_version').notNull(),
+  document: jsonb('document').$type<Record<string, unknown>>().notNull(),
+  version: text('version').notNull(),
+  blueprintRef: text('blueprint_ref'),
+  overlay: jsonb('overlay').$type<Record<string, unknown>>(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+/** Every version a client's document has had, so a change is reviewable and a rollback is a write. */
+export const clientDocumentVersions = pgTable(
+  'client_document_versions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    clientId: text('client_id').notNull(),
+    version: text('version').notNull(),
+    document: jsonb('document').$type<Record<string, unknown>>().notNull(),
+    createdBy: text('created_by'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex('client_document_versions_client_version_uq').on(t.clientId, t.version)],
+);
+
+/**
+ * What a tenant used, per principal per day (spec section 4.5, invariant 16).
+ *
+ * Counts, tokens, cost and seconds, and **not one word anybody wrote**: no message, no tool
+ * argument, no document text, no conversation id. A full join, because a day can have approvals
+ * with no run of its own (an approval decided the morning after it was raised) and runs with no
+ * approval, and an export that dropped either would be an invoice that disagreed with the audit
+ * log. `sandbox_seconds` is a literal zero until a sandbox provider exists (spec decision 14).
+ */
+export const usageRuns = pgView('usage_runs', {
+  client: text('client').notNull(),
+  principalId: text('principal_id').notNull(),
+  day: timestamp('day', { withTimezone: true }).notNull(),
+  runs: integer('runs').notNull(),
+  inputTokens: integer('input_tokens').notNull(),
+  outputTokens: integer('output_tokens').notNull(),
+  costUsd: real('cost_usd').notNull(),
+  durationSeconds: integer('duration_seconds').notNull(),
+  runsDone: integer('runs_done').notNull(),
+  runsError: integer('runs_error').notNull(),
+  runsCancelled: integer('runs_cancelled').notNull(),
+  runsRunning: integer('runs_running').notNull(),
+  approvalsRequested: integer('approvals_requested').notNull(),
+  approvalsDecided: integer('approvals_decided').notNull(),
+  sandboxSeconds: integer('sandbox_seconds').notNull(),
+}).as(
+  sql`with "run_totals" as (
+      select "client", "principal_id", date_trunc('day', "started_at") as "day",
+        count(*)::int as "runs",
+        coalesce(sum("input_tokens"), 0)::int as "input_tokens",
+        coalesce(sum("output_tokens"), 0)::int as "output_tokens",
+        coalesce(sum("cost_usd"), 0)::real as "cost_usd",
+        coalesce(sum(extract(epoch from (coalesce("ended_at", "started_at") - "started_at"))), 0)::int as "duration_seconds",
+        count(*) filter (where "status" = 'done')::int as "runs_done",
+        count(*) filter (where "status" = 'error')::int as "runs_error",
+        count(*) filter (where "status" = 'cancelled')::int as "runs_cancelled",
+        count(*) filter (where "status" = 'running')::int as "runs_running"
+      from "runs" group by 1, 2, 3
+    ), "approval_totals" as (
+      select "client", "requested_by" as "principal_id", date_trunc('day', "created_at") as "day",
+        count(*)::int as "approvals_requested",
+        count(*) filter (where "decided_at" is not null)::int as "approvals_decided"
+      from "approvals" group by 1, 2, 3
+    )
+    select
+      coalesce(r."client", a."client") as "client",
+      coalesce(r."principal_id", a."principal_id") as "principal_id",
+      coalesce(r."day", a."day") as "day",
+      coalesce(r."runs", 0) as "runs",
+      coalesce(r."input_tokens", 0) as "input_tokens",
+      coalesce(r."output_tokens", 0) as "output_tokens",
+      coalesce(r."cost_usd", 0) as "cost_usd",
+      coalesce(r."duration_seconds", 0) as "duration_seconds",
+      coalesce(r."runs_done", 0) as "runs_done",
+      coalesce(r."runs_error", 0) as "runs_error",
+      coalesce(r."runs_cancelled", 0) as "runs_cancelled",
+      coalesce(r."runs_running", 0) as "runs_running",
+      coalesce(a."approvals_requested", 0) as "approvals_requested",
+      coalesce(a."approvals_decided", 0) as "approvals_decided",
+      0 as "sandbox_seconds"
+    from "run_totals" r
+    full join "approval_totals" a
+      on a."client" = r."client" and a."principal_id" = r."principal_id" and a."day" = r."day"`,
 );

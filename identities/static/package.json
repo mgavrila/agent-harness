@@ -12,8 +12,7 @@
   },
   "dependencies": {
     "@harness/identity-api": "workspace:*",
-    "@harness/shared": "workspace:*",
-    "yaml": "^2.9.1"
+    "@harness/shared": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^26.5.1",

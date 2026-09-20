@@ -25,7 +25,9 @@ async function say(
   content: string,
   at = '2026-09-15T12:00:00Z',
 ): Promise<void> {
-  await dbh.insert(messages).values({ threadId, role, principalId: 'u-any', content, createdAt: new Date(at) });
+  await dbh
+    .insert(messages)
+    .values({ client: 'test', threadId, role, principalId: 'u-any', content, createdAt: new Date(at) });
 }
 
 describe('searchSessions', () => {

@@ -2,222 +2,93 @@ import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { config as loadEnv } from 'dotenv';
-import {
-  DEFAULT_HEALTH_BIND,
-  collectHealth,
-  createInProcessCoreToolsClient,
-  loadSurfaces,
-  registerApprovalHandlers,
-  startHealthServer,
-  startRunner,
-  surfaceSinks,
-} from '@harness/approvals';
-import { assertEmbedDims, buildKernelConfig, loadIdentity } from '@harness/core-tools';
-import { outRoot } from '@harness/core-tools/storage';
+import { DEFAULT_HEALTH_BIND, collectHealth, startHealthServer, type HealthPayload } from '@harness/approvals';
+import { assertEmbedDims, configSourceNameFrom, loadConfigSource } from '@harness/core-tools';
+import { outRoot, storageRoot } from '@harness/core-tools/storage';
 import { createDb } from '@harness/db';
-import { ConfigError, createLogger, envOrDefault, numberFromEnv, optionalEnv, requiredEnv } from '@harness/shared';
+import { createLogger, envOrDefault, numberFromEnv, optionalEnv } from '@harness/shared';
 import { startRunApi } from '../domain/api/server.js';
 import { DEFAULT_HOST_BIND, DEFAULT_HOST_PORT } from '../domain/api/types.js';
-import { SHUTDOWN_DRAIN_MS, TIMEOUT_MARGIN_MS, attachMessageHandlers, drainActive } from '../domain/conversation.js';
-import type { Host } from '../domain/host.js';
-import { readPersona } from '../domain/persona.js';
-import { syncPlaybooks } from '../domain/playbooks/repository.js';
-import { readPlaybooksFile } from '../domain/playbooks/schema.js';
-import { SCHEDULER_TICK_MS, startScheduler } from '../domain/playbooks/scheduler.js';
-import { decisionDeps } from '../domain/resume.js';
-import { loadRuntime } from '../domain/runtime/registry.js';
-import { kernelSkillsDir, readSkillCatalogue } from '../domain/skills.js';
+import { SHUTDOWN_DRAIN_MS } from '../domain/conversation.js';
+import { createHost } from '../domain/tenancy/pool.js';
 
 const log = createLogger('host');
 
-// src/app -> src -> host -> harness -> <repo>. The same resolution the other entrypoints use.
+// src/app -> src -> host -> harness -> <repo>. The .env this deployment was started with; a
+// client is not here any more, and nothing below resolves one from this path (invariant 18).
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../..');
 loadEnv({ path: path.join(repoRoot, '.env'), quiet: true });
 
-const seconds = (name: string, fallback: number): number =>
-  numberFromEnv(name, fallback, { min: 1, max: 86_400, unit: 'seconds' });
 const port = (name: string, fallback: number): number =>
   numberFromEnv(name, fallback, { min: 1, max: 65_535, integer: true });
 const now = (): Date => new Date();
-const names = (raw: string): string[] =>
-  raw
-    .split(',')
-    .map((n) => n.trim())
-    .filter((n) => n !== '');
 
 const { db, close: closeDb } = createDb();
-const config = await buildKernelConfig(process.env);
-// Belt to the image's braces (decision 4): the storage volume's layout comes from
-// node.Dockerfile, but an operator who mounts a bare directory instead still gets both.
-await mkdir(path.join(config.storageDir, 'incoming'), { recursive: true });
-await mkdir(outRoot(config.storageDir), { recursive: true });
-// Derived by the kernel from HARNESS_CLIENT (spec section 7), so the host and core-tools cannot
-// disagree about where a client's files are.
-const clientDir = config.clientDir;
+const storageDir = storageRoot(process.env);
+// Belt to the image's braces: the storage volume's layout comes from node.Dockerfile, but an
+// operator who mounts a bare directory instead still gets both.
+await mkdir(path.join(storageDir, 'incoming'), { recursive: true });
+await mkdir(outRoot(storageDir), { recursive: true });
 // The knowledge tables' embedding width is fixed by migration 0013; refuse to start rather than
-// fail halfway through the first sync.
-await assertEmbedDims(db, config.embedDims);
+// fail halfway through the first sync. One database, one check, whatever the tenancy.
+await assertEmbedDims(db, numberFromEnv('HARNESS_EMBED_DIMS', 1_024, { min: 8, max: 2_000, integer: true }));
 
-// The three plug-ins, by name. Identity first: the host's own principal has to be declared.
-const identity = await loadIdentity(envOrDefault('HARNESS_IDENTITY', '@harness/identity-static'), {
-  env: process.env,
-  log,
-  clientDir,
-});
-const servicePrincipalId = envOrDefault('HARNESS_HOST_PRINCIPAL', 'svc-host');
-const servicePrincipal = await identity.get(servicePrincipalId);
-if (!servicePrincipal || servicePrincipal.kind !== 'service') {
-  throw new ConfigError(
-    `HARNESS_HOST_PRINCIPAL names "${servicePrincipalId}", which the identity plug-in "${identity.name}" does not declare as a service`,
-  );
-}
-// The file into the table, once per start, and before a surface or the runtime connects: a
-// playbook edited, added or removed in clients/<name>/playbooks.yaml takes effect on the next
-// start, a firing missed while the process was down is not replayed (next_run_at is recomputed
-// from now), and a malformed file fails startup with no socket open and no message accepted.
-const playbooksFile = await readPlaybooksFile(clientDir);
-const synced = await syncPlaybooks(
-  db,
-  { client: config.client, now: now(), file: playbooksFile.file },
-  playbooksFile.playbooks,
-);
-log.info(
-  playbooksFile.present
-    ? `playbooks: ${synced.upserted} from ${playbooksFile.file}, ${synced.disabled} disabled`
-    : `playbooks: no playbooks.yaml in ${clientDir}; ${synced.disabled} disabled`,
-);
-
-const surfaces = await loadSurfaces(names(requiredEnv('HARNESS_SURFACES')), {
-  env: process.env,
-  log,
-  storageDir: config.storageDir,
-});
-// Required, with no default: a default here would be a specific runtime plug-in's package name
-// in host source, the coupling `HARNESS_SURFACES` already avoids for the same reason. The demo's
-// value is a deployment default, supplied in `.env.example` and Compose, not in code.
-const runtime = await loadRuntime(requiredEnv('HARNESS_RUNTIME'), {
-  env: process.env,
-  log,
-  databaseUrl: requiredEnv('DATABASE_URL'),
-  storageDir: config.storageDir,
-});
-
-const host: Host = {
-  db,
-  config,
-  client: config.client,
-  identity,
-  surfaces,
-  runtime,
-  persona: await readPersona(clientDir),
-  // The kernel's own skills first, then every pack's. `preflightPlaybook` resolves a playbook's
-  // skill name against this list with `find`, so the kernel's entry is the one it lands on. That
-  // is not a shadowing rule: `readSkillCatalogue` refuses a duplicate directory name within one
-  // directory and not across two, so a pack shipping a `knowledge-sync` directory of its own would
-  // still add a second entry of that name to the catalogue the runtime is offered.
-  skills: await readSkillCatalogue([kernelSkillsDir(), ...config.packs.skillsDirs()]),
-  model: { baseUrl: config.gateway.baseUrl, apiKey: config.gateway.apiKey, route: 'chat', fallbackRoute: 'reason' },
-  budget: {
-    maxModelCalls: numberFromEnv('HARNESS_RUN_MAX_MODEL_CALLS', 30, { min: 1, max: 1_000, integer: true }),
-    maxToolCalls: numberFromEnv('HARNESS_RUN_MAX_TOOL_CALLS', 60, { min: 1, max: 5_000, integer: true }),
-    timeoutMs: seconds('HARNESS_RUN_TIMEOUT_S', 600) * 1000,
-    timeoutMarginMs: TIMEOUT_MARGIN_MS,
-    maxHistoryMessages: numberFromEnv('HARNESS_HISTORY_MAX_MESSAGES', 40, { min: 0, max: 500, integer: true }),
-  },
-  servicePrincipal,
-  log,
-  now,
-  active: new Map(),
-  turns: new Map(),
-  draining: false,
-};
-
-const core = createInProcessCoreToolsClient({ db, config, client: config.client, servicePrincipal });
-const deps = decisionDeps(host, core);
-for (const session of surfaces.all) registerApprovalHandlers(session, deps);
-attachMessageHandlers(host);
-
-const runner = startRunner(
-  {
-    db,
-    surfaces,
-    core,
-    sinks: surfaceSinks(surfaces, { outDir: outRoot(config.storageDir) }),
-    client: config.client,
-    encryptionKey: config.encryptionKey,
-    now: host.now,
-  },
-  {
-    pollMs: seconds('APPROVALS_POLL_SECONDS', 5) * 1000,
-    dispatchMs: seconds('EFFECTS_DISPATCH_SECONDS', 5) * 1000,
-    reconcileMs: seconds('RECONCILE_SECONDS', 300) * 1000,
-    staleAfterMinutes: 10,
-  },
-);
-
-// The scheduler (spec 5.6): the same shape as the three loops above, one tick every thirty
-// seconds, claiming due playbooks with skip-locked rows and running each as its own service
-// principal.
-const scheduler = startScheduler(host, { tickMs: SCHEDULER_TICK_MS });
+const source = await loadConfigSource(configSourceNameFrom(process.env), { env: process.env, log, db });
+// Set: a dedicated host, serving one client and refusing every other. Unset: a pooled host,
+// resolving the client per event.
+const dedicatedClient = (optionalEnv('HARNESS_CLIENT') ?? '').trim() || null;
+const pool = await createHost({ db, env: process.env, log, now, source, dedicatedClient });
 
 const health = startHealthServer({
   port: port('APPROVALS_HEALTH_PORT', 8787),
   bind: process.env.APPROVALS_HEALTH_BIND?.trim() || DEFAULT_HEALTH_BIND,
-  snapshot: () => collectHealth(db, config.client, runner, host.now),
+  // One tenant: exactly the shape a container health check has always read. Several: the same
+  // shape per tenant under `tenants`, because there is no single client to report (decision 13).
+  snapshot: async (): Promise<HealthPayload> => {
+    const entries = await Promise.all(
+      [...pool.tenants.values()].map(
+        async (tenant) => [tenant.clientId, await collectHealth(db, tenant.clientId, tenant.runner, now)] as const,
+      ),
+    );
+    if (dedicatedClient !== null && entries.length === 1) return entries[0][1];
+    // A dedicated host between tenants — its one client is reloading — has nothing serving, and
+    // `every` over an empty list would call that healthy. `ok: false` is the true answer, and the
+    // shape says which tenants there are, which is none.
+    const serving = entries.length > 0 && entries.every(([, snapshot]) => snapshot.ok);
+    return { ok: serving, tenants: Object.fromEntries(entries) };
+  },
 });
 
-// The run API (spec 5.8). No bearer secret, no listener: a control plane that opened a socket with
-// no bearer secret because a variable was missing is the failure this avoids (decision 13). The
-// scheduler's handle goes in so `GET /v1/status` can report it, which is the one place that
-// status is reachable from.
+// The run API (spec 5.8). No bearer secret, no listener: a control plane that opened a socket
+// with no bearer secret because a variable was missing is the failure this avoids. One listener
+// per process, whatever the tenancy: it resolves the tenant a request belongs to per request.
 const hostToken = (optionalEnv('HARNESS_HOST_TOKEN') ?? '').trim();
 const runApi =
   hostToken === ''
     ? null
-    : startRunApi(host, {
+    : startRunApi(pool, {
         token: hostToken,
         bind: envOrDefault('HARNESS_HOST_BIND', DEFAULT_HOST_BIND),
         port: port('HARNESS_HOST_PORT', DEFAULT_HOST_PORT),
-        scheduler,
       });
 if (runApi) await runApi.ready;
 
-for (const session of surfaces.all) await session.start();
 log.info(
-  `listening (client=${config.client}, principal=${servicePrincipal.id}, runtime=${runtime.name}, identity=${identity.name}, surfaces=${surfaces.all.map((s) => s.name).join(',')}, primary=${surfaces.primary.name} on ${surfaces.primary.defaultConversation}, skills=${host.skills.length}, playbooks=${synced.upserted}, runApi=${runApi ? 'on' : 'off (set HARNESS_HOST_TOKEN)'})`,
+  `listening (mode=${pool.resolver.mode}, tenants=${[...pool.tenants.keys()].join(',') || 'none'}, runApi=${runApi ? 'on' : 'off (set HARNESS_HOST_TOKEN)'})`,
 );
 
 async function shutdown(signal: string): Promise<void> {
   log.info(`${signal} received, stopping`);
   try {
-    // No new tick from here on; the promise settles once the tick in flight has, which needs the
-    // drain below to abort the turn that tick is waiting on — so it is created first and awaited
-    // after.
-    const schedulerStopped = scheduler.stop();
     // Before the drain: nothing new is accepted while the turns in flight unwind, and the open
     // event streams are closed rather than holding the shutdown for as long as a caller listens.
     await runApi?.close();
-    // Abort the turns in flight and wait for them, bounded, before anything they are still using
-    // goes away: `runtime.stop()` ends the runtime's own pool and `closeDb()` the host's, and a
-    // turn that loses that race leaves its `runs` row `running` with nothing to sweep it.
-    await drainActive(host, SHUTDOWN_DRAIN_MS);
-    // Under the same bound, and for the same reason: the tick is waiting on a turn the drain has
-    // just aborted, and a runtime that ignores an abort would otherwise hold the whole shutdown
-    // here with nothing to time it out — until the container's grace period kills the process and
-    // leaves behind exactly the `running` rows the bounded drain exists to avoid.
-    await Promise.race([
-      schedulerStopped,
-      new Promise<void>((resolve) => setTimeout(resolve, SHUTDOWN_DRAIN_MS).unref()),
-    ]);
-    if (scheduler.status().ticking) {
-      log.warn(`the scheduler tick had not finished ${SHUTDOWN_DRAIN_MS}ms after the drain; stopping anyway`);
-    }
-    await runner.stop();
+    // Abort every tenant's turns and wait for them, bounded, before anything they are still
+    // using goes away: each tenant's `close` ends its runtime and `closeDb` the pool they share,
+    // and a turn that loses that race leaves its `runs` row `running` with nothing to sweep it.
+    await pool.drain(SHUTDOWN_DRAIN_MS);
+    await pool.close();
     await health.close();
-    for (const session of surfaces.all) await session.stop();
-    await runtime.stop();
-    await identity.stop();
-    await core.close();
     await closeDb();
     process.exit(0);
   } catch (err) {

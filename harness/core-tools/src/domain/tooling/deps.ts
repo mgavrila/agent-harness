@@ -4,8 +4,11 @@ import { PACK_KERNEL } from '../packs/kernel.js';
 import type { RunContext, ToolDeps } from './types.js';
 
 /**
- * The startup-only part of `ToolDeps`: what `buildKernelConfig` reads and loads once per process
- * — packs, policy, the key, the gateway, the storage root — and every run shares.
+ * The startup-only part of `ToolDeps`: what `buildKernelConfig` reads and loads once per **tenant**
+ * — packs, policy, the key, the gateway, the storage root — and every run of that tenant shares.
+ *
+ * Once per tenant and no longer once per process: a pooled host holds one of these per client it
+ * serves, and `depsForRun` clones the tenant's own rather than a process-wide one.
  */
 export type KernelConfig = Omit<
   ToolDeps,

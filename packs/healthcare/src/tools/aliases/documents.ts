@@ -8,8 +8,8 @@
  * a foreign document's result is returned exactly as the kernel produced it and the schemas below
  * widen to say both shapes are possible. Every widening is conditional on some other pack having
  * declared a document kind, which is what keeps the schemas byte-identical to the ones
- * `docs/architecture/tool-surface.json` records: that snapshot is taken for
- * `HARNESS_PACKS=@harness/pack-healthcare` alone.
+ * `docs/architecture/tool-surface.json` records: that snapshot is taken for a client whose `packs`
+ * list names `@harness/pack-healthcare` alone.
  *
  * Otherwise every schema here is the object the pre-Plan-5 `tools/documents.ts` declared, copied
  * without an edit, down to the order of its members.

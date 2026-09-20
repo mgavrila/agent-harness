@@ -16,10 +16,10 @@ function pluginFailed(specifier: string, err: unknown, stage: 'initialise' | 'co
 }
 
 /**
- * Load and connect the identity plug-in `HARNESS_IDENTITY` names.
+ * Load and connect the identity plug-in the client document names.
  *
- * The specifier is a variable, so this is the one place in core-tools that reaches a plug-in at
- * all, and it reaches it the way `loadPacks` reaches a pack: by name, at startup, with no
+ * The specifier is derived from a name, so this is the one place in core-tools that reaches a
+ * plug-in at all, and it reaches it the way `loadPacks` reaches a pack: by name, at startup, with no
  * build-time edge. `pnpm arch` forbids a static `identities/*` import anywhere else under `src/`.
  * The three failure modes are told apart the same way, so an operator who has debugged one has
  * debugged all three: an unresolvable specifier is replaced, because the resolver's own message

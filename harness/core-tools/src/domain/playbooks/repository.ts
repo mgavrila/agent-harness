@@ -23,11 +23,12 @@ export async function findPlaybook(db: Db, client: string, name: string): Promis
  */
 export async function requestPlaybookRun(
   db: Db,
-  input: { playbookId: string; now: Date; requestedBy: string },
+  input: { client: string; playbookId: string; now: Date; requestedBy: string },
 ): Promise<PlaybookRunRow> {
   const [row] = await db
     .insert(playbookRuns)
     .values({
+      client: input.client,
       playbookId: input.playbookId,
       scheduledAt: input.now,
       status: 'requested',

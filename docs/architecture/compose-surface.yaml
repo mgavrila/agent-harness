@@ -19,7 +19,6 @@ services:
         required: true
     environment:
       DATABASE_URL: postgres://harness:harness@postgres:5432/harness
-      HARNESS_CLIENT: ${HARNESS_CLIENT:-demo-practice}
       HARNESS_ENCRYPTION_KEY: ${HARNESS_ENCRYPTION_KEY:?set HARNESS_ENCRYPTION_KEY in .env}
       HARNESS_GATEWAY_URL: http://litellm:4000
       HARNESS_STORAGE_DIR: /data/storage
@@ -80,7 +79,9 @@ services:
       APPROVALS_POLL_SECONDS: ${APPROVALS_POLL_SECONDS:-5}
       DATABASE_URL: postgres://harness:harness@postgres:5432/harness
       EFFECTS_DISPATCH_SECONDS: ${EFFECTS_DISPATCH_SECONDS:-5}
-      HARNESS_CLIENT: ${HARNESS_CLIENT:-demo-practice}
+      HARNESS_CLIENT: ${HARNESS_CLIENT-}
+      HARNESS_CLIENTS_DIR: /srv/tenants
+      HARNESS_CONFIG_SOURCE: ${HARNESS_CONFIG_SOURCE:-files}
       HARNESS_EMBED_DIMS: ${HARNESS_EMBED_DIMS:-1024}
       HARNESS_ENCRYPTION_KEY: ${HARNESS_ENCRYPTION_KEY:-}
       HARNESS_FILES_URL: http://files:8790
@@ -90,20 +91,16 @@ services:
       HARNESS_HOST_PORT: "8788"
       HARNESS_HOST_PRINCIPAL: ${HARNESS_HOST_PRINCIPAL:-svc-host}
       HARNESS_HOST_TOKEN: ${HARNESS_HOST_TOKEN:-}
-      HARNESS_IDENTITY: ${HARNESS_IDENTITY:-@harness/identity-static}
-      HARNESS_PACKS: ${HARNESS_PACKS-@harness/pack-healthcare}
-      HARNESS_POLICY_FILE: /srv/agent-harness/clients/${HARNESS_CLIENT:?set HARNESS_CLIENT in .env}/policy.yaml
       HARNESS_RUN_MAX_MODEL_CALLS: ${HARNESS_RUN_MAX_MODEL_CALLS:-30}
       HARNESS_RUN_MAX_TOOL_CALLS: ${HARNESS_RUN_MAX_TOOL_CALLS:-60}
       HARNESS_RUN_TIMEOUT_S: ${HARNESS_RUN_TIMEOUT_S:-600}
-      HARNESS_RUNTIME: ${HARNESS_RUNTIME:-@harness/runtime-deepagents}
       HARNESS_STORAGE_DIR: /srv/harness-storage
-      HARNESS_SURFACES: ${HARNESS_SURFACES:-@harness/surface-slack,@harness/surface-http}
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?set LITELLM_MASTER_KEY in .env}
       RECONCILE_SECONDS: ${RECONCILE_SECONDS:-300}
       SLACK_APP_TOKEN: ${SLACK_APP_TOKEN:-}
       SLACK_APPROVALS_CHANNEL: ${SLACK_APPROVALS_CHANNEL:-}
       SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN:-}
+      SLACK_SIGNING_SECRET: ${SLACK_SIGNING_SECRET:-}
     image: harness-host
     networks:
       default: null
@@ -125,11 +122,9 @@ services:
         source: ../../packs
         target: /srv/agent-harness/packs
         type: bind
-      - bind:
-          create_host_path: true
-        read_only: true
-        source: ../../clients
-        target: /srv/agent-harness/clients
+      - read_only: true
+        source: ${HARNESS_CLIENTS_DIR:-../../clients}
+        target: /srv/tenants
         type: bind
   litellm:
     command:

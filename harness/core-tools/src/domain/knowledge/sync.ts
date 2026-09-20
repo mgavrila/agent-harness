@@ -82,10 +82,19 @@ function isRestricted(doc: ParsedKnowledgeDocument, chunks: readonly string[]): 
  * otherwise leave the whole folder on yesterday's content.
  */
 export async function syncKnowledge(deps: ToolDeps, opts: { dir?: string } = {}): Promise<KnowledgeSyncResult> {
-  const dir = opts.dir ?? path.join(deps.clientDir, 'knowledge');
+  const dir = opts.dir ?? deps.knowledgeDir;
+  if (dir === null) {
+    throw new ToolError(
+      "this client keeps its knowledge in the store, not in a directory; the document's `knowledge` section decides which",
+    );
+  }
   const now = deps.now();
-  // A stable, readable location rather than the absolute path, which differs between a checkout
-  // and a container and would rewrite the row on every start for no reason.
+  // A stable, readable label on the `knowledge_sources` row rather than the absolute path, which
+  // differs between a checkout and a container and would rewrite the row on every start for no
+  // reason. Nothing opens it: `dir` above is what is read. It still spells the layout a client
+  // had when clients lived in this repository, and goes on spelling it: the label is part of the
+  // row's identity, so changing it would rewrite every existing row to say the same thing
+  // differently.
   const location = opts.dir ?? path.posix.join('clients', deps.client, 'knowledge');
   const { id: sourceId } = await findOrCreateSource(
     deps.db,

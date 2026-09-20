@@ -10,11 +10,21 @@ resolve against NPPES — that mismatch is part of the demo.
 ## Before you start
 
 ```bash
-cp clients/demo-practice/.env.example .env        # fill in the blanks
 pnpm install
 pnpm db:up && pnpm db:migrate
+pnpm new-client --name demo-practice --pack healthcare --target ../harness-tenants
+cp .env.example .env
+# then, in .env: HARNESS_CLIENTS_DIR=../harness-tenants, HARNESS_CLIENT=demo-practice,
+# and fill in the blanks pnpm new-client printed
 pnpm demo:up
 ```
+
+`pnpm new-client` writes one client document, `../harness-tenants/demo-practice/client.yaml`, and
+a `persona.md` beside it — never into this repository. Add a `surfaces.slack` section to that
+document (`teamId`, and `signingSecret` and `botToken` as `{ env: <NAME> }` references naming the
+environment variables below) before creating the Slack app. `teamId` is the id of the workspace
+the app is installed in — the `T…` segment of any workspace URL — and the host refuses an event
+from any other.
 
 Create one Slack app before filling in `.env`, with Socket Mode and Interactivity both on. Its
 bot scopes are `chat:write`, `app_mentions:read`, `channels:history`, `groups:history`,
@@ -23,9 +33,9 @@ Paste `SLACK_BOT_TOKEN` and `SLACK_APP_TOKEN` into `.env`, along with `SLACK_APP
 One app now carries both chat and approvals, because the host is the only process that holds a
 Socket Mode connection.
 
-The host posts on whichever surface `HARNESS_SURFACES` names first. It has no default of its
-own; the demo's `.env` and the `host` service both set `@harness/surface-slack`, which is why
-Slack is what you see here.
+The host posts on whichever surface is first in the client document's `surfaces` section, by the
+schema's own fixed order (`slack`, `memory`, `http`). The demo's document declares `slack`, which
+is why Slack is what you see here.
 
 Then in Slack, invite the bot to `SLACK_APPROVALS_CHANNEL` and to every other channel it should
 answer in. Generate the synthetic provider files with the generator from the document-pipeline
@@ -66,13 +76,13 @@ is attributed to the person who answered.
 
 `deadlines_upcoming` answers with no model call behind it: the date maths is
 deterministic. The `credentialing-expirations` skill runs nightly from the
-scheduler as `svc-playbooks` (`clients/demo-practice/playbooks.yaml`);
+scheduler as `svc-playbooks` (the client document's own `playbooks` section);
 `playbooks_run_now` fires it on demand.
 
 ### A cited answer, at the asker's level
 
-The demo ships two knowledge documents in `clients/demo-practice/knowledge/`. Sync them once, as
-the practice manager (an `admin`, so the sync runs rather than parking for approval):
+The demo document's `knowledge` section points at a directory of two markdown files. Sync them
+once, as the practice manager (an `admin`, so the sync runs rather than parking for approval):
 
 ```
 @assistant refresh the knowledge base
@@ -84,8 +94,9 @@ Then ask, as the coordinator (a `lead`):
 @assistant how do we escalate something urgent?
 ```
 
-The answer quotes `escalation-and-billing.md` and names it. Add a `member` to `identity.yaml` and
-ask the same thing as them and the assistant says it does not have that and offers to ask a lead:
+The answer quotes `escalation-and-billing.md` and names it. Add a `member` to the document's
+`identity` section and ask the same thing as them and the assistant says it does not have that and
+offers to ask a lead:
 `knowledge_search` returned only `front-desk.md`, because the escalation document is
 `min_level: lead`. Nothing about the second document leaks into the refusal — the member's search
 never ranked it.
@@ -123,8 +134,9 @@ runtime stamps the skill it activated.
 
 ### 6. Swap the model provider (30 seconds)
 
-Edit `clients/demo-practice/routing.yaml` to point the `chat` route at a
-different provider, restart the gateway, and ask the same expirations question.
+Edit the client document's own `routing` section to point the `chat` route at a different
+provider, run `pnpm gateway:config` to re-render it, restart the gateway, and ask the same
+expirations question.
 
 ```bash
 docker compose --env-file .env -f harness/compose/docker-compose.yml restart litellm

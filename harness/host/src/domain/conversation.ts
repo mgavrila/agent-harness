@@ -1,11 +1,13 @@
-import { hashArgs, memorySnapshot, writeAudit, type RunStatus } from '@harness/core-tools';
+import { hashArgs, memorySnapshot, recordModelCall, writeAudit, type RunStatus } from '@harness/core-tools';
 import { containsRestrictedPattern } from '@harness/core-tools/redaction';
+import type { Db } from '@harness/db';
 import type { Principal } from '@harness/identity-api';
 import type { RunEvent, RunRequest, RunSkill } from '@harness/runtime-api';
-import { describeError } from '@harness/shared';
+import { describeError, type Logger } from '@harness/shared';
 import type { MessageEvent, MessageRef, StreamHandle, SurfaceSession } from '@harness/surface-api';
 import type { Host } from './host.js';
 import { openKernel } from './kernel.js';
+import type { ClientResolver } from './tenancy/resolver-types.js';
 import { WITHHELD, appendMessage, findOrCreateThread, recentHistory, type ThreadRow } from './threads/repository.js';
 import { HISTORY_MAX_CHARS, trimHistory } from './threads/trim.js';
 
@@ -33,7 +35,7 @@ export const EMPTY_REPLY = 'I finished without an answer; ask again and I will t
  */
 export const TIMEOUT_MARGIN_MS = 5_000;
 
-/** How long `app/main.ts` gives the turns in flight to unwind before it stops the runtime. */
+/** How long the entrypoint gives the turns in flight to unwind before it stops the runtime. */
 export const SHUTDOWN_DRAIN_MS = 10_000;
 
 const ABORT_REASONS = ['cancelled', 'timeout', 'cost-cap'] as const;
@@ -256,6 +258,7 @@ export async function runTurn(host: Host, turn: TurnInput): Promise<TurnResult> 
     await emit({ type: 'run', runId });
     try {
       await appendMessage(host.db, {
+        client: host.client,
         threadId: turn.thread.id,
         runId,
         role: turn.role,
@@ -265,7 +268,7 @@ export async function runTurn(host: Host, turn: TurnInput): Promise<TurnResult> 
       // The row just appended is always the newest, and it is the turn being run, not history:
       // it is dropped *before* the character budget is spent, so a long message cannot empty its
       // own history. `+ 1` fetches it so that exactly `maxHistoryMessages` real turns remain.
-      const rows = await recentHistory(host.db, turn.thread.id, host.budget.maxHistoryMessages + 1);
+      const rows = await recentHistory(host.db, host.client, turn.thread.id, host.budget.maxHistoryMessages + 1);
       const history = trimHistory(rows.slice(0, -1), {
         maxMessages: host.budget.maxHistoryMessages,
         maxChars: HISTORY_MAX_CHARS,
@@ -318,6 +321,21 @@ export async function runTurn(host: Host, turn: TurnInput): Promise<TurnResult> 
               // What the cap bounds today is whatever the runtime reports; see the runbook's
               // "Playbooks" section for what that is worth with the shipped runtime.
               spentUsd += event.costUsd;
+              // And persisted, on the same table the kernel's own calls go to. Before this the
+              // runtime's spend was added up here for the cap and then dropped, so the run's
+              // totals — which `finishRun` sums from these rows, and which the usage export
+              // reads — reported the kernel's half of the bill as the whole of it (spec §4.5).
+              // The route is the one the runtime was configured to talk on, not a literal, so a
+              // deployment that moves the conversation to another route says so in the row.
+              await recordModelCall(host.db, {
+                runId,
+                client: host.client,
+                route: host.model.route,
+                model: host.model.route,
+                inputTokens: event.inputTokens,
+                outputTokens: event.outputTokens,
+                costUsd: event.costUsd,
+              });
               if (turn.costCapUsd !== undefined && spentUsd > turn.costCapUsd && !controller.signal.aborted) {
                 abort('cost-cap');
               }
@@ -405,6 +423,7 @@ export async function runTurn(host: Host, turn: TurnInput): Promise<TurnResult> 
       }
       if (status !== 'cancelled' && text !== '') {
         await appendMessage(host.db, {
+          client: host.client,
           threadId: turn.thread.id,
           runId,
           role: 'assistant',
@@ -554,14 +573,51 @@ export async function handleMessage(host: Host, event: MessageEvent): Promise<vo
   );
 }
 
-/** Register the flow on every loaded surface. A handler's failure is logged, never thrown into the adapter. */
-export function attachMessageHandlers(host: Host): void {
-  for (const session of host.surfaces.all) {
+/**
+ * Register the flow on every one of this tenant's surfaces. A handler's failure is logged, never
+ * thrown into the adapter.
+ *
+ * Every event is checked against the pool's resolver before anything else happens. On a dedicated
+ * host that is invariant 19: an event whose workspace belongs to another client is refused and
+ * audited rather than answered with this client's data. On a pooled host it is the same check
+ * from the other side — the surface that delivered the event belongs to this tenant, so an event
+ * naming a different workspace has been misrouted and is not this tenant's to answer.
+ *
+ * Both parameters are structural on purpose: this module may not import `./tenancy/types.js`,
+ * which reaches `playbooks/scheduler.ts`, which reaches this file. `ClientResolver` comes from
+ * the leaf `./tenancy/resolver-types.js`, which imports nothing, so no cycle runs through it and
+ * `pnpm arch`'s `no-circular` stays green. `pool.ts` passes the whole pool and the whole tenant,
+ * which satisfy these shapes.
+ */
+export function attachMessageHandlers(
+  pool: { db: Db; log: Logger; resolver: ClientResolver },
+  tenant: { clientId: string; host: Host },
+): void {
+  for (const session of tenant.host.surfaces.all) {
     session.onMessage(async (event) => {
       try {
-        await handleMessage(host, event);
+        const claimed = pool.resolver.resolve({
+          from: 'surface',
+          surface: event.surface,
+          tenantHint: event.tenantHint ?? null,
+        });
+        if (claimed !== tenant.clientId) {
+          await writeAudit(pool.db, {
+            client: tenant.clientId,
+            caller: `${event.surface}:${event.userId}`,
+            tool: 'host_message',
+            actionClass: 'read',
+            argsHash: hashArgs({ conversation: event.conversation, tenantHint: event.tenantHint ?? null }),
+            decision: 'unauthorised',
+          });
+          pool.log.warn(
+            `tenant ${tenant.clientId}: a message on surface "${event.surface}" named another tenant; refused`,
+          );
+          return;
+        }
+        await handleMessage(tenant.host, event);
       } catch (err) {
-        host.log.error(`the message handler failed on surface "${session.name}": ${describeError(err)}`);
+        pool.log.error(`the message handler failed on surface "${session.name}": ${describeError(err)}`);
       }
     });
   }

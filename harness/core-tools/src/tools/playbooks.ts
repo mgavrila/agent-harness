@@ -44,8 +44,11 @@ const playbooksRunNow = defineTool({
     const playbook = await findPlaybook(deps.db, deps.client, name);
     if (!playbook) throw new ToolError(`no playbook named "${name}"`);
     if (!playbook.enabled)
-      throw new ToolError(`playbook "${name}" is disabled; enable it in playbooks.yaml and restart the host`);
+      throw new ToolError(
+        `playbook "${name}" is disabled; enable it in the client document's playbooks section, and the tenant reopens on the next version`,
+      );
     const run = await requestPlaybookRun(deps.db, {
+      client: deps.client,
       playbookId: playbook.id,
       now: deps.now(),
       requestedBy: deps.principal.id,

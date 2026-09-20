@@ -84,7 +84,7 @@ export async function executePlaybook(
   const { playbook, run } = claimed;
   const flight = await preflightPlaybook(host, playbook);
   if (!flight.ok) {
-    await finishPlaybookRun(host.db, run.id, {
+    await finishPlaybookRun(host.db, host.client, run.id, {
       status: 'preflight_failed',
       runId: null,
       attempts: 0,
@@ -131,7 +131,7 @@ export async function executePlaybook(
   });
 
   const status = error === null ? 'done' : 'failed';
-  await finishPlaybookRun(host.db, run.id, { status, runId, attempts, error, endedAt: host.now() });
+  await finishPlaybookRun(host.db, host.client, run.id, { status, runId, attempts, error, endedAt: host.now() });
   if (status === 'failed') {
     await stagePlaybookNotice(host, {
       playbook,
@@ -224,7 +224,7 @@ export function startScheduler(host: Host, opts: { tickMs: number }): SchedulerH
         outcome = await executePlaybook(host, entry);
       } catch (err) {
         host.log.error(`playbook "${entry.playbook.name}": the firing could not be recorded`, err);
-        await finishPlaybookRun(host.db, entry.run.id, {
+        await finishPlaybookRun(host.db, host.client, entry.run.id, {
           status: 'failed',
           runId: null,
           attempts: 0,

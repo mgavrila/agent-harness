@@ -8,13 +8,15 @@ namespace for the identity plug-in to resolve `(surface, userId)` in, and a load
 host to find. Every capability is false, and every posting method rejects with a `SurfaceError`,
 because an HTTP request has no conversation that outlives it.
 
-Load it **after** a surface a human reads:
+Declare it in a client document beside a surface a human reads:
 
-    HARNESS_SURFACES=@harness/surface-slack,@harness/surface-http
+    surfaces:
+      slack: { teamId: T0123456, signingSecret: { env: SLACK_SIGNING_SECRET }, botToken: { env: SLACK_BOT_TOKEN } }
+      http: {}
 
-The first entry is the primary surface and is where approval cards are posted; this one could not
-post a card if it were asked to. Give each principal that may call the API an `http` entry in
-`clients/<name>/identity.yaml`:
+The schema's own `SURFACE_ORDER` always places `http` last, so the primary surface — where
+approval cards are posted — is never this one; it could not post a card if it were asked to. Give
+each principal that may call the API an `http` entry in the document's `identity` section:
 
     - id: u-coordinator
       surfaces:

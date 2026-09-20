@@ -7,7 +7,7 @@ import { readJsonl } from '@harness/shared';
  * One attachment a case expects the pipeline to have stored.
  *
  * `kind` is an open string: the closed union it used to be was a copy of the healthcare pack's
- * four kinds, and this loader reads whichever pack's corpus `HARNESS_PACKS` names.
+ * four kinds, and this loader reads whichever pack's corpus `--packs` names.
  */
 export interface ExpectedAttachment {
   kind: string;

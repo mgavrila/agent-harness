@@ -12,17 +12,18 @@ async function client(level: Level, id = 'u-reader', kind: 'user' | 'service' = 
   const fake = await startFakeGateway();
   onTestFinished(() => fake.close());
   const clientDir = await mkdtemp(path.join(tmpdir(), 'harness-client-'));
-  await mkdir(path.join(clientDir, 'knowledge'), { recursive: true });
+  const knowledgeDir = path.join(clientDir, 'knowledge');
+  await mkdir(knowledgeDir, { recursive: true });
   await writeFile(
-    path.join(clientDir, 'knowledge', 'front-desk.md'),
+    path.join(knowledgeDir, 'front-desk.md'),
     '---\ntitle: Front desk\nmin_level: member\n---\n\nThe front desk answers the telephone until five.\n',
   );
   await writeFile(
-    path.join(clientDir, 'knowledge', 'escalation.md'),
+    path.join(knowledgeDir, 'escalation.md'),
     '---\ntitle: Escalation\nmin_level: lead\n---\n\nEscalate an urgent matter to the duty lead.\n',
   );
   const deps = makeTestDeps(db, {
-    clientDir,
+    knowledgeDir,
     gateway: { baseUrl: fake.url, apiKey: 'sk-test', timeoutMs: 5_000, maxCallsPerRun: 200 },
     principal: {
       id,

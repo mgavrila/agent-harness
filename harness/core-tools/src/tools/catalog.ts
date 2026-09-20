@@ -38,7 +38,9 @@ export function kernelTools(packs: PackRegistry): AnyToolDef[] {
  * two kinds of tool nothing loaded can serve — the generic `records_*` tools when no loaded
  * record kind wants them, and `documents_classify`, `documents_extract` and `deadlines_compute`
  * when no loaded pack declares a document kind — plus every source's own. `publishedCatalogue`
- * is where those rules live and where each of them fails loudly.
+ * is where those rules live and where each of them fails loudly. Less, finally, every name the
+ * client's own `policy.tools.hide` withholds — whoever publishes it — which is how a deployment
+ * drops one tool without blinding its action class.
  */
 export function publishedTools(deps: ToolDeps, kernel: AnyToolDef[] = kernelTools(deps.packs)): AnyToolDef[] {
   const sources: ToolSource[] = deps.packs.all.map((pack) => ({
@@ -59,11 +61,20 @@ export function publishedTools(deps: ToolDeps, kernel: AnyToolDef[] = kernelTool
   // is loaded" means here: `definePack` refuses a pack that declares no document kind, so a
   // registry with one is a registry with record kinds too.
   const anyDocumentKind = deps.packs.documentKinds().length > 0;
-  const hidden = new Set<string>([
+  const gated = new Set<string>([
     ...(anyGenericKind ? [] : GENERIC_RECORD_TOOLS),
     ...(anyDocumentKind ? [] : [...PACK_DOCUMENT_TOOLS, ...PACK_DEADLINE_TOOLS]),
   ]);
-  return publishedCatalogue(kernel, sources, hidden);
+  // The client's own list is applied *after* the sources have contributed, not folded into the
+  // gating set above, and the difference is the whole of what `tools.hide` means. The gating set
+  // withholds kernel tools nothing loaded can serve, so it has to run before a pack publishes;
+  // the client's list withholds a name from the catalogue a person is offered, whoever publishes
+  // it — the kernel, a pack, or a pack's replacement of a kernel name. Filtering here rather than
+  // inside `publishedCatalogue` also leaves the replacement rules alone: a pack that replaces a
+  // hidden name still has to publish it, so hiding a tool can never turn a misconfigured pack
+  // into a silent one.
+  const byClient = new Set(deps.hiddenTools);
+  return publishedCatalogue(kernel, sources, gated).filter((tool) => !byClient.has(tool.name));
 }
 
 /**

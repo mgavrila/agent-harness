@@ -1,5 +1,4 @@
 import type { AddressInfo } from 'node:net';
-import type { SchedulerStatus } from '../playbooks/scheduler.js';
 
 /**
  * The run API's limits (spec 5.8, decision 19). Constants, not settings: the five below are what
@@ -34,13 +33,20 @@ export const SSE_KEEPALIVE_MS = 15_000;
 export const DEFAULT_HOST_BIND = '127.0.0.1';
 export const DEFAULT_HOST_PORT = 8788;
 
+/**
+ * The header a caller names its client with.
+ *
+ * On a dedicated host it may be absent and a value that is not that host's client is refused; on
+ * a pooled host it is required, because a pool that picked a tenant for a caller who had not
+ * named one would pick the wrong one the day it had two.
+ */
+export const CLIENT_HEADER = 'x-harness-client';
+
 export interface RunApiOptions {
   /** `HARNESS_HOST_TOKEN`. Never empty: with no token there is no API (decision 13). */
   token: string;
   bind?: string;
   port?: number;
-  /** The scheduler, so `GET /v1/status` can report it. Absent in a test that starts none. */
-  scheduler?: { status(): SchedulerStatus };
 }
 
 export interface RunApiServer {

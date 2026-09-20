@@ -1,47 +1,22 @@
-import { mkdtemp, mkdir, rm, writeFile, readFile } from 'node:fs/promises';
+import { mkdtemp, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
+import { filesConfigSource } from '@harness/config-files';
 import { newClient, titleCase } from './scaffold.js';
 
-let root: string;
+const log = { info() {}, warn() {}, error() {} };
+const targets: string[] = [];
 
-/** A repository skeleton with just the parts new-client reads: the five files plus .env.example. */
-async function scaffold(): Promise<void> {
-  await mkdir(path.join(root, 'packs', 'healthcare'), { recursive: true });
-  const template = path.join(root, 'clients', 'demo-practice');
-  await mkdir(template, { recursive: true });
-  await writeFile(
-    path.join(template, 'SOUL.md'),
-    '# Demo Practice credentialing assistant\nYou work for Demo Practice.\n',
-  );
-  await writeFile(path.join(template, 'policy.yaml'), 'classes:\n  external: approval\n');
-  await writeFile(
-    path.join(template, 'identity.yaml'),
-    'principals:\n  - id: svc-local\n    kind: service\n    level: service\n    displayName: Demo Practice\n',
-  );
-  await writeFile(path.join(template, 'routing.yaml'), 'routes:\n  chat: demo-practice-chat\n');
-  await writeFile(
-    path.join(template, 'playbooks.yaml'),
-    "playbooks:\n  - name: nightly\n    schedule: '0 7 * * *'\n    skill: demo-practice-skill\n    prompt: Run it for Demo Practice.\n    principal: svc-playbooks\n    cost_cap_usd: 0.5\n",
-  );
-  await writeFile(
-    path.join(template, '.env.example'),
-    'HARNESS_CLIENT=demo-practice\nHARNESS_PACKS=@harness/pack-healthcare\n',
-  );
-  await mkdir(path.join(template, 'knowledge'), { recursive: true });
-  await writeFile(
-    path.join(template, 'knowledge', 'front-desk.md'),
-    '---\ntitle: Front desk\nmin_level: member\n---\n\nDemo Practice answers the telephone until five.\n',
-  );
+/** A directory that is not this repository, which is the only place a client may be written. */
+async function newTarget(): Promise<string> {
+  const target = await mkdtemp(path.join(tmpdir(), 'harness-tenants-'));
+  targets.push(target);
+  return target;
 }
 
-beforeEach(async () => {
-  root = await mkdtemp(path.join(tmpdir(), 'harness-newclient-'));
-  await scaffold();
-});
 afterEach(async () => {
-  await rm(root, { recursive: true, force: true });
+  for (const target of targets.splice(0)) await rm(target, { recursive: true, force: true });
 });
 
 describe('titleCase', () => {
@@ -52,124 +27,94 @@ describe('titleCase', () => {
 });
 
 describe('newClient', () => {
-  it('copies the template and substitutes the client name everywhere', async () => {
-    const out = await newClient({ pack: 'healthcare', name: 'river-clinic', root });
-    expect(out.dir).toBe(path.join(root, 'clients', 'river-clinic'));
-    expect(out.files.sort()).toEqual(
-      [
-        '.env.example',
-        'SOUL.md',
-        'identity.yaml',
-        'knowledge/front-desk.md',
-        'playbooks.yaml',
-        'policy.yaml',
-        'routing.yaml',
-      ].sort(),
-    );
-    expect(out.skipped).toEqual([]);
+  it('writes a client document and its persona into the directory it was given', async () => {
+    const target = await newTarget();
+    const result = await newClient({ name: 'river-clinic', displayName: 'River Clinic', pack: 'healthcare', target });
+    expect(result.dir).toBe(path.join(target, 'river-clinic'));
+    expect(result.files.sort()).toEqual(['client.yaml', 'persona.md']);
 
-    const soul = await readFile(path.join(out.dir, 'SOUL.md'), 'utf8');
-    expect(soul).toContain('River Clinic');
-    expect(soul).not.toContain('Demo Practice');
-
-    const identity = await readFile(path.join(out.dir, 'identity.yaml'), 'utf8');
-    expect(identity).toContain('displayName: River Clinic');
-    expect(identity).not.toContain('Demo Practice');
-
-    const env = await readFile(path.join(out.dir, '.env.example'), 'utf8');
-    expect(env).toContain('HARNESS_CLIENT=river-clinic');
-
-    const playbooksFile = await readFile(path.join(out.dir, 'playbooks.yaml'), 'utf8');
-    expect(playbooksFile).toContain('Run it for River Clinic.');
-    expect(playbooksFile).not.toContain('demo-practice');
+    const loaded = await filesConfigSource({ root: target, log }).load('river-clinic');
+    expect(loaded?.document.id).toBe('river-clinic');
+    expect(loaded?.document.displayName).toBe('River Clinic');
+    expect(loaded?.document.packs).toEqual(['@harness/pack-healthcare']);
+    expect(loaded?.document.persona).toContain('River Clinic');
   });
 
-  it('reports a template file that is missing as skipped', async () => {
-    await rm(path.join(root, 'clients', 'demo-practice', 'routing.yaml'));
-    const out = await newClient({ pack: 'healthcare', name: 'river-clinic', root });
-    expect(out.skipped).toEqual(['routing.yaml']);
-    expect(out.files.sort()).toEqual(
-      ['.env.example', 'SOUL.md', 'identity.yaml', 'knowledge/front-desk.md', 'playbooks.yaml', 'policy.yaml'].sort(),
-    );
+  it('writes a client with no pack, which used to need an empty variable', async () => {
+    const target = await newTarget();
+    await newClient({ name: 'internal-team', target });
+    const loaded = await filesConfigSource({ root: target, log }).load('internal-team');
+    expect(loaded?.document.packs).toEqual([]);
   });
 
-  it('copies the knowledge folder, rewriting the client name inside each document', async () => {
-    const out = await newClient({ pack: 'healthcare', name: 'river-clinic', root });
-    const document = await readFile(path.join(out.dir, 'knowledge', 'front-desk.md'), 'utf8');
-    expect(document).toContain('River Clinic answers the telephone until five.');
-    expect(document).toContain('min_level: member');
-    expect(document).not.toContain('Demo Practice');
+  it('schedules nothing, because a new client runs what somebody asked it to and no more', async () => {
+    const target = await newTarget();
+    await newClient({ name: 'river-clinic', target });
+    const loaded = await filesConfigSource({ root: target, log }).load('river-clinic');
+    expect(loaded?.document.playbooks.playbooks).toEqual([]);
   });
 
-  it('reports a missing knowledge folder as skipped rather than failing', async () => {
-    await rm(path.join(root, 'clients', 'demo-practice', 'knowledge'), { recursive: true, force: true });
-    const out = await newClient({ pack: 'healthcare', name: 'river-clinic', root });
-    expect(out.skipped).toEqual(['knowledge/']);
-    expect(out.files).not.toContain('knowledge/front-desk.md');
+  it("takes a runtime when the deployment runs one, and the fixture's otherwise", async () => {
+    const target = await newTarget();
+    await newClient({ name: 'river-clinic', target });
+    await newClient({ name: 'internal-team', runtime: 'scripted', target });
+    const source = filesConfigSource({ root: target, log });
+    expect((await source.load('river-clinic'))?.document.runtime).toBe('deepagents');
+    expect((await source.load('internal-team'))?.document.runtime).toBe('scripted');
   });
 
-  it('refuses a slug that is not a safe directory name', async () => {
-    for (const bad of ['River Clinic', '../escape', 'x', 'UPPER', 'trailing-', '9lives']) {
-      await expect(newClient({ pack: 'healthcare', name: bad, root })).rejects.toThrow(/name must be/);
+  it('creates the knowledge directory its own document declares, so the client loads at all', async () => {
+    const target = await newTarget();
+    const result = await newClient({ name: 'river-clinic', target });
+    await expect(readdir(path.join(result.dir, 'knowledge'))).resolves.toEqual([]);
+  });
+
+  it('never writes inside this repository unless it was pointed at it', async () => {
+    const target = await newTarget();
+    const result = await newClient({ name: 'river-clinic', target });
+    expect(result.dir.startsWith(target)).toBe(true);
+    expect(result.dir).not.toContain(`${path.sep}clients${path.sep}`);
+  });
+
+  it('refuses to write anywhere at all when neither --target nor HARNESS_CLIENTS_DIR says where', async () => {
+    const previous = process.env.HARNESS_CLIENTS_DIR;
+    delete process.env.HARNESS_CLIENTS_DIR;
+    try {
+      await expect(newClient({ name: 'river-clinic' })).rejects.toThrow(/nowhere to write/);
+    } finally {
+      if (previous !== undefined) process.env.HARNESS_CLIENTS_DIR = previous;
     }
   });
 
-  it('scaffolds a client with no pack at all, and empties HARNESS_PACKS to say so', async () => {
-    // `HARNESS_PACKS=`: a client that wants the kernel's own tools and no product area. The
-    // folder is the same folder; the one line that differs is the one that decides it.
-    const out = await newClient({ name: 'internal-team', root });
-    expect(out.dir).toBe(path.join(root, 'clients', 'internal-team'));
-    expect(out.files).toContain('.env.example');
-    const env = await readFile(path.join(out.dir, '.env.example'), 'utf8');
-    expect(env).toMatch(/^HARNESS_PACKS=$/m);
-    expect(env).not.toContain('@harness/pack-healthcare');
-    expect(env).toContain('HARNESS_CLIENT=internal-team');
+  it('falls back to HARNESS_CLIENTS_DIR when no target is passed', async () => {
+    const target = await newTarget();
+    const previous = process.env.HARNESS_CLIENTS_DIR;
+    process.env.HARNESS_CLIENTS_DIR = target;
+    try {
+      const result = await newClient({ name: 'river-clinic' });
+      expect(result.dir).toBe(path.join(target, 'river-clinic'));
+    } finally {
+      if (previous === undefined) delete process.env.HARNESS_CLIENTS_DIR;
+      else process.env.HARNESS_CLIENTS_DIR = previous;
+    }
   });
 
-  it('writes the HARNESS_PACKS line even when the template carries none', async () => {
-    await writeFile(path.join(root, 'clients', 'demo-practice', '.env.example'), 'HARNESS_CLIENT=demo-practice\n');
-    const out = await newClient({ name: 'internal-team', root });
-    expect(await readFile(path.join(out.dir, '.env.example'), 'utf8')).toMatch(/^HARNESS_PACKS=$/m);
+  it('refuses to overwrite a client that is already there', async () => {
+    const target = await newTarget();
+    await newClient({ name: 'river-clinic', target });
+    await expect(newClient({ name: 'river-clinic', target })).rejects.toThrow(/already exists/);
   });
 
-  it('copies the template’s HARNESS_PACKS line untouched when a pack is named', async () => {
-    const out = await newClient({ pack: 'healthcare', name: 'river-clinic', root });
-    expect(await readFile(path.join(out.dir, '.env.example'), 'utf8')).toContain(
-      'HARNESS_PACKS=@harness/pack-healthcare',
-    );
+  it('refuses a pack this build does not ship, before it writes anything', async () => {
+    const target = await newTarget();
+    await expect(newClient({ name: 'river-clinic', pack: 'nope', target })).rejects.toThrow(/no pack named "nope"/);
+    await expect(readdir(target)).resolves.toEqual([]);
   });
 
-  it('refuses a pack that is not installed', async () => {
-    await expect(newClient({ pack: 'dentistry', name: 'river-clinic', root })).rejects.toThrow(
-      /no pack named "dentistry"/,
-    );
+  it('refuses a slug that is not a safe directory name', async () => {
+    const target = await newTarget();
+    for (const bad of ['River Clinic', '../escape', 'x', 'UPPER', 'trailing-', '9lives']) {
+      await expect(newClient({ pack: 'healthcare', name: bad, target })).rejects.toThrow(/name must be/);
+    }
   });
-
-  it('refuses to overwrite an existing client', async () => {
-    await newClient({ pack: 'healthcare', name: 'river-clinic', root });
-    await expect(newClient({ pack: 'healthcare', name: 'river-clinic', root })).rejects.toThrow(/already exists/);
-  });
-
-  // chmod 000 does not block reads for root (root bypasses file permission
-  // checks), so this test would spuriously pass there: there'd be no read
-  // failure to clean up after.
-  const isRoot = typeof process.getuid === 'function' && process.getuid() === 0;
-
-  it.skipIf(isRoot)(
-    'removes a half-written client directory when the copy fails (skipped as root: chmod 000 does not block root reads)',
-    async () => {
-      const { access, chmod } = await import('node:fs/promises');
-      const blocked = path.join(root, 'clients', 'demo-practice', 'policy.yaml');
-      await chmod(blocked, 0o000);
-      try {
-        await expect(newClient({ pack: 'healthcare', name: 'river-clinic', root })).rejects.toThrow();
-        await expect(access(path.join(root, 'clients', 'river-clinic'))).rejects.toThrow();
-      } finally {
-        await chmod(blocked, 0o644);
-      }
-
-      const out = await newClient({ pack: 'healthcare', name: 'river-clinic', root });
-      expect(out.dir).toBe(path.join(root, 'clients', 'river-clinic'));
-    },
-  );
 });

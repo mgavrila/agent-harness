@@ -1,5 +1,5 @@
 # Default action-class policy for a healthcare credentialing deployment.
-# A client overrides it with clients/<name>/policy.yaml; see
+# A client overrides it in its own document's policy section; see
 # harness/core-tools/src/domain/tooling/policy.ts for how the two are merged.
 classes:
   # Reading records, deadlines, the audit log, and public registry lookups.

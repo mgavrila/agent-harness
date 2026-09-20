@@ -4,7 +4,6 @@ import {
   DEFAULT_POLICY,
   MASKED,
   PACK_KERNEL,
-  clientDirFor,
   createCoreToolsServer,
   loadPacks,
   localParser,
@@ -81,9 +80,9 @@ export interface OpenPipelineOptions {
   /** Defaults to the shipped threshold. Set it to measure a different one. */
   confidenceThreshold?: number;
   /**
-   * Packs to load, as `HARNESS_PACKS` would name them, first one first. Not defaulted: the eval
+   * Packs to load, as `--packs` would name them, first one first. Not defaulted: the eval
    * runner has no opinion about which pack it measures, and a default here would be one — the
-   * caller that knows is the CLI, which reads `HARNESS_PACKS`. Give this or `registry`.
+   * caller that knows is the CLI, which reads `--packs`. Give this or `registry`.
    */
   packs?: readonly string[];
   /**
@@ -224,9 +223,10 @@ export async function openPipeline(opts: OpenPipelineOptions): Promise<PipelineH
     confidenceThreshold,
     gateway: opts.gateway,
     storageDir: opts.storageDir,
-    // The same derivation the host and the stdio server use, so a pipeline measures the client
-    // folder a deployment would read rather than one this file invented.
-    clientDir: clientDirFor(client),
+    // The eval runner syncs no knowledge folder, so `null` is the true answer rather than a
+    // placeholder: a client whose knowledge is not a directory is exactly what this measures.
+    knowledgeDir: null,
+    hiddenTools: [],
     embedDims: 1_024,
     parser: localParser(opts.storageDir),
     // The pipeline under test reads documents; it fills no forms. The measured pack's shipped

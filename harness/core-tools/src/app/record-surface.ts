@@ -3,6 +3,8 @@ import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
+import { parseClientDocument } from '@harness/config-api';
+import { fixtureDocument } from '@harness/config-api/testing';
 import { describeError } from '@harness/shared';
 import { localParser } from '../domain/documents/parser.js';
 import { connectInProcess } from '../domain/tooling/in-process.js';
@@ -30,12 +32,16 @@ export interface ToolSurfaceEntry {
  * public surface must not need Postgres, or the snapshot could not be regenerated offline.
  */
 export async function surfaceDeps(): Promise<ToolDeps> {
-  // A literal rather than HARNESS_PACKS, deliberately: the committed snapshot has to describe
-  // the shipped default, not whatever the machine recording it happens to have configured.
-  const packs = await loadPacks(['@harness/pack-healthcare']);
+  // A fixture document rather than an environment, deliberately: the committed snapshot has to
+  // describe the shipped default, not whatever the machine recording it happens to have
+  // configured. Its `packs` names the one shipped pack and its `policy.tools.hide` is empty, so
+  // the recorded catalogue is the whole catalogue — which is also why `tools.hide` can never
+  // move this file.
+  const document = parseClientDocument(fixtureDocument({ id: 'surface', displayName: 'Surface recorder' }));
+  const packs = await loadPacks(document.packs);
   return {
     db: null as unknown as ToolDeps['db'],
-    client: 'surface',
+    client: document.id,
     principal: {
       id: 'svc-surface',
       kind: 'service',
@@ -45,13 +51,14 @@ export async function surfaceDeps(): Promise<ToolDeps> {
       attributes: {},
     },
     policy: { ...DEFAULT_POLICY },
+    hiddenTools: document.policy.tools.hide,
     encryptionKey: Buffer.alloc(32),
     now: () => new Date('2026-01-01T00:00:00Z'),
     approvalTtlHours: 24,
     confidenceThreshold: DEFAULT_CONFIDENCE_THRESHOLD,
     gateway: { baseUrl: 'http://127.0.0.1:1', apiKey: 'unused', timeoutMs: 1_000, maxCallsPerRun: 1 },
     storageDir: '/nonexistent/surface',
-    clientDir: '/nonexistent/surface',
+    knowledgeDir: null,
     embedDims: 1_024,
     parser: localParser('/nonexistent/surface'),
     formsDir: '/nonexistent/surface',
@@ -160,17 +167,18 @@ export const ENV_READING_HELPERS = [
 /**
  * The directories the environment scan walks. This is every place shipping TypeScript lives
  * today. `clients/` and the repository root are absent because neither holds a `.ts` file —
- * `clients/` is per-client configuration (`.env`, `policy.yaml`, `identity.yaml`, `SOUL.md`, the
- * runtime's config) and the root holds only config. Add the directory here if you put source in
+ * `clients/` is the one fixture client document and what it includes, and the root holds only
+ * config. Add the directory here if you put source in
  * either, or the variables it reads will go unrecorded and the `.env.example` check will pass
  * while missing them. `surfaces/` is there for the same reason `packs/` is: an adapter reads its
  * own variables, and a scan that did not walk it would let them go undocumented — including the
  * primary adapter's conversation variable, which `surface.test.ts` anchors on. `identities/` is
- * there for the same reason `surfaces/` is: a plug-in reads its own variables off `deps.env`
- * through the shared helpers, and `HARNESS_IDENTITY_FILE` is one of them. `runtimes/` is there
- * for the same reason again: a runtime plug-in reads its configuration off `RuntimeDeps.env`
- * rather than the ambient environment, and the scan walks it so that a variable it reads is
- * documented like every other one.
+ * there for the same reason `surfaces/` is: a directory-backed identity plug-in reads its own
+ * secret off `deps.env` through the shared helpers, the way `identities/static` no longer needs
+ * to now that its section arrives through `IdentityDeps.identity`. `runtimes/` is there for the
+ * same reason again: a runtime plug-in reads its configuration off `RuntimeDeps.env` rather than
+ * the ambient environment, and the scan walks it so that a variable it reads is documented like
+ * every other one.
  */
 const SOURCE_ROOTS = ['harness', 'packs', 'surfaces', 'identities', 'runtimes', 'evals', 'scripts'];
 const DIRECT_ENV = /process\.env\.([A-Z][A-Z0-9_]*)/g;

@@ -1,4 +1,4 @@
-import type { EnvSource, Logger } from '@harness/shared';
+import type { EnvSource, Logger, SurfaceDirectory } from '@harness/shared';
 
 /**
  * Every declaration of the surface contract, in one leaf module.
@@ -172,6 +172,16 @@ export interface MessageEvent {
    * host answers only when this is true.
    */
   mentioned: boolean;
+  /**
+   * Whatever identifies the workspace this event came from, in the surface's own terms — the
+   * organisation, the team, the tenant of whatever the transport calls one — or absent for a
+   * surface with no such notion.
+   *
+   * Opaque to the host, which matches it against the keys each client's document declares and
+   * never reads it as anything but a string. That is how one process serves several clients on
+   * one transport without the host learning a vendor's field name.
+   */
+  tenantHint?: string;
 }
 
 /**
@@ -207,11 +217,18 @@ export interface UploadRequest {
  * token or a payload value.
  */
 export interface SurfaceSession {
-  /** This adapter's name, as `HARNESS_SURFACES` named it and as `approvals.surface` stores it. */
+  /** This adapter's name, as the client document named it and as `approvals.surface` stores it. */
   readonly name: string;
   readonly capabilities: SurfaceCapabilities;
   /** Where this surface posts when nobody names a conversation. */
   readonly defaultConversation: string;
+  /**
+   * Who this surface's users are and what groups they are in, when it can say.
+   *
+   * Optional: a transport with no notion of a directory simply does not offer one, and an
+   * identity plug-in that wanted one is told so at load rather than at the first message.
+   */
+  readonly directory?: SurfaceDirectory;
   /** How this surface spells a mention of a user inside plain text. */
   mention(userId: string): string;
   /**
@@ -261,11 +278,21 @@ export interface SurfaceDeps {
   log: Logger;
   /** The root of the file store. An adapter that stages nothing may ignore it. */
   storageDir: string;
+  /**
+   * The opaque key this client's document declares for *this* surface, when it declares one.
+   *
+   * The counterpart of `MessageEvent.tenantHint`: the host matches an inbound event's hint
+   * against these keys. An adapter whose transport reports the workspace an event came from
+   * ignores this and reports what it saw; one with no such notion — the memory surface — has
+   * nothing to read it off an event and answers with what the document declared. Absent for a
+   * client that declared no key for this surface.
+   */
+  tenantKey?: string;
 }
 
 /** What a `@harness/surface-*` package exports as `surface`. */
 export interface Surface {
-  /** Lowercase, stable. `HARNESS_SURFACES` orders these and the first one is the primary. */
+  /** Lowercase, stable. The client document's schema orders these and the first one is the primary. */
   name: string;
   version: string;
   /**

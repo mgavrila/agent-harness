@@ -25,18 +25,41 @@ describe('threads', () => {
       ['host', 'three'],
       ['user', 'four'],
     ] as const) {
-      await appendMessage(db, { threadId: t.id, runId: null, role, principalId: 'u-1', content });
+      await appendMessage(db, { client: 'test', threadId: t.id, runId: null, role, principalId: 'u-1', content });
     }
-    expect(await recentHistory(db, t.id, 3)).toEqual([
+    expect(await recentHistory(db, 'test', t.id, 3)).toEqual([
       { role: 'assistant', content: 'two' },
       { role: 'host', content: 'three' },
       { role: 'user', content: 'four' },
     ]);
   });
 
+  it('writes the tenant on a message and hands back no history from another', async () => {
+    const thread = await findOrCreateThread(db, {
+      client: 'alpha',
+      surface: 'memory',
+      conversation: 'C1',
+      principalId: 'u-one',
+    });
+    await appendMessage(db, {
+      client: 'alpha',
+      threadId: thread.id,
+      runId: null,
+      role: 'user',
+      principalId: 'u-one',
+      content: 'hello',
+    });
+    const [row] = await db.select().from(messages).where(eq(messages.threadId, thread.id));
+    expect(row.client).toBe('alpha');
+    expect(await recentHistory(db, 'alpha', thread.id, 10)).toHaveLength(1);
+    // The same thread id, asked for as somebody else: nothing, not an error.
+    expect(await recentHistory(db, 'beta', thread.id, 10)).toEqual([]);
+  });
+
   it('withholds a message that carries a restricted identifier instead of storing it', async () => {
     const t = await findOrCreateThread(db, key);
     const stored = await appendMessage(db, {
+      client: 'test',
       threadId: t.id,
       runId: null,
       role: 'assistant',
@@ -53,8 +76,10 @@ describe('threads', () => {
     const at = new Date('2026-09-15T12:00:00Z');
     // Straight into the table with one clock value, which is what one transaction does.
     for (const content of ['one', 'two', 'three', 'four', 'five', 'six']) {
-      await db.insert(messages).values({ threadId: t.id, role: 'user', principalId: 'u-1', content, createdAt: at });
+      await db
+        .insert(messages)
+        .values({ client: 'test', threadId: t.id, role: 'user', principalId: 'u-1', content, createdAt: at });
     }
-    expect((await recentHistory(db, t.id, 3)).map((m) => m.content)).toEqual(['four', 'five', 'six']);
+    expect((await recentHistory(db, 'test', t.id, 3)).map((m) => m.content)).toEqual(['four', 'five', 'six']);
   });
 });

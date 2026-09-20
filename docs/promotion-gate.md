@@ -224,7 +224,7 @@ EVALS_SERVING_MODEL='{"extract":"gemini/gemini-3-flash-preview"}' \
 
 Check the report for `FAIL` lines first. A baseline is only worth committing
 when the failure rate is near zero; otherwise raise the daily budget, add a
-fallback deployment to `clients/<name>/routing.yaml`, or run a smaller sample.
+fallback deployment to the client document's own `routing` section, or run a smaller sample.
 Record the sample size in `eval_set_version`, as above, because a 24-case
 sample and the full 162-case corpus are different eval sets.
 

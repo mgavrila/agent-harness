@@ -24,13 +24,14 @@ async function synced(): Promise<(level: Level, id?: string) => ToolDeps> {
   const fake = await startFakeGateway();
   onTestFinished(() => fake.close());
   const clientDir = await mkdtemp(path.join(tmpdir(), 'harness-client-'));
-  await mkdir(path.join(clientDir, 'knowledge'), { recursive: true });
+  const knowledgeDir = path.join(clientDir, 'knowledge');
+  await mkdir(knowledgeDir, { recursive: true });
   for (const [name, text] of Object.entries(FILES)) {
-    await writeFile(path.join(clientDir, 'knowledge', name), text);
+    await writeFile(path.join(knowledgeDir, name), text);
   }
   const depsFor = (level: Level, id = 'u-reader'): ToolDeps =>
     makeTestDeps(db, {
-      clientDir,
+      knowledgeDir,
       gateway: { baseUrl: fake.url, apiKey: 'sk-test', timeoutMs: 5_000, maxCallsPerRun: 200 },
       principal: {
         id,
@@ -86,7 +87,7 @@ describe('searchKnowledge access', () => {
     const depsFor = await synced();
     const deps = depsFor('admin');
     const elsewhere = makeTestDeps(db, {
-      clientDir: deps.clientDir,
+      knowledgeDir: deps.knowledgeDir,
       gateway: deps.gateway,
       client: 'other-client',
       principal: deps.principal,

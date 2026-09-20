@@ -19,9 +19,7 @@ export {
   BEHAVIORS,
   DEFAULT_POLICY,
   decide,
-  loadPolicy,
   mergePolicy,
-  parsePolicy,
   type ActionClass,
   type Behavior,
   type ClassTable,
@@ -32,7 +30,13 @@ export {
 export { expireApprovals, parkStuckDispatches, reconcile, type ReconcileResult } from './domain/tooling/reconcile.js';
 export { connectInProcess } from './domain/tooling/in-process.js';
 export { depsForRun, type KernelConfig, type RunDeps } from './domain/tooling/deps.js';
-export { buildKernelConfig, clientDirFor } from './domain/tooling/config.js';
+export { buildKernelConfig } from './domain/tooling/config.js';
+export {
+  configSourceNameFrom,
+  loadClientDocument,
+  loadConfigSource,
+  type ConfigSourceDeps,
+} from './domain/config/registry.js';
 export {
   DEFAULT_CONFIDENCE_THRESHOLD,
   type AnyToolDef,
@@ -46,7 +50,15 @@ export {
 export { createCoreToolsServer, kernelTools, publishedTools } from './tools/catalog.js';
 
 // --- Domains ------------------------------------------------------------------------------
-export { closeRun, openRun, type OpenRunInput, type RunStatus } from './domain/session/repository.js';
+export {
+  closeRun,
+  finishRun,
+  openRun,
+  sumRunTotals,
+  type OpenRunInput,
+  type RunStatus,
+  type RunTotals,
+} from './domain/session/repository.js';
 export { createOrReuseApproval } from './domain/approvals/repository.js';
 export { assertNoInjection, findInjection, type InjectionCategory } from './domain/memory/injection.js';
 export {
@@ -135,7 +147,7 @@ export {
 export { PACK_KERNEL } from './domain/packs/kernel.js';
 export { loadPacks, registryOf } from './domain/packs/registry.js';
 export { type PackRegistry, type ResolvedTarget } from './domain/packs/types.js';
-export { callModel, callModelJson, gatewayFromEnv, httpGateway } from './domain/models/gateway.js';
+export { callModel, callModelJson, gatewayFromEnv, httpGateway, recordModelCall } from './domain/models/gateway.js';
 export {
   EMBED_ROUTE,
   ROUTES,

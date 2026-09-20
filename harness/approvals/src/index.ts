@@ -42,4 +42,4 @@ export {
   type RunnerLoopStatus,
   type RunnerStatus,
 } from './domain/runner.js';
-export { DEFAULT_HEALTH_BIND, startHealthServer, type HealthServer } from './domain/health.js';
+export { DEFAULT_HEALTH_BIND, startHealthServer, type HealthPayload, type HealthServer } from './domain/health.js';

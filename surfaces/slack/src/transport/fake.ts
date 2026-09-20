@@ -11,6 +11,10 @@ import type {
   SlackThreadMessage,
   SlackUpdateArgs,
   SlackUploadArgs,
+  SlackUserInfoResult,
+  SlackUsergroup,
+  SlackUsergroupUsersResult,
+  SlackUsergroupsListResult,
   SlackView,
   SlackViewOpenArgs,
 } from './types.js';
@@ -29,6 +33,14 @@ export class FakeSlack implements SlackApi {
   repliesCalls: SlackRepliesArgs[] = [];
   /** What `conversations.replies` answers, keyed `<channel>:<thread ts>`; missing is an empty thread. */
   replies: Record<string, SlackThreadMessage[]> = {};
+  /** What `usergroups.list` answers. */
+  usergroupsList: SlackUsergroup[] = [];
+  /** Who is in each group, keyed by its id. */
+  usergroupMembers: Record<string, string[]> = {};
+  /** What `users.info` answers, keyed by user id. */
+  userProfiles: Record<string, { real_name?: string; profile?: { display_name?: string } }> = {};
+  /** How many times the group list was actually fetched, so a test can prove the cache works. */
+  usergroupsListCalls = 0;
   /** When set, every call rejects with this message. */
   failWith?: string;
   /**
@@ -88,6 +100,27 @@ export class FakeSlack implements SlackApi {
       this.guard();
       this.repliesCalls.push(args);
       return { messages: this.replies[`${args.channel}:${args.ts}`] ?? [] };
+    },
+  };
+
+  usergroups = {
+    list: async (): Promise<SlackUsergroupsListResult> => {
+      this.guard();
+      this.usergroupsListCalls += 1;
+      return { usergroups: this.usergroupsList };
+    },
+    users: {
+      list: async (args: { usergroup: string }): Promise<SlackUsergroupUsersResult> => {
+        this.guard();
+        return { users: this.usergroupMembers[args.usergroup] ?? [] };
+      },
+    },
+  };
+
+  users = {
+    info: async (args: { user: string }): Promise<SlackUserInfoResult> => {
+      this.guard();
+      return { user: this.userProfiles[args.user] };
     },
   };
 }

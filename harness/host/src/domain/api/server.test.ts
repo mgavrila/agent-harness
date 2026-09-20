@@ -1,27 +1,59 @@
 import type { AddressInfo } from 'node:net';
 import { eq } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished } from 'vitest';
-import { messages, threads } from '@harness/db';
+import { parseClientDocument } from '@harness/config-api';
+import { fixtureDocument } from '@harness/config-api/testing';
+import { messages, runs, threads } from '@harness/db';
 import type { Trajectory } from '@harness/runtime-api/testing';
-import { COORDINATOR, MEMBER, hostFixture, useTestDb, type HostFixture } from '../../testing.js';
+import { COORDINATOR, MEMBER, poolFixture, useTestDb, type PoolFixture } from '../../testing.js';
 import { WITHHELD } from '../threads/repository.js';
 import { startRunApi } from './server.js';
-import { API_MAX_BODY_BYTES } from './types.js';
+import { API_MAX_BODY_BYTES, CLIENT_HEADER } from './types.js';
+import { USAGE_DEFAULT_DAYS, USAGE_MAX_DAYS, type UsageRow } from './usage.js';
 
 const db = useTestDb();
 const TOKEN = 'sk-run-api-test';
+/** The client this listener's one tenant serves; every route resolves it before it runs. */
+const CLIENT = 'test';
+/**
+ * A usage window around the moment the case runs, inside the year the route allows.
+ *
+ * Built from the clock rather than written out, because a run's `started_at` is Postgres' own
+ * `now()` — the fixture's frozen clock stamps what a turn decides, never what the database
+ * defaults — so a window of fixed dates would age out of the suite.
+ */
+const WINDOW = (() => {
+  const day = 24 * 60 * 60 * 1000;
+  const now = Date.now();
+  return `from=${new Date(now - day).toISOString()}&to=${new Date(now + day).toISOString()}`;
+})();
 
 interface Api {
-  f: HostFixture;
+  f: PoolFixture;
   url: string;
   open(body: unknown, token?: string): Promise<Response>;
-  get(path: string, token?: string): Promise<Response>;
+  get(path: string, token?: string, headers?: Record<string, string>): Promise<Response>;
   post(path: string, token?: string): Promise<Response>;
 }
 
+/**
+ * A dedicated host with one tenant, and the listener over its pool.
+ *
+ * The run API is per process and the tenants are per client, so the listener takes the pool and
+ * resolves a tenant per request — which is why every case here drives a real pool rather than a
+ * bare host.
+ */
 async function api(trajectory: Trajectory): Promise<Api> {
-  const f = await hostFixture(db, { trajectory });
-  const server = startRunApi(f.host, { token: TOKEN, bind: '127.0.0.1', port: 0 });
+  const f = await poolFixture(db, {
+    documents: [
+      parseClientDocument(
+        fixtureDocument({ id: CLIENT, displayName: 'Test', runtime: 'scripted', surfaces: { memory: {} } }),
+      ),
+    ],
+    trajectories: { [CLIENT]: trajectory },
+    dedicated: CLIENT,
+  });
+  const server = startRunApi(f.pool, { token: TOKEN, bind: '127.0.0.1', port: 0 });
   await server.ready;
   const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   onTestFinished(async () => {
@@ -38,7 +70,7 @@ async function api(trajectory: Trajectory): Promise<Api> {
         headers: { 'content-type': 'application/json', ...auth(token) },
         body: typeof body === 'string' ? body : JSON.stringify(body),
       }),
-    get: (p, token) => fetch(`${url}${p}`, { headers: auth(token) }),
+    get: (p, token, headers = {}) => fetch(`${url}${p}`, { headers: { ...auth(token), ...headers } }),
     post: (p, token) => fetch(`${url}${p}`, { method: 'POST', headers: auth(token) }),
   };
 }
@@ -142,7 +174,7 @@ describe('the run API: a run', () => {
     expect(thread).toMatchObject({ surface: 'memory', conversation: 'memory', kind: 'chat' });
     const rows = await db.select().from(messages).where(eq(messages.threadId, thread.id));
     expect(rows.map((r) => r.role)).toEqual(['user', 'assistant']);
-    expect(a.f.surface.texts).toEqual([]);
+    expect(a.f.surface(CLIENT).texts).toEqual([]);
   });
 
   it('cancels a run in flight, by the id the first frame carried', async () => {
@@ -221,13 +253,117 @@ describe('the run API: a thread and the status', () => {
     const response = await a.get('/v1/status');
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({
-      client: 'test',
+      client: CLIENT,
       surfaces: ['memory'],
       primary_surface: 'memory',
       runs_in_flight: 0,
       draining: false,
-      scheduler: null,
+      // The tenant's own scheduler, which is where it is reachable from now that there is one per
+      // tenant rather than one per process. It has not ticked: the interval is thirty seconds.
+      scheduler: { lastTickAt: null, lastOkAt: null, lastError: null, lastErrorAt: null, ticking: false },
     });
+  });
+
+  it('answers the tenant it serves when a caller names it, and 404 when a caller names another', async () => {
+    const a = await api([]);
+    // Naming this host's own client is the same request as naming none.
+    expect((await a.get('/v1/status', TOKEN, { [CLIENT_HEADER]: CLIENT })).status).toBe(200);
+    // Invariant 19 at the control plane: another client is "no such client", never this one's
+    // status under another name, and never a 403 that would confirm the client exists.
+    const other = await a.get('/v1/status', TOKEN, { [CLIENT_HEADER]: 'beta' });
+    expect(other.status).toBe(404);
+    expect(await other.json()).toEqual({ error: 'no such client' });
+  });
+
+  it('exports what this tenant used, per principal per day, and not a word of what anybody wrote', async () => {
+    const a = await api([
+      { usage: { inputTokens: 120, outputTokens: 34, costUsd: 0.002 } },
+      { say: 'nothing is overdue' },
+    ]);
+    await collect(await a.open(asCoordinator('anything overdue?')));
+
+    const response = await a.get(`/v1/usage?${WINDOW}`);
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { client: string; from: string; to: string; rows: UsageRow[] };
+    expect(body.client).toBe(CLIENT);
+    expect(body.rows).toHaveLength(1);
+    expect(body.rows[0]).toMatchObject({
+      client: CLIENT,
+      principal_id: COORDINATOR.id,
+      runs: 1,
+      input_tokens: 120,
+      output_tokens: 34,
+      runs_done: 1,
+    });
+    // Invariant 16 on the wire, not just in the view: the question that was asked and the answer
+    // that was given are both on the thread, and neither is in the export.
+    expect(JSON.stringify(body)).not.toContain('anything overdue?');
+    expect(JSON.stringify(body)).not.toContain('nothing is overdue');
+  });
+
+  it('reads whole UTC days, so a from inside today does not drop today', async () => {
+    const a = await api([{ usage: { inputTokens: 10, outputTokens: 2, costUsd: 0.001 } }, { say: 'done' }]);
+    await collect(await a.open(asCoordinator('anything overdue?')));
+
+    // Noon today and midnight tomorrow. The run's bucket is today's midnight, which is *before*
+    // this `from` read as a timestamp and inside it read as a day — the whole of today's usage
+    // would otherwise vanish from an invoice for anybody who asked after breakfast.
+    const now = new Date();
+    const utc = (dayOffset: number, hour = 0): Date =>
+      new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + dayOffset, hour));
+    const response = await a.get(`/v1/usage?from=${utc(0, 12).toISOString()}&to=${utc(1).toISOString()}`);
+    const body = (await response.json()) as { from: string; to: string; rows: UsageRow[] };
+    expect(body.rows).toHaveLength(1);
+    expect(body.rows[0].day).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    // And the window the answer reports is the one it read: whole days, `to` still exclusive.
+    expect(body.from).toBe(utc(0).toISOString());
+    expect(body.to).toBe(utc(1).toISOString());
+  });
+
+  it('includes today in the window a request that names none gets', async () => {
+    const a = await api([{ usage: { inputTokens: 10, outputTokens: 2, costUsd: 0.001 } }, { say: 'done' }]);
+    await collect(await a.open(asCoordinator('anything overdue?')));
+
+    // No `from`, no `to`: the last thirty days, which has to end *after* today rather than at this
+    // morning's midnight. A caller who asks at noon is asking about a day that is under way.
+    const body = (await (await a.get('/v1/usage')).json()) as { from: string; to: string; rows: UsageRow[] };
+    expect(body.rows).toHaveLength(1);
+    expect(body.rows[0]).toMatchObject({ input_tokens: 10, output_tokens: 2 });
+    const now = new Date();
+    const utcDay = (offset: number): string =>
+      new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + offset)).toISOString();
+    expect(body.to).toBe(utcDay(1));
+    expect(body.from).toBe(utcDay(-USAGE_DEFAULT_DAYS));
+  });
+
+  it('refuses a window that is not one, and one wider than a year', async () => {
+    const a = await api([]);
+    expect((await a.get('/v1/usage?from=not-a-date&to=2030-01-01')).status).toBe(400);
+    expect((await a.get('/v1/usage?from=2030-01-01&to=2020-01-01')).status).toBe(400);
+    const tooWide = await a.get('/v1/usage?from=2020-01-01&to=2026-01-01');
+    expect(tooWide.status).toBe(400);
+    expect(await tooWide.json()).toEqual({ error: `the window may not exceed ${USAGE_MAX_DAYS} days` });
+  });
+
+  it('reads no usage without a token', async () => {
+    const a = await api([]);
+    // Before anything is read: the bearer check is in front of every route, so a caller with no
+    // token is told "unauthorised" and not how many rows there were to refuse.
+    const response = await fetch(`${a.url}/v1/usage?${WINDOW}`);
+    expect(response.status).toBe(401);
+    expect(await response.json()).toEqual({ error: 'unauthorised' });
+  });
+
+  it("answers 404 for a caller naming another client, and none of that client's usage", async () => {
+    const a = await api([]);
+    // A row that exists and belongs to somebody else. Naming that client is "no such client" on
+    // this host, and the answer carries nothing of theirs (invariant 19).
+    await db
+      .insert(runs)
+      .values({ client: 'beta', principalId: 'u-beta', status: 'done', inputTokens: 999, outputTokens: 999 });
+    const response = await a.get(`/v1/usage?${WINDOW}`, TOKEN, { [CLIENT_HEADER]: 'beta' });
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({ error: 'no such client' });
   });
 
   it('answers "no such route" for anything else', async () => {

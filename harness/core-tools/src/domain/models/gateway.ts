@@ -1,7 +1,7 @@
 import * as z from 'zod/v4';
 import { and, eq } from 'drizzle-orm';
-import { modelCalls } from '@harness/db';
-import { ModelOutputError, ToolError, requiredEnv } from '@harness/shared';
+import { modelCalls, type Db } from '@harness/db';
+import { ModelOutputError, ToolError, requiredEnv, type EnvSource } from '@harness/shared';
 import type { ToolDeps } from '../tooling/types.js';
 import {
   EMBED_ROUTE,
@@ -14,24 +14,26 @@ import {
   type Route,
 } from './types.js';
 
-export function gatewayFromEnv(): GatewayConfig {
-  const apiKey = requiredEnv('LITELLM_MASTER_KEY');
-  // Read directly, not through optionalEnv/numberFromEnv: those treat an empty string as
-  // unset, and this function has always treated an empty HARNESS_GATEWAY_URL as the literal
-  // empty base URL and an empty numeric variable as `Number('') === 0`, which fails the range
-  // check below and throws at startup. Preserving that exact behaviour is the point of leaving
-  // these three reads alone — nothing tests it, but nothing should silently change it either.
-  // That is also why the layer rule is suppressed here rather than satisfied: the helper it
-  // points at cannot express "an empty string is the value". Moving this whole function into
-  // app/, where the rule does not apply, is the real fix.
-  /* eslint-disable no-restricted-syntax */
-  const raw = process.env.HARNESS_GATEWAY_URL ?? 'http://127.0.0.1:4000';
-  const timeout = Number(process.env.HARNESS_GATEWAY_TIMEOUT_MS ?? 120_000);
+/**
+ * How this deployment reaches the model gateway, off the environment it is handed.
+ *
+ * The map is a parameter and never the ambient one, so a process that serves two clients can
+ * hand each its own — and so that nothing here reads a global to decide what a run may call.
+ */
+export function gatewayFromEnv(env: EnvSource): GatewayConfig {
+  const apiKey = requiredEnv('LITELLM_MASTER_KEY', '', env);
+  // Read off the map directly, not through optionalEnv/numberFromEnv: those treat an empty
+  // string as unset, and this function has always treated an empty HARNESS_GATEWAY_URL as the
+  // literal empty base URL and an empty numeric variable as `Number('') === 0`, which fails the
+  // range check below and throws at startup. Preserving that exact behaviour is the point of
+  // leaving these three reads alone — nothing tests it, but nothing should silently change it
+  // either.
+  const raw = env.HARNESS_GATEWAY_URL ?? 'http://127.0.0.1:4000';
+  const timeout = Number(env.HARNESS_GATEWAY_TIMEOUT_MS ?? 120_000);
   if (!Number.isFinite(timeout) || timeout < 1_000 || timeout > 600_000) {
     throw new Error('HARNESS_GATEWAY_TIMEOUT_MS must be a number between 1000 and 600000');
   }
-  const maxCalls = Number(process.env.HARNESS_GATEWAY_MAX_CALLS_PER_RUN ?? 100);
-  /* eslint-enable no-restricted-syntax */
+  const maxCalls = Number(env.HARNESS_GATEWAY_MAX_CALLS_PER_RUN ?? 100);
   if (!Number.isInteger(maxCalls) || maxCalls < 1 || maxCalls > 10_000) {
     throw new Error('HARNESS_GATEWAY_MAX_CALLS_PER_RUN must be a whole number between 1 and 10000');
   }
@@ -54,7 +56,9 @@ interface ChatCompletionResponse {
  */
 export function gatewayError(route: Route, status: number, body: string): ToolError {
   if (/budget/i.test(body)) {
-    return new ToolError(`model route "${route}" is over its daily budget; raise it in clients/<name>/routing.yaml`);
+    return new ToolError(
+      `model route "${route}" is over its daily budget; raise it in the client document's routing section`,
+    );
   }
   if (status === 401 || status === 403) {
     return new ToolError(
@@ -134,6 +138,33 @@ export function httpGateway(config: GatewayConfig): ModelGateway {
   };
 }
 
+/**
+ * One `model_calls` row, from the one place that writes them.
+ *
+ * Attribution only. LiteLLM's own spend tables are what enforce the budget; this row joins the
+ * spend to a run, a client and a route. Three callers: `callModel` below, `embedTexts`, and the
+ * host, which records every `usage` event its runtime reports — a spend that used to be counted
+ * for the cost cap and then dropped. It is written on the handle the caller passed, so it rolls
+ * back with a failing handler — see "Model calls" in docs/runbook.md.
+ *
+ * A row written here counts against `callModel`'s per-run breaker below, whoever wrote it: a run
+ * that has made a hundred model calls has made them whether a tool or the conversation did.
+ */
+export async function recordModelCall(
+  db: Db,
+  row: {
+    runId: string | null;
+    client: string;
+    route: string;
+    model: string;
+    inputTokens: number;
+    outputTokens: number;
+    costUsd: number;
+  },
+): Promise<void> {
+  await db.insert(modelCalls).values(row);
+}
+
 export async function callModel(deps: ToolDeps, opts: ModelCallOptions): Promise<ModelCallResult> {
   if (!ROUTES.includes(opts.route)) throw new ToolError(`unknown model route "${opts.route}"`);
   if (opts.route === EMBED_ROUTE) {
@@ -158,11 +189,7 @@ export async function callModel(deps: ToolDeps, opts: ModelCallOptions): Promise
 
   const result = await httpGateway(deps.gateway).call(opts);
 
-  // Attribution only. LiteLLM's own spend tables are what enforce the budget;
-  // this row joins the spend to a run and a route. It is written on the same
-  // handle the caller passed, so it rolls back with a failing handler - see
-  // "Model calls" in docs/runbook.md.
-  await deps.db.insert(modelCalls).values({
+  await recordModelCall(deps.db, {
     runId: deps.context.runId ?? null,
     client: deps.client,
     route: opts.route,

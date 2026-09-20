@@ -1,7 +1,7 @@
 import { sql } from 'drizzle-orm';
-import { modelCalls, type Db } from '@harness/db';
+import type { Db } from '@harness/db';
 import { ConfigError, ToolError } from '@harness/shared';
-import { costFromResponse, gatewayError, gatewayUnreachable } from '../models/gateway.js';
+import { costFromResponse, gatewayError, gatewayUnreachable, recordModelCall } from '../models/gateway.js';
 import { EMBED_ROUTE } from '../models/types.js';
 import type { ToolDeps } from '../tooling/types.js';
 
@@ -65,7 +65,7 @@ async function embedBatch(deps: ToolDeps, texts: readonly string[]): Promise<num
     }
   }
 
-  await deps.db.insert(modelCalls).values({
+  await recordModelCall(deps.db, {
     runId: deps.context.runId ?? null,
     client: deps.client,
     route: EMBED_ROUTE,
