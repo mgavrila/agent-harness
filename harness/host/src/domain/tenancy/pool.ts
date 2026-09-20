@@ -40,6 +40,18 @@ export async function createHost(deps: HostDeps): Promise<HostPool> {
    */
   const claimed = new Map<string, readonly { surface: string; key: string }[]>();
 
+  /**
+   * The reload in flight per client, so two version changes for one client run one after the
+   * other rather than over each other.
+   *
+   * A change that lands *during* a reopen is the case this exists for: the tenant is out of the
+   * map and the new one does not exist yet, so nothing can be evicted for it and a reload that
+   * simply returned would leave the tenant on the previous version until somebody edited the
+   * document again. Chained, that second change waits for the open it interrupted and then
+   * reloads on top of it.
+   */
+  const reloading = new Map<string, Promise<void>>();
+
   const keysOf = (clientId: string): readonly { surface: string; key: string }[] => claimed.get(clientId) ?? [];
 
   /** Drop everything the client claims: it is gone, not merely between tenants. */
@@ -53,6 +65,64 @@ export async function createHost(deps: HostDeps): Promise<HostPool> {
     for (const { surface, key } of own) keys.set(`${surface}:${key}`, clientId);
     claimed.set(clientId, own);
   };
+  /**
+   * Watch this client's document, once, for as long as the process serves it.
+   *
+   * **The watch outlives the tenant.** It is registered before the first open can fail and stopped
+   * only by `close`, or when the source turns out to hold no document for the client at all. A
+   * watch that lived and died with a tenant left a client whose reopen threw — a missing secret, a
+   * runtime that is not installed, an undeclared service principal — with nothing listening for
+   * the edit that fixes it, so the tenant stayed dead until the process restarted.
+   *
+   * The version is compared against whatever tenant is open *now*, because by the time this fires
+   * there may be none.
+   */
+  const watchClient = (clientId: string): void => {
+    if (stopWatching.has(clientId)) return;
+    const stop = deps.source.watch?.(clientId, (version) => {
+      if (tenants.get(clientId)?.version === version) return;
+      deps.log.info(`tenant ${clientId}: document moved to ${version}; reopening`);
+      void pool.invalidate(clientId).catch((err: unknown) => {
+        // Error, not warn: this client is serving nobody until the next version arrives, and the
+        // watch is still up precisely so that the operator's fix is what ends that.
+        deps.log.error(`tenant ${clientId}: could not reopen: ${describeError(err)}`);
+      });
+    });
+    if (stop) stopWatching.set(clientId, stop);
+  };
+
+  /**
+   * One eviction and one reopen. `invalidate` serialises these per client; nothing else calls it.
+   *
+   * Quiesce first, evict second. The tenant stops taking work in — no tick, no approval poll, no
+   * message off a surface — while it is still the tenant this client's events resolve to, so a
+   * message that arrives mid-reload is either run or dropped by the drain, and never refused as
+   * another client's and written to the audit log as `unauthorised`. A row like that is what an
+   * operator reads to decide whether a tenant boundary was crossed, and a document edit must not
+   * manufacture one.
+   */
+  const reloadOnce = async (clientId: string): Promise<void> => {
+    const tenant = tenants.get(clientId);
+    if (tenant) {
+      await tenant.quiesce();
+      await drainActive(tenant.host, INVALIDATE_DRAIN_MS);
+      tenants.delete(clientId);
+      // Only after it is shut: a pooled host that reopened while the old one was still draining
+      // would have two runtimes and two schedulers for one client. The client keeps its claim
+      // across the whole of this, and gives it up only if there is no document to reopen from.
+      await tenant.close();
+    }
+    if (!pool.draining && (await pool.tenantFor(clientId))) return;
+    // Nothing is open for this client. Its claim goes either way — an event for it now has no
+    // tenant to reach — but the watch is stopped only when the client is gone from the source,
+    // never because this process is shutting down, which `close` handles on its own.
+    forget(clientId);
+    if (!pool.draining) {
+      stopWatching.get(clientId)?.();
+      stopWatching.delete(clientId);
+    }
+  };
+
   const resolver: ClientResolver =
     deps.dedicatedClient === null
       ? pooledResolver((surface, key) => keys.get(`${surface}:${key}`) ?? null)
@@ -80,19 +150,13 @@ export async function createHost(deps: HostDeps): Promise<HostPool> {
       const openPromise = (async (): Promise<Tenant | null> => {
         const loaded = await deps.source.load(clientId);
         if (!loaded) return null;
+        // Before the open, which is what can fail: see `watchClient`.
+        watchClient(clientId);
         const tenant = await openTenant(pool, loaded);
         tenants.set(clientId, tenant);
         claim(clientId, tenantKeysOf(tenant.document));
         attachMessageHandlers(pool, tenant);
         for (const session of tenant.host.surfaces.all) await session.start();
-        const stop = deps.source.watch?.(clientId, (version) => {
-          if (version === tenant.version) return;
-          deps.log.info(`tenant ${clientId}: document moved to ${version}; reopening`);
-          void pool.invalidate(clientId).catch((err: unknown) => {
-            deps.log.error(`tenant ${clientId}: could not reopen: ${describeError(err)}`);
-          });
-        });
-        if (stop) stopWatching.set(clientId, stop);
         return tenant;
       })();
       opening.set(clientId, openPromise);
@@ -105,25 +169,14 @@ export async function createHost(deps: HostDeps): Promise<HostPool> {
       }
     },
     async invalidate(clientId) {
-      const tenant = tenants.get(clientId);
-      if (!tenant) return;
-      // Quiesce first, evict second. The tenant stops taking work in — no tick, no approval poll,
-      // no message off a surface — while it is still the tenant this client's events resolve to,
-      // so a message that arrives mid-reload is either run or dropped by the drain, and never
-      // refused as another client's and written to the audit log as `unauthorised`. A row like
-      // that is what an operator reads to decide whether a tenant boundary was crossed, and a
-      // document edit must not manufacture one.
-      await tenant.quiesce();
-      await drainActive(tenant.host, INVALIDATE_DRAIN_MS);
-      tenants.delete(clientId);
-      stopWatching.get(clientId)?.();
-      stopWatching.delete(clientId);
-      await tenant.close();
-      // Only after it is shut: a pooled host that reopened while the old one was still draining
-      // would have two runtimes and two schedulers for one client. The client keeps its claim
-      // across the whole of this, and gives it up only if there is no document to reopen from.
-      const reopened = pool.draining ? null : await pool.tenantFor(clientId);
-      if (!reopened) forget(clientId);
+      const queued = (reloading.get(clientId) ?? Promise.resolve()).catch(() => {}).then(() => reloadOnce(clientId));
+      reloading.set(clientId, queued);
+      try {
+        await queued;
+      } finally {
+        // Only if nothing chained behind this one, which is the entry a later caller is waiting on.
+        if (reloading.get(clientId) === queued) reloading.delete(clientId);
+      }
     },
     async drain(boundMs) {
       pool.draining = true;

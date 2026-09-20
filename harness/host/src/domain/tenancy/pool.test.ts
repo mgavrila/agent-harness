@@ -190,6 +190,44 @@ describe('createHost', () => {
     await f.close();
   });
 
+  it('keeps watching a tenant whose reopen failed, and reopens it on the next good version', async () => {
+    const f = await poolFixture(db, { documents: [doc('alpha')] });
+    const before = f.tenant('alpha');
+    // A document that parses but cannot be opened: the runtime it names is not installed. This is
+    // the whole class — a missing secret, an undeclared service principal, an uninstalled pack —
+    // and every one of them is something an operator fixes by editing the document again.
+    f.source.put(parseClientDocument({ ...doc('alpha'), runtime: 'nonexistent' }), 'v2');
+    await waitFor(() => !f.pool.tenants.has('alpha'));
+    expect(before.host.draining).toBe(true);
+
+    // The fix edit. Nothing in the pool is listening for it unless the watch outlived the tenant,
+    // and a tenant nobody is watching is a client that stays dead until the process restarts.
+    f.source.put(parseClientDocument({ ...doc('alpha'), persona: 'Fixed.' }), 'v3');
+    await waitFor(() => f.pool.tenants.get('alpha')?.version === 'v3');
+    expect(f.tenant('alpha').host.persona).toBe('Fixed.');
+    await f.close();
+  });
+
+  it('applies a version that lands while the tenant is reopening', async () => {
+    const f = await poolFixture(db, { documents: [doc('alpha')] });
+    const third = parseClientDocument({ ...doc('alpha'), persona: 'The third.' });
+    const load = f.source.load.bind(f.source);
+    // The second edit lands *inside* the reopen the first one started: the old tenant is gone from
+    // the map and the new one does not exist yet, which is the window a watch tied to a tenant's
+    // lifetime loses a change in. The tenant would then serve the previous version until somebody
+    // edited the document again.
+    vi.spyOn(f.source, 'load').mockImplementation(async (clientId) => {
+      const loaded = await load(clientId);
+      if (loaded?.version === 'v2') f.source.put(third, 'v3');
+      return loaded;
+    });
+
+    f.source.put(parseClientDocument({ ...doc('alpha'), persona: 'The second.' }), 'v2');
+    await waitFor(() => f.pool.tenants.get('alpha')?.version === 'v3');
+    expect(f.tenant('alpha').host.persona).toBe('The third.');
+    await f.close();
+  });
+
   it('closes every tenant it opened, and refuses to open another once it is draining', async () => {
     const f = await poolFixture(db, { documents: [doc('alpha'), doc('beta')] });
     await f.pool.drain(200);
