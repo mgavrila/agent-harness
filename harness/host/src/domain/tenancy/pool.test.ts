@@ -13,6 +13,10 @@ const db = useTestDb();
 // real connection from a unit test; decision 6 says plainly that this plan cannot serve such a
 // surface pooled anyway. `workspace` is the memory surface's tenant key, which is what makes
 // pooled routing provable here at all.
+/** A document that parses but cannot be opened: the runtime it names is not installed. */
+const unopenable = (id: string) =>
+  parseClientDocument(fixtureDocument({ id, displayName: id, runtime: 'nonexistent', surfaces: { memory: {} } }));
+
 const doc = (id: string, workspace?: string) =>
   parseClientDocument(
     fixtureDocument({
@@ -188,6 +192,20 @@ describe('createHost', () => {
     expect(after.host.identity).not.toBe(before.host.identity);
     expect(after.host.draining).toBe(false);
     await f.close();
+  });
+
+  it("opens the tenants it can when one client's document cannot be opened", async () => {
+    // One tenant's bad document is that tenant's outage, not the pool's: every other client on a
+    // pooled host is a different customer, and decision 12 says warm every id, not fail all for one.
+    const f = await poolFixture(db, { documents: [doc('alpha'), unopenable('beta')] });
+    expect([...f.pool.tenants.keys()]).toEqual(['alpha']);
+    await f.close();
+  });
+
+  it('refuses to start when every client it listed failed to open', async () => {
+    await expect(poolFixture(db, { documents: [unopenable('alpha'), unopenable('beta')] })).rejects.toThrow(
+      /no tenant of the 2/,
+    );
   });
 
   it('keeps watching a tenant whose reopen failed, and reopens it on the next good version', async () => {

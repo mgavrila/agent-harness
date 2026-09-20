@@ -207,8 +207,27 @@ export async function createHost(deps: HostDeps): Promise<HostPool> {
         `HARNESS_CLIENT is unset, so this host is pooled, and the ${deps.source.name} config source cannot list its clients`,
       );
     }
-    for (const clientId of await deps.source.list()) await pool.tenantFor(clientId);
-    deps.log.info(`pooled host: ${tenants.size} tenants open`);
+    // Per client, because on a pooled host every other id is a different customer: one
+    // malformed document, one missing secret or one uninstalled pack is that tenant's outage
+    // and nobody else's. Decision 12 says warm every id; it does not say fail all for one. The
+    // failure is logged with the id, and its watch stays up, so the edit that fixes it opens it.
+    const listed = await deps.source.list();
+    for (const clientId of listed) {
+      try {
+        await pool.tenantFor(clientId);
+      } catch (err) {
+        deps.log.error(`tenant ${clientId}: could not open: ${describeError(err)}`);
+      }
+    }
+    // Every listed client failing is not one tenant's problem, it is a deployment that is wrong —
+    // a bad mount, the wrong database — and a host serving nobody should say so at start rather
+    // than answer its health check. A source that lists nothing has nothing to have failed.
+    if (listed.length > 0 && tenants.size === 0) {
+      throw new ConfigError(
+        `no tenant of the ${listed.length} the ${deps.source.name} config source lists could be opened; the errors above name each one`,
+      );
+    }
+    deps.log.info(`pooled host: ${tenants.size} of ${listed.length} tenants open`);
   }
   return pool;
 }
