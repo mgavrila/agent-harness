@@ -604,11 +604,14 @@ with the second process.
 
 | App | Variables | Bot scopes | Other settings |
 |---|---|---|---|
-| The host's Slack app | `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN` | `chat:write`, `app_mentions:read`, `channels:history`, `groups:history`, `im:history`, `im:read`, `im:write`, `mpim:history`, `users:read`, `files:read`, `files:write` | Socket Mode on, Interactivity on |
+| The host's Slack app | `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`, `SLACK_SIGNING_SECRET` | `chat:write`, `app_mentions:read`, `channels:history`, `groups:history`, `im:history`, `im:read`, `im:write`, `mpim:history`, `users:read`, `files:read`, `files:write` | Socket Mode on, Interactivity on |
 
 Subscribe the app to the `message.channels`, `message.groups`, `message.im`, `message.mpim` and
 `app_mention` events, listed in `.env.example`. Invite the bot to `SLACK_APPROVALS_CHANNEL` and
-to every channel it should answer messages in.
+to every channel it should answer messages in. `SLACK_SIGNING_SECRET` is the app's signing
+secret, under Basic Information -> App Credentials: a client document's
+`surfaces.slack.signingSecret` names it, and a tenant that names a variable the deployment does
+not set refuses to open.
 
 **A reply inside a thread the bot has already posted in needs no mention**: the thread is the
 conversation, so a follow-up written there is answered as it stands. It is the bot's *own* posts
@@ -693,7 +696,11 @@ client must not go is this repository.
    people at all (see "Directory-backed identity" below). A tenant whose principal is missing from
    the document refuses to open.
 3. Add a `surfaces.slack` section (see "Slack credentials" above) and create one Slack app,
-   pasting its tokens and the approvals channel id into `.env`.
+   pasting its tokens, its signing secret and the approvals channel id into `.env`. **Every
+   `SecretRef` a document names must also be on the Compose host service's environment
+   allowlist**, which is an explicit list and not an `env_file`: a variable that is set in `.env`
+   but missing from that list reaches nothing inside the container, and the tenant refuses to
+   open naming a variable the operator can see is set.
 4. Review the document's `persona` and `policy` sections before the first run, and the markdown
    under the directory its `knowledge` section names (`{ source: 'dir', path }`) — the scaffolder
    copied the fixture's, which is a worked example rather than this client's content. Set

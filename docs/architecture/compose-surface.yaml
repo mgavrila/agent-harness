@@ -100,6 +100,7 @@ services:
       SLACK_APP_TOKEN: ${SLACK_APP_TOKEN:-}
       SLACK_APPROVALS_CHANNEL: ${SLACK_APPROVALS_CHANNEL:-}
       SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN:-}
+      SLACK_SIGNING_SECRET: ${SLACK_SIGNING_SECRET:-}
     image: harness-host
     networks:
       default: null

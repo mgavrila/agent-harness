@@ -182,6 +182,10 @@ services:
       # The one Slack app: chat and approvals.
       SLACK_BOT_TOKEN: '${SLACK_BOT_TOKEN:-}'
       SLACK_APP_TOKEN: '${SLACK_APP_TOKEN:-}'
+      # Named by a document's `surfaces.slack.signingSecret`. The host refuses to open a tenant
+      # whose named variable is unset, so every SecretRef a document names must be on this list —
+      # a document is data and cannot add a line here.
+      SLACK_SIGNING_SECRET: '${SLACK_SIGNING_SECRET:-}'
       SLACK_APPROVALS_CHANNEL: '${SLACK_APPROVALS_CHANNEL:-}'
       APPROVALS_POLL_SECONDS: '${APPROVALS_POLL_SECONDS:-5}'
       EFFECTS_DISPATCH_SECONDS: '${EFFECTS_DISPATCH_SECONDS:-5}'
