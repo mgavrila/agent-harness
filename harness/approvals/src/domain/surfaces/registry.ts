@@ -111,7 +111,11 @@ export async function loadSurfaces(
   for (const { specifier, surface } of declared) {
     try {
       sessions.push(
-        await surface.connect(surface.name in tenantKeys ? { ...deps, tenantKey: tenantKeys[surface.name] } : deps),
+        await surface.connect(
+          // Own keys only: `in` would hand an adapter that called itself `constructor` whatever
+          // `Object.prototype` has under that name.
+          Object.hasOwn(tenantKeys, surface.name) ? { ...deps, tenantKey: tenantKeys[surface.name] } : deps,
+        ),
       );
     } catch (err) {
       surfaceFailed(specifier, err, 'connect');

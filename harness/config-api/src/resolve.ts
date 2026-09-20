@@ -38,23 +38,32 @@ function assertShape(shape: z.ZodType, value: unknown, what: string): void {
 }
 
 /**
- * Strip the prototype from every plain object in a tree, in place.
+ * Strip the prototype from every plain object in a tree, in place, and refuse a cyclic one.
  *
  * `structuredClone` copies a plain object onto `Object.prototype`, so the working copy a patch is
- * applied to inherits every name on it and the document that comes back carries whatever a
- * `__proto__` key in the blueprint or in an overlay value happened to be. Neither is something a
- * tenant's file should be able to decide. Only plain objects are touched — anything with a
- * prototype of its own is left as it is rather than broken.
+ * applied to inherits every name on it and a `__proto__` key in the blueprint would decide what
+ * the document inherits. That is not a tenant's decision to make. Only plain objects are touched —
+ * anything with a prototype of its own is left as it is rather than broken.
+ *
+ * `ancestors` is the path from the root, not everything seen: an anchor used twice is a shared
+ * node and perfectly legal, and only a node that contains itself is a cycle. The `yaml` parser
+ * resolves an anchor that names one of its own ancestors into exactly that, and `structuredClone`
+ * keeps it, so without this a tenant's file ends the request with a `RangeError` instead of a
+ * sentence naming what is wrong with it.
  */
-function stripPrototypes<T>(node: T): T {
-  if (Array.isArray(node)) {
-    for (const item of node) stripPrototypes(item);
-    return node;
+function stripPrototypes<T>(node: T, ancestors: Set<unknown> = new Set()): T {
+  if (typeof node !== 'object' || node === null) return node;
+  if (ancestors.has(node)) {
+    throw new ConfigError('blueprint: a value refers to itself; a client document is a tree, not a loop');
   }
-  if (typeof node === 'object' && node !== null && Object.getPrototypeOf(node) === Object.prototype) {
-    for (const value of Object.values(node)) stripPrototypes(value);
+  ancestors.add(node);
+  if (Array.isArray(node)) {
+    for (const item of node) stripPrototypes(item, ancestors);
+  } else if (Object.getPrototypeOf(node) === Object.prototype) {
+    for (const value of Object.values(node)) stripPrototypes(value, ancestors);
     Object.setPrototypeOf(node, null);
   }
+  ancestors.delete(node);
   return node;
 }
 
@@ -106,7 +115,5 @@ export function resolve(blueprint: Blueprint, overlay: Overlay): ClientDocument 
   }
   const draft = stripPrototypes(structuredClone(blueprint.document) as unknown as Record<string, unknown>);
   for (const op of overlay.patch) writePointer(draft, op);
-  // Again after the writes: an overlay's own `value` is written as it arrived, and a `__proto__`
-  // key inside one is data until something reads it as a prototype.
-  return parseClientDocument(stripPrototypes(draft));
+  return parseClientDocument(draft);
 }

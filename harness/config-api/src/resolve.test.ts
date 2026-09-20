@@ -186,6 +186,17 @@ describe('a hostile overlay', () => {
 });
 
 describe('resolve validates what it was handed', () => {
+  it('refuses a blueprint whose document contains a cycle, rather than exhausting the stack', () => {
+    // A YAML anchor that refers to its own ancestor parses into a genuinely cyclic object, and
+    // `structuredClone` keeps the cycle. A tenant's file must not be able to end a request with a
+    // RangeError on the very path the prototype refusal is about.
+    const bp = blueprint([]);
+    const document = bp.document as unknown as Record<string, unknown>;
+    document.loop = document;
+    expect(() => resolve(bp, names)).toThrow(ConfigError);
+    expect(() => resolve(bp, names)).toThrow(/refers to itself/);
+  });
+
   it('refuses a blueprint with no lock set, rather than failing on an iteration', () => {
     const { lockset: _lockset, ...rest } = blueprint([]);
     expect(() => resolve(rest as Blueprint, names)).toThrow(ConfigError);
