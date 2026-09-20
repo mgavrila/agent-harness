@@ -56,7 +56,9 @@ interface ChatCompletionResponse {
  */
 export function gatewayError(route: Route, status: number, body: string): ToolError {
   if (/budget/i.test(body)) {
-    return new ToolError(`model route "${route}" is over its daily budget; raise it in clients/<name>/routing.yaml`);
+    return new ToolError(
+      `model route "${route}" is over its daily budget; raise it in the client document's routing section`,
+    );
   }
   if (status === 401 || status === 403) {
     return new ToolError(

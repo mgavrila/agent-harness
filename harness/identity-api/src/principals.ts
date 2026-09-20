@@ -109,28 +109,29 @@ export function parseIdentityFile(raw: unknown): Principal[] {
  */
 export function parseIdentityFileWithDefaults(raw: unknown): IdentityFile {
   const parsed = IdentityFileShape.safeParse(raw);
-  if (!parsed.success) throw new ConfigError(`identity file is invalid: ${z.prettifyError(parsed.error)}`);
+  if (!parsed.success) throw new ConfigError(`identity section is invalid: ${z.prettifyError(parsed.error)}`);
   if (parsed.data.defaults[UNDEFAULTABLE_SURFACE] !== undefined) {
     throw new ConfigError(
-      `identity file: "${UNDEFAULTABLE_SURFACE}" may not have a default; the run API's bearer is one shared secret, so every ${UNDEFAULTABLE_SURFACE} user must be declared`,
+      `identity section: "${UNDEFAULTABLE_SURFACE}" may not have a default; the run API's bearer is one shared secret, so every ${UNDEFAULTABLE_SURFACE} user must be declared`,
     );
   }
   const seen = new Set<string>();
   const claims = new Map<string, string>();
   for (const p of parsed.data.principals) {
-    if (seen.has(p.id)) throw new ConfigError(`identity file: "${p.id}" is declared twice`);
+    if (seen.has(p.id)) throw new ConfigError(`identity section: "${p.id}" is declared twice`);
     seen.add(p.id);
     if (p.kind === 'user') {
-      if (!p.id.startsWith('u-')) throw new ConfigError(`identity file: "${p.id}" is a user and must have a "u-" id`);
+      if (!p.id.startsWith('u-'))
+        throw new ConfigError(`identity section: "${p.id}" is a user and must have a "u-" id`);
       if (p.level === 'service') {
-        throw new ConfigError(`identity file: "${p.id}" is a user and cannot be at level "service"`);
+        throw new ConfigError(`identity section: "${p.id}" is a user and cannot be at level "service"`);
       }
     } else {
       if (!p.id.startsWith('svc-')) {
-        throw new ConfigError(`identity file: "${p.id}" is a service and must have a "svc-" id`);
+        throw new ConfigError(`identity section: "${p.id}" is a service and must have a "svc-" id`);
       }
       if (p.level !== 'service') {
-        throw new ConfigError(`identity file: "${p.id}" is a service and must be at level "service"`);
+        throw new ConfigError(`identity section: "${p.id}" is a service and must be at level "service"`);
       }
     }
     for (const [surface, userId] of Object.entries(p.surfaces)) {
@@ -138,7 +139,7 @@ export function parseIdentityFileWithDefaults(raw: unknown): IdentityFile {
       const already = claims.get(key);
       if (already !== undefined) {
         throw new ConfigError(
-          `identity file: "${already}" and "${p.id}" both claim user "${userId}" on surface "${surface}"`,
+          `identity section: "${already}" and "${p.id}" both claim user "${userId}" on surface "${surface}"`,
         );
       }
       claims.set(key, p.id);

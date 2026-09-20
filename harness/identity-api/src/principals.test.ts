@@ -36,7 +36,7 @@ describe('parseIdentityFile', () => {
 
   it('refuses an empty file, because a deployment with nobody in it can run nothing', () => {
     expect(() => parseIdentityFile({ principals: [] })).toThrow(ConfigError);
-    expect(() => parseIdentityFile({})).toThrow(/identity file is invalid/);
+    expect(() => parseIdentityFile({})).toThrow(/identity section is invalid/);
   });
 
   describe('displayName', () => {
@@ -107,7 +107,7 @@ describe('parseIdentityFile', () => {
 
   it('refuses a surface name that is not a surface name', () => {
     expect(() => parseIdentityFile({ principals: [{ ...manager, surfaces: { Slack: 'U1' } }] })).toThrow(
-      /identity file is invalid/,
+      /identity section is invalid/,
     );
   });
 });
@@ -137,7 +137,7 @@ describe('parseIdentityFileWithDefaults', () => {
 
   it('refuses a surface name that is not a surface name, as `surfaces` does', () => {
     expect(() => parseIdentityFileWithDefaults({ defaults: { Memory: 'member' }, principals: [manager] })).toThrow(
-      /identity file is invalid/,
+      /identity section is invalid/,
     );
   });
 
