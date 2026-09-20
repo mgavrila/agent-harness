@@ -5,9 +5,10 @@ messaging surface, records a decision from whoever the identity plug-in resolves
 approver, executes it in-process against the kernel, and drains the `tool_effects` outbox
 through the `surface_message` and `surface_file` sinks on a timer.
 
-It holds no transport. Adapters are loaded by name from `HARNESS_SURFACES`, which is required and
-has no default in this package — the demo's Compose service sets `@harness/surface-slack`. Everything
-the host says is a neutral `Card`, `Form` or line of text from `@harness/surface-api`.
+It holds no transport. `loadSurfaces` connects the adapters its caller names — `@harness/host`
+passes each tenant's own `surfaces` section, in the order the schema fixes — and this package
+reads no environment variable of its own to choose them. Everything the host says is a neutral
+`Card`, `Form` or line of text from `@harness/surface-api`.
 
 This package no longer hosts its own process. `src/app/main.ts` and `src/app/child-env.ts` are
 gone — `@harness/host` is what opens a run and drives this domain, in the same process as the
@@ -17,7 +18,7 @@ kernel rather than as a stdio child of it.
 
 ```text
 src/domain/cards.ts      approvalCard, decidedCard, editForm: what a human reads, in neutral models
-src/domain/surfaces/     loadSurfaces: HARNESS_SURFACES, the primary rule, the failure messages
+src/domain/surfaces/     loadSurfaces: the caller's surface names, the primary rule, the failure messages
 src/domain/handlers.ts   the button and form handlers; who may decide comes from the identity plug-in
 src/domain/execute/      the CoreToolsClient interface, the in-process adapter, FakeCoreToolsClient
 src/domain/poller.ts     claim a pending row, post its card, record the message reference

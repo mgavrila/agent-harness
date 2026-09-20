@@ -10,8 +10,9 @@ clients by adding content and configuration, not code.
   conventions, evals.
 - **Packs**: reusable industry content (record kinds, skills, forms, eval
   sets) plus any tools that area needs, behind one contract.
-- **Clients**: one folder per deployment (SOUL, routing, policy, env, and
-  the knowledge folder the assistant cites from).
+- **Clients**: one document each — persona, principals, policy, routing,
+  playbooks, skills and where its knowledge comes from — held in a directory
+  or a table outside this repository and read through a `ConfigSource`.
 
 First pack: healthcare credentialing. First client: a demo medical practice
 on Slack.
@@ -23,53 +24,62 @@ Design spec: `docs/superpowers/specs/2026-09-15-agent-harness-credentialing-desi
 ```
 harness/shared/      env, errors, paths, logging, subprocess, JSONL, CSV. No dependencies.
 harness/pack-api/    the Pack contract every pack implements and core loads
+harness/config-api/  the ClientDocument contract: the schema, blueprint + overlay + lock set,
+                     resolve(), and the ConfigSource interface a source implements
+harness/config-files/ a ConfigSource reading HARNESS_CLIENTS_DIR/<id>/client.yaml
+harness/config-postgres/ a ConfigSource over versioned rows in client_documents
 harness/surface-api/ the Surface contract a messaging adapter implements
 harness/identity-api/ the Identity contract a principal resolver implements
 harness/db/          schema, migrations, the pool, encryption
-harness/gateway/     the routing table and the LiteLLM config renderer
+harness/gateway/     the routing schema and the LiteLLM config renderer
 harness/core-tools/  the pack-agnostic kernel and MCP server: shared/, domain/, tools/, app/
 harness/runtime-api/ the Runtime contract, ScriptedRuntime, the fake gateway and the conformance kit
 harness/approvals/   the approvals library the host composes: cards, decisions, the effects dispatcher
-harness/host/        the one process per client: the runtime, the surfaces, the identity plug-in
+harness/host/        a pool of tenants: the runtime, the surfaces, the identity plug-in, each
+                     loaded per client from its own document
 harness/files/       the parsing worker: untrusted documents, no key, no database, no route out
 harness/compose/     the Docker stack
 surfaces/            the messaging adapters: slack, memory, http (the run API's caller)
-identities/          the identity plug-ins: static (clients/<name>/identity.yaml)
-runtimes/            the agent runtimes behind the Runtime contract: deepagents
+identities/          the identity plug-ins: static (a document's own principals), slack-groups
+                     (a Slack workspace's own user groups)
+runtimes/            the agent runtimes behind the Runtime contract: deepagents, scripted (tests)
 packs/healthcare/    the credentialing pack: record and attachment kinds, forms, skills, eval sets, corpus, eighteen tools
 packs/stories/       the proof pack: one record kind, one document kind, no tools
-clients/             one folder per deployment: SOUL, routing, policy, identity, playbooks, env
-clients/*/knowledge/ markdown the assistant can cite, filtered by who is asking
+clients/fixture/     the one client document in this repository, for the suite to read and the
+                     scaffolder to copy; a real client is never here
 evals/               the runner, scorers, judge and report
-scripts/             the client scaffolder
+scripts/             the client scaffolder: `pnpm new-client` writes a document
 docs/                specs, runbook, demo, promotion gate, architecture
 ```
 
 Every package has the same four layers — `shared` → `domain` → `tools` → `app` — with one
 public entry point. A **pack** is an area of the product core loads at runtime rather than
-imports: set `HARNESS_PACKS` to choose. The kernel knows about records, attachments, documents
-and deadlines, and nothing about medicine — a grep test fails the build on the word `provider`
-in `harness/core-tools/src`. A **surface** is loaded the same way: set `HARNESS_SURFACES` to
-choose where a human is talked to, and the host holds no transport of its own. An **identity
-plug-in** is loaded the same way: set `HARNESS_IDENTITY` to choose who resolves a person to a
-principal, and the host binds that principal to every run before the model sees anything. A
-**runtime** is loaded the same way too: set `HARNESS_RUNTIME` to choose which agent loop drives
-a conversation turn — required, with no default, because a default here would be one runtime
-plug-in's package name written into the host's own source.
-**[ARCHITECTURE.md](ARCHITECTURE.md)** explains the layers, the packs, the surfaces, the path of
-one tool call and the three invariants; **[CONTRIBUTING.md](CONTRIBUTING.md)** is how to add a
-tool, a domain, a pack, a surface, a client, a migration or a test.
+imports: name it in a client document's `packs`. The kernel knows about records, attachments,
+documents and deadlines, and nothing about medicine — a grep test fails the build on the word
+`provider` in `harness/core-tools/src`. A **surface** is loaded the same way: name it under the
+document's `surfaces` section to choose where a human is talked to, and the host holds no
+transport of its own. An **identity plug-in** is loaded the same way: the document's
+`identityPlugin.kind` chooses who resolves a person to a principal, and the host binds that
+principal to every run before the model sees anything. A **runtime** is loaded the same way too:
+the document's `runtime` chooses which agent loop drives a conversation turn — required, with no
+default, because a default here would be one runtime plug-in's package name written into the
+host's own source. A client is one such document, read through a `ConfigSource`
+(`HARNESS_CONFIG_SOURCE`: `files`, from `HARNESS_CLIENTS_DIR`, or `postgres`, from versioned
+rows) — never a folder in this repository.
+**[ARCHITECTURE.md](ARCHITECTURE.md)** explains the layers, the packs, the surfaces, the client
+document, the path of one tool call and the three invariants; **[CONTRIBUTING.md](CONTRIBUTING.md)**
+is how to add a tool, a domain, a pack, a surface, a migration or a test.
 
 ## Documents
 
-|                                                  |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| ------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [ARCHITECTURE.md](ARCHITECTURE.md)               | the layers, the package map, the path of a tool call, the three invariants                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| [CONTRIBUTING.md](CONTRIBUTING.md)               | how to add a tool, a domain, a pack, a surface, a client, a migration, a test                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| [docs/runbook.md](docs/runbook.md)               | operating it: audit, effects, reconciliation, storage, the host and its surfaces, onboarding                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| [docs/demo.md](docs/demo.md)                     | the five-minute demo script                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| [docs/promotion-gate.md](docs/promotion-gate.md) | what an eval run has to clear                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| package READMEs                                  | [shared](harness/shared/README.md), [pack-api](harness/pack-api/README.md), [surface-api](harness/surface-api/README.md), [identity-api](harness/identity-api/README.md), [runtime-api](harness/runtime-api/README.md), [db](harness/db/README.md), [gateway](harness/gateway/README.md), [core-tools](harness/core-tools/README.md), [approvals](harness/approvals/README.md), [host](harness/host/README.md), [files](harness/files/README.md), [surface-slack](surfaces/slack/README.md), [surface-memory](surfaces/memory/README.md), [surface-http](surfaces/http/README.md), [identity-static](identities/static/README.md), [runtime-deepagents](runtimes/deepagents/README.md), [evals](evals/README.md), [pack-healthcare](packs/healthcare/README.md), [pack-stories](packs/stories/README.md), [scripts](scripts/README.md) |
+|                                                  |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [ARCHITECTURE.md](ARCHITECTURE.md)               | the layers, the package map, the path of a tool call, the three invariants                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| [CONTRIBUTING.md](CONTRIBUTING.md)               | how to add a tool, a domain, a pack, a surface, a client, a migration, a test                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| [docs/runbook.md](docs/runbook.md)               | operating it: audit, effects, reconciliation, storage, the host and its surfaces, onboarding                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| [docs/demo.md](docs/demo.md)                     | the five-minute demo script                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| [docs/promotion-gate.md](docs/promotion-gate.md) | what an eval run has to clear                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| package READMEs                                  | [shared](harness/shared/README.md), [pack-api](harness/pack-api/README.md), [config-api](harness/config-api/README.md), [config-files](harness/config-files/README.md), [config-postgres](harness/config-postgres/README.md), [surface-api](harness/surface-api/README.md), [identity-api](harness/identity-api/README.md), [runtime-api](harness/runtime-api/README.md), [db](harness/db/README.md), [gateway](harness/gateway/README.md), [core-tools](harness/core-tools/README.md), [approvals](harness/approvals/README.md), [host](harness/host/README.md), [files](harness/files/README.md), [surface-slack](surfaces/slack/README.md), [surface-memory](surfaces/memory/README.md), [surface-http](surfaces/http/README.md), [identity-static](identities/static/README.md), [identity-slack-groups](identities/slack-groups/README.md), [runtime-deepagents](runtimes/deepagents/README.md), [runtime-scripted](runtimes/scripted/README.md), [evals](evals/README.md), [pack-healthcare](packs/healthcare/README.md), [pack-stories](packs/stories/README.md), [scripts](scripts/README.md) |
 
 ## Run locally
 
@@ -78,7 +88,7 @@ pnpm install
 cp .env.example .env            # then set HARNESS_ENCRYPTION_KEY=$(openssl rand -base64 32)
 pnpm db:up                      # Postgres 16 with pgvector, databases harness and harness_test
 pnpm db:migrate
-pnpm gateway:config             # render clients/demo-practice/routing.yaml -> LiteLLM config
+pnpm gateway:config             # render HARNESS_CLIENT's routing (the fixture, by default) -> LiteLLM config
 pnpm gateway:up                 # LiteLLM proxy on 127.0.0.1:4000
 pnpm test
 pnpm --filter @harness/core-tools start   # core-tools MCP server on stdio
@@ -149,12 +159,14 @@ record the first one.
 ## Run the demo practice
 
 ```bash
-cp clients/demo-practice/.env.example .env     # then fill in the blanks
 pnpm install
 pnpm db:up && pnpm db:migrate
+pnpm new-client --name demo-practice --pack healthcare --target ../harness-tenants
+cp .env.example .env    # then set HARNESS_CLIENTS_DIR/HARNESS_CLIENT and fill in the blanks
 pnpm demo:up
 ```
 
+`docs/demo.md` has the full walkthrough, including the client document's `surfaces.slack` section.
 One Slack app, in Socket Mode with Interactivity on, carries both chat and approvals; see
 `docs/runbook.md`, "Slack credentials: one app", for the scopes and how to invite it.
 

@@ -8,8 +8,8 @@ has learned about an area of the product it should not know about.
 
 At run time this package depends on `@harness/pack-api` and on nothing else in the workspace; its
 tests also use `@harness/shared` to parse the two case files. Those are the only two workspace
-packages a pack may reach for. core-tools loads it by name from `HARNESS_PACKS` and never imports
-it, so an import of `@harness/core-tools` from here would be a cycle and `pnpm arch` fails the
+packages a pack may reach for. core-tools loads it by name from a client document's own `packs`
+list and never imports it, so an import of `@harness/core-tools` from here would be a cycle and `pnpm arch` fails the
 build on one — and an import of `@harness/evals` would invert the relationship this pack exists to
 demonstrate, which is why its case files are checked against the declaration here rather than
 through the eval runner's loader.
@@ -36,8 +36,8 @@ synthetic/cli.ts          the `pnpm synth:stories` entrypoint
 - **`attachment_instruction` and `attachment_schema_description` differ.** The prompt sentence and
   the JSON-Schema description are two strings on purpose, and both packs exercise the split.
 - **The target claims `meeting_notes` by name, never `"*"`.** A catch-all claims every document
-  kind in the process. Two loaded packs declaring one would make routing depend on
-  `HARNESS_PACKS` order, and the registry refuses it.
+  kind in the process. Two loaded packs declaring one would make routing depend on the document's
+  `packs` order, and the registry refuses it.
 - **The skill names eight tools and every one of them is the kernel's.** `records_search`,
   `records_get`, `records_list_pending` and `records_confirm_field` are published only because the
   healthcare pack replaces the seven same-named tools and not the twelve.
@@ -74,22 +74,23 @@ what `evals/injection.jsonl` scores against.
 
 It is a devDependency of `@harness/core-tools`, because it is a test fixture rather than something
 a deployment serves. A deployment that wants it moves it into that package's `dependencies`, so
-pnpm can resolve the dynamic import, and names it in `HARNESS_PACKS`.
+pnpm can resolve the dynamic import, and names it in the client document's own `packs` list.
 
 Order matters in one way only: the first entry is the deployment's primary pack, which answers
 `manifest()`, `formsDir()` and the target for a document nobody classified. This pack ships no
 forms, so it goes second.
 
-```bash
-HARNESS_PACKS=@harness/pack-healthcare,@harness/pack-stories
+```yaml
+packs:
+  - '@harness/pack-healthcare'
+  - '@harness/pack-stories'
 ```
 
 ## Evaluating it
 
 ```bash
 pnpm synth:stories                                                            # write the three PDFs
-HARNESS_PACKS=@harness/pack-healthcare,@harness/pack-stories \
-  pnpm evals -- --pack stories
+pnpm evals -- --packs=@harness/pack-healthcare,@harness/pack-stories --pack=stories
 ```
 
 `--pack` picks which loaded pack is measured, and everything follows it: this pack's three

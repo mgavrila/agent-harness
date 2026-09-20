@@ -3,11 +3,12 @@
 Content plus one declaration: everything the harness needs to do credentialing for a medical
 practice, and a `Pack` that tells core where it all is. This package depends on
 `@harness/pack-api` and `@harness/shared` and on nothing else in the workspace. core-tools
-loads it by name from `HARNESS_PACKS` and never imports it, so an import of
+loads it by name from a client document's own `packs` list and never imports it, so an import of
 `@harness/core-tools` from here would be a cycle and `pnpm arch` fails the build on one.
 
-It is the **primary** pack of the demo deployment: the first name in `HARNESS_PACKS`, which is
-what makes its forms directory and its extraction manifest the ones core answers with.
+It is `clients/fixture/`'s pack, and the primary pack of any client whose document names it
+first, which is what makes its forms directory and its extraction manifest the ones core answers
+with.
 
 ## Layout
 
@@ -104,10 +105,10 @@ asserted against `forms_roster`'s result.
 ## How core loads this pack
 
 `src/index.ts` exports `pack`, a `Pack` from `@harness/pack-api`. core-tools imports this module
-by name at startup, from `HARNESS_PACKS`, and reads everything through `deps.packs`. Name it
-first — `HARNESS_PACKS=@harness/pack-healthcare` for the demo deployment, and
-`@harness/pack-healthcare,@harness/pack-stories` when the proof pack rides along — because the
-first entry is the primary pack and this one owns the forms.
+by name at startup, from the client document's own `packs` list, and reads everything through
+`deps.packs`. Name it first — `packs: ['@harness/pack-healthcare']` for a healthcare-only
+deployment, and `['@harness/pack-healthcare', '@harness/pack-stories']` when the proof pack rides
+along — because the first entry is the primary pack and this one owns the forms.
 
 This package depends on `@harness/pack-api` and `@harness/shared` and on nothing else in the
 workspace; an import of `@harness/core-tools` or `@harness/db` from here would be a cycle and

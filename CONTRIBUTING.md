@@ -212,37 +212,38 @@ complete one; read it alongside this.
    third-party model. `readback.classifyTool` is declared for completeness and is not driven by
    the runner today. `pnpm evals -- --pack <name>` measures it.
 
-10. **Name it where a deployment is configured.** Add the package to `@harness/core-tools`'s
-    `dependencies` so pnpm can resolve the dynamic import, then set
-    `HARNESS_PACKS=@harness/pack-healthcare,@harness/pack-stories` in the client's `.env`.
-    `HARNESS_PACKS` in `.env` is the whole answer: `@harness/host` runs core-tools in-process,
-    with no child process and no separate env block of its own to keep in step, so naming the
-    variable once is enough.
+10. **Name it where a client is configured.** Add the package to `@harness/core-tools`'s
+    `dependencies` so pnpm can resolve the dynamic import, then add
+    `@harness/pack-healthcare` and `@harness/pack-stories` to the client document's own `packs`
+    list. That list is the whole answer: `@harness/host` runs core-tools in-process, with no
+    child process and no separate env block of its own to keep in step, so naming the packs once,
+    in the document, is enough.
 
-    Every scaffolded client inherits it, because `pnpm new-client` copies `clients/demo-practice/`.
+    A client `pnpm new-client` scaffolds starts from `clients/fixture/`'s document and takes
+    `--pack` as its own `packs` entry; it inherits nothing from another client.
 
 11. **Run the gates.** `pnpm -r typecheck && pnpm lint && pnpm arch && pnpm test`. If your pack
     changes the published tool list for the default deployment, run `pnpm surface:record` and
     say so in the commit; if it does not, the snapshot must not move.
 
-The first pack named in `HARNESS_PACKS` is the deployment's **primary** pack: it answers
-`deps.packs.manifest()`, `deps.packs.formsDir()` and the unclassified-document target. An empty
-`HARNESS_PACKS` loads no pack at all, and each of those three then throws naming what is missing;
-the kernel's own catalogue is what such a client serves.
+The first pack named in a client document's `packs` is the deployment's **primary** pack: it
+answers `deps.packs.manifest()`, `deps.packs.formsDir()` and the unclassified-document target. An
+empty `packs` list loads no pack at all, and each of those three then throws naming what is
+missing; the kernel's own catalogue is what such a client serves.
 `documentKinds()`, `recordKinds()` and `attachmentKinds()` union them all. Nothing else depends
 on load order, because `registryOf` refuses two packs that claim the same document kind or
 declare the same record kind.
 
 `Pack.policy` is declared but not yet merged into `deps.policy`: a pack's policy is carried,
-not applied. Set the client's `HARNESS_POLICY_FILE` if you need a different action-class table
-today.
+not applied. Set the client document's own `policy.classes` if you need a different action-class
+table today.
 
 **A `classes:` entry does not override a level's own cell.** `decide` reads
 `policy.levels[level][class]` first and falls back to `policy.classes[class]`, and the kernel's
 `DEFAULT_POLICY` already ships several level cells — `levels.member.destructive: blocked`,
-`levels.service.write.assign: approval`, and others. Setting `classes.destructive` in a
-client's `policy.yaml` therefore does nothing for `member`, whose cell wins regardless; to
-loosen or tighten one level, write `levels:`:
+`levels.service.write.assign: approval`, and others. Setting `classes.destructive` in a client
+document's own `policy` section therefore does nothing for `member`, whose cell wins regardless;
+to loosen or tighten one level, write `levels:`:
 
 ```yaml
 levels:
@@ -340,8 +341,11 @@ complete one; read it alongside this, and read `surfaces/slack` for the real thi
    `surfaces/slack/src/transport/` does, and export a wired-to-fakes session from a `./testing`
    subpath. No test makes a real network call.
 
-8. **Load it.** Add the package to `@harness/host`'s dependencies and put its name in
-   `HARNESS_SURFACES`. Nothing in the host's own code changes.
+8. **Load it.** Add the package to `@harness/host`'s dependencies, add its key to `SURFACE_ORDER`
+   and `SurfacesShape` in `@harness/config-api` (the one place the schema fixes which surfaces a
+   document may declare and in what order), and name it under a client document's `surfaces`
+   section. Nothing in the host's own code changes: it still reaches every surface by name,
+   through `surfaceSpecifier`.
 
 ## Adding an identity provider
 
@@ -374,8 +378,11 @@ user id. `identities/static` is the smallest complete one; read it alongside thi
    helpers with `deps.env` as their last argument, and document every name in `.env.example` in
    the same commit — the env scan walks `identities/`. `deps.identity` is the client document's
    own identity section, already validated — the declared principals and the level each surface
-   gives everyone else — and `deps.settings` is whatever the document's `identityPlugin.settings`
-   held. **A plug-in is never handed a path or the whole document.**
+   gives everyone else — `deps.settings` is whatever the document's `identityPlugin.settings`
+   held, and `deps.directories` is the `SurfaceDirectory` (`groupsOf`, `displayNameOf`) each
+   loaded surface offers, keyed by surface name, for a plug-in that resolves levels from a
+   workspace's own groups rather than from a list — `identities/slack-groups` is the worked
+   example. **A plug-in is never handed a path or the whole document.**
 
 4. **Implement `IdentitySession`.** `resolve({ surface, userId })` answers a `Principal` or
    `null`, and null means "not authorised" — never invent a guest. `get(id)`, `list()` and
@@ -389,8 +396,8 @@ user id. `identities/static` is the smallest complete one; read it alongside thi
 
 6. **Load it.** Add the package to `@harness/core-tools`'s dependencies (the stdio server
    resolves its own principal from it) and to `@harness/host`'s (the host resolves every
-   message's sender from it), and set `HARNESS_IDENTITY=@harness/identity-<name>`. Nothing in
-   the kernel or the host's own code changes.
+   message's sender from it), and set a client document's `identityPlugin.kind` to `<name>`.
+   Nothing in the kernel or the host's own code changes.
 
 ## Adding a runtime
 
@@ -449,30 +456,32 @@ takes, and read `@harness/runtime-api`'s README for the contract it implements.
    is the model-free runtime the kit's own suite and every host test run against; a model-backed
    runtime scripts the fake gateway (`startFakeGateway`, same subpath) instead of a trajectory.
 
-5. **Load it.** Add the package to `@harness/host`'s dependencies and set
-   `HARNESS_RUNTIME=@harness/runtime-<name>`. The variable is required and has no default:
-   naming a plug-in is a deployment's decision, the same as `HARNESS_SURFACES`, and a default
-   here would be exactly the coupling the variable exists to avoid. Nothing in the host's own
-   code changes.
+5. **Load it.** Add the package to `@harness/host`'s dependencies and set a client document's
+   `runtime` to `<name>`. The field is required and has no code default: naming a plug-in is a
+   client's decision, the same as its `surfaces`, and a default here would be exactly the coupling
+   the field exists to avoid. Nothing in the host's own code changes.
 
-## Adding a client
+## Onboarding a tenant
 
-```bash
-pnpm new-client --pack healthcare --name acme-clinic
-```
+You do not. A tenant is a client document in a directory or a table outside this repository, and
+onboarding one changes nothing here — that is the boundary this repository is built around.
 
-Then fill in `clients/acme-clinic/.env.example`, review `SOUL.md` and `policy.yaml`, declare the
-people and services in `identity.yaml` (including `svc-playbooks`), review `playbooks.yaml` and the
-markdown the scaffolder copied into `knowledge/`, and read "Onboarding a client" in
-`docs/runbook.md`.
+`pnpm new-client --name <slug> --display-name "<name>" [--pack <pack>] [--target <dir>]` writes
+one into `--target`, or into `HARNESS_CLIENTS_DIR` when you have set it. It refuses to run with
+neither, because the one place a client must not go is here.
+
+`clients/fixture/` is the exception and the only one: the suite needs a document to read and the
+scaffolder needs one to copy. A change to it is a change to the tests, and a pull request that adds
+a second client to that directory is a pull request that has misread this section.
 
 ## Adding a playbook
 
-Add an entry to `clients/<name>/playbooks.yaml` (the fields are documented in the demo's file
-and in the runbook's "Playbooks"), naming a skill the host offers — one of a loaded pack's, or one
+Add an entry to the client document's own `playbooks` section (the fields are documented in
+`docs/runbook.md`, "Playbooks"), naming a skill the host offers — one of a loaded pack's, or one
 of the host's own in `harness/host/skills/`, which is where `knowledge-sync` lives — and a service
-principal from `identity.yaml`, and restart the host. Test it with `playbooks_run_now` from the MCP
-inspector as an `admin` principal, then read `playbook_runs`.
+principal the document's `identity` section declares, then reopen the tenant (a document reload,
+or a restart for a dedicated host). Test it with `playbooks_run_now` from the MCP inspector as an
+`admin` principal, then read `playbook_runs`.
 
 ## Adding a migration
 

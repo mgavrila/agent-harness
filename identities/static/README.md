@@ -1,8 +1,8 @@
 # @harness/identity-static
 
 The identity plug-in that answers for the principals the client document declares. It reads no
-file and no environment variable: it is the one the demo runs
-(`HARNESS_IDENTITY=@harness/identity-static`, the default) and the one every kernel test loads.
+file and no environment variable: a document selects it with `identityPlugin: { kind: static }`,
+and it is the one every kernel test loads.
 
 ```yaml
 identity:

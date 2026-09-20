@@ -2,14 +2,22 @@
 
 The model routing table and the LiteLLM config renderer. Every model call in the harness names
 a _job_ — `chat`, `extract`, `reason`, `judge` — never a provider, so switching providers is a
-change to `clients/<name>/routing.yaml` and nothing else.
+change to the client document's own `routing` section and nothing else.
+
+`pnpm gateway:config` reads the client `HARNESS_CLIENT` names through whatever `ConfigSource`
+`HARNESS_CONFIG_SOURCE` picks (`@harness/core-tools`'s `configSourceNameFrom`/`loadConfigSource`,
+the same registry the kernel uses), not a file this package resolves on its own — which is why it
+depends on `@harness/core-tools` and `@harness/db` now, and is no longer the one package with no
+edge to `@harness/shared`.
 
 ## Layout
 
 ```
-src/domain/routing/parse.ts   parseRouting: routing.yaml -> RoutingFile, with a readable error
+src/domain/routing/parse.ts   parseRouting: an inline routing table -> RoutingFile, with a
+                               readable error (kept for a document embedded as raw YAML; the
+                               render pipeline itself reads the field already parsed)
 src/domain/routing/render.ts  apiKeyEnvFor, renderLiteLlmConfig: RoutingFile -> LiteLLM YAML
-src/app/render-config.ts      the `pnpm gateway:config` entrypoint
+src/app/render-config.ts      the `pnpm gateway:config` entrypoint: renderClientConfig(source, clientId)
 src/index.ts                  the public API
 litellm.config.yaml           GENERATED. Compose bind-mounts this exact path; do not move it.
 ```

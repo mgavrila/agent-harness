@@ -28,9 +28,11 @@ The tables `schema.ts` declares, in the order it declares them:
 | `approvals`, `runs`, `tool_effects`                            | the parked actions, the runs that produced them (each with the principal it acted as, and where it was started from), and the outbox                       |
 | `model_calls`, `audit_log`                                     | what was asked of a model, and what every tool call did. `audit_log` is append-only.                                                                       |
 | `memory_entries`                                               | one curated fact per row, in a principal's own scope or the client's                                                                                       |
-| `playbooks`, `playbook_runs`                                   | the scheduled work read from `playbooks.yaml`, and one row per firing                                                                                      |
+| `playbooks`, `playbook_runs`                                   | the scheduled work read from the client document's `playbooks` section, and one row per firing                                                             |
 | `threads`, `messages`                                          | one thread per conversation, and the turns on it                                                                                                           |
 | `knowledge_sources`, `knowledge_documents`, `knowledge_chunks` | the client's knowledge folder: one source, one row per markdown file, one row per retrievable passage with its `tsvector` and its `vector(1024)` embedding |
+| `client_documents`, `client_document_versions`                 | (Plan 11a) the `postgres` `ConfigSource`: one live document per client, and every version it has had                                                       |
+| `usage_runs` (view)                                            | (Plan 11a) per client, principal and day: run counts, tokens, cost, durations, approval counts — no content                                                |
 
 There is no `providers` table and no `credentials` table: migration `0008` replaced them with
 `records` and `attachments`, so one pair of tables serves every loaded pack and a pack ships no
@@ -85,3 +87,11 @@ a fixture of the pre-0008 schema on every run.
 `0010_run_principal` adds `runs.principal_id` and backfills it from `caller` in a hand-written
 data section before setting it `NOT NULL`; `src/domain/migration-0010.test.ts` replays it over a
 fixture of the pre-0010 `runs` table.
+
+`0014` (Plan 11a) adds `client_documents`, `client_document_versions` and the `usage_runs` view,
+and adds a `NOT NULL` `client` column with no default to `attachments`, `deadlines`, `fields`,
+`messages` and `playbook_runs` — a default would have filed every existing row under one tenant,
+so this migration has no path from live data: `docs/runbook.md`, "Upgrading to Plan 11a", says the
+database is recreated instead. `src/domain/migration-0014.test.ts` replays the shipped file onto a
+fresh database, tenant columns and view included; `schema.test.ts` asserts the view's whole column
+list against `information_schema`.

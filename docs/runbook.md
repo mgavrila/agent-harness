@@ -90,7 +90,7 @@ Narrow to one client or tool when triaging:
 select caller, tool, args_hash, error, created_at
 from audit_log
 where error is not null
-  and client = 'demo-practice'
+  and client = '<client-id>'
   and created_at > now() - interval '1 day'
 order by created_at desc;
 ```
@@ -218,24 +218,24 @@ stopped.
 ## Runs and principals
 
 The stdio server (the MCP inspector, the eval runner) acts as exactly one principal —
-`HARNESS_PRINCIPAL`, an id declared in `clients/<name>/identity.yaml` — and opens exactly one
-`runs` row for its whole life. `@harness/host` is different: it opens one `runs` row per
-conversation turn, as whichever principal the identity plug-in resolved for that message's
+`HARNESS_PRINCIPAL`, an id the client document's own `identity` section declares — and opens
+exactly one `runs` row for its whole life. `@harness/host` is different: it opens one `runs` row
+per conversation turn, as whichever principal the identity plug-in resolved for that message's
 sender, and one more for every approval it executes or reconciles, as the approver's or the
 host's own service principal. Every `audit_log`, `tool_effects`, `model_calls`, `threads` and
 `messages` row a run touches points at its `runs.id`. `runs.status` (`running` → `done` | `error`
 | `cancelled`) records how a run ended; `runs.caller` is gone — `runs.principal_id` is the only
 column that says who a run acted as, and it always agrees with `audit_log.caller` on that run's
-rows. A run whose principal the identity file does not declare never opens.
+rows. A run whose principal the document's identity section does not declare never opens.
 
-Who is who in the demo: `svc-host` is the host's own identity (`HARNESS_HOST_PRINCIPAL`,
-default `svc-host`): reconciliation runs as it. `svc-playbooks` is the identity the scheduled
-playbooks run as — each entry of `playbooks.yaml` names its own service principal, and the
-demo's names this one. `svc-local` is the stdio server on an operator's machine (the default). The two humans are
-`u-practice-manager` (`admin`) and `u-coordinator` (`lead`). On the host's own surfaces — the
-ones `HARNESS_SURFACES` names — every message from a person runs as that person's own
-principal: the identity plug-in resolves the surface user id before the turn starts, and an
-unresolved sender gets one refusal and no run at all.
+Who is who in a typical document: `svc-host` is the host's own identity (`HARNESS_HOST_PRINCIPAL`,
+default `svc-host`): reconciliation runs as it. `svc-playbooks` is a common name for the identity
+scheduled playbooks run as — each entry of the document's `playbooks` section names its own
+service principal. `svc-local` is the stdio server on an operator's machine (the default). A
+document typically declares an `admin` and a `lead` for its two humans. On the host's own
+surfaces — the ones the document's `surfaces` section loads — every message from a person runs
+as that person's own principal: the identity plug-in resolves the surface user id before the turn
+starts, and an unresolved sender gets one refusal and no run at all.
 
 A multi-run host builds one `KernelConfig` and calls `openRun` and `depsForRun` per run; it
 must never reuse one `ToolDeps` across runs, or one run's id would be stamped on another's rows.
@@ -248,6 +248,19 @@ approval, always at least `lead` — so that fallback never wrongly blocks or pe
 a level the original requester never held; a policy tightened after the row was parked still
 applies, because the check reads the *current* policy at the parked (or fallback) level, not
 whatever the policy said when the row was created.
+
+**A parked approval for a tool the client has since hidden cannot be replayed.** `tools.hide`
+is checked again at replay, the same way an unknown tool name is, so `approvals_execute` refuses
+a decided approval whose tool a document edit hid in the meantime. The operator re-enables the
+tool — an edit to the document's own `policy.tools.hide` — or lets the approval expire; there is
+no way to force a replay of a tool the current document withholds.
+
+`HARNESS_RUN_MAX_MODEL_CALLS` must stay below `HARNESS_GATEWAY_MAX_CALLS_PER_RUN`: the
+conversation's own model calls count against the gateway's per-run breaker too, since the host
+began persisting the runtime's own spend, so a runtime budget that reaches the breaker would have
+the kernel's tools refused mid-turn. `openTenant` checks this at open rather than let it happen at
+turn time: a tenant whose `HARNESS_RUN_MAX_MODEL_CALLS` is not below the gateway's ceiling is
+refused with a `ConfigError` naming both numbers, and the host never opens for that client.
 
 To see what a run did:
 
@@ -387,7 +400,7 @@ where "startTime" > now() - interval '1 day' group by 1;
 
 A `model route "extract" is over its daily budget` error means LiteLLM refused
 the call, not that the harness declined to make it. Raise `daily_budget_usd` in
-`clients/<name>/routing.yaml` and re-run `pnpm gateway:config && pnpm gateway:up`.
+the client document's own `routing` section and re-run `pnpm gateway:config && pnpm gateway:up`.
 
 ## Document pipeline
 
@@ -455,8 +468,9 @@ including the route being down.
 `judge` — not the underlying deployment that served the call. Per-provider cost
 attribution needs the deployment, which LiteLLM returns in the
 `x-litellm-model-id` response header; recording that header is a later change,
-and until then the deployment behind a route is whatever
-`clients/<name>/routing.yaml` said at the time of the run.
+and until then the deployment behind a route is whatever the client document's own `routing`
+section said at the time of the run.
+
 ## Storage
 
 `HARNESS_STORAGE_DIR` is the root of the file store, and there is exactly one
@@ -491,22 +505,24 @@ where the `surface_file` sink reads it back — one process now — and `files` 
 parse a document core-tools sends it. If a file upload fails with ENOENT, check both services'
 `volumes:` entries before anything else.
 
-Storage isolation is per process, not per request: a core-tools process is
-started with one `HARNESS_STORAGE_DIR` and one `HARNESS_CLIENT`, and that scopes
-every file it reads or writes for as long as it runs. One core-tools process
-never serves two clients, so there is no per-call tenant check on file paths —
-the isolation comes entirely from which process, and which storage root, a
-given client's traffic is routed to.
+Storage isolation is per process and per storage root, not per request: a dedicated host is
+started with one `HARNESS_STORAGE_DIR` and one `HARNESS_CLIENT`, and that scopes every file it
+reads or writes for as long as it runs, with no per-call tenant check on file paths — the
+isolation comes entirely from which process, and which storage root, a given client's traffic is
+routed to. **A pooled host shares one `HARNESS_STORAGE_DIR` across every tenant it opens**: the
+directory is read once from the pool's own process environment, not per tenant, so two clients on
+one pooled host currently share one file store. Run a client that ingests documents dedicated
+(`HARNESS_CLIENT` set) until a per-tenant storage root exists.
 
 ## The host and its surfaces
 
 `@harness/host` is the process; `@harness/approvals` is the only writer of approval decisions and
-the only caller of `approvals_execute`, a library the host composes rather than a process of its
-own. It holds no transport of its own: it loads messaging adapters by name from
-`HARNESS_SURFACES`, and the **first one is primary** — the surface approval cards are posted on.
-The variable is required and the host has no default for it: where a card is posted is a
-deployment's decision, so Compose supplies the demo's `@harness/surface-slack`. It runs three
-loops:
+the only caller of `approvals_execute`, a library each tenant composes rather than a process of
+its own. It holds no transport of its own: it loads messaging adapters by name from the client
+document's own `surfaces` section, and the **first one, by the schema's fixed order, is
+primary** — the surface approval cards are posted on. A document with no surfaces fails to open:
+where a card is posted is a client's decision, and one with none is a client nothing can approve
+for. Each tenant runs its own three loops:
 
 | Loop | Default | What it does |
 |---|---|---|
@@ -520,7 +536,9 @@ to the client and lands in `audit_log` like any other call — the in-process
 MCP client to a server built on that run's `ToolDeps`, the same shape an approval's execution
 uses. The host has no privileged route into the data.
 
-**Run one host per client.** The poller claims each row before it posts, by setting
+**Run one host for a client — never two.** A dedicated host and a pooled host both serving the
+same client at once is the case to avoid, whether that is two dedicated hosts or a dedicated host
+alongside a pool that also opens the client. The poller claims each row before it posts, by setting
 `conversation_id` under a guard on the row still being `pending` with `conversation_id IS NULL`.
 Only one claim can win that guard, so two pollers never both post a card for the same approval;
 the loser's update affects zero rows and it logs the row as `orphaned`.
@@ -606,9 +624,9 @@ interpolated from `.env`, so nothing outside that list reaches the container. Wh
 approval is gated by the identity plug-in — level `lead` or above, resolved on the surface the
 card was posted on — not by which token is present; see "The host and its surfaces" above.
 
-**Finding a Slack member id for `identity.yaml`.** Open the person's profile in Slack, click the
-"More" (•••) menu, and choose "Copy member ID"; it is a string starting with `U`. Paste it into
-`identity.yaml`'s `surfaces.slack` field for that principal.
+**Finding a Slack member id for a document's `identity` section.** Open the person's profile in
+Slack, click the "More" (•••) menu, and choose "Copy member ID"; it is a string starting with
+`U`. Paste it into that principal's `surfaces.slack` field.
 
 ### Health
 
@@ -648,47 +666,87 @@ Restricted values are kept away from a human in three places, on purpose:
 A withheld payload in a card is not a bug to route around. It means something
 wrote a restricted-looking value where it should not be; read the audit row.
 
-## Onboarding a client
+## Onboarding a tenant
 
-`pnpm new-client --name <slug> [--pack <pack>]` scaffolds `clients/<slug>/` — `SOUL.md`,
-`identity.yaml`, `policy.yaml`, `routing.yaml`, `playbooks.yaml`, a `knowledge/` folder of markdown
-and an `.env.example`: a client is content and configuration, never code. Compose derives every client path from `HARNESS_CLIENT`, so there is
-nothing to edit under `harness/compose/`:
+A tenant is a document — the persona, principals, policy, routing, playbooks, skills, knowledge
+source, surfaces, identity plug-in, runtime and packs a client is — in a directory or a table
+**outside this repository**. Onboarding one writes that document; it changes nothing under this
+checkout, and nothing under `harness/compose/`.
 
-1. `cp clients/<slug>/.env.example .env` and fill it in, with `HARNESS_CLIENT=<slug>` and a
-   storage directory this client does not share. `HARNESS_PACKS` names the product areas this
-   client serves; set it to the empty string for a client that has no pack at all, which serves
-   the kernel's own tools — memory, playbooks, knowledge, approvals and files — and nothing else.
-   Leaving the variable out entirely is not the same thing: unset falls back to the healthcare
-   pack, so a pack-less client sets it empty rather than deleting the line.
-2. Declare the people and services in `clients/<slug>/identity.yaml`: `svc-host` for the
-   container, `svc-local` for the operator, and one `u-…` principal per human with their level
-   and their Slack member id ("Finding a Slack member id" above). A container whose principal
-   is missing from the file refuses to start.
-3. Create one Slack app as described under **Slack credentials** above and paste its tokens and
-   the approvals channel id.
-4. Review `clients/<slug>/SOUL.md` and `policy.yaml` before the first run, and the markdown in
-   `clients/<slug>/knowledge/`, which the scaffolder copied from the template with the client's
-   name rewritten — it is the demo practice's content until somebody replaces it. Delete the folder
-   if this client has no knowledge base; nothing requires one.
-5. Review `clients/<slug>/routing.yaml`, whose `embed` route came from the template like every
+`pnpm new-client --name <slug> [--display-name "<name>"] [--pack <pack>] [--target <dir>]` writes
+`<target>/<slug>/client.yaml` and `<target>/<slug>/persona.md`, starting from `clients/fixture/`'s
+document with the slug, display name and pack substituted in. `--target` defaults to
+`HARNESS_CLIENTS_DIR`; the scaffolder refuses to run with neither set, because the one place a
+client must not go is this repository.
+
+1. Run `pnpm new-client`, then fill in `.env` (`HARNESS_CONFIG_SOURCE=files`,
+   `HARNESS_CLIENTS_DIR=<target>`, `HARNESS_CLIENT=<slug>` for a dedicated host) and a storage
+   directory this client does not share with another tenant's dedicated host. Edit the document's
+   `packs` list: the package names this client serves, or an empty list for a client with no pack
+   at all, which serves the kernel's own tools — memory, playbooks, knowledge, approvals and
+   files — and nothing else.
+2. Declare the people and services in the document's own `identity` section: `svc-host` for the
+   container, `svc-playbooks` for its scheduled work, `svc-local` for an operator running the
+   stdio server, and one `u-…` principal per human with their level and their Slack member id
+   ("Finding a Slack member id" above) — or an `identity.defaults` entry per surface instead of
+   listing every person, or an `identityPlugin.kind: slack-groups` section instead of declaring
+   people at all (see "Directory-backed identity" below). A tenant whose principal is missing from
+   the document refuses to open.
+3. Add a `surfaces.slack` section (see "Slack credentials" above) and create one Slack app,
+   pasting its tokens and the approvals channel id into `.env`.
+4. Review the document's `persona` and `policy` sections before the first run, and the markdown
+   under the directory its `knowledge` section names (`{ source: 'dir', path }`) — the scaffolder
+   copied the fixture's, which is a worked example rather than this client's content. Set
+   `knowledge: { source: 'store' }` if this client has no knowledge base; nothing requires one.
+5. Review the document's `routing` section, whose `embed` route came from the fixture like every
    other route, and check its width once with the `curl` under "Knowledge" before the first sync.
 6. Start it under its own Compose project so it does not collide with another client's
    containers and volumes:
    `COMPOSE_PROJECT_NAME=<slug> docker compose --env-file .env -f harness/compose/docker-compose.yml --profile demo up -d --build`.
 
 `pnpm demo:up` is the same command under the default project name; with `HARNESS_CLIENT` set
-in `.env` it starts that client.
+in `.env` it starts that client dedicated, and with it unset a pooled host opens every client its
+`ConfigSource` lists.
 
-`policy.yaml`'s `classes:` block sets the default for every level, but a level cell — the
-kernel's own `DEFAULT_POLICY` or a `levels:` block in the client's file — always wins over
-`classes` for that level, so `classes:` alone cannot loosen or tighten a level the kernel
-already gives its own cell:
+The document's `policy.classes` sets the default for every level, but a level cell — the kernel's
+own `DEFAULT_POLICY` or the document's own `policy.levels` — always wins over `classes` for that
+level, so `classes:` alone cannot loosen or tighten a level the kernel already gives its own cell:
 
 ```yaml
 levels:
   member: { destructive: approval }
 ```
+
+### Directory-backed identity
+
+`identities/slack-groups` resolves a level from a Slack workspace's own user groups instead of a
+list of people:
+
+```yaml
+identityPlugin:
+  kind: slack-groups
+  settings:
+    surface: slack
+    groups:
+      - { id: S-ADMINS, level: admin }
+      - { id: S-LEADS, level: lead }
+    exceptions:
+      - { userId: U-CONTRACTOR, level: member }
+    sync: { everySeconds: 300 }
+```
+
+The order is exceptions, then groups, then the document's own `identity.defaults` for everyone
+else; someone in no group on a surface with no default is refused. The Slack app needs two scopes
+this plug-in reads through, beyond the ones under "Slack credentials": `usergroups:read` (the
+group list and membership) and `users:read` (a display name). Grant both before pointing a
+document at `slack-groups`, or every lookup fails and every caller is refused.
+
+**A group change takes up to ten minutes to reach a decision, not five.** The surface directory
+caches a workspace's group membership for 300 seconds and `identities/slack-groups` caches the
+resolved level for `sync.everySeconds` (also 300 by default) on top of that, so the two windows
+stack. A minted level that expires mid-conversation falls back to the document's own default for
+that surface until the person's next message re-resolves it — the person is not refused, but may
+briefly act at a lower level than their current group would give them.
 
 ## Upgrading from Plan 7
 
@@ -820,6 +878,29 @@ and start the host last.
    the batch is the `CLAIM_BATCH` constant, at the same value of 10. And the host's `listening` line
    gained one more field, `runApi=on` or `runApi=off (set HARNESS_HOST_TOKEN)`.
 
+## Upgrading to Plan 11a
+
+The deployment database is **recreated**, not migrated in place. Migration 0014 adds five
+`NOT NULL` tenant columns — `client` on `attachments`, `deadlines`, `fields`, `messages` and
+`playbook_runs` — with no default, because a default would file every existing row under one
+tenant, which is a silent cross-tenant merge dressed up as a migration. Start from a fresh
+database (`pnpm db:up` on an empty volume, then `pnpm db:migrate`); there is no supported path
+that carries old rows across this migration.
+
+The one live client is **re-onboarded as a document**, not carried across: run `pnpm new-client`
+for it (or write its document by hand against `@harness/config-api`'s schema) in a directory
+outside this repository, delete its `clients/<name>/` folder, and point `.env` at
+`HARNESS_CONFIG_SOURCE=files` and `HARNESS_CLIENTS_DIR`. Six variables are gone —
+`HARNESS_IDENTITY_FILE`, `HARNESS_POLICY_FILE`, `HARNESS_PACKS`, `HARNESS_SURFACES`,
+`HARNESS_IDENTITY`, `HARNESS_RUNTIME` — remove them from `.env`; what they named is now a
+section of the document. `HARNESS_CONFIG_SOURCE` and `HARNESS_CLIENTS_DIR` are new and, for
+`files`, both required.
+
+`/healthz` keeps its old shape for a dedicated host (`HARNESS_CLIENT` set) — a container health
+check and this runbook read the same fields as before. A pooled host (`HARNESS_CLIENT` unset) has
+no single client to report, so it answers `{ ok, tenants: { <id>: <the old shape>, … } }`, with
+`ok` false when any tenant's is.
+
 ## Memory
 
 `memory_entries` is the curated memory (spec 5.5): one row per fact, in scope `principal` (one
@@ -837,7 +918,7 @@ The host renders what the caller can see into `RunRequest.memory` once, before t
 turn's snapshot. `session_search` is full-text recall over `messages` of the caller's own
 threads, plus the playbook threads for `lead` and above, filtered by principal before ranking.
 
-**Leave `write.self` on `auto` in `policy.yaml`.** Parking it strands the write. A replay runs on
+**Leave `write.self` on `auto` in the document's own `policy` section.** Parking it strands the write. A replay runs on
 the deciding principal's own dependencies, and a `write.self` handler files the entry under
 whoever replays it, so `approvals_execute` refuses every replay whose principal is not the one
 who asked —
@@ -853,15 +934,16 @@ remembers with:
 
 ```sql
 select scope, principal_id, text, created_by, created_at
-from memory_entries where client = 'demo-practice' order by created_at;
+from memory_entries where client = '<client-id>' order by created_at;
 ```
 
 ## Knowledge
 
-`clients/<name>/knowledge/` is a folder of markdown. `knowledge_sync` walks it into
-`knowledge_documents` and `knowledge_chunks`; `knowledge_search` reads it back, filtered by who is
-asking. The demo ships two documents and a nightly `knowledge-sync` playbook at 06:30
-`America/New_York`. The folder is optional: a client without one syncs nothing and starts fine.
+The directory a client document's `knowledge` section names (`{ source: 'dir', path }`) is a
+folder of markdown. `knowledge_sync` walks it into `knowledge_documents` and `knowledge_chunks`;
+`knowledge_search` reads it back, filtered by who is asking. The demo ships two documents and a
+nightly `knowledge-sync` playbook at 06:30 `America/New_York`. The section is optional: a client
+whose `knowledge` is `{ source: 'store' }` syncs nothing and starts fine.
 
 **Who may sync.** `knowledge_sync` is `write.internal`, so under the default matrix it runs
 automatically for a `practitioner`, a `lead`, an `admin` and a **service** principal, and is
@@ -927,7 +1009,7 @@ the first `ef_search` candidates. An older server fails that half of every searc
 naming the setting. Compose pins `pgvector/pgvector:0.8.1-pg16` for exactly this reason, and so
 does CI.
 
-**Embeddings.** Route `embed` in `clients/<name>/routing.yaml`, called at `POST /v1/embeddings` on
+**Embeddings.** Route `embed` in the client document's own `routing` section, called at `POST /v1/embeddings` on
 the gateway, up to 64 passages per request, one `model_calls` row per request on route `embed`
 (with `output_tokens` 0, because an embeddings deployment produces no completion tokens). The
 column is `vector(1024)` and `HARNESS_EMBED_DIMS` is checked against it at startup: they disagree
@@ -960,21 +1042,23 @@ directory is read before every pack's, so a pack cannot shadow it. The skill cal
 ```sql
 select d.path, d.title, d.min_level, d.principals, d.updated_at, d.deleted_at, count(c.id) as chunks
 from knowledge_documents d left join knowledge_chunks c on c.document_id = d.id
-where d.client = 'demo-practice' group by d.id order by d.path;
+where d.client = '<client-id>' group by d.id order by d.path;
 ```
 
 ## The run API
 
-Four routes in the host, on `HARNESS_HOST_BIND:HARNESS_HOST_PORT` (default `127.0.0.1:8788`),
+Five routes in the host, on `HARNESS_HOST_BIND:HARNESS_HOST_PORT` (default `127.0.0.1:8788`),
 behind `Authorization: Bearer $HARNESS_HOST_TOKEN`, compared in constant time. **With no token
 there is no listener**: nothing is bound, and the host's `listening` line says so with
 `runApi=off (set HARNESS_HOST_TOKEN)`.
 
 Who a run acts as is the identity plug-in's answer, never the caller's: every route names a loaded
 `surface` and that surface's own user id, which is resolved exactly as an adapter's message is, so
-a caller cannot name a principal. Load `@harness/surface-http` in `HARNESS_SURFACES` — **after**
-your primary surface, because the first entry is where approval cards go and that one cannot post
-a card — and give each caller an `http:` entry in `identity.yaml`.
+a caller cannot name a principal. Add `http` to the client document's `surfaces` section — the
+schema always orders it last, because it cannot post an approval card — and give each caller an
+`http:` entry in the document's `identity` section. On a pooled host every request also needs an
+`x-harness-client` header naming which tenant it is for; a dedicated host ignores the header
+(or refuses one naming a different client) because there is only ever one.
 
 | Route | What it does |
 | --- | --- |
@@ -982,6 +1066,7 @@ a card — and give each caller an `http:` entry in `identity.yaml`.
 | `POST /v1/runs/:id/cancel?surface=&userId=` | `{ run_id, cancelled }`; `cancelled` is false when the run had already ended |
 | `GET /v1/threads/:id?surface=&userId=` | that thread and its **most recent** messages, newest last, at most 200 — the tail of a long thread, not its beginning |
 | `GET /v1/status` | six fields: `client`, `surfaces`, `primary_surface`, `runs_in_flight`, `draining` and `scheduler` — the scheduler's own status (`lastTickAt`, `lastOkAt`, `lastError`, `lastErrorAt`, `ticking`), which has nowhere else to be read |
+| `GET /v1/usage?from&to` | per-principal, per-day totals for this tenant; see "Usage" below |
 
 ```bash
 curl -N http://127.0.0.1:8788/v1/runs -H "Authorization: Bearer $HARNESS_HOST_TOKEN" \
@@ -1018,25 +1103,43 @@ carries the whole reply already withheld if it tripped — the same guarantee a 
 has. A pattern split across two deltas is caught by that final check, not by the deltas. An idle
 stream writes a keep-alive comment every 15 seconds so a proxy in between does not close it.
 
+### Usage
+
+```bash
+curl -s "http://127.0.0.1:8788/v1/usage?from=2026-09-01&to=2026-10-01" \
+  -H "Authorization: Bearer $HARNESS_HOST_TOKEN" | python3 -m json.tool
+```
+
+`{ client, from, to, rows }`, one row per principal per day for the tenant the request resolved
+to — `runs`, `input_tokens`, `output_tokens`, `cost_usd`, `duration_seconds`, `runs_done`,
+`runs_error`, `runs_cancelled`, `runs_running`, `approvals_requested`, `approvals_decided` and
+`sandbox_seconds` (a fixed `0` until a sandbox provider exists). With no `from`/`to` the window is
+the last 30 days; the widest a request may ask for is 366 days, and `to` must be after `from`.
+
+**It carries no content.** No message, no tool argument, no document text, no conversation id —
+the `usage_runs` view it reads selects no text column at all, so there is nothing to withhold and
+nothing a caller could learn about what was said. This is what a billing or usage-reporting system
+reads; it never reaches the kernel's own tables, and the kernel never knows a customer paid.
+
 ## Playbooks
 
-Scheduled work is `clients/<name>/playbooks.yaml`, read into the `playbooks` table when the host
-starts, and a scheduler loop inside the host that ticks every 30 seconds. The demo ships two
-playbooks as `svc-playbooks`: `credentialing-expirations` at 07:00 `America/New_York`, and
-`knowledge-sync` at 06:30 in the same zone.
+Scheduled work is the client document's own `playbooks` section, read into the `playbooks` table
+when the host starts, and a scheduler loop inside the host that ticks every 30 seconds. The demo
+ships two playbooks as `svc-playbooks`: `credentialing-expirations` at 07:00 `America/New_York`,
+and `knowledge-sync` at 06:30 in the same zone.
 
-**The file.** One entry per playbook: `name` (the key), `schedule` (cron, five or six fields),
-`timezone` (IANA, default `UTC`), `skill` (the host's own or a loaded pack's), `prompt`, `principal` (a `svc-…` id from
-`identity.yaml`), `deliver` (`none`, the default, or `conversation`), optional `surface` and
-`conversation`, `cost_cap_usd`, `timeout_s` (default 600), `enabled` (default true). The schedule
-is exactly five or six whitespace-separated fields that fire at least once: the wider forms the
-cron library would otherwise take — `@daily` and the rest of that family, seven fields, an ISO
-one-shot date — are rejected, and so is a calendar that can never come round again, such as
-`0 0 30 2 *`. The timezone is checked at parse time too. A malformed file stops the host at
-startup, naming the field. Edit the file and restart: a playbook removed from it is **disabled,
-not deleted**, so `playbook_runs` keeps its history, and a firing that was due while the host was
-down is **not replayed** (decision 13) — `next_run_at` is recomputed from the clock at every
-start.
+**The section.** One entry per playbook: `name` (the key), `schedule` (cron, five or six fields),
+`timezone` (IANA, default `UTC`), `skill` (the host's own or a loaded pack's), `prompt`,
+`principal` (a `svc-…` id the document's own `identity` section declares), `deliver` (`none`, the
+default, or `conversation`), optional `surface` and `conversation`, `cost_cap_usd`, `timeout_s`
+(default 600), `enabled` (default true). The schedule is exactly five or six whitespace-separated
+fields that fire at least once: the wider forms the cron library would otherwise take — `@daily`
+and the rest of that family, seven fields, an ISO one-shot date — are rejected, and so is a
+calendar that can never come round again, such as `0 0 30 2 *`. The timezone is checked at parse
+time too. A malformed document stops the host at open, naming the field. Edit the document and
+reopen the tenant: a playbook removed from it is **disabled, not deleted**, so `playbook_runs`
+keeps its history, and a firing that was due while the host was down is **not replayed**
+(decision 13) — `next_run_at` is recomputed from the clock at every start.
 
 **A firing.** The scheduler claims due rows with `FOR UPDATE SKIP LOCKED` (two hosts on one
 database never both fire the same row), then for each: preflight — the skill is one the host
@@ -1047,7 +1150,7 @@ and posts one notice, and no model call is made. Then one turn on the playbook's
 prompt as a host message, that one skill offered, `timeout_s` as the run's budget timeout.
 Under `deliver: none` the run's reply is recorded on the thread and posted nowhere; what the
 practice sees is whatever the skill staged through `harness_notify`, which is the silence
-doctrine in `SOUL.md`. Under `deliver: conversation` the reply is posted once to
+doctrine in the document's own `persona`. Under `deliver: conversation` the reply is posted once to
 `surface`/`conversation` (defaults: the primary surface, its default conversation).
 
 The 30-second tick is a constant in the code, not a variable a deployment tunes. A tick that

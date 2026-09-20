@@ -38,16 +38,25 @@ environment and opens a pool, and a consumer that imported it would inherit both
 
 ## Configuration
 
-`buildKernelConfig` (`domain/tooling/config.ts`) does the startup-only work once — pack loading,
-policy parsing, key loading — from an `EnvSource` a caller passes in; it used to live in
-`app/server.ts`, which no other package may import, and moved to the domain layer so
-`@harness/host` can call it too, once per process, and clone it into per-run deps with
-`depsForRun`. `src/app/server.ts` is still the stdio server's own composition root and reads
-almost everything through a helper in `@harness/shared` so no variable is validated more
-loosely than its neighbour. Two domains read their own variable the same way, as a default
-parameter a caller can override: `storageRoot` (`HARNESS_STORAGE_DIR`) and `loadPolicy`
-(`HARNESS_POLICY_FILE`). The third reader, `gatewayFromEnv`, takes no parameter and is the
-exception described next.
+`buildKernelConfig(document, env)` (`domain/tooling/config.ts`) does the startup-only work once —
+pack loading, policy merging, key loading — from a `ClientDocument` (`@harness/config-api`) and an
+`EnvSource` a caller passes in; it used to take only the environment, and gained the document in
+Plan 11a because policy, packs and the knowledge source are the client's now, not a file this
+package resolved from `HARNESS_CLIENT`. It used to live in `app/server.ts`, which no other package
+may import, and moved to the domain layer so `@harness/host` can call it too, once per tenant, and
+clone it into per-run deps with `depsForRun`. `src/app/server.ts` is still the stdio server's own
+composition root — it loads the document through `domain/config/registry.ts` (`HARNESS_CONFIG_SOURCE`,
+`HARNESS_CLIENTS_DIR` for `files`) before calling `buildKernelConfig` — and reads almost everything
+through a helper in `@harness/shared` so no variable is validated more loosely than its neighbour.
+`storageRoot` reads its own variable the same way, as a default parameter a caller can override:
+`HARNESS_STORAGE_DIR`. The other reader, `gatewayFromEnv`, takes no parameter and is the exception
+described next.
+
+`config.policy` is `mergePolicy(DEFAULT_POLICY, document.policy)`; `config.hiddenTools` is
+`document.policy.tools.hide`, applied once, in `publishedTools`, before any pack contributes a
+tool — a hidden kernel or pack tool never reaches `deps.tools`, so calling it is the same
+`ToolError` an unknown tool name gets, and `approvals_execute` refuses to replay a parked
+approval for a tool the document has since hidden the same way.
 
 **`gatewayFromEnv` in `src/domain/models/gateway.ts` is the documented exception**, and it is
 the only one in the workspace. Three more variables — `HARNESS_GATEWAY_URL`,
@@ -62,12 +71,13 @@ variable.
 `.env.example` documents every name; `src/app/surface.test.ts` fails if the code reads one that
 file does not list.
 
-`HARNESS_CLIENT`, `HARNESS_PRINCIPAL` and `HARNESS_IDENTITY` have defaults, and for each an
-empty value is a startup `ConfigError` naming the variable rather than a silent fall back.
-`HARNESS_PRINCIPAL` names an id the identity plug-in must declare; one it does not is a startup
-error too, because a server that started anyway would audit every call as somebody nobody
-vouched for. Parsing happens in the files worker when `HARNESS_FILES_URL` is set and in this
-process otherwise.
+`HARNESS_CLIENT` names which client the stdio server serves and has no code default — an empty
+value is a startup `ConfigError` naming the variable, and so is a client id the config source
+holds no document for. `HARNESS_PRINCIPAL` defaults to `svc-local` and names an id the document's
+`identity` section must declare; one it does not is a startup error too, because a server that
+started anyway would audit every call as somebody nobody vouched for. The identity plug-in comes
+from the document's own `identityPlugin.kind`, not a variable. Parsing happens in the files
+worker when `HARNESS_FILES_URL` is set and in this process otherwise.
 
 The four `VERIFY_*` and `NPPES_*` variables are **not** read here any more. They are the
 healthcare pack's, read in `packs/healthcare/src/config.ts` out of `deps.env`, the environment
@@ -85,12 +95,13 @@ of one shared wording for both.
 `HARNESS_EMBED_DIMS` (default 1024) is how wide an embedding this deployment stores. It does not
 decide the width: `knowledge_chunks.embedding` was created at a fixed width by migration 0013, and
 `assertEmbedDims` — which both composition roots call at startup — refuses to start when the two
-disagree. It reaches a handler as `ToolDeps.embedDims`, and `embedTexts` asks the gateway
-for exactly that width and refuses a vector of any other. `ToolDeps.clientDir` arrives the same
-way, derived from `HARNESS_CLIENT` rather than configured.
+disagree. It reaches a handler as `ToolDeps.embedDims`, and `embedTexts` asks the gateway for
+exactly that width and refuses a vector of any other. `ToolDeps.knowledgeDir` (renamed from
+`clientDir` in Plan 11a) arrives from the document's own `knowledge` section instead — `null` when
+it is `{ source: 'store' }`.
 
 `HARNESS_FORMS_DIR` is an override, not a requirement: unset, the forms directory comes from the
-first pack named in `HARNESS_PACKS`, so changing the pack changes the templates with it.
+first pack the document's `packs` names, so changing the pack changes the templates with it.
 
 ## How to test it
 
