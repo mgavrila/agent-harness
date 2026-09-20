@@ -2,6 +2,17 @@ import { ConfigError } from '@harness/shared';
 import type { PatchOp } from './types.js';
 
 /**
+ * The three segments no pointer may name.
+ *
+ * A pointer is a tenant's own string — an overlay is the tenant's edits by definition — and
+ * `__proto__`, `constructor` and `prototype` are the three names that reach an object's prototype
+ * rather than its contents. One of them written through on a pooled host is every tenant's
+ * `Object.prototype`, so they are refused at the one place every walk and every write starts,
+ * rather than checked again at each of them.
+ */
+const PROTOTYPE_SEGMENTS = new Set(['__proto__', 'constructor', 'prototype']);
+
+/**
  * The segments of an RFC 6901 JSON pointer, with `~1` and `~0` unescaped.
  *
  * `''` is the whole document and has no segments. Anything that does not begin with `/` is not a
@@ -10,10 +21,27 @@ import type { PatchOp } from './types.js';
 export function pointerSegments(pointer: string): string[] {
   if (pointer === '') return [];
   if (!pointer.startsWith('/')) throw new ConfigError(`"${pointer}" is not a JSON pointer; one starts with "/"`);
-  return pointer
+  const segments = pointer
     .slice(1)
     .split('/')
     .map((segment) => segment.replaceAll('~1', '/').replaceAll('~0', '~'));
+  for (const segment of segments) {
+    if (PROTOTYPE_SEGMENTS.has(segment)) {
+      throw new ConfigError(`"${pointer}" names "${segment}", which is an object's prototype rather than its contents`);
+    }
+  }
+  return segments;
+}
+
+/**
+ * One step of a walk, over what an object *has* rather than what it inherits.
+ *
+ * `node[segment]` would answer for `toString` on any object and for `polluted` on every object
+ * once one prototype somewhere had been written to. A pointer names a place in a document; a key
+ * the document does not own is not one.
+ */
+function own(node: Record<string, unknown>, segment: string): unknown {
+  return Object.hasOwn(node, segment) ? node[segment] : undefined;
 }
 
 /**
@@ -29,7 +57,7 @@ function container(root: Record<string, unknown>, segments: string[], path: stri
     if (typeof node !== 'object' || node === null) {
       throw new ConfigError(`overlay: ${path} has no container in the blueprint`);
     }
-    node = (node as Record<string, unknown>)[segment];
+    node = own(node as Record<string, unknown>, segment);
   }
   if (typeof node !== 'object' || node === null) {
     throw new ConfigError(`overlay: ${path} is not an object or array in the blueprint`);
@@ -55,7 +83,7 @@ export function readPointer(root: unknown, pointer: string): unknown {
   let node: unknown = root;
   for (const segment of pointerSegments(pointer)) {
     if (typeof node !== 'object' || node === null) return undefined;
-    node = (node as Record<string, unknown>)[segment];
+    node = own(node as Record<string, unknown>, segment);
   }
   return node;
 }
@@ -71,14 +99,14 @@ export function writePointer(root: Record<string, unknown>, op: PatchOp): void {
   const last = segments[segments.length - 1];
   const parent = container(root, segments.slice(0, -1), op.path);
   if (op.op === 'remove') {
-    if (!(last in parent))
+    if (!Object.hasOwn(parent, last))
       throw new ConfigError(`overlay: cannot remove ${op.path}, which the blueprint does not have`);
     if (Array.isArray(parent)) parent.splice(Number(last), 1);
     else delete parent[last];
     return;
   }
   if (op.op === 'replace') {
-    if (!(last in parent)) {
+    if (!Object.hasOwn(parent, last)) {
       throw new ConfigError(`overlay: cannot replace ${op.path}, which the blueprint does not have; use "add"`);
     }
     parent[last] = op.value;

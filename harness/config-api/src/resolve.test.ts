@@ -163,3 +163,41 @@ describe('resolve', () => {
     ).toThrow(/cannot add \/packs\/5, which is not a position in a 1-element array/);
   });
 });
+
+describe('a hostile overlay', () => {
+  it('refuses the three segments that name a prototype, and leaves Object.prototype untouched', () => {
+    for (const path of ['/__proto__/polluted', '/constructor/prototype/polluted', '/prototype/polluted']) {
+      expect(() =>
+        resolve(blueprint([]), { version: 'ov-1', patch: [...names.patch, { op: 'add', path, value: 'yes' }] }),
+      ).toThrow(ConfigError);
+    }
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+    expect(Object.prototype).not.toHaveProperty('polluted');
+  });
+
+  it('cannot reach a key the blueprint inherits rather than owns', () => {
+    expect(() =>
+      resolve(blueprint([]), {
+        version: 'ov-1',
+        patch: [...names.patch, { op: 'replace', path: '/toString', value: 'x' }],
+      }),
+    ).toThrow(/cannot replace \/toString/);
+  });
+});
+
+describe('resolve validates what it was handed', () => {
+  it('refuses a blueprint with no lock set, rather than failing on an iteration', () => {
+    const { lockset: _lockset, ...rest } = blueprint([]);
+    expect(() => resolve(rest as Blueprint, names)).toThrow(ConfigError);
+    expect(() => resolve(rest as Blueprint, names)).toThrow(/blueprint is invalid/);
+  });
+
+  it('refuses an overlay operation with a non-string path or an unknown op', () => {
+    expect(() =>
+      resolve(blueprint([]), { version: 'ov-1', patch: [{ op: 'add', path: 7, value: 1 } as unknown as never] }),
+    ).toThrow(/overlay is invalid/);
+    expect(() =>
+      resolve(blueprint([]), { version: 'ov-1', patch: [{ op: 'copy', path: '/persona' } as unknown as never] }),
+    ).toThrow(/overlay is invalid/);
+  });
+});

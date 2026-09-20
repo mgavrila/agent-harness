@@ -1,7 +1,62 @@
+import * as z from 'zod/v4';
 import { ConfigError } from '@harness/shared';
 import { parseClientDocument, type ClientDocument } from './document.js';
 import { pointerSegments, writePointer } from './pointer.js';
 import type { Blueprint, Overlay } from './types.js';
+
+/**
+ * What a blueprint and an overlay have to be before anything reads them.
+ *
+ * Both files are written by hand or by a control plane, and both reach this function as a cast
+ * (`config-files` reads YAML and asserts the type). Without a parse, a `blueprint.yaml` with no
+ * `lockset` is a `TypeError` on an iteration and an operation with a non-string `path` or an
+ * unknown `op` falls quietly into the `add` branch — neither of which is a sentence anybody can
+ * act on. `document` is a record rather than a whole client document: a blueprint is missing `id`
+ * and `displayName` by construction, and the resolved result is what gets parsed properly.
+ */
+export const BlueprintShape = z.object({
+  document: z.record(z.string(), z.unknown()),
+  lockset: z.array(z.string()),
+  version: z.string().min(1),
+});
+
+export const OverlayShape = z.object({
+  patch: z.array(
+    z.discriminatedUnion('op', [
+      z.object({ op: z.literal('replace'), path: z.string(), value: z.unknown() }),
+      z.object({ op: z.literal('add'), path: z.string(), value: z.unknown() }),
+      z.object({ op: z.literal('remove'), path: z.string() }),
+    ]),
+  ),
+  version: z.string().min(1),
+});
+
+/** Parsed for the error only: what was handed in is what the caller keeps using. */
+function assertShape(shape: z.ZodType, value: unknown, what: string): void {
+  const parsed = shape.safeParse(value);
+  if (!parsed.success) throw new ConfigError(`${what} is invalid: ${z.prettifyError(parsed.error)}`);
+}
+
+/**
+ * Strip the prototype from every plain object in a tree, in place.
+ *
+ * `structuredClone` copies a plain object onto `Object.prototype`, so the working copy a patch is
+ * applied to inherits every name on it and the document that comes back carries whatever a
+ * `__proto__` key in the blueprint or in an overlay value happened to be. Neither is something a
+ * tenant's file should be able to decide. Only plain objects are touched — anything with a
+ * prototype of its own is left as it is rather than broken.
+ */
+function stripPrototypes<T>(node: T): T {
+  if (Array.isArray(node)) {
+    for (const item of node) stripPrototypes(item);
+    return node;
+  }
+  if (typeof node === 'object' && node !== null && Object.getPrototypeOf(node) === Object.prototype) {
+    for (const value of Object.values(node)) stripPrototypes(value);
+    Object.setPrototypeOf(node, null);
+  }
+  return node;
+}
 
 /**
  * Whether `a` and `b` overlap: either is a prefix of the other, or they are equal.
@@ -29,6 +84,8 @@ function pointersOverlap(a: string[], b: string[]): boolean {
  * set that named either would describe a blueprint no tenant could instantiate, and is refused.
  */
 export function resolve(blueprint: Blueprint, overlay: Overlay): ClientDocument {
+  assertShape(BlueprintShape, blueprint, 'blueprint');
+  assertShape(OverlayShape, overlay, 'overlay');
   for (const locked of blueprint.lockset) {
     const segments = pointerSegments(locked);
     if (segments.length === 1 && (segments[0] === 'id' || segments[0] === 'displayName')) {
@@ -47,7 +104,9 @@ export function resolve(blueprint: Blueprint, overlay: Overlay): ClientDocument 
       );
     }
   }
-  const draft = structuredClone(blueprint.document) as unknown as Record<string, unknown>;
+  const draft = stripPrototypes(structuredClone(blueprint.document) as unknown as Record<string, unknown>);
   for (const op of overlay.patch) writePointer(draft, op);
-  return parseClientDocument(draft);
+  // Again after the writes: an overlay's own `value` is written as it arrived, and a `__proto__`
+  // key inside one is data until something reads it as a prototype.
+  return parseClientDocument(stripPrototypes(draft));
 }
