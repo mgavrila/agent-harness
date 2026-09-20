@@ -1,6 +1,6 @@
 import { describeError, SurfaceError } from '@harness/shared';
 
-/** This adapter's name, as `HARNESS_SURFACES` names it and as `approvals.surface` stores it. */
+/** This adapter's name, as a client document names it and as `approvals.surface` stores it. */
 export const NAME = 'slack';
 
 /**

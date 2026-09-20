@@ -43,8 +43,9 @@ export interface Policy {
 }
 
 /**
- * What a `policy.yaml` parses to, and what `Pack.policy` carries: both halves partial, because a
- * client's file and a pack's defaults each say only what they want to change.
+ * What a pack's `policy.yaml` parses to, and what a client document's `policy` section carries:
+ * both halves partial, because a client and a pack's defaults each say only what they want to
+ * change.
  */
 export interface PolicyOverrides {
   classes?: Partial<ClassTable>;

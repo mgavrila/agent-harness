@@ -1,5 +1,5 @@
 # GENERATED FILE - do not edit by hand.
-# Rendered from clients/<name>/routing.yaml by harness/gateway/src/app/render-config.ts.
+# Rendered from a client document's routing section by harness/gateway/src/app/render-config.ts.
 # Regenerate with: pnpm gateway:config
 model_list:
   - model_name: chat

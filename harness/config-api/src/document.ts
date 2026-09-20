@@ -30,7 +30,7 @@ export const SecretRefShape = z
  * **The order is the schema's, not the file's.** The first loaded surface is the primary — where
  * approval cards go — and a file's key order is not something a YAML writer or a JSON column
  * should be able to change by accident. `http` is last because it cannot post a card, which is
- * the rule `.env.example` used to state in prose about `HARNESS_SURFACES`.
+ * a rule the schema states by ordering rather than one a deployment has to remember.
  */
 export const SURFACE_ORDER = ['slack', 'memory', 'http'] as const;
 
@@ -70,15 +70,15 @@ export const ClientDocumentShape = z
     schemaVersion: z.number().int().min(1),
     id: z.string().regex(CLIENT_ID, 'a client id is lowercase letters, digits and hyphens, 2 to 64 characters'),
     displayName: z.string().trim().min(1).max(120),
-    /** Today's SOUL.md body, verbatim. */
+    /** The persona, verbatim: what a runtime puts at the top of what the model reads. */
     persona: z.string().min(1),
-    /** Today's identity.yaml: the declared principals, and the level everyone else gets. */
+    /** The declared principals, and the level everyone else gets. */
     identity: IdentityFileShape,
-    /** Today's policy.yaml, plus the tools this client withholds. */
+    /** The action-class overrides, plus the tools this client withholds. */
     policy: ClientPolicyShape,
-    /** Today's routing.yaml. */
+    /** The five named routes, and what this client's deployments are for each. */
     routing: RoutingFile,
-    /** Today's playbooks.yaml. */
+    /** The scheduled work this client runs. */
     playbooks: PlaybooksFileShape,
     /** Today's skills/ directory: name → the whole SKILL.md, frontmatter included. */
     skills: z.record(z.string().regex(SKILL_NAME), z.string().min(1)).default({}),

@@ -179,7 +179,7 @@ const GLOBAL_RULES = [
   {
     name: 'core-tools-never-statically-imports-a-pack',
     comment:
-      'Packs are loaded at runtime from HARNESS_PACKS through a dynamic import in domain/packs/registry.ts. A static import would wire core to one pack by name, which is the coupling the contract exists to remove. src/testing.ts and *.test.ts build a registry from the healthcare pack directly and are exempt: they are not shipped and they need a registry synchronously.',
+      'Packs are loaded at runtime from the `packs` list in a client document, through a dynamic import in domain/packs/registry.ts. A static import would wire core to one pack by name, which is the coupling the contract exists to remove. src/testing.ts and *.test.ts build a registry from the healthcare pack directly and are exempt: they are not shipped and they need a registry synchronously.',
     severity: 'error',
     from: {
       path: '^harness/core-tools/src/',
@@ -190,7 +190,7 @@ const GLOBAL_RULES = [
   {
     name: 'core-tools-never-statically-imports-an-identity-plugin',
     comment:
-      'Identity plug-ins are loaded at runtime from HARNESS_IDENTITY through a dynamic import in domain/identity/registry.ts. A static import would wire the kernel to one way of knowing who is asking, which is the coupling the identity contract exists to remove. src/testing.ts and *.test.ts are exempt for the same reason they are for packs.',
+      'Identity plug-ins are loaded at runtime from the `identityPlugin.kind` a client document names, through a dynamic import in domain/identity/registry.ts. A static import would wire the kernel to one way of knowing who is asking, which is the coupling the identity contract exists to remove. src/testing.ts and *.test.ts are exempt for the same reason they are for packs.',
     severity: 'error',
     from: {
       path: '^harness/core-tools/src/',
@@ -201,7 +201,7 @@ const GLOBAL_RULES = [
   {
     name: 'evals-never-statically-imports-a-pack',
     comment:
-      'The eval runner measures whichever pack HARNESS_PACKS names, loaded at runtime through loadPacks. A static import would wire it to one pack by name and put an opinion about what it measures back into the runner, which is the coupling this task removed. *.test.ts and *.test-helpers.ts are exempt: a test names a pack as a fixture because there is no other way to run against a real corpus, and neither is shipped.',
+      'The eval runner measures whichever pack --packs names, loaded at runtime through loadPacks. A static import would wire it to one pack by name and put an opinion about what it measures back into the runner, which is the coupling this task removed. *.test.ts and *.test-helpers.ts are exempt: a test names a pack as a fixture because there is no other way to run against a real corpus, and neither is shipped.',
     severity: 'error',
     from: {
       path: '^evals/src/',
@@ -212,7 +212,7 @@ const GLOBAL_RULES = [
   {
     name: 'the-host-never-statically-imports-a-surface',
     comment:
-      'Adapters are loaded at runtime from HARNESS_SURFACES through a dynamic import in domain/surfaces/registry.ts. A static import would wire the approvals host to one messaging transport by name, which is the coupling the surface contract exists to remove. *.test.ts is exempt: a test drives a real adapter on a fake transport because that is the only way to prove the host against the thing that ships, and it is not shipped itself.',
+      'Adapters are loaded at runtime from the surfaces a client document declares, through a dynamic import in domain/surfaces/registry.ts. A static import would wire the approvals host to one messaging transport by name, which is the coupling the surface contract exists to remove. *.test.ts is exempt: a test drives a real adapter on a fake transport because that is the only way to prove the host against the thing that ships, and it is not shipped itself.',
     severity: 'error',
     from: {
       path: '^harness/approvals/src/',

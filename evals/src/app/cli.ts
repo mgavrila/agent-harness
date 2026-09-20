@@ -227,7 +227,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     servingModel:
       Object.keys(routing).length > 0
         ? routing
-        : { extract: 'see clients/<name>/routing.yaml', judge: 'see clients/<name>/routing.yaml' },
+        : { extract: "see the client document's routing section", judge: "see the client document's routing section" },
     evalSetVersion: flag('version') ?? '1.0.0',
     limit,
     packs: toMeasure.names,

@@ -27,7 +27,7 @@ export interface Principal {
   readonly displayName: string;
   /**
    * This principal's user id on each surface it may speak from, keyed by the surface's name as
-   * `HARNESS_SURFACES` and `approvals.surface` spell it. Empty for a service.
+   * the client document's `surfaces` and `approvals.surface` spell it. Empty for a service.
    */
   readonly surfaces: Readonly<Record<string, string>>;
   /** Free-form, plug-in-defined: department, role, groups. Never a restricted value. */

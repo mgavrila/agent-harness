@@ -26,7 +26,7 @@ export const SURFACE_NAME_PATTERN = /^[a-z][a-z0-9-]*$/;
 /**
  * A playbook's name: a lowercase slug of at most 64 characters, the key `playbooks` is upserted
  * on. Here rather than in either package that checks it, for the same reason as the two above:
- * the host validates the name it reads from `playbooks.yaml` and `@harness/core-tools` validates
+ * the host validates the name it reads from the client document and `@harness/core-tools` validates
  * the name a model passes to `playbooks_run_now`, the two may not import each other, and a name
  * one accepted that the other rejects is a tool call that can never reach its row.
  */

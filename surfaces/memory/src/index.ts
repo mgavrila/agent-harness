@@ -4,8 +4,8 @@ import { MemorySurface } from '@harness/surface-api/testing';
 /**
  * A surface with no transport.
  *
- * It exists for two reasons and does the same job for both: a developer runs the host with
- * `HARNESS_SURFACES=@harness/surface-memory` and no Slack workspace at all, and the suite loads
+ * It exists for two reasons and does the same job for both: a developer runs the host against a
+ * document that declares `memory` and no Slack workspace at all, and the suite loads
  * it beside the Slack adapter so every host test can drive a real, loaded surface rather than a
  * mock of one. `MemorySurface` itself lives in the contract's `testing` subpath, so the thing the
  * suite proves the host against is the thing that runs.

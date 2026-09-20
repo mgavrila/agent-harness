@@ -217,7 +217,7 @@ export interface UploadRequest {
  * token or a payload value.
  */
 export interface SurfaceSession {
-  /** This adapter's name, as `HARNESS_SURFACES` named it and as `approvals.surface` stores it. */
+  /** This adapter's name, as the client document named it and as `approvals.surface` stores it. */
   readonly name: string;
   readonly capabilities: SurfaceCapabilities;
   /** Where this surface posts when nobody names a conversation. */
@@ -282,7 +282,7 @@ export interface SurfaceDeps {
 
 /** What a `@harness/surface-*` package exports as `surface`. */
 export interface Surface {
-  /** Lowercase, stable. `HARNESS_SURFACES` orders these and the first one is the primary. */
+  /** Lowercase, stable. The client document's schema orders these and the first one is the primary. */
   name: string;
   version: string;
   /**

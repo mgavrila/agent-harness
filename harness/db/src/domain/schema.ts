@@ -182,8 +182,8 @@ export const approvals = pgTable(
     expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
     idempotencyKey: text('idempotency_key').notNull(),
     /**
-     * The loaded surface this approval's card was posted on: `slack`, `memory`, whatever
-     * `HARNESS_SURFACES` names. Null until the poller claims the row, and the only thing that
+     * The loaded surface this approval's card was posted on: `slack`, `memory`, whichever the
+     * client document declares. Null until the poller claims the row, and the only thing that
      * says which adapter a decision arriving from somewhere is allowed to come from.
      */
     surface: text('surface'),

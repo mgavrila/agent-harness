@@ -4,7 +4,7 @@ import { LEVELS } from '@harness/shared';
 
 const OverridesShape = z.partialRecord(z.enum(ACTION_CLASSES), z.enum(BEHAVIORS));
 
-/** The action-class table a client overrides, exactly as `policy.yaml` held it. */
+/** The action-class table a client overrides: the shape a pack's defaults are merged under. */
 export const PolicyFileShape = z.object({
   classes: OverridesShape.optional(),
   levels: z.partialRecord(z.enum(LEVELS), OverridesShape).optional(),

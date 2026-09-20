@@ -18,7 +18,7 @@ const CANNOT_POST = 'surface "http" cannot post outside a request; the run API a
  * It opens no socket. The run API's listener lives in the host, because spec 5.8 puts it there,
  * and what this adapter supplies is the other three things a run needs to exist: a `threads.surface`
  * value so an API run has a thread of its own, a namespace for the identity plug-in to resolve
- * `(surface, userId)` in — `surfaces: { http: … }` in `identity.yaml` — and a loaded session for
+ * `(surface, userId)` in — `surfaces: { http: … }` on a declared principal — and a loaded session for
  * `runTurn` to find.
  *
  * Every capability is false and every way of posting rejects, and both are honest rather than
@@ -27,8 +27,9 @@ const CANNOT_POST = 'surface "http" cannot post outside a request; the run API a
  * delivered on the caller's own event stream instead (`deliver: 'none'` on the turn), and an
  * approval card raised during one goes where every card goes — the primary surface.
  *
- * **Do not make this the primary surface.** `HARNESS_SURFACES` makes its first entry primary and
- * that is where approval cards are posted, so list this one after a surface a human reads.
+ * **Do not make this the primary surface.** The first surface a document declares is the primary
+ * and that is where approval cards are posted, which is why the document's schema orders `http`
+ * last and refuses a client that declares nothing else.
  */
 function session(): SurfaceSession {
   const refuse = (): never => {

@@ -222,7 +222,7 @@ export interface Pack {
   formsDir?: string;
   /** Absolute path to the directory of `<skill>/SKILL.md` folders. */
   skillsDir: string;
-  /** Action-class defaults this pack ships, in the shape a policy.yaml parses to. A client's file still wins. */
+  /** Action-class defaults this pack ships, in the shape an override table parses to. A client's own still wins. */
   policy: PolicyOverrides;
   /**
    * Kernel tool names this pack's own tools supersede. A name listed here is not published; the
