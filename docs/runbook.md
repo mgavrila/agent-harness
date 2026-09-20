@@ -511,8 +511,21 @@ reads or writes for as long as it runs, with no per-call tenant check on file pa
 isolation comes entirely from which process, and which storage root, a given client's traffic is
 routed to. **A pooled host shares one `HARNESS_STORAGE_DIR` across every tenant it opens**: the
 directory is read once from the pool's own process environment, not per tenant, so two clients on
-one pooled host currently share one file store. Run a client that ingests documents dedicated
-(`HARNESS_CLIENT` set) until a per-tenant storage root exists.
+one pooled host currently share one file store.
+
+The exposure that leaves is specific, and it is `documents_ingest`. Every other file read starts
+from a `documents` row, and every row is scoped to one client — the isolation suite proves that a
+tenant cannot read another tenant's row. `documents_ingest` takes a **path**, not a row: it is
+confined to the storage root and to nothing narrower, so a tenant whose model names
+`incoming/<another tenant's file>` gets a `documents` row of its own for those bytes, and can then
+read and extract them. The name is the whole of the barrier — Slack stages a download as
+`<message ts>-<original name>` and no tool lists the directory — which makes it a guess rather
+than a listing, but a guess is not an isolation boundary. The run API's attachment check has the
+same shape, and so does the files worker, which parses whatever path it is handed. Skills are not
+shared: each tenant's are rebuilt under `<storageDir>/skills/<client id>/` on every open.
+
+Run a client that ingests documents dedicated (`HARNESS_CLIENT` set) until a per-tenant storage
+root exists.
 
 ## The host and its surfaces
 
