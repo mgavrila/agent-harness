@@ -212,19 +212,23 @@ export async function createHost(deps: HostDeps): Promise<HostPool> {
     // and nobody else's. Decision 12 says warm every id; it does not say fail all for one. The
     // failure is logged with the id, and its watch stays up, so the edit that fixes it opens it.
     const listed = await deps.source.list();
+    const failed: string[] = [];
     for (const clientId of listed) {
       try {
         await pool.tenantFor(clientId);
       } catch (err) {
+        failed.push(`${clientId}: ${describeError(err)}`);
         deps.log.error(`tenant ${clientId}: could not open: ${describeError(err)}`);
       }
     }
     // Every listed client failing is not one tenant's problem, it is a deployment that is wrong —
     // a bad mount, the wrong database — and a host serving nobody should say so at start rather
-    // than answer its health check. A source that lists nothing has nothing to have failed.
+    // than answer its health check. Each reason travels in the message as well as in the log,
+    // because a single-tenant pooled host that refused to start would otherwise say only that it
+    // had. A source that lists nothing has nothing to have failed.
     if (listed.length > 0 && tenants.size === 0) {
       throw new ConfigError(
-        `no tenant of the ${listed.length} the ${deps.source.name} config source lists could be opened; the errors above name each one`,
+        `no tenant of the ${listed.length} the ${deps.source.name} config source lists could be opened: ${failed.join('; ')}`,
       );
     }
     deps.log.info(`pooled host: ${tenants.size} of ${listed.length} tenants open`);
