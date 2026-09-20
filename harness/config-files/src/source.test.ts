@@ -177,4 +177,24 @@ describe('filesConfigSource', () => {
     expect(seen).toHaveLength(1);
     expect((await source.load('fixture'))?.version).toBe(seen[0]);
   });
+
+  it('resolves a relative knowledge path against the client directory, so the kernel gets an absolute one', async () => {
+    const root = await newRoot();
+    await writeDocument(
+      root,
+      parseClientDocument(fixtureDocument({ knowledge: { source: 'dir', path: 'knowledge' } })),
+    );
+    const loaded = await filesConfigSource({ root, log }).load('fixture');
+    expect(loaded?.document.knowledge).toEqual({ source: 'dir', path: path.join(root, 'fixture', 'knowledge') });
+  });
+
+  it("refuses a knowledge path that climbs out of the client's own directory", async () => {
+    const root = await newRoot();
+    await writeDocument(
+      root,
+      parseClientDocument(fixtureDocument({ knowledge: { source: 'dir', path: '../other/knowledge' } })),
+    );
+    await expect(filesConfigSource({ root, log }).load('fixture')).rejects.toThrow(ConfigError);
+    await expect(filesConfigSource({ root, log }).load('fixture')).rejects.toThrow(/outside the client directory/);
+  });
 });

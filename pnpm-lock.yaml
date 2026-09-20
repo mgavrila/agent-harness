@@ -358,6 +358,15 @@ importers:
       '@harness/config-api':
         specifier: workspace:*
         version: link:../config-api
+      '@harness/core-tools':
+        specifier: workspace:*
+        version: link:../core-tools
+      '@harness/db':
+        specifier: workspace:*
+        version: link:../db
+      '@harness/shared':
+        specifier: workspace:*
+        version: link:../shared
       yaml:
         specifier: ^2.9.1
         version: 2.9.1
@@ -441,6 +450,9 @@ importers:
         specifier: ^4.6.5
         version: 4.6.5
     devDependencies:
+      '@harness/config-files':
+        specifier: workspace:*
+        version: link:../config-files
       '@harness/pack-healthcare':
         specifier: workspace:*
         version: link:../../packs/healthcare
@@ -720,6 +732,19 @@ importers:
         version: 5.0.0(@types/node@26.5.1)(vite@8.3.0(@types/node@26.5.1)(esbuild@0.28.2)(tsx@4.23.13)(yaml@2.9.1))
 
   scripts:
+    dependencies:
+      '@harness/config-api':
+        specifier: workspace:*
+        version: link:../harness/config-api
+      '@harness/config-files':
+        specifier: workspace:*
+        version: link:../harness/config-files
+      '@harness/shared':
+        specifier: workspace:*
+        version: link:../harness/shared
+      yaml:
+        specifier: ^2.9.1
+        version: 2.9.1
     devDependencies:
       '@types/node':
         specifier: ^26.5.1

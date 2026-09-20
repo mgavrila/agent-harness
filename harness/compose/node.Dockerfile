@@ -2,6 +2,7 @@
 #
 # The host: the runtime, the surfaces and the identity plug-in it loads, with core-tools hosted
 # in-process. The whole workspace is installed because the plug-ins are workspace packages.
+# No client is copied in: a client is a document the deployment mounts, not part of this image.
 #
 # Build context is the repository root.
 FROM node:26-bookworm-slim
@@ -11,17 +12,17 @@ RUN npm install -g pnpm@11.4.0 && npm cache clean --force
 WORKDIR /srv/agent-harness
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml tsconfig.base.json ./
 COPY harness ./harness
-# The identity plug-in HARNESS_IDENTITY names, a workspace dependency of @harness/core-tools.
+# The identity plug-in a client document's `identityPlugin.kind` names, a workspace
+# dependency of @harness/core-tools.
 COPY identities ./identities
 COPY packs ./packs
-# The adapters `HARNESS_SURFACES` names. Without them `pnpm install
-# --frozen-lockfile` below cannot resolve `@harness/surface-slack`, which
+# The adapters a client document's `surfaces` section names. Without them `pnpm
+# install --frozen-lockfile` below cannot resolve `@harness/surface-slack`, which
 # `@harness/host` declares as a workspace dependency, and the build fails
 # here rather than the container failing at startup.
 COPY surfaces ./surfaces
-# The runtime plug-in `HARNESS_RUNTIME` names, a workspace dependency of @harness/host.
+# The runtime plug-in a client document's `runtime` names, a workspace dependency of @harness/host.
 COPY runtimes ./runtimes
-COPY clients ./clients
 COPY scripts ./scripts
 RUN pnpm install --frozen-lockfile && chmod -R a+rX /srv/agent-harness
 

@@ -90,4 +90,13 @@ describe('postgresConfigSource', () => {
     stop?.();
     expect(seen).toEqual(['v2']);
   });
+
+  it('refuses a stored document whose knowledge path is relative, because a row has no directory', async () => {
+    await writeClientDocument(
+      db,
+      parseClientDocument(fixtureDocument({ knowledge: { source: 'dir', path: 'knowledge' } })),
+      'v1',
+    );
+    await expect(postgresConfigSource({ db, log }).load('fixture')).rejects.toThrow(/must be absolute/);
+  });
 });

@@ -4,37 +4,34 @@ import { newClient } from '../domain/scaffold.js';
 
 const { values } = parseArgs({
   options: {
-    pack: { type: 'string' },
     name: { type: 'string' },
-    template: { type: 'string' },
+    'display-name': { type: 'string' },
+    pack: { type: 'string' },
+    target: { type: 'string' },
   },
 });
 if (!values.name) {
-  console.error('usage: pnpm new-client --name <client-slug> [--pack <pack>] [--template <client-slug>]');
+  console.error(
+    'usage: pnpm new-client --name <client-slug> [--display-name "<name>"] [--pack <pack>] [--target <dir>]',
+  );
   console.error('       --pack is optional: a client with no pack serves the kernel’s own tools alone.');
+  console.error('       --target defaults to HARNESS_CLIENTS_DIR. A client does not live in this repository.');
   process.exit(2);
 }
-const result = await newClient({ pack: values.pack, name: values.name, template: values.template });
+const result = await newClient({
+  name: values.name,
+  displayName: values['display-name'],
+  pack: values.pack,
+  target: values.target,
+});
 console.log(`Created ${result.dir}`);
 for (const file of result.files) console.log(`  + ${file}`);
-for (const file of result.skipped) console.log(`  - ${file} (not in the template)`);
 console.log('');
 console.log('Next:');
+console.log(`  1. Fill in ${result.dir}/client.yaml: the principals and their surface ids, the routing table,`);
+console.log('     and the surfaces this client serves.');
 console.log(
-  `  1. cp ${path.relative(process.cwd(), path.join(result.dir, '.env.example'))} .env   # then fill in the blanks`,
+  `  2. Set HARNESS_CONFIG_SOURCE=files and HARNESS_CLIENTS_DIR=${path.dirname(result.dir)} in the deployment's`,
 );
-console.log(`     Set HARNESS_CLIENT=${values.name} and a storage directory this client does not share.`);
-console.log(
-  values.pack
-    ? '     HARNESS_PACKS names the packs this client serves; the template names the healthcare pack.'
-    : '     Its HARNESS_PACKS is already empty: this client serves no pack, only the kernel’s tools.',
-);
-console.log('  2. Create one Slack app (Socket Mode and Interactivity on; see docs/runbook.md),');
-console.log("     paste its two tokens and the approvals channel id, and put the two humans'");
-console.log('     Slack member ids in identity.yaml.');
-console.log(`  3. Review clients/${values.name}/SOUL.md and policy.yaml before the first run.`);
-console.log('     playbooks.yaml runs as svc-playbooks; keep that principal in identity.yaml or change both.');
-console.log(
-  `  4. COMPOSE_PROJECT_NAME=${values.name} docker compose --env-file .env -f harness/compose/docker-compose.yml --profile demo up -d --build,`,
-);
-console.log('     or `pnpm demo:up` with HARNESS_CLIENT set in .env.');
+console.log(`     environment, and HARNESS_CLIENT=${values.name} for a dedicated host.`);
+console.log(`  3. Review ${result.dir}/persona.md and the policy section before the first run.`);

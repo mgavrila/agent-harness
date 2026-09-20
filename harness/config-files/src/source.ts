@@ -6,6 +6,7 @@ import {
   migrate,
   resolve as resolveOverlay,
   type Blueprint,
+  type ClientDocument,
   type ConfigSource,
   type LoadedDocument,
   type Overlay,
@@ -38,6 +39,28 @@ async function exists(target: string): Promise<boolean> {
  */
 function versionOf(document: unknown): string {
   return createHash('sha256').update(JSON.stringify(document), 'utf8').digest('hex').slice(0, 16);
+}
+
+/**
+ * A client's knowledge directory, as an absolute path under the client's own directory.
+ *
+ * The document says `knowledge: { source: 'dir', path: knowledge }` — a path *relative to the
+ * client*, because a document is portable and a tenant does not know where the host mounted it.
+ * The same escape check `readIncluded` applies to an `!include` applies here and for the same
+ * reason: the path is written by a tenant, and `../../other-tenant/knowledge` would hand one
+ * client's documents to another. An already-absolute path is taken as it is, so a deployment that
+ * mounts its knowledge somewhere else still can.
+ */
+function knowledgeAbsolute(document: ClientDocument, dir: string): ClientDocument {
+  if (document.knowledge.source !== 'dir') return document;
+  const root = path.resolve(dir);
+  const target = path.resolve(root, document.knowledge.path);
+  if (target !== root && !target.startsWith(`${root}${path.sep}`)) {
+    throw new ConfigError(
+      `client "${document.id}": knowledge.path "${document.knowledge.path}" is outside the client directory ${root}`,
+    );
+  }
+  return { ...document, knowledge: { source: 'dir', path: target } };
 }
 
 export interface FilesConfigSourceOptions {
@@ -78,12 +101,12 @@ export function filesConfigSource(opts: FilesConfigSourceOptions): ConfigSource 
       const overlay = (await exists(overlayFile))
         ? ((await parseWithIncludes(overlayFile)) as Overlay)
         : ({ patch: [], version: 'empty' } satisfies Overlay);
-      document = resolveOverlay(blueprint, overlay);
+      document = knowledgeAbsolute(resolveOverlay(blueprint, overlay), dir);
       sourceFile = overlayFile;
     } else {
       const file = path.join(dir, 'client.yaml');
       if (!(await exists(file))) return null;
-      document = migrate(await parseWithIncludes(file));
+      document = knowledgeAbsolute(migrate(await parseWithIncludes(file)), dir);
       sourceFile = file;
     }
     if (document.id !== clientId) {

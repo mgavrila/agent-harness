@@ -185,9 +185,10 @@ describe('the files worker boundary', () => {
 });
 
 /**
- * Spec section 7, read off the recorded Compose config: no Docker socket anywhere, no client
- * name outside a `${HARNESS_CLIENT…}` interpolation, and no forms directory pinned to a pack —
- * core-tools takes it from the first pack the client document's `packs` list names.
+ * Spec section 7, read off the recorded Compose config: no Docker socket anywhere, no client name
+ * at all — a client is not in this repository, so the stack mounts a directory the deployment
+ * names and bakes nobody — and no forms directory pinned to a pack: core-tools takes it from the
+ * first pack the client document's `packs` list names.
  */
 describe('the Compose stack names no client and mounts no socket', () => {
   const rendered = async (): Promise<string> => readFile(path.join(architecture, 'compose-surface.yaml'), 'utf8');
@@ -196,10 +197,10 @@ describe('the Compose stack names no client and mounts no socket', () => {
     expect(await rendered()).not.toContain('/var/run/docker.sock');
   });
 
-  it('derives every client path from HARNESS_CLIENT', async () => {
-    // --no-interpolate keeps `${HARNESS_CLIENT:-demo-practice}` and `${HARNESS_CLIENT:?…}`
-    // verbatim; with those stripped, the client's name must not appear anywhere.
-    expect((await rendered()).replace(/\$\{HARNESS_CLIENT[^}]*\}/g, '')).not.toContain('demo-practice');
+  it('names no client anywhere in the compose config, because a client is not in this repository', async () => {
+    const compose = await rendered();
+    expect(compose).not.toContain('demo-practice');
+    expect(compose).not.toContain('/srv/agent-harness/clients');
   });
 
   it('pins no forms directory', async () => {

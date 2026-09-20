@@ -1,7 +1,7 @@
-import { readFile } from 'node:fs/promises';
+import { mkdtemp } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parse as parseYaml } from 'yaml';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { eq } from 'drizzle-orm';
 import {
@@ -17,12 +17,14 @@ import {
   type Db,
 } from '@harness/db';
 import { DEFAULT_POLICY, mergePolicy, requestPlaybookRun } from '@harness/core-tools';
-import { parsePlaybooksFile, type PlaybookDefinition } from '@harness/config-api';
+import { filesConfigSource } from '@harness/config-files';
+import type { PlaybookDefinition } from '@harness/config-api';
 import { RUN_FAILED_MESSAGE, type RunEvent, type RuntimeSession } from '@harness/runtime-api';
 import { startFakeGateway } from '@harness/runtime-api/testing';
 import { hostFixture, testKernelConfig, useTestDb, waitFor, type HostFixture } from '../../testing.js';
 import { drainActive } from '../conversation.js';
 import { kernelSkillsDir, readSkillCatalogue } from '../skills.js';
+import { materialiseSkills } from '../tenancy/skills.js';
 import { stagePlaybookNotice } from './notice.js';
 import { syncPlaybooks } from './repository.js';
 import { SCHEDULER_TICK_MS, startScheduler } from './scheduler.js';
@@ -31,6 +33,8 @@ import { SCHEDULER_TICK_MS, startScheduler } from './scheduler.js';
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../../..');
 
 const db = useTestDb();
+
+const log = { info() {}, warn() {}, error() {} };
 
 const NIGHTLY: PlaybookDefinition = {
   name: 'nightly',
@@ -434,7 +438,8 @@ describe('the scheduler', () => {
 });
 
 /**
- * The end of the chain the shipped demo actually runs, over the shipped files rather than fixtures.
+ * The end of the chain a shipped client actually runs, over the shipped document rather than
+ * fixtures.
  *
  * `preflightPlaybook` asks whether the skill, the principal and the surface exist; it never asks
  * whether policy will let the run's tool call through. So a playbook can pass preflight, start on
@@ -442,48 +447,47 @@ describe('the scheduler', () => {
  * exactly what `knowledge_sync` did while it was an `admin`-class tool, because `admin` is
  * `blocked` for `service` and `service` is the level every scheduled job runs at.
  *
- * This ties the three shipped files together: the playbook entry from `playbooks.yaml`, the policy
- * from `policy.yaml`, and the knowledge folder the sync reads. It fails if any one of them moves
- * out from under the other two.
+ * This ties three sections of one document together: its playbook entry, its policy, and the
+ * knowledge folder its `knowledge` section points at. It fails if any one of them moves out from
+ * under the other two.
  */
-describe('the shipped knowledge-sync playbook (I1)', () => {
-  const demoClientDir = path.join(repoRoot, 'clients', 'demo-practice');
+describe('the shipped knowledge-refresh playbook (I1)', () => {
+  const clientsDir = path.join(repoRoot, 'clients');
 
   it('runs its sync unattended as svc-playbooks, with the shipped policy deciding auto', async () => {
     // The embedder the sync calls. Nothing else in this test reaches the gateway.
     const fake = await startFakeGateway();
     onTestFinished(() => fake.close());
 
-    const text = await readFile(path.join(demoClientDir, 'playbooks.yaml'), 'utf8');
-    const shipped = parsePlaybooksFile(parseYaml(text));
-    const definition = shipped.find((p) => p.name === 'knowledge-sync');
-    expect(definition, 'clients/demo-practice/playbooks.yaml must still ship knowledge-sync').toBeDefined();
+    const loaded = await filesConfigSource({ root: clientsDir, log }).load('fixture');
+    expect(loaded, 'clients/fixture/client.yaml must load').toBeTruthy();
+    const document = loaded!.document;
+    const definition = document.playbooks.playbooks.find((p) => p.name === 'knowledge-refresh');
+    expect(definition, 'clients/fixture/client.yaml must still ship knowledge-refresh').toBeDefined();
 
     const f = await hostFixture(db, {
       trajectory: [
-        { skill: 'knowledge-sync', version: '1.0.0' },
+        { skill: 'knowledge-refresh', version: '1.0.0' },
         { tool: 'knowledge_sync', args: {} },
         { say: 'Nothing to report.' },
       ],
-      // Built the way main.ts builds it, because the skill this playbook names is the kernel's own.
-      skills: await readSkillCatalogue([kernelSkillsDir(), ...testKernelConfig(db).packs.skillsDirs()]),
+      // Built the way a tenant's catalogue is: the kernel's own skills, the document's own
+      // written out, and the packs the document names. The skill this playbook runs is the
+      // document's, which is why the middle directory has to be there.
+      skills: await readSkillCatalogue([
+        kernelSkillsDir(),
+        await materialiseSkills(document, await mkdtemp(path.join(tmpdir(), 'harness-fixture-'))),
+        ...testKernelConfig(db).packs.skillsDirs(),
+      ]),
     });
     // The deployment's own policy and its own knowledge folder, so the decision under test is the
     // one a deployment makes rather than the fixture default.
     f.host.config = {
       ...f.host.config,
-      // The deployment's `policy.classes`, as a literal: `@harness/config-api` validates that
-      // section and `mergePolicy` applies it, so nothing here reads a policy file.
-      policy: mergePolicy(DEFAULT_POLICY, {
-        classes: {
-          read: 'auto',
-          'write.internal': 'auto',
-          external: 'approval',
-          financial: 'blocked',
-          destructive: 'approval',
-        },
-      }),
-      knowledgeDir: path.join(demoClientDir, 'knowledge'),
+      // The document's own `policy` section, applied the way the host applies it, so this asserts
+      // on the decision the shipped document makes rather than on a literal copied beside it.
+      policy: mergePolicy(DEFAULT_POLICY, document.policy),
+      knowledgeDir: path.join(clientsDir, 'fixture', 'knowledge'),
       gateway: { ...f.host.config.gateway, baseUrl: fake.url },
     };
 
@@ -504,7 +508,7 @@ describe('the shipped knowledge-sync playbook (I1)', () => {
       runId: run.id,
       decision: 'auto',
       actionClass: 'write.internal',
-      skill: 'knowledge-sync',
+      skill: 'knowledge-refresh',
       error: null,
     });
     // And it did the work, rather than merely being permitted to: both shipped documents indexed.

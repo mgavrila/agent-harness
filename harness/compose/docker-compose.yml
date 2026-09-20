@@ -6,9 +6,10 @@
 # brings up the whole client instance. `core-tools` is build-only: nothing
 # starts it as a service — it is hosted in-process inside `host`, and this
 # entry only proves the image still builds, for the MCP inspector and the eval
-# runner on an operator's machine. Every client path is derived from
-# `HARNESS_CLIENT`; onboarding a client is a folder and a `.env`, never an edit
-# here. No service mounts the Docker socket.
+# runner on an operator's machine. No client is named or baked in here: the host
+# mounts whatever directory `HARNESS_CLIENTS_DIR` points at, or reads the
+# database, and onboarding a client is a document outside this repository, never
+# an edit here. No service mounts the Docker socket.
 #
 # Every variable below is interpolated from the repository-root `.env`, so run
 # these through the `pnpm` scripts, which pass `--env-file .env`. Compose's own
@@ -151,8 +152,12 @@ services:
     environment:
       DATABASE_URL: 'postgres://harness:harness@postgres:5432/harness'
       HARNESS_ENCRYPTION_KEY: '${HARNESS_ENCRYPTION_KEY:-}'
-      HARNESS_CLIENT: '${HARNESS_CLIENT:-demo-practice}'
+      # One dash: unset means a pooled host, and an empty value must reach the container as empty.
+      HARNESS_CLIENT: '${HARNESS_CLIENT-}'
       HARNESS_STORAGE_DIR: '/srv/harness-storage'
+      # Where a client comes from. `files` reads the volume below; `postgres` reads the database.
+      HARNESS_CONFIG_SOURCE: '${HARNESS_CONFIG_SOURCE:-files}'
+      HARNESS_CLIENTS_DIR: '/srv/tenants'
       # Which surfaces this client serves and which runtime owns its loop are its document's
       # `surfaces` and `runtime`, not this service's environment.
       HARNESS_HOST_PRINCIPAL: '${HARNESS_HOST_PRINCIPAL:-svc-host}'
@@ -189,7 +194,7 @@ services:
     volumes:
       - storage:/srv/harness-storage
       - ../../packs:/srv/agent-harness/packs:ro
-      - ../../clients:/srv/agent-harness/clients:ro
+      - ${HARNESS_CLIENTS_DIR:-../../clients}:/srv/tenants:ro
 
 networks:
   # The files worker's network. `internal: true` means no route out of it: the worker reaches

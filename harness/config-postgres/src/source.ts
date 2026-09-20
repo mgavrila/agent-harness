@@ -1,7 +1,8 @@
+import path from 'node:path';
 import { eq } from 'drizzle-orm';
 import { migrate, type ClientDocument, type ConfigSource, type LoadedDocument } from '@harness/config-api';
 import { clientDocumentVersions, clientDocuments, withTransaction, type Db } from '@harness/db';
-import { describeError, type Logger } from '@harness/shared';
+import { ConfigError, describeError, type Logger } from '@harness/shared';
 
 /**
  * How often a watching host asks whether a client's version has moved.
@@ -49,6 +50,23 @@ export async function writeClientDocument(
 }
 
 /**
+ * A row's `knowledge.path` is absolute or the document is refused.
+ *
+ * A directory source resolves a relative path against the client's own directory; a row has no
+ * directory, so a relative path here is a document somebody wrote for the other source. Refusing
+ * it names the fix; resolving it against the process's working directory would serve a tenant
+ * whatever happened to be next to the host binary.
+ */
+function assertAbsoluteKnowledge(document: ClientDocument): ClientDocument {
+  if (document.knowledge.source === 'dir' && !path.isAbsolute(document.knowledge.path)) {
+    throw new ConfigError(
+      `client "${document.id}": knowledge.path "${document.knowledge.path}" must be absolute in a stored document, because a row has no directory to be relative to`,
+    );
+  }
+  return document;
+}
+
+/**
  * Client documents from versioned rows: the source a pooled host runs.
  *
  * The row is validated again on load. A store the platform writes to is not a store the kernel
@@ -65,7 +83,7 @@ export function postgresConfigSource(opts: PostgresConfigSourceOptions): ConfigS
       .where(eq(clientDocuments.clientId, clientId))
       .limit(1);
     if (!row) return null;
-    return { document: migrate(row.document), version: row.version };
+    return { document: assertAbsoluteKnowledge(migrate(row.document)), version: row.version };
   };
 
   return {

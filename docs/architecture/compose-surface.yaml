@@ -79,7 +79,9 @@ services:
       APPROVALS_POLL_SECONDS: ${APPROVALS_POLL_SECONDS:-5}
       DATABASE_URL: postgres://harness:harness@postgres:5432/harness
       EFFECTS_DISPATCH_SECONDS: ${EFFECTS_DISPATCH_SECONDS:-5}
-      HARNESS_CLIENT: ${HARNESS_CLIENT:-demo-practice}
+      HARNESS_CLIENT: ${HARNESS_CLIENT-}
+      HARNESS_CLIENTS_DIR: /srv/tenants
+      HARNESS_CONFIG_SOURCE: ${HARNESS_CONFIG_SOURCE:-files}
       HARNESS_EMBED_DIMS: ${HARNESS_EMBED_DIMS:-1024}
       HARNESS_ENCRYPTION_KEY: ${HARNESS_ENCRYPTION_KEY:-}
       HARNESS_FILES_URL: http://files:8790
@@ -119,12 +121,11 @@ services:
         source: ../../packs
         target: /srv/agent-harness/packs
         type: bind
-      - bind:
-          create_host_path: true
-        read_only: true
-        source: ../../clients
-        target: /srv/agent-harness/clients
-        type: bind
+      - read_only: true
+        source: ${HARNESS_CLIENTS_DIR:-../../clients}
+        target: /srv/tenants
+        type: volume
+        volume: {}
   litellm:
     command:
       - --config

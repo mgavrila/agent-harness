@@ -1,0 +1,112 @@
+# The one client in this repository, and the only reason `clients/` still exists.
+#
+# It is a fixture: the host suite boots it, the scaffolder copies it, and the runbook points at it
+# as the shape a real tenant's document has. A real tenant lives in HARNESS_CLIENTS_DIR or in
+# `client_documents`, outside this repository, and onboarding one changes nothing here.
+schemaVersion: 1
+id: fixture
+displayName: Fixture
+
+persona: !include persona.md
+
+identity:
+  # Everyone this deployment declares. Anyone else on `memory` is a member, under an id derived
+  # from theirs, so the fixture exercises the defaults rule as well as the declared one.
+  defaults:
+    memory: member
+  principals:
+    - id: u-coordinator
+      kind: user
+      level: lead
+      displayName: Coordinator
+      surfaces:
+        memory: U012
+        http: coordinator
+    - id: u-member
+      kind: user
+      level: member
+      displayName: Member
+      surfaces:
+        memory: U345
+        http: member
+    - id: svc-host
+      kind: service
+      level: service
+      displayName: Harness host
+    - id: svc-playbooks
+      kind: service
+      level: service
+      displayName: Nightly playbooks
+    - id: svc-local
+      kind: service
+      level: service
+      displayName: Local operator
+
+policy:
+  classes:
+    read: auto
+    write.internal: auto
+    external: approval
+    financial: blocked
+    destructive: approval
+  tools:
+    # Nothing, and deliberately: `tools.hide` must never change the default catalogue, or
+    # docs/architecture/tool-surface.json would have to move with it.
+    hide: []
+
+routing:
+  routes:
+    chat:
+      model: gemini/gemini-3-flash-preview
+      fallbacks:
+        - groq/openai/gpt-oss-120b
+      daily_budget_usd: 2
+    extract:
+      model: gemini/gemini-3-flash-preview
+      daily_budget_usd: 5
+    reason:
+      model: gemini/gemini-3-flash-preview
+      fallbacks:
+        - groq/openai/gpt-oss-120b
+      daily_budget_usd: 2
+    judge:
+      model: groq/openai/gpt-oss-120b
+      daily_budget_usd: 1
+    embed:
+      model: gemini/gemini-embedding-001
+      daily_budget_usd: 1
+  defaults:
+    daily_budget_usd: 1
+    num_retries: 2
+    request_timeout_s: 120
+
+playbooks:
+  playbooks:
+    - name: knowledge-refresh
+      schedule: '30 6 * * *'
+      timezone: America/New_York
+      skill: knowledge-refresh
+      prompt: Refresh the knowledge base for today. Follow the skill exactly, including its silence rule.
+      principal: svc-playbooks
+      deliver: none
+      cost_cap_usd: 0.5
+      timeout_s: 300
+
+skills:
+  knowledge-refresh: !include skills/knowledge-refresh/SKILL.md
+
+knowledge:
+  source: dir
+  path: knowledge
+
+surfaces:
+  memory: {}
+  http: {}
+
+identityPlugin:
+  kind: static
+
+runtime: deepagents
+
+packs:
+  - '@harness/pack-healthcare'
