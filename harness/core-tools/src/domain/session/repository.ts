@@ -1,5 +1,5 @@
-import { and, eq } from 'drizzle-orm';
-import { runs, type Db } from '@harness/db';
+import { and, eq, sql } from 'drizzle-orm';
+import { modelCalls, runs, type Db } from '@harness/db';
 import type { Principal } from '@harness/identity-api';
 import type { RunContext, ToolDeps } from '../tooling/types.js';
 import { reconcile, type ReconcileResult } from '../tooling/reconcile.js';
@@ -48,13 +48,48 @@ export async function openRun(db: Db, input: OpenRunInput): Promise<RunContext &
 
 export type RunStatus = 'running' | 'done' | 'error' | 'cancelled';
 
+/** What a run spent, written onto its row when it closes. Zero for a run that called no model. */
+export interface RunTotals {
+  inputTokens: number;
+  outputTokens: number;
+  costUsd: number;
+}
+
+const NOTHING_SPENT: RunTotals = { inputTokens: 0, outputTokens: 0, costUsd: 0 };
+
 /**
- * Close a run: the status it ended in and when. The one writer of `runs.status` after `openRun`.
+ * What one run spent, summed from its own `model_calls` rows.
+ *
+ * Summed from the rows rather than counted in memory, so a turn that crashed after writing a
+ * call still reports it and the run row and the call rows can never disagree. `usage_runs` reads
+ * `runs` alone for its tokens, so this is the one place a run's totals are computed — the host
+ * uses it when a turn ends and the approvals executor when an approved call does. Scoped to the
+ * client like every other query of a pooled host (spec invariant 13).
+ */
+export async function sumRunTotals(db: Db, client: string, runId: string): Promise<RunTotals> {
+  const [totals] = await db
+    .select({
+      inputTokens: sql<number>`coalesce(sum(${modelCalls.inputTokens}), 0)::int`,
+      outputTokens: sql<number>`coalesce(sum(${modelCalls.outputTokens}), 0)::int`,
+      costUsd: sql<number>`coalesce(sum(${modelCalls.costUsd}), 0)::real`,
+    })
+    .from(modelCalls)
+    .where(and(eq(modelCalls.runId, runId), eq(modelCalls.client, client)));
+  return totals;
+}
+
+/**
+ * Close a run: the status it ended in, when, and what it spent. The one writer of `runs.status`
+ * after `openRun`.
  *
  * Scoped to the client, even though a run id is a uuid and cannot collide, because a pooled host
  * closes runs for several tenants from one process and a predicate that is only *probably* enough
  * is not a predicate (spec invariant 13). A run id from another tenant matches nothing and the
  * call is a no-op, which is what a caller that has been handed the wrong id should get.
+ *
+ * `totals` defaults to zero rather than to leaving the columns alone: a run closed without them
+ * is a run whose caller knows of no spend, and the usage export reads `runs` for its tokens, so
+ * "unset" and "nothing" have to be the same row.
  */
 export async function closeRun(
   db: Db,
@@ -62,10 +97,11 @@ export async function closeRun(
   runId: string,
   status: RunStatus,
   now: () => Date = () => new Date(),
+  totals: RunTotals = NOTHING_SPENT,
 ): Promise<void> {
   await db
     .update(runs)
-    .set({ status, endedAt: now() })
+    .set({ status, endedAt: now(), ...totals })
     .where(and(eq(runs.id, runId), eq(runs.client, client)));
 }
 

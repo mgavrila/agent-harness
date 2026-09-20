@@ -50,7 +50,14 @@ export {
 export { createCoreToolsServer, kernelTools, publishedTools } from './tools/catalog.js';
 
 // --- Domains ------------------------------------------------------------------------------
-export { closeRun, openRun, type OpenRunInput, type RunStatus } from './domain/session/repository.js';
+export {
+  closeRun,
+  openRun,
+  sumRunTotals,
+  type OpenRunInput,
+  type RunStatus,
+  type RunTotals,
+} from './domain/session/repository.js';
 export { createOrReuseApproval } from './domain/approvals/repository.js';
 export { assertNoInjection, findInjection, type InjectionCategory } from './domain/memory/injection.js';
 export {
@@ -139,7 +146,7 @@ export {
 export { PACK_KERNEL } from './domain/packs/kernel.js';
 export { loadPacks, registryOf } from './domain/packs/registry.js';
 export { type PackRegistry, type ResolvedTarget } from './domain/packs/types.js';
-export { callModel, callModelJson, gatewayFromEnv, httpGateway } from './domain/models/gateway.js';
+export { callModel, callModelJson, gatewayFromEnv, httpGateway, recordModelCall } from './domain/models/gateway.js';
 export {
   EMBED_ROUTE,
   ROUTES,

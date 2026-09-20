@@ -17,6 +17,13 @@ const StepShape = z.union([
   z.object({ say: z.string() }).strict(),
   z.object({ skill: z.string().min(1), version: z.string().min(1) }).strict(),
   z.object({ sleep: z.number().int().min(0) }).strict(),
+  z
+    .object({
+      usage: z
+        .object({ inputTokens: z.number().int().min(0), outputTokens: z.number().int().min(0), costUsd: z.number() })
+        .strict(),
+    })
+    .strict(),
 ]);
 export const TrajectoryShape = z.array(StepShape);
 export type TrajectoryStep = z.infer<typeof StepShape>;
@@ -54,7 +61,8 @@ function sleepUntil(ms: number, signal: AbortSignal): Promise<'slept' | 'aborted
  * host, the approvals bridge and the scheduler are tested against a loaded runtime whose tool
  * calls pass policy, audit and the outbox. `say` steps become text deltas and the joined `done`
  * text; a `skill` step is the activation event a real runtime emits when it reads a skill body; a
- * `sleep` step holds the run open so a cancel can be tested.
+ * `sleep` step holds the run open so a cancel can be tested; a `usage` step is the spend a
+ * model-backed runtime reports after a model call, which the host persists and caps against.
  */
 export class ScriptedRuntime implements RuntimeSession {
   readonly name: string;
@@ -101,6 +109,8 @@ export class ScriptedRuntime implements RuntimeSession {
           yield { type: 'text', delta: step.say };
         } else if ('skill' in step) {
           yield { type: 'skill_activated', name: step.skill, version: step.version };
+        } else if ('usage' in step) {
+          yield { type: 'usage', ...step.usage };
         } else if ((await sleepUntil(step.sleep, request.signal)) === 'aborted') {
           yield { type: 'error', message: 'cancelled' };
           return;

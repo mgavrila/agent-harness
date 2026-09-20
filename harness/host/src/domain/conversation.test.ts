@@ -2,7 +2,7 @@ import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { registryOf } from '@harness/core-tools';
 import type { RunEvent, RuntimeSession } from '@harness/runtime-api';
-import { approvals, auditLog, memoryEntries, messages, runs, threads } from '@harness/db';
+import { approvals, auditLog, memoryEntries, messages, modelCalls, runs, threads } from '@harness/db';
 import { COORDINATOR, attachTestHandlers, hostFixture, useTestDb, waitFor, type HostFixture } from '../testing.js';
 import {
   COST_CAP_EXCEEDED,
@@ -854,5 +854,45 @@ describe('a watcher on a turn', () => {
     expect(seen.filter((event) => event.type === 'result')).toEqual([
       { type: 'result', status: 'error', text: '', error: RUNTIME_FAILED },
     ]);
+  });
+});
+
+describe("the runtime's own spend", () => {
+  it('persists every usage event as a model call and closes the run with its totals', async () => {
+    // Until now the runtime's spend was accumulated for the cost cap and dropped, so the only
+    // model calls the database knew about were the kernel's own — which made a usage export a
+    // report on the wrong half of the bill (spec section 4.5).
+    const f = await hostFixture(db, {
+      trajectory: [
+        { usage: { inputTokens: 120, outputTokens: 34, costUsd: 0.002 } },
+        { usage: { inputTokens: 30, outputTokens: 6, costUsd: 0.001 } },
+        { say: 'Done.' },
+      ],
+    });
+    const result = await turnOn(f, 'none');
+    expect(result.status).toBe('done');
+
+    const calls = await db.select().from(modelCalls).where(eq(modelCalls.runId, result.runId));
+    expect(calls).toHaveLength(2);
+    expect(calls.map((call) => [call.inputTokens, call.outputTokens]).sort()).toEqual([
+      [120, 34],
+      [30, 6],
+    ]);
+    expect(calls.every((call) => call.client === 'test' && call.route === 'chat')).toBe(true);
+
+    // The run's totals are summed from those rows, so the row and the calls cannot disagree.
+    const [run] = await db.select().from(runs).where(eq(runs.id, result.runId));
+    expect(run).toMatchObject({ status: 'done', inputTokens: 150, outputTokens: 40 });
+    expect(run.costUsd).toBeCloseTo(0.003, 6);
+    await f.close();
+  });
+
+  it('closes a run that spent nothing with zero totals rather than leaving them unset', async () => {
+    const f = await hostFixture(db, { trajectory: [{ say: 'Nothing to report.' }] });
+    const result = await turnOn(f, 'none');
+    const [run] = await db.select().from(runs).where(eq(runs.id, result.runId));
+    expect(run).toMatchObject({ status: 'done', inputTokens: 0, outputTokens: 0, costUsd: 0 });
+    expect(await db.select().from(modelCalls).where(eq(modelCalls.runId, result.runId))).toEqual([]);
+    await f.close();
   });
 });

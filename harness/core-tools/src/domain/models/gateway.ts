@@ -1,6 +1,6 @@
 import * as z from 'zod/v4';
 import { and, eq } from 'drizzle-orm';
-import { modelCalls } from '@harness/db';
+import { modelCalls, type Db } from '@harness/db';
 import { ModelOutputError, ToolError, requiredEnv, type EnvSource } from '@harness/shared';
 import type { ToolDeps } from '../tooling/types.js';
 import {
@@ -136,6 +136,33 @@ export function httpGateway(config: GatewayConfig): ModelGateway {
   };
 }
 
+/**
+ * One `model_calls` row, from the one place that writes them.
+ *
+ * Attribution only. LiteLLM's own spend tables are what enforce the budget; this row joins the
+ * spend to a run, a client and a route. Three callers: `callModel` below, `embedTexts`, and the
+ * host, which records every `usage` event its runtime reports — a spend that used to be counted
+ * for the cost cap and then dropped. It is written on the handle the caller passed, so it rolls
+ * back with a failing handler — see "Model calls" in docs/runbook.md.
+ *
+ * A row written here counts against `callModel`'s per-run breaker below, whoever wrote it: a run
+ * that has made a hundred model calls has made them whether a tool or the conversation did.
+ */
+export async function recordModelCall(
+  db: Db,
+  row: {
+    runId: string | null;
+    client: string;
+    route: string;
+    model: string;
+    inputTokens: number;
+    outputTokens: number;
+    costUsd: number;
+  },
+): Promise<void> {
+  await db.insert(modelCalls).values(row);
+}
+
 export async function callModel(deps: ToolDeps, opts: ModelCallOptions): Promise<ModelCallResult> {
   if (!ROUTES.includes(opts.route)) throw new ToolError(`unknown model route "${opts.route}"`);
   if (opts.route === EMBED_ROUTE) {
@@ -160,11 +187,7 @@ export async function callModel(deps: ToolDeps, opts: ModelCallOptions): Promise
 
   const result = await httpGateway(deps.gateway).call(opts);
 
-  // Attribution only. LiteLLM's own spend tables are what enforce the budget;
-  // this row joins the spend to a run and a route. It is written on the same
-  // handle the caller passed, so it rolls back with a failing handler - see
-  // "Model calls" in docs/runbook.md.
-  await deps.db.insert(modelCalls).values({
+  await recordModelCall(deps.db, {
     runId: deps.context.runId ?? null,
     client: deps.client,
     route: opts.route,

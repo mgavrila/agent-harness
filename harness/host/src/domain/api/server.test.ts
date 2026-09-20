@@ -3,17 +3,30 @@ import { eq } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { parseClientDocument } from '@harness/config-api';
 import { fixtureDocument } from '@harness/config-api/testing';
-import { messages, threads } from '@harness/db';
+import { messages, runs, threads } from '@harness/db';
 import type { Trajectory } from '@harness/runtime-api/testing';
 import { COORDINATOR, MEMBER, poolFixture, useTestDb, type PoolFixture } from '../../testing.js';
 import { WITHHELD } from '../threads/repository.js';
 import { startRunApi } from './server.js';
 import { API_MAX_BODY_BYTES, CLIENT_HEADER } from './types.js';
+import { USAGE_MAX_DAYS, type UsageRow } from './usage.js';
 
 const db = useTestDb();
 const TOKEN = 'sk-run-api-test';
 /** The client this listener's one tenant serves; every route resolves it before it runs. */
 const CLIENT = 'test';
+/**
+ * A usage window around the moment the case runs, inside the year the route allows.
+ *
+ * Built from the clock rather than written out, because a run's `started_at` is Postgres' own
+ * `now()` — the fixture's frozen clock stamps what a turn decides, never what the database
+ * defaults — so a window of fixed dates would age out of the suite.
+ */
+const WINDOW = (() => {
+  const day = 24 * 60 * 60 * 1000;
+  const now = Date.now();
+  return `from=${new Date(now - day).toISOString()}&to=${new Date(now + day).toISOString()}`;
+})();
 
 interface Api {
   f: PoolFixture;
@@ -260,6 +273,62 @@ describe('the run API: a thread and the status', () => {
     const other = await a.get('/v1/status', TOKEN, { [CLIENT_HEADER]: 'beta' });
     expect(other.status).toBe(404);
     expect(await other.json()).toEqual({ error: 'no such client' });
+  });
+
+  it('exports what this tenant used, per principal per day, and not a word of what anybody wrote', async () => {
+    const a = await api([
+      { usage: { inputTokens: 120, outputTokens: 34, costUsd: 0.002 } },
+      { say: 'nothing is overdue' },
+    ]);
+    await collect(await a.open(asCoordinator('anything overdue?')));
+
+    const response = await a.get(`/v1/usage?${WINDOW}`);
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { client: string; from: string; to: string; rows: UsageRow[] };
+    expect(body.client).toBe(CLIENT);
+    expect(body.rows).toHaveLength(1);
+    expect(body.rows[0]).toMatchObject({
+      client: CLIENT,
+      principal_id: COORDINATOR.id,
+      runs: 1,
+      input_tokens: 120,
+      output_tokens: 34,
+      runs_done: 1,
+    });
+    // Invariant 16 on the wire, not just in the view: the question that was asked and the answer
+    // that was given are both on the thread, and neither is in the export.
+    expect(JSON.stringify(body)).not.toContain('anything overdue?');
+    expect(JSON.stringify(body)).not.toContain('nothing is overdue');
+  });
+
+  it('refuses a window that is not one, and one wider than a year', async () => {
+    const a = await api([]);
+    expect((await a.get('/v1/usage?from=not-a-date&to=2030-01-01')).status).toBe(400);
+    expect((await a.get('/v1/usage?from=2030-01-01&to=2020-01-01')).status).toBe(400);
+    const tooWide = await a.get('/v1/usage?from=2020-01-01&to=2026-01-01');
+    expect(tooWide.status).toBe(400);
+    expect(await tooWide.json()).toEqual({ error: `the window may not exceed ${USAGE_MAX_DAYS} days` });
+  });
+
+  it('reads no usage without a token', async () => {
+    const a = await api([]);
+    // Before anything is read: the bearer check is in front of every route, so a caller with no
+    // token is told "unauthorised" and not how many rows there were to refuse.
+    const response = await fetch(`${a.url}/v1/usage?${WINDOW}`);
+    expect(response.status).toBe(401);
+    expect(await response.json()).toEqual({ error: 'unauthorised' });
+  });
+
+  it("answers 404 for a caller naming another client, and none of that client's usage", async () => {
+    const a = await api([]);
+    // A row that exists and belongs to somebody else. Naming that client is "no such client" on
+    // this host, and the answer carries nothing of theirs (invariant 19).
+    await db
+      .insert(runs)
+      .values({ client: 'beta', principalId: 'u-beta', status: 'done', inputTokens: 999, outputTokens: 999 });
+    const response = await a.get(`/v1/usage?${WINDOW}`, TOKEN, { [CLIENT_HEADER]: 'beta' });
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({ error: 'no such client' });
   });
 
   it('answers "no such route" for anything else', async () => {

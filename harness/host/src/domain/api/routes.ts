@@ -13,6 +13,7 @@ import type { HostPool } from '../tenancy/types.js';
 import { WITHHELD, findOrCreateThread } from '../threads/repository.js';
 import { findRunFor, readThreadFor } from './repository.js';
 import { sseStream } from './sse.js';
+import { USAGE_MAX_DAYS, readUsage } from './usage.js';
 import {
   API_MAX_ATTACHMENTS,
   API_MAX_BODY_BYTES,
@@ -23,6 +24,9 @@ import {
 
 /** A uuid, checked before it reaches Postgres: an id of any other shape is "no such thing", not an error. */
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** One day, for the usage window's default and its bound. */
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 const OpenRunShape = z
   .object({
@@ -272,6 +276,36 @@ function statusRoute(host: Host, res: ServerResponse, scheduler: { status(): Sch
 }
 
 /**
+ * What this tenant used, per principal per day (spec section 4.5, decision 15).
+ *
+ * `from` and `to` are ISO dates or timestamps, the window is half-open, and a request that names
+ * neither gets the last thirty days. Bearer-authenticated and tenant-scoped like every other
+ * route, and there is no way to widen it: the client is the one the request resolved to, never
+ * one the caller asked for.
+ *
+ * Counts, tokens, cost and seconds, and nothing anybody wrote — the view is what guarantees that
+ * (invariant 16), and `usage.test.ts` asserts its column list whole.
+ */
+async function usageRoute(host: Host, url: URL, res: ServerResponse): Promise<void> {
+  const asked = { from: url.searchParams.get('from'), to: url.searchParams.get('to') };
+  const to = asked.to === null ? new Date() : new Date(asked.to);
+  const from = asked.from === null ? new Date(to.getTime() - 30 * DAY_MS) : new Date(asked.from);
+  if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) {
+    return json(res, 400, { error: 'from and to are ISO timestamps' });
+  }
+  if (to <= from) return json(res, 400, { error: 'to must be after from' });
+  if (to.getTime() - from.getTime() > USAGE_MAX_DAYS * DAY_MS) {
+    return json(res, 400, { error: `the window may not exceed ${USAGE_MAX_DAYS} days` });
+  }
+  return json(res, 200, {
+    client: host.client,
+    from: from.toISOString(),
+    to: to.toISOString(),
+    rows: await readUsage(host.db, { client: host.client, from, to }),
+  });
+}
+
+/**
  * Route one request. Every route is behind the bearer check, and then behind the tenant check.
  *
  * `x-harness-client` names the client. On a dedicated host it may be absent, and a value that is
@@ -296,6 +330,7 @@ export async function handleApiRequest(
   if (!tenant) return json(res, 404, { error: 'no such client' });
   const host = tenant.host;
   if (req.method === 'GET' && route === '/v1/status') return statusRoute(host, res, tenant.scheduler);
+  if (req.method === 'GET' && route === '/v1/usage') return usageRoute(host, url, res);
   if (req.method === 'POST' && route === '/v1/runs') return openRunRoute(host, req, res);
   const cancel = /^\/v1\/runs\/([^/]+)\/cancel$/.exec(route);
   if (req.method === 'POST' && cancel) return cancelRoute(host, url, res, cancel[1]);

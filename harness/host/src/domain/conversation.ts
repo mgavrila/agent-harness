@@ -1,4 +1,4 @@
-import { hashArgs, memorySnapshot, writeAudit, type RunStatus } from '@harness/core-tools';
+import { hashArgs, memorySnapshot, recordModelCall, writeAudit, type RunStatus } from '@harness/core-tools';
 import { containsRestrictedPattern } from '@harness/core-tools/redaction';
 import type { Db } from '@harness/db';
 import type { Principal } from '@harness/identity-api';
@@ -321,6 +321,21 @@ export async function runTurn(host: Host, turn: TurnInput): Promise<TurnResult> 
               // What the cap bounds today is whatever the runtime reports; see the runbook's
               // "Playbooks" section for what that is worth with the shipped runtime.
               spentUsd += event.costUsd;
+              // And persisted, on the same table the kernel's own calls go to. Before this the
+              // runtime's spend was added up here for the cap and then dropped, so the run's
+              // totals — which `finishKernel` sums from these rows, and which the usage export
+              // reads — reported the kernel's half of the bill as the whole of it (spec §4.5).
+              // The route is the one the runtime was configured to talk on, not a literal, so a
+              // deployment that moves the conversation to another route says so in the row.
+              await recordModelCall(host.db, {
+                runId,
+                client: host.client,
+                route: host.model.route,
+                model: host.model.route,
+                inputTokens: event.inputTokens,
+                outputTokens: event.outputTokens,
+                costUsd: event.costUsd,
+              });
               if (turn.costCapUsd !== undefined && spentUsd > turn.costCapUsd && !controller.signal.aborted) {
                 abort('cost-cap');
               }
