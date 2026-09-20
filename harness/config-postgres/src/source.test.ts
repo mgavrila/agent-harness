@@ -99,7 +99,7 @@ describe('postgresConfigSource', () => {
       clientId: 'fixture',
       schemaVersion: 1,
       version: 'v1',
-      document: parseClientDocument(fixtureDocument({ id: 'other' })) as unknown as Record<string, unknown>,
+      document: parseClientDocument(fixtureDocument({ id: 'other' })),
     });
     await expect(postgresConfigSource({ db, log }).load('fixture')).rejects.toThrow(
       'the row keyed "fixture" holds a document that declares id "other"',
