@@ -142,7 +142,9 @@ services:
       HARNESS_RUN_MAX_TOOL_CALLS: '${HARNESS_RUN_MAX_TOOL_CALLS:-60}'
       HARNESS_RUN_TIMEOUT_S: '${HARNESS_RUN_TIMEOUT_S:-600}'
       HARNESS_HISTORY_MAX_MESSAGES: '${HARNESS_HISTORY_MAX_MESSAGES:-40}'
-      # The run API (spec 5.8). Unset HARNESS_HOST_TOKEN means no listener at all.
+      # The run API (spec 5.8). The listener always runs — it carries every tenant's surface
+      # mounts too — so an unset HARNESS_HOST_TOKEN closes /v1/* with 401 rather than closing
+      # the port.
       HARNESS_HOST_TOKEN: '${HARNESS_HOST_TOKEN:-}'
       # Every interface inside the container, for the reason APPROVALS_HEALTH_BIND is: a
       # container-loopback listener answers neither the published port nor another container.
