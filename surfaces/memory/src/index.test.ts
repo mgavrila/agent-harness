@@ -49,4 +49,14 @@ describe('the memory surface', () => {
     });
     expect(ref).toEqual({ surface: 'memory', conversation: 'memory', id: 'm1' });
   });
+
+  it('ships with no inbound door: this surface authenticates nobody', async () => {
+    // `MemorySurface.mountHttp()` exists for a host test, which mounts it on the session the pool
+    // opened. This wrapper must never call it: anyone who can reach the port would be able to
+    // speak as any user id this client's identity plug-in knows.
+    const session = await surface.connect(deps());
+    expect(session.http).toBeUndefined();
+    const keyed = await surface.connect({ ...deps(), tenantKey: 'W-ALPHA' });
+    expect(keyed.http).toBeUndefined();
+  });
 });

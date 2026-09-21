@@ -10,7 +10,9 @@
 export { defineSurface } from './surface.js';
 export {
   CONVERSATION_ID_PATTERN,
+  SURFACE_HTTP_PATH_PATTERN,
   SURFACE_NAME_PATTERN,
+  SURFACE_REFUSAL_REASON_PATTERN,
   SurfaceFilePayloadShape,
   SurfaceMessagePayloadShape,
   type SurfaceFilePayload,
@@ -32,6 +34,9 @@ export type {
   PostKind,
   StreamHandle,
   Surface,
+  SurfaceHttp,
+  SurfaceHttpRequest,
+  SurfaceHttpResponse,
   SurfaceCapabilities,
   SurfaceDeps,
   SurfaceSession,

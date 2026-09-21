@@ -39,6 +39,24 @@ Every method rejects with a `SurfaceError` whose message is safe for a plaintext
 answered with nothing to address it by. It says a card is live, so a host holding a claim on the
 row keeps it instead of posting a second one.
 
+## Being reached by a request
+
+A surface that does not open its own connection offers `http`: a mount path and a handler. The
+host mounts it at `/tenants/<clientId>/<path>` on the server it already runs for the run API,
+resolves the tenant from that path, and calls `handle` with the method, whatever is left of the
+path, the lower-cased headers and the raw body — unparsed, because a signature is computed over
+the bytes that arrived.
+
+Whatever authenticates the request is the surface's own business: the host cannot check a
+transport's signature without knowing the transport. What the host does do is audit. A response
+carrying `refusal: { reason }` is written to `audit_log` exactly once, as `surface_request` /
+`refused`, with the reason and nothing of the body. `reason` is a short token
+(`SURFACE_REFUSAL_REASON_PATTERN`), never a sentence, because it is a column an operator groups
+by.
+
+`MemorySurface.mountHttp()` is the reference implementation, and it is off until it is called:
+this surface authenticates nobody, so a door to it is a door to speaking as anyone.
+
 Authorisation is not this package's business. Who may act — decide an approval, or have a
 message answered — is the identity plug-in's answer (`@harness/identity-api`), resolved from a
 surface user id on the surface a message or a button press arrived on. There is no allowlist

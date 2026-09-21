@@ -9,6 +9,9 @@ import type {
   PostKind,
   StreamHandle,
   SurfaceCapabilities,
+  SurfaceHttp,
+  SurfaceHttpRequest,
+  SurfaceHttpResponse,
   SurfaceSession,
   UploadRequest,
 } from './types.js';
@@ -52,12 +55,22 @@ export class MemorySurface implements SurfaceSession {
   readonly uploads: { conversation: string; filename: string; path: string; comment: string | null }[] = [];
   readonly forms: { trigger: string; form: Form }[] = [];
   readonly streams: { conversation: string; text: string; ended: boolean; replyTo: MessageRef | null }[] = [];
+  /** Every request this surface's door received, in order. Empty until something mounts one. */
+  readonly requests: SurfaceHttpRequest[] = [];
+  /**
+   * Not `readonly`, unlike the contract's own declaration: the door is mounted by a caller rather
+   * than by the constructor (see `mountHttp`), and an implementation may widen a property the
+   * interface declares `readonly`.
+   */
+  http?: SurfaceHttp;
   started = false;
   stopped = false;
   /** When set, every outbound call rejects with this message, the way an unreachable transport does. */
   failWith?: string;
 
   private seq = 0;
+  /** The deliveries this door has acknowledged and not yet finished, so a test can await them. */
+  private readonly delivering: Promise<void>[] = [];
   private actionHandler: ((event: ActionEvent) => Promise<void>) | null = null;
   private formHandler: ((event: FormEvent) => Promise<void>) | null = null;
   private messageHandler: ((event: MessageEvent) => Promise<void>) | null = null;
@@ -185,6 +198,44 @@ export class MemorySurface implements SurfaceSession {
     });
   }
 
+  /**
+   * Mount this surface's inbound door at `path`.
+   *
+   * **Off until it is called**, and `@harness/surface-memory` never calls it. This surface accepts
+   * any user id with no authentication at all — that is what it is for — so a door to it is a way
+   * to speak as anybody, and a developer's host should not grow one merely because its document
+   * declared the memory surface. A host test mounts it on the session the pool opened: it is the
+   * reference implementation of the `http` seam and the thing the host's dispatch is proved
+   * against.
+   */
+  mountHttp(path = 'messages'): void {
+    this.http = { path, handle: (request) => this.handleHttp(request) };
+  }
+
+  /**
+   * Wait for every delivery this door has acknowledged.
+   *
+   * The door answers before the message is delivered, exactly as a real transport must, so a test
+   * that asserted straight after the response would race the handler it is testing.
+   */
+  async settled(): Promise<void> {
+    await Promise.all(this.delivering);
+  }
+
+  private async handleHttp(request: SurfaceHttpRequest): Promise<SurfaceHttpResponse> {
+    this.requests.push(request);
+    if (request.method !== 'POST') return { status: 405, refusal: { reason: 'method_not_allowed' } };
+    const message = parseMemoryMessage(request.body);
+    // The refusal names the kind and nothing else: the body is not repeated, not summarised and
+    // not logged, because a refused request is one nobody has authenticated.
+    if (!message) return { status: 400, refusal: { reason: 'bad_request' } };
+    // Acknowledge, then run. `say` rejects when no handler is registered, which is a race at
+    // startup rather than a fault in the request, so it is swallowed here and the sender is told
+    // the door took the message.
+    this.delivering.push(this.say(message.userId, message.text).catch(() => undefined));
+    return { status: 200, headers: { 'content-type': 'application/json' }, body: '{"ok":true}' };
+  }
+
   async start(): Promise<void> {
     this.started = true;
   }
@@ -236,4 +287,17 @@ export class MemorySurface implements SurfaceSession {
       ...over,
     });
   }
+}
+
+/** `{ userId, text }`, or null for anything else. Deliberately not a zod schema: it is two strings. */
+function parseMemoryMessage(body: string): { userId: string; text: string } | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    return null;
+  }
+  const { userId, text } = (parsed ?? {}) as { userId?: unknown; text?: unknown };
+  if (typeof userId !== 'string' || userId === '' || typeof text !== 'string' || text === '') return null;
+  return { userId, text };
 }

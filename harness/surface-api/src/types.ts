@@ -210,6 +210,64 @@ export interface UploadRequest {
 }
 
 /**
+ * One inbound request, as a surface's own transport understands it.
+ *
+ * `body` is the bytes exactly as they arrived, decoded as UTF-8 and not parsed: a signature is
+ * computed over them, and a handler that was given a parsed object could not check one. **The
+ * seam is text, not bytes**, which is lossless for the UTF-8 every transport in question sends
+ * and is worth knowing for the one that does not: an invalid byte sequence decodes to U+FFFD, so
+ * its signature is computed over something other than what arrived and the request is refused as
+ * badly signed rather than as malformed. A transport that must sign arbitrary bytes needs this
+ * field widened, and that is a contract change rather than a workaround. `path` is what is left
+ * of the URL below this surface's mount — empty for the mount itself — so an adapter never sees,
+ * and never has to agree with, the tenant prefix the host put in front of it.
+ * `headers` are lower-cased, and a header sent twice is the first value: a transport that signs
+ * its requests does not send its signature twice, and a handler that had to decide which of two
+ * values was real would be the wrong place to decide it.
+ */
+export interface SurfaceHttpRequest {
+  method: string;
+  path: string;
+  headers: Readonly<Record<string, string>>;
+  body: string;
+}
+
+/**
+ * What the host sends back, and whether it was a refusal.
+ *
+ * `refusal` is the one field the host reads for itself: when it is set, exactly one `audit_log`
+ * row is written before the response goes out (invariant 15), and `reason` is a short token — see
+ * `SURFACE_REFUSAL_REASON_PATTERN` — because it lands in a column an operator groups by. Nothing
+ * of the request body reaches that row: a refused request has not been authenticated, so there is
+ * nothing in it worth recording. A surface never writes audit itself; it may import only this
+ * contract, `@harness/shared` and its own modules.
+ */
+export interface SurfaceHttpResponse {
+  status: number;
+  headers?: Readonly<Record<string, string>>;
+  body?: string;
+  refusal?: { reason: string };
+}
+
+/**
+ * A surface that can be reached by a request rather than by a socket it opened itself.
+ *
+ * The host mounts this at `/tenants/<clientId>/<path>` on its own HTTP server, one rule for a
+ * dedicated deployment and a pooled one alike, and resolves the tenant from the path before it
+ * calls `handle`. `path` carries no leading slash and is matched whole or as a prefix of one:
+ * `slack/events` answers `/tenants/acme/slack/events` with `path: ''` and
+ * `/tenants/acme/slack/events/extra` with `path: 'extra'`.
+ *
+ * Whatever authenticates the request is this surface's business and nobody else's — a signature
+ * over the raw body, a shared token, an upstream header — because it is the transport's own
+ * scheme, and the host would have to name a vendor to know about it.
+ */
+export interface SurfaceHttp {
+  readonly path: string;
+  handle(request: SurfaceHttpRequest): Promise<SurfaceHttpResponse>;
+}
+
+/**
  * A connected surface.
  *
  * Every method that talks to the outside world rejects with a `SurfaceError` whose message is
@@ -229,6 +287,14 @@ export interface SurfaceSession {
    * identity plug-in that wanted one is told so at load rather than at the first message.
    */
   readonly directory?: SurfaceDirectory;
+  /**
+   * Where this surface is reached by a request, when it is reached that way at all.
+   *
+   * Optional, and absent for a surface that opens its own connection or has no transport: a host
+   * mounts what it is offered and nothing else. Spec section 4.6 — this is what lets the Slack
+   * adapter hold the Events API without the host holding a Slack-shaped route.
+   */
+  readonly http?: SurfaceHttp;
   /** How this surface spells a mention of a user inside plain text. */
   mention(userId: string): string;
   /**

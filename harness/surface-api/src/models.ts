@@ -56,3 +56,24 @@ export const SurfaceFilePayloadShape = z.object({
 
 export type SurfaceMessagePayload = z.infer<typeof SurfaceMessagePayloadShape>;
 export type SurfaceFilePayload = z.infer<typeof SurfaceFilePayloadShape>;
+
+/**
+ * A surface's mount path, below the tenant prefix the host puts in front of it.
+ *
+ * Lowercase, slash-separated, no leading and no trailing slash, and every segment starts with a
+ * letter or a digit — so `..` cannot appear and a mount cannot climb out of its tenant's prefix
+ * into `/v1/runs`. One spelling per mount, because two surfaces of one tenant claiming the same
+ * path is a startup failure and a case-insensitive match would make it a silent one.
+ */
+export const SURFACE_HTTP_PATH_PATTERN = /^[a-z0-9][a-z0-9_-]*(?:\/[a-z0-9][a-z0-9_-]*)*$/;
+
+/**
+ * A refusal reason: a short lowercase token, at most 64 characters.
+ *
+ * It is written into `audit_log.error`, which is plaintext an operator reads and groups by, so it
+ * names the *kind* of refusal — `bad_signature`, `stale_timestamp` — and can never be a sentence
+ * assembled from what was refused. The host replaces anything that does not match with
+ * `unspecified` rather than refusing to answer, because a badly declared reason is the surface's
+ * bug and dropping the request would hide it behind a second failure.
+ */
+export const SURFACE_REFUSAL_REASON_PATTERN = /^[a-z][a-z0-9_]{0,63}$/;
