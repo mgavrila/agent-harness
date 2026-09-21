@@ -24,6 +24,10 @@ venv/
 *.sqlite
 packs/*/synthetic/out/
 evals/results/
+# What release.yml packs into before it uploads: seven tarballs and the release body. Anchored
+# for the same reason as /data/ above, and an untracked .tgz is one careless `git add` from
+# being committed.
+/release/
 
 # os / editors
 .DS_Store

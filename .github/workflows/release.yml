@@ -78,7 +78,12 @@ jobs:
       - run: pnpm format:check
       - run: pnpm test
       - name: Log in to the container registry
-        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login "$REGISTRY" -u "${{ github.actor }}" --password-stdin
+        # Both values reach the script through the environment rather than through `${{ }}`, so
+        # the token is never written into the generated step script on the runner's disk.
+        env:
+          REGISTRY_USER: ${{ github.actor }}
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: echo "$REGISTRY_TOKEN" | docker login "$REGISTRY" -u "$REGISTRY_USER" --password-stdin
       - name: Build and push the host image
         run: |
           docker build -f harness/compose/node.Dockerfile -t "$REGISTRY/$IMAGE_OWNER/agent-harness-host:$VERSION" .
@@ -98,12 +103,18 @@ jobs:
       - name: Write the release notes from the changelog
         run: pnpm release:notes "$VERSION" > release/notes.md
       - name: Create the release
+        # Idempotent, because the images above push happily on a re-run and it would be poor to
+        # then die on the last step: the release is created or its body brought up to date, and
+        # every asset is uploaded with --clobber. Re-running the same tag ends in the same place.
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release create "$GITHUB_REF_NAME" \
-            --title "$GITHUB_REF_NAME" \
-            --notes-file release/notes.md \
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release edit "$GITHUB_REF_NAME" --notes-file release/notes.md
+          else
+            gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-file release/notes.md
+          fi
+          gh release upload "$GITHUB_REF_NAME" --clobber \
             release/*.tgz \
             docs/architecture/tool-surface.json \
             docs/architecture/compose-surface.yaml
