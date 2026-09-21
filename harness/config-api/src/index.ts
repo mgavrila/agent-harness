@@ -20,6 +20,8 @@ export {
   surfaceSecretsOf,
   tenantKeysOf,
   type ClientDocument,
+  type SecretRef,
+  type SurfaceSecretRef,
 } from './document.js';
 export { ClientPolicyShape, PolicyFileShape } from './policy.js';
 export {
@@ -33,4 +35,4 @@ export {
 export { ROUTES, RouteSpec, RoutingFile, type Route } from './routing.js';
 export { pointerSegments, readPointer, writePointer } from './pointer.js';
 export { resolve } from './resolve.js';
-export type { Blueprint, ConfigSource, JsonPatch, LoadedDocument, Overlay, PatchOp, SecretRef } from './types.js';
+export type { Blueprint, ConfigSource, JsonPatch, LoadedDocument, Overlay, PatchOp } from './types.js';

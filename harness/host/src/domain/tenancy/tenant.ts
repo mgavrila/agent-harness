@@ -47,14 +47,22 @@ const SCHEDULER_STOP_MS = 10_000;
 /**
  * Check that every secret the document *refers to* is actually present.
  *
- * A `SecretRef` names an environment variable; the value stays in the process environment and
- * reaches the surface through `deps.env`, exactly as it does today. What the document adds is the
- * chance to fail at load, naming the tenant and the variable, instead of at the first message
- * with a transport error nobody can attribute. `surfaceSecretsOf` is what reads the typed surface
- * sections, so this file names no surface's own fields.
+ * A `SecretRef` names either an environment variable or a secret store entry, never the secret
+ * itself. `{ env }`'s value stays in the process environment and reaches the surface through
+ * `deps.env`, exactly as it does today; the chance this adds is to fail at load, naming the
+ * tenant and the variable, instead of at the first message with a transport error nobody can
+ * attribute. `{ ref }` names an entry in the deployment's secret store, which nothing in this
+ * repository has yet, so it is refused here the same way — at load, naming the tenant and the
+ * secret — rather than by a surface that cannot resolve it. `surfaceSecretsOf` is what reads the
+ * typed surface sections, so this file names no surface's own fields.
  */
 function assertSecretsPresent(document: ClientDocument, env: EnvSource): void {
   for (const ref of surfaceSecretsOf(document)) {
+    if ('ref' in ref) {
+      throw new ConfigError(
+        `client "${document.id}" names the secret "${ref.ref}" for ${ref.surface}.${ref.field}, and this deployment has no secret source`,
+      );
+    }
     if ((optionalEnv(ref.env, env) ?? '').trim() === '') {
       throw new ConfigError(
         `client "${document.id}" declares the "${ref.surface}" surface, which needs ${ref.env}; this deployment does not set it`,
@@ -166,8 +174,14 @@ async function buildTenant(pool: HostPool, loaded: LoadedDocument, opened: Stopp
   for (const { surface, key } of tenantKeysOf(document)) {
     settings[surface] = { ...settings[surface], tenantKey: key };
   }
-  for (const { surface, field, env } of surfaceSecretsOf(document)) {
-    settings[surface] = { ...settings[surface], secrets: { ...settings[surface]?.secrets, [field]: env } };
+  // `assertSecretsPresent`, above, has already thrown for any `{ ref }` entry, so every one left
+  // here names an environment variable; the guard is for the type checker, not the deployment.
+  for (const ref of surfaceSecretsOf(document)) {
+    if (!('env' in ref)) continue;
+    settings[ref.surface] = {
+      ...settings[ref.surface],
+      secrets: { ...settings[ref.surface]?.secrets, [ref.field]: ref.env },
+    };
   }
   const surfaces = await loadSurfaces(
     surfaceNamesOf(document).map(surfaceSpecifier),

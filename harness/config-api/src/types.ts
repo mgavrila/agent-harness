@@ -1,16 +1,6 @@
 import type { ClientDocument } from './document.js';
 
-/**
- * A reference to a secret, never the secret.
- *
- * `{ env: 'SLACK_BOT_TOKEN' }` names an environment variable the host resolves from its own
- * process environment. A `{ ref: string }` member into a platform secret store is reserved for
- * the deployment that has one; until then a document that carried a literal value would be a
- * document that got copied into a ticket, so the schema admits no such shape at all.
- */
-export interface SecretRef {
-  env: string;
-}
+// `SecretRef` lives in `document.ts`, next to the `SecretRefShape` it is inferred from.
 
 /** One operation of the JSON Patch subset an overlay may use (spec decision 3). */
 export type PatchOp =

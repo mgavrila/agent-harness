@@ -48,3 +48,23 @@ describe('the two per-run model-call limits', () => {
     await raised.close();
   });
 });
+
+describe('assertSecretsPresent', () => {
+  it('refuses a client whose document names a secret this deployment has no secret source for', async () => {
+    const withRef = parseClientDocument(
+      fixtureDocument({
+        id: 'alpha',
+        displayName: 'alpha',
+        runtime: 'scripted',
+        surfaces: {
+          slack: { teamId: 'T001', signingSecret: { ref: 'slack-signing' }, botToken: { env: 'SLACK_BOT_TOKEN' } },
+        },
+      }),
+    );
+    // No other document to open, so the pool's own start-up failure wraps this one, and carries
+    // it in full: the assertion below reads it out of that wrapper.
+    await expect(poolFixture(db, { documents: [withRef] })).rejects.toThrow(
+      'client "alpha" names the secret "slack-signing" for slack.signingSecret, and this deployment has no secret source',
+    );
+  });
+});
