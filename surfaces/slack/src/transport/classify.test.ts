@@ -1,11 +1,11 @@
 import type { Logger } from '@harness/shared';
 import { describe, expect, it, vi } from 'vitest';
-import { classifyInbound, classifyMessage, createThreadMemory, THREAD_MEMORY_LIMIT } from './bolt.js';
+import { classifyInbound, classifyMessage, createThreadMemory, THREAD_MEMORY_LIMIT } from './classify.js';
 import { FakeSlack } from './fake.js';
 import type { RawMessage } from './types.js';
 
 const BOT = 'UBOT';
-/** This app, as the lookup knows itself: its bot user, and the bot id Bolt puts on the context. */
+/** This app, as the lookup knows itself: its bot user, and the bot id `auth.test` answers with. */
 const SELF = { userId: BOT, botId: 'B_SELF' };
 
 /** A logger that keeps its warnings, so a test can count them. */

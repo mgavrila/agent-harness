@@ -1,18 +1,6 @@
-import { App, LogLevel } from '@slack/bolt';
 import type { Logger } from '@harness/shared';
-import type { SlackConfig } from '../config.js';
-import { downloadAttachments, type SlackFile } from './files.js';
-import type {
-  RawMessage,
-  SlackApi,
-  SlackAction,
-  SlackEvents,
-  SlackInbound,
-  SlackThreadMessage,
-  SlackTransport,
-  SlackView,
-} from './types.js';
-import { webClientApi } from './web-client.js';
+import type { SlackFile } from './files.js';
+import type { RawMessage, SlackApi, SlackThreadMessage } from './types.js';
 
 /** How many threads each half of the thread memory holds before the oldest key falls out. */
 export const THREAD_MEMORY_LIMIT = 1000;
@@ -117,8 +105,8 @@ function boundedMap<V>(limit: number): {
 
 /**
  * This app, as the thread lookup knows itself: the user id it posts under and the bot id Slack
- * stamps on its messages. Bolt puts both on the context; either may be missing, and a message
- * matching neither was written by somebody else — another bot included.
+ * stamps on its messages. `auth.test` answers with both at start; either may be missing, and a
+ * message matching neither was written by somebody else — another bot included.
  */
 export interface BotIdentity {
   userId?: string;
@@ -219,127 +207,4 @@ export async function classifyInbound(
   if (!classified || classified.mentioned || classified.threadTs === undefined) return classified;
   if (!(await threads.hasPosted(event.channel, classified.threadTs, bot))) return classified;
   return { ...classified, mentioned: true };
-}
-
-/**
- * A real Slack connection, in Socket Mode.
- *
- * One app carries chat and approvals, because one process — this host — holds both connections.
- * Slack routes each Socket Mode event to exactly one open connection per app, and there is only
- * one connection, so there is nothing to split between.
- *
- * Both the action and the view registrations are catch-alls. The contract takes one action
- * handler and one view handler and dispatches on the id itself, so there is nothing for Bolt to
- * route. Every interaction Slack delivers is acknowledged, and one this host did not post is
- * acked and dropped by the handler above rather than ignored by Bolt. Acking something unknown
- * costs nothing; leaving it unacked makes Slack show the user an error for a message the host
- * has no opinion about.
- */
-export function boltTransport(config: SlackConfig, log: Logger, storageDir: string): SlackTransport {
-  const bolt = new App({
-    token: config.botToken,
-    appToken: config.appToken,
-    socketMode: true,
-    logLevel: LogLevel.INFO,
-  });
-
-  const api = webClientApi(bolt.client);
-  const threads = createThreadMemory(api, log);
-
-  let actionHandler: ((action: SlackAction) => Promise<void>) | null = null;
-  let viewHandler: ((view: SlackView) => Promise<void>) | null = null;
-  let messageHandler: ((message: SlackInbound) => Promise<void>) | null = null;
-
-  /** Slack drops an interaction that is not acknowledged within three seconds. */
-  const ackFirst = async (ack: () => Promise<unknown>): Promise<void> => {
-    try {
-      await ack();
-    } catch (err) {
-      log.error('ack failed', err);
-    }
-  };
-
-  bolt.action(/.*/, async ({ ack, body, action }) => {
-    await ackFirst(ack);
-    if (!actionHandler) {
-      log.warn('a Slack action arrived before a handler was registered');
-      return;
-    }
-    await actionHandler({
-      userId: (body as { user?: { id?: string } }).user?.id ?? 'unknown',
-      // The channel the interactive message lives in.
-      channel: (body as { channel?: { id?: string } }).channel?.id ?? '',
-      actionId: (action as { action_id?: string }).action_id ?? '',
-      value: (action as { value?: string }).value ?? '',
-      triggerId: (body as { trigger_id?: string }).trigger_id ?? null,
-      messageTs: (body as { message?: { ts?: string } }).message?.ts ?? null,
-    });
-  });
-
-  bolt.view(/.*/, async ({ ack, body, view }) => {
-    await ackFirst(ack);
-    if (!viewHandler) {
-      log.warn('a Slack view submission arrived before a handler was registered');
-      return;
-    }
-    await viewHandler({
-      userId: (body as { user?: { id?: string } }).user?.id ?? 'unknown',
-      callbackId: view.callback_id,
-      privateMetadata: view.private_metadata ?? '',
-      state: (view.state as { values?: Record<string, Record<string, { value?: string | null }>> }).values ?? {},
-    });
-  });
-
-  const deliver = async (raw: RawMessage, bot: BotIdentity, teamId: string | undefined): Promise<void> => {
-    if (!messageHandler) {
-      log.warn('a Slack message arrived before a handler was registered');
-      return;
-    }
-    const classified = await classifyInbound(raw, bot, threads);
-    if (!classified) return;
-    // The reply the host writes names this message, and only the transport sees which thread it
-    // belongs to: a mention inside an existing thread carries a root that is not its own
-    // timestamp. Recorded only for a message that will be answered, so ordinary channel chatter
-    // does not fill the store.
-    if (classified.mentioned) threads.noteInbound(raw.channel, raw.ts, raw.thread_ts ?? raw.ts);
-    const files = await downloadAttachments(raw.ts, classified.files, { token: config.botToken, storageDir, log });
-    await messageHandler({
-      userId: classified.userId,
-      channel: raw.channel,
-      text: classified.text,
-      ts: raw.ts,
-      threadTs: raw.thread_ts ?? null,
-      mentioned: classified.mentioned,
-      files,
-      // The payload's own `team` where Slack sends one, and the connection's context otherwise:
-      // Socket Mode carries the workspace on every event it delivers, and the two agree.
-      teamId: raw.team ?? teamId ?? null,
-    });
-  };
-  const identity = (context: { botUserId?: string; botId?: string }): BotIdentity => ({
-    userId: context.botUserId,
-    botId: context.botId,
-  });
-  bolt.event('message', async ({ event, context }) =>
-    deliver(event as unknown as RawMessage, identity(context), context.teamId),
-  );
-  bolt.event('app_mention', async ({ event, context }) =>
-    deliver(event as unknown as RawMessage, identity(context), context.teamId),
-  );
-
-  const events: SlackEvents = {
-    onAction(handler) {
-      actionHandler = handler;
-    },
-    onView(handler) {
-      viewHandler = handler;
-    },
-    onMessage(handler) {
-      messageHandler = handler;
-    },
-    start: () => bolt.start().then(() => undefined),
-    stop: () => bolt.stop().then(() => undefined),
-  };
-
-  return { api, events, notePostedIn: (channel, threadTs) => threads.notePostedIn(channel, threadTs) };
 }

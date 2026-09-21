@@ -12,7 +12,7 @@ export { FakeSlack, FakeSlackEvents } from './transport/fake.js';
  * arrives as Block Kit.
  *
  * There is no `storageDir` to pass: this wiring goes straight to `createSlackSession`, never
- * through `boltTransport`, and `FakeSlackEvents`'s `emitMessage` takes an already-downloaded
+ * through `eventsTransport`, and `FakeSlackEvents`'s `emitMessage` takes an already-downloaded
  * `SlackInbound`, so no fake here ever touches a disk.
  */
 export function fakeSlackSession(over: Partial<SlackConfig> = {}): {
@@ -25,12 +25,12 @@ export function fakeSlackSession(over: Partial<SlackConfig> = {}): {
   const events = new FakeSlackEvents();
   const config: SlackConfig = {
     botToken: 'xoxb-test',
-    appToken: 'xapp-test',
+    signingSecret: 'a-signing-secret',
     defaultConversation: 'C0DEMO',
     ...over,
   };
   // The thread memory itself lives in the real transport, which this wiring skips, and the rule
-  // it answers is tested against the real memory in `transport/bolt.test.ts`. What is recorded
+  // it answers is tested against the real memory in `transport/classify.test.ts`. What is recorded
   // here is the other half: which posts claim a thread, which is the session's decision.
   const noted: { channel: string; threadTs: string }[] = [];
   const transport = {

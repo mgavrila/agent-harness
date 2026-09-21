@@ -359,6 +359,16 @@ export interface SurfaceDeps {
    * client that declared no key for this surface.
    */
   tenantKey?: string;
+  /**
+   * The environment variable this client's document named for each of this surface's credentials,
+   * keyed by the document's own field name — `{ botToken: 'SLACK_BOT_TOKEN' }`.
+   *
+   * The counterpart of `Surface.secrets`, which says what an adapter reads: this says what *this
+   * tenant* calls it. An adapter falls back to the conventional name for a field the document did
+   * not name, so a single-tenant deployment configures nothing; two tenants in one process name
+   * two pairs, and neither adapter can read the other's.
+   */
+  secrets?: Readonly<Record<string, string>>;
 }
 
 /** What a `@harness/surface-*` package exports as `surface`. */

@@ -56,6 +56,14 @@ export function webClientApi(client: WebClient): SlackApi {
         return { messages: (res.messages ?? []).map((m) => ({ user: m.user, bot_id: m.bot_id })) };
       },
     },
+    auth: {
+      test: async () => {
+        const res = await client.auth.test();
+        // Narrowed to the two ids the classifier compares against: the workspace, the app's URL
+        // and the user's name are not this adapter's business at start-up.
+        return { user_id: res.user_id, bot_id: res.bot_id };
+      },
+    },
     usergroups: {
       // Narrowed to the id, because that is all a level is decided from: a group's name and its
       // handle are an operator's words and change without the mapping changing.

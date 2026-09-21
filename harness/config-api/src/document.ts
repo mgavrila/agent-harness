@@ -143,19 +143,25 @@ export function tenantKeysOf(document: ClientDocument): { surface: string; key: 
 }
 
 /**
- * Every environment variable this document's surfaces refer to, with the surface that named it.
+ * Every environment variable this document's surfaces refer to, with the surface that named it
+ * and the field it was named under.
  *
  * The same reason `tenantKeysOf` exists: the typed surface sections are read here, so the host
  * never is. A host that checked a `signingSecret` by name would have a vendor's field in the one
- * process every client runs, which `kernel-vocabulary.test.ts` forbids `harness/host/src`. The
- * value itself never appears — a `SecretRef` names a variable and the deployment's environment
+ * process every client runs, which `kernel-vocabulary.test.ts` forbids `harness/host/src`. `field`
+ * travels as an opaque string: the host copies it into the bag the adapter is handed, and the
+ * adapter — which is allowed to know what its own fields are called — looks its variable up. The
+ * value itself never appears: a `SecretRef` names a variable and the deployment's environment
  * holds what it is worth.
  */
-export function surfaceSecretsOf(document: ClientDocument): { surface: string; env: string }[] {
-  const secrets: { surface: string; env: string }[] = [];
+export function surfaceSecretsOf(document: ClientDocument): { surface: string; field: string; env: string }[] {
+  const secrets: { surface: string; field: string; env: string }[] = [];
   const slack = document.surfaces.slack;
   if (slack) {
-    secrets.push({ surface: 'slack', env: slack.signingSecret.env }, { surface: 'slack', env: slack.botToken.env });
+    secrets.push(
+      { surface: 'slack', field: 'signingSecret', env: slack.signingSecret.env },
+      { surface: 'slack', field: 'botToken', env: slack.botToken.env },
+    );
   }
   return secrets;
 }
