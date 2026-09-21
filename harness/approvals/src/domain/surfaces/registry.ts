@@ -18,19 +18,16 @@ const NO_SURFACES_MESSAGE = 'this client declares no surface; at least one is re
 export interface LoadedSurfaces {
   readonly all: readonly SurfaceSession[];
   readonly primary: SurfaceSession;
-  /** The union of every loaded adapter's declared credentials, for the child-process allowlist. */
-  readonly secrets: readonly string[];
   /** `undefined` when no loaded surface has that name; the caller decides whether that is an error. */
   find(name: string): SurfaceSession | undefined;
 }
 
 /** A set over sessions that are already in hand. Every test uses it; `loadSurfaces` builds one. */
-export function surfacesOf(sessions: SurfaceSession[], secrets: readonly string[] = []): LoadedSurfaces {
+export function surfacesOf(sessions: SurfaceSession[]): LoadedSurfaces {
   if (sessions.length === 0) throw new ConfigError(NO_SURFACES_MESSAGE);
   return {
     all: sessions,
     primary: sessions[0],
-    secrets,
     find: (name) => sessions.find((s) => s.name === name),
   };
 }
@@ -131,5 +128,5 @@ export async function loadSurfaces(
       surfaceFailed(specifier, err, 'connect');
     }
   }
-  return surfacesOf(sessions, [...new Set(declared.flatMap((d) => [...d.surface.secrets]))]);
+  return surfacesOf(sessions);
 }

@@ -37,8 +37,14 @@ const DOMAIN_FORBIDDEN =
  * either — it has its own copy of this rule, in `harness/approvals/src/host-vocabulary.test.ts`,
  * because a test in this package that scanned another package's source would fail in whichever
  * suite happened to run it.
+ *
+ * `socket ?mode` is here since Plan 11b: the Slack adapter receives signed requests now and
+ * nothing in this repository holds a vendor's connection, so a kernel that names one is a kernel
+ * describing a transport it no longer has. A plain `socket` is not forbidden — the host binds
+ * one — and neither is `webhook`, `signature` or `hmac`: those are HTTP, which the host is
+ * allowed to know about.
  */
-const MESSAGING_FORBIDDEN = /slack|bolt|block ?kit|thread_ts|\bblocks\b/i;
+const MESSAGING_FORBIDDEN = /slack|bolt|block ?kit|thread_ts|\bblocks\b|socket ?mode/i;
 
 /**
  * Words that belong to one agent framework or one identity vendor and must not appear in the
@@ -405,11 +411,17 @@ describe('the kernel, the packs, the identity contract and the evals name no are
       '// the Block Kit card',
       'thread_ts: row.messageRef,',
       'const blocks = cardBlocks(card);',
+      '// opened in Socket Mode',
     ]) {
       expect(MESSAGING_FORBIDDEN.test(line), line).toBe(true);
     }
-    // And the shapes it must not catch: an ordinary identifier, and the words the kernel uses.
-    for (const line of ['const prompt = dataBlockSystemPrompt(role);', "sink: 'surface_message',"]) {
+    // And the shapes it must not catch: an ordinary identifier, the words the kernel uses, and a
+    // plain socket — the host binds one, and what is forbidden is the transport's own mode.
+    for (const line of [
+      'const prompt = dataBlockSystemPrompt(role);',
+      "sink: 'surface_message',",
+      'server.on("connection", (socket) => socket.destroy());',
+    ]) {
       expect(MESSAGING_FORBIDDEN.test(line), line).toBe(false);
     }
     for (const line of [

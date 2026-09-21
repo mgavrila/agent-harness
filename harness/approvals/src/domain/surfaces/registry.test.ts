@@ -15,7 +15,6 @@ describe('loadSurfaces', () => {
     expect(surfaces.all).toHaveLength(1);
     expect(surfaces.primary.name).toBe('memory');
     expect(surfaces.find('memory')).toBe(surfaces.primary);
-    expect(surfaces.secrets).toEqual([]);
   });
 
   it('refuses an empty list rather than starting a host nobody can answer', async () => {
@@ -67,11 +66,10 @@ describe('surfacesOf', () => {
   it('answers by name and reports an unknown one as undefined', () => {
     const memory = new MemorySurface();
     const other = new MemorySurface({ name: 'other', conversation: 'other' });
-    const surfaces = surfacesOf([memory, other], ['A_TOKEN']);
+    const surfaces = surfacesOf([memory, other]);
     expect(surfaces.primary).toBe(memory);
     expect(surfaces.find('other')).toBe(other);
     expect(surfaces.find('teams')).toBeUndefined();
-    expect(surfaces.secrets).toEqual(['A_TOKEN']);
   });
 
   it('refuses an empty list, because `primary` would be undefined and every caller assumes it', () => {

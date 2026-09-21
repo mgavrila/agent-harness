@@ -69,6 +69,15 @@ describe('the Slack transport as an HTTP door', () => {
     expect(SLACK_MOUNT_PATH).toBe('slack/events');
   });
 
+  it('answers a non-POST with 405 and no refusal, before anything else is consulted', async () => {
+    const { t, api } = transport();
+    const response = await t.http!.handle({ method: 'GET', path: '', headers: {}, body: '' });
+    expect(response.status).toBe(405);
+    expect(response.headers).toEqual({ allow: 'POST' });
+    expect(response.refusal).toBeUndefined();
+    expect(api.authTestCalls).toBe(0);
+  });
+
   it('answers the url_verification handshake with the challenge it was given', async () => {
     const { t } = transport();
     const response = await t.http!.handle(signed(JSON.stringify({ type: 'url_verification', challenge: 'c-123' })));

@@ -5,9 +5,7 @@ import { approvals, encrypt, toolEffects } from '@harness/db';
 import { dispatchStagedEffects } from '@harness/core-tools/effects';
 import { StaticIdentity } from '@harness/identity-api/testing';
 import { MemorySurface } from '@harness/surface-api/testing';
-import { surface as slackSurface } from '@harness/surface-slack';
 import { fakeSlackSession } from '@harness/surface-slack/testing';
-import { surface as memorySurface } from '@harness/surface-memory';
 import { FakeCoreToolsClient, pendingApproval, principal, useTestDb } from '../../testing.js';
 import { APPROVE_ACTION_ID } from '../cards.js';
 import { decideApproval } from '../decisions.js';
@@ -15,7 +13,7 @@ import { registerApprovalHandlers } from '../handlers.js';
 import { postPendingApprovals } from '../poller.js';
 import { surfaceSinks } from '../sinks.js';
 import { surfacesOf } from './registry.js';
-import { STUB_SECRET, stubSession, stubSurface } from './stub-surface.test-helpers.js';
+import { stubSession } from './stub-surface.test-helpers.js';
 
 const db = useTestDb();
 const key = randomBytes(32);
@@ -25,22 +23,16 @@ const LEAD = principal({ surfaces: { slack: 'U012', memory: 'U012', stub: 'U012'
 
 /**
  * Three surfaces at once: Slack, through the real adapter on a fake transport, the memory adapter
- * beside it, and a credential-declaring stub third. This is the suite that proves the host is not
- * a Slack app with an interface in front of it — cards go to the primary, effects go where they
- * are addressed, and a decision can only be taken where the card is.
- *
- * The stub earns its place in the last case: the memory adapter declares no credentials, so
- * without a third adapter the union below is Slack's own list and asserts nothing.
+ * beside it, and a stub third. This is the suite that proves the host is not a Slack app with an
+ * interface in front of it — cards go to the primary, effects go where they are addressed, and a
+ * decision can only be taken where the card is. The stub is what makes "cards go to the primary
+ * only" a statement about more than a pair; `stub-surface.test-helpers.ts` says why it's there.
  */
 function wire() {
   const slack = fakeSlackSession();
   const memory = new MemorySurface();
   const stub = stubSession();
-  // The secrets come off the three adapters' own `Surface.secrets`, the way `loadSurfaces` builds
-  // them, rather than out of an array written here. Otherwise the last case below proves only
-  // that the host collected what this file remembered.
-  const declared = [...new Set([slackSurface, memorySurface, stubSurface].flatMap((s) => [...s.secrets]))];
-  const surfaces = surfacesOf([slack.session, memory, stub], declared);
+  const surfaces = surfacesOf([slack.session, memory, stub]);
   const core = new FakeCoreToolsClient();
   const identity = new StaticIdentity([LEAD]);
   for (const session of surfaces.all) {
@@ -132,24 +124,5 @@ describe('a host with several surfaces loaded', () => {
     expect(out).toMatchObject({ dispatched: 2 });
     expect(memory.texts.map((t) => t.text)).toEqual(['for the memory surface']);
     expect(slack.api.posts.map((p) => p.text)).toEqual(['for whoever is primary']);
-  });
-
-  /**
-   * What a host running this domain in a separate process from the kernel would strip from a
-   * child's environment. The host runs the kernel in-process, so nothing here spawns a child,
-   * but the union of every loaded adapter's declared credentials is still what a deployment
-   * needs if it ever does.
-   */
-  it('collects the credentials of every loaded adapter, from the adapters themselves', () => {
-    const { surfaces } = wire();
-    // Stated so the case below cannot go quietly hollow: with only these two loaded, the union
-    // would be Slack's list and a host that dropped every list but the first would pass.
-    expect([...memorySurface.secrets]).toEqual([]);
-    expect([...slackSurface.secrets].length).toBeGreaterThan(0);
-    // Exact membership, from the adapters' own declarations rather than a list written here. A
-    // set, because the order is load order and nothing depends on it.
-    expect(new Set(surfaces.secrets)).toEqual(new Set([...slackSurface.secrets, STUB_SECRET]));
-    // A union, not a concatenation: a name two adapters both read is carried once.
-    expect(surfaces.secrets).toHaveLength(slackSurface.secrets.length + 1);
   });
 });

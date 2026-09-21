@@ -63,10 +63,9 @@ const SurfacesShape = z
       .object({
         /**
          * An optional workspace name for the memory surface, with exactly the role `teamId` has
-         * for Slack: it is what an inbound event's tenant hint is matched against. It exists
-         * because a pooled host cannot serve two live Slack tenants in this plan (decision 6),
-         * and pooled routing still has to be provable end to end — the memory surface is the one
-         * spec §9 asks the isolation work to be proved with.
+         * for Slack: it is what an inbound event's tenant hint is matched against. It exists so
+         * spec §9's pooled-tenant isolation work, which the memory surface proves because it
+         * needs no network to run in a suite, has a hint to match tenants against.
          */
         workspace: z.string().min(1).max(64).optional(),
       })

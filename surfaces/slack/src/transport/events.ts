@@ -317,6 +317,10 @@ export function eventsTransport(
    * unanswerable — neither of which reads the bot's ids at all.
    */
   const handle = async (request: SurfaceHttpRequest): Promise<SurfaceHttpResponse> => {
+    // Before signature verification, and carrying no `refusal`: this is a method Slack never
+    // sends, so it is not something worth an audit row, and an unsigned probe of the mount should
+    // not cost one. `screen` and everything past it assumes a body worth reading; this does not.
+    if (request.method !== 'POST') return { status: 405, headers: { allow: 'POST' } };
     const refused = screen(request);
     if (refused) return refused;
     const contentType = (request.headers['content-type'] ?? '').split(';')[0].trim().toLowerCase();
