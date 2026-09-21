@@ -155,9 +155,17 @@ describe('runDeepAgent', () => {
   });
 
   it('ends with error "cancelled" and no done when the signal aborts mid-run', async () => {
-    gateway.setResponder(() => new Promise<never>(() => {}));
     const controller = new AbortController();
-    setTimeout(() => controller.abort(), 50);
+    // Aborted from inside the model call rather than on a timer. The fake records a call before
+    // it consults the responder, so by the time this runs the request is in flight and
+    // `gateway.calls` already holds exactly one — which is what "mid-run" means here. The timer
+    // this replaces was a guess about how long the run takes to reach its first model call, and
+    // on a slow runner the abort landed before it, taking a different path through the graph and
+    // leaving this case red for a reason that had nothing to do with cancellation.
+    gateway.setResponder(() => {
+      controller.abort();
+      return new Promise<never>(() => {});
+    });
     const events = await run(request({ signal: controller.signal }));
     expect(events).toEqual([{ type: 'error', message: 'cancelled' }]);
     expect(gateway.calls).toHaveLength(1);
