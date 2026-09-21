@@ -3,13 +3,12 @@
 # `postgres` and `litellm` have no profile, so they start with a bare
 # `docker compose up`: the database and the model gateway are what everything
 # else needs. `files` and `host` are the `demo` profile, and `pnpm demo:up`
-# brings up the whole client instance. `core-tools` is build-only: nothing
-# starts it as a service — it is hosted in-process inside `host`, and this
-# entry only proves the image still builds, for the MCP inspector and the eval
-# runner on an operator's machine. No client is named or baked in here: the host
-# mounts whatever directory `HARNESS_CLIENTS_DIR` points at, or reads the
-# database, and onboarding a client is a document outside this repository, never
-# an edit here. No service mounts the Docker socket.
+# brings up the whole client instance. Nothing here is built: both images are
+# pulled by tag from the container registry, and `HARNESS_IMAGE_TAG` in .env
+# says which release this deployment runs. No client is named or baked in here:
+# the host mounts whatever directory `HARNESS_CLIENTS_DIR` points at, or reads
+# the database, and onboarding a client is a document outside this repository,
+# never an edit here. No service mounts the Docker socket.
 #
 # Every variable below is interpolated from the repository-root `.env`, so run
 # these through the `pnpm` scripts, which pass `--env-file .env`. Compose's own
@@ -79,10 +78,7 @@ services:
   # reach the network. core-tools sends it a path under the storage root and gets pages back;
   # see harness/files/README.md. No env_file: its whole environment is the three lines below.
   files:
-    build:
-      context: ../..
-      dockerfile: harness/compose/files.Dockerfile
-    image: harness-files
+    image: ghcr.io/mgavrila/agent-harness-files:${HARNESS_IMAGE_TAG:?set HARNESS_IMAGE_TAG in .env}
     profiles: ['demo']
     restart: unless-stopped
     networks:
@@ -105,36 +101,11 @@ services:
       timeout: 5s
       retries: 6
 
-  # Built, not started: core-tools is hosted in-process inside `host` (see node.Dockerfile).
-  # `docker compose build core-tools` proves the image still builds, for the MCP inspector and
-  # the eval runner on an operator's machine.
-  core-tools:
-    build:
-      context: ../..
-      dockerfile: harness/compose/core-tools.Dockerfile
-    profiles: ['build-only']
-    environment:
-      DATABASE_URL: postgres://harness:harness@postgres:5432/harness
-      HARNESS_GATEWAY_URL: http://litellm:4000
-      HARNESS_STORAGE_DIR: /data/storage
-      HARNESS_ENCRYPTION_KEY: ${HARNESS_ENCRYPTION_KEY:?set HARNESS_ENCRYPTION_KEY in .env}
-      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?set LITELLM_MASTER_KEY in .env}
-    volumes:
-      - ../../storage:/data/storage
-    depends_on:
-      postgres:
-        condition: service_healthy
-      litellm:
-        condition: service_healthy
-
   # The one long-running harness process per client: the runtime, the surfaces and the identity
   # plug-in it loads by name, the approvals loops, and core-tools hosted in-process. The one
   # Slack app serves both chat and approvals.
   host:
-    build:
-      context: ../..
-      dockerfile: harness/compose/node.Dockerfile
-    image: harness-host
+    image: ghcr.io/mgavrila/agent-harness-host:${HARNESS_IMAGE_TAG:?set HARNESS_IMAGE_TAG in .env}
     profiles: ['demo']
     restart: unless-stopped
     networks:
@@ -179,9 +150,10 @@ services:
       HARNESS_HOST_PORT: '8788'
       # The width knowledge_chunks.embedding was created at. Changing it means a new database.
       HARNESS_EMBED_DIMS: '${HARNESS_EMBED_DIMS:-1024}'
-      # The one Slack app: chat and approvals.
+      # The one Slack app: the token the host posts as, and the signing secret every inbound
+      # request is verified against. Slack delivers to a URL now — there is no app-level token
+      # and nothing here holds a connection.
       SLACK_BOT_TOKEN: '${SLACK_BOT_TOKEN:-}'
-      SLACK_APP_TOKEN: '${SLACK_APP_TOKEN:-}'
       # Named by a document's `surfaces.slack.signingSecret`. The host refuses to open a tenant
       # whose named variable is unset, so every SecretRef a document names must be on this list —
       # a document is data and cannot add a line here.

@@ -6,37 +6,7 @@ networks:
     internal: true
     name: agent-harness_files
 services:
-  core-tools:
-    build:
-      context: ../..
-      dockerfile: harness/compose/core-tools.Dockerfile
-    depends_on:
-      litellm:
-        condition: service_healthy
-        required: true
-      postgres:
-        condition: service_healthy
-        required: true
-    environment:
-      DATABASE_URL: postgres://harness:harness@postgres:5432/harness
-      HARNESS_ENCRYPTION_KEY: ${HARNESS_ENCRYPTION_KEY:?set HARNESS_ENCRYPTION_KEY in .env}
-      HARNESS_GATEWAY_URL: http://litellm:4000
-      HARNESS_STORAGE_DIR: /data/storage
-      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?set LITELLM_MASTER_KEY in .env}
-    networks:
-      default: null
-    profiles:
-      - build-only
-    volumes:
-      - bind:
-          create_host_path: true
-        source: ../../storage
-        target: /data/storage
-        type: bind
   files:
-    build:
-      context: ../..
-      dockerfile: harness/compose/files.Dockerfile
     environment:
       HARNESS_FILES_BIND: 0.0.0.0
       HARNESS_FILES_PORT: "8790"
@@ -48,7 +18,7 @@ services:
         - CMD-SHELL
         - 'node -e "fetch(''http://127.0.0.1:8790/healthz'').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"'
       timeout: 5s
-    image: harness-files
+    image: ghcr.io/mgavrila/agent-harness-files:${HARNESS_IMAGE_TAG:?set HARNESS_IMAGE_TAG in .env}
     networks:
       files: null
     profiles:
@@ -60,9 +30,6 @@ services:
         type: volume
         volume: {}
   host:
-    build:
-      context: ../..
-      dockerfile: harness/compose/node.Dockerfile
     depends_on:
       files:
         condition: service_healthy
@@ -97,11 +64,10 @@ services:
       HARNESS_STORAGE_DIR: /srv/harness-storage
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?set LITELLM_MASTER_KEY in .env}
       RECONCILE_SECONDS: ${RECONCILE_SECONDS:-300}
-      SLACK_APP_TOKEN: ${SLACK_APP_TOKEN:-}
       SLACK_APPROVALS_CHANNEL: ${SLACK_APPROVALS_CHANNEL:-}
       SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN:-}
       SLACK_SIGNING_SECRET: ${SLACK_SIGNING_SECRET:-}
-    image: harness-host
+    image: ghcr.io/mgavrila/agent-harness-host:${HARNESS_IMAGE_TAG:?set HARNESS_IMAGE_TAG in .env}
     networks:
       default: null
       files: null

@@ -113,8 +113,8 @@ export async function readToolSurface(): Promise<ToolSurfaceEntry[]> {
  *   - Without `--no-path-resolution`, every bind mount is rewritten to an absolute host path,
  *     so the snapshot differs on every machine.
  *
- * Both `--profile` flags are needed because `config` omits services whose profile is not
- * enabled, and every service but `postgres` and `litellm` has one.
+ * The `demo` profile is needed because `config` omits services whose profile is not enabled, and
+ * every service but `postgres` and `litellm` has one.
  */
 export async function readComposeSurface(repoRoot: string): Promise<string> {
   try {
@@ -126,8 +126,6 @@ export async function readComposeSurface(repoRoot: string): Promise<string> {
         'harness/compose/docker-compose.yml',
         '--profile',
         'demo',
-        '--profile',
-        'build-only',
         'config',
         '--no-interpolate',
         '--no-path-resolution',
