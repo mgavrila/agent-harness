@@ -15,9 +15,11 @@ pnpm db:up && pnpm db:migrate
 pnpm new-client --name demo-practice --pack healthcare --target ../harness-tenants
 cp .env.example .env
 # then, in .env: HARNESS_CLIENTS_DIR=../harness-tenants, HARNESS_CLIENT=demo-practice,
-# and fill in the blanks pnpm new-client printed
+# HARNESS_IMAGE_TAG, and fill in the blanks pnpm new-client printed
 pnpm demo:up
 ```
+
+`pnpm demo:up` pulls the image named by `HARNESS_IMAGE_TAG` and builds nothing.
 
 `pnpm new-client` writes one client document, `../harness-tenants/demo-practice/client.yaml`, and
 a `persona.md` beside it — never into this repository. Add a `surfaces.slack` section to that
@@ -26,12 +28,13 @@ environment variables below) before creating the Slack app. `teamId` is the id o
 the app is installed in — the `T…` segment of any workspace URL — and the host refuses an event
 from any other.
 
-Create one Slack app before filling in `.env`, with Socket Mode and Interactivity both on. Its
+Create one Slack app before filling in `.env`, with Socket Mode **off** and Interactivity on. Its
 bot scopes are `chat:write`, `app_mentions:read`, `channels:history`, `groups:history`,
 `im:history`, `im:read`, `im:write`, `mpim:history`, `users:read`, `files:read`, `files:write`.
-Paste `SLACK_BOT_TOKEN` and `SLACK_APP_TOKEN` into `.env`, along with `SLACK_APPROVALS_CHANNEL`.
-One app now carries both chat and approvals, because the host is the only process that holds a
-Socket Mode connection.
+Point both request URLs — Event Subscriptions and Interactivity — at
+`https://<tunnel or host>/tenants/<clientId>/slack/events`. Paste `SLACK_BOT_TOKEN`,
+`SLACK_SIGNING_SECRET` and `SLACK_APPROVALS_CHANNEL` into `.env`. One app carries both chat and
+approvals, because one process — the host — serves both.
 
 The host posts on whichever surface is first in the client document's `surfaces` section, by the
 schema's own fixed order (`slack`, `memory`, `http`). The demo's document declares `slack`, which
@@ -168,7 +171,7 @@ Run this before the demo. Each line either passes or tells you what is wrong.
 - [ ] `docker compose --env-file .env -f harness/compose/docker-compose.yml --profile demo ps` shows `postgres`, `litellm`, `files` and `host` up.
 - [ ] `curl http://127.0.0.1:8787/healthz` answers `"ok": true`.
 - [ ] `psql "$DATABASE_URL" -c "select path, min_level from knowledge_documents order by path"` shows the two demo documents, if you are demonstrating the knowledge base.
-- [ ] `docker compose --env-file .env -f harness/compose/docker-compose.yml --profile demo exec host printenv SLACK_APP_TOKEN` prints the one token.
+- [ ] `docker compose --env-file .env -f harness/compose/docker-compose.yml --profile demo exec host printenv SLACK_SIGNING_SECRET` prints the one secret.
 - [ ] A direct message to the bot is answered.
 - [ ] A mention in a channel is answered, and an unmentioned message in that channel is not.
 - [ ] Asking the bot "what tools do you have?" lists the kernel's own tool names plus `read_file`, `ls`, `glob` and `grep`, and **no** terminal tool.

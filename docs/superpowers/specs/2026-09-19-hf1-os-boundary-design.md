@@ -323,6 +323,12 @@ and adds `publishConfig`; `release.yml` on a tag runs `pnpm -r publish`, pushes 
 to the registry, and attaches the two snapshots to the release. The platform's lockfile pins
 them.
 
+> **Amended by Plan 11b.** The packages are attached to the GitHub Release as `pnpm pack` tarballs
+> rather than pushed with `pnpm -r publish`: GitHub Packages resolves an npm scope to the
+> repository owner, and `@harness/*` cannot be published there without renaming every package and
+> every import. A consumer pins tarball URLs and a `pnpm.overrides` block. Moving to a registry is
+> a change to two steps of `release.yml` and to nothing else.
+
 ### 4.8 Plan 12 seams
 
 **Typed model access.** The gateway seam in core-tools (`domain/models/gateway.ts`) becomes

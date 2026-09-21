@@ -10,8 +10,13 @@ src/stream.ts            startStream: a reply as one message edited at a bounded
 src/format.ts            toMrkdwn: the model's Markdown as Slack mrkdwn, escaped for the API
 src/render/blocks.ts     a Card as Block Kit. Byte-pinned against what the app produced before Plan 6
 src/render/modal.ts      a Form as a Slack modal view, and reading a submission back
-src/transport/           the SlackApi slice, the WebClient adapter, the HTTP door and its
-                         signature check, the classifier, the file downloader, the fakes
+src/transport/classify.ts   narrows a raw Slack event and decides mentioned
+src/transport/events.ts     the HTTP door: signature check, url_verification, acknowledge-then-run
+src/transport/signature.ts  the HMAC-SHA256 check over v0:<timestamp>:<body>
+src/transport/files.ts      downloads an attachment with the bot token
+src/transport/types.ts      SlackApi, SlackConfig and the shapes the transport passes around
+src/transport/web-client.ts the WebClient adapter behind SlackApi
+src/transport/fake.ts       FakeSlack and FakeSlackEvents
 src/testing.ts           ./testing: FakeSlack, FakeSlackEvents, fakeSlackSession
 ```
 
