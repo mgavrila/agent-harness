@@ -9,7 +9,9 @@ import { signRequest } from './signature.js';
 import type { SlackAuthTestResult, SlackInbound, SlackTransport } from './types.js';
 
 const SECRET = 'a-signing-secret';
-const env = { SLACK_BOT_TOKEN: 'xoxb-test', SLACK_SIGNING_SECRET: SECRET, SLACK_APPROVALS_CHANNEL: 'C0DEMO' };
+/** What the host resolves from this client's document and hands the adapter. */
+const secrets = { botToken: 'xoxb-test', signingSecret: SECRET };
+const config = () => slackConfig(secrets, 'C0DEMO');
 const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
 
 // One logger is shared by every case here, so a case that counts its lines has to start from
@@ -28,7 +30,7 @@ beforeEach(() => {
  */
 function transport(): { t: SlackTransport; api: FakeSlack } {
   const api = new FakeSlack();
-  return { t: eventsTransport(slackConfig(env), log, '/nonexistent/storage', api), api };
+  return { t: eventsTransport(config(), log, '/nonexistent/storage', api), api };
 }
 
 /** A signed request, as the host would hand one over. */
@@ -255,7 +257,7 @@ describe('the Slack transport and an interaction', () => {
 
   it('delivers a block action to the session s action handler, which is where approvals listen', async () => {
     const { t } = transport();
-    const session = createSlackSession(t, slackConfig(env));
+    const session = createSlackSession(t, config());
     const seen: ActionEvent[] = [];
     session.onAction(async (event) => {
       seen.push(event);
@@ -284,7 +286,7 @@ describe('the Slack transport and an interaction', () => {
 
   it('delivers a view submission with its metadata and its values', async () => {
     const { t } = transport();
-    const session = createSlackSession(t, slackConfig(env));
+    const session = createSlackSession(t, config());
     const seen: FormEvent[] = [];
     session.onFormSubmit(async (event) => {
       seen.push(event);
@@ -322,7 +324,7 @@ describe('the Slack transport and an interaction', () => {
     // `encodeURIComponent` only ever emits `%20`, so every other case here would pass against a
     // hand-rolled `decodeURIComponent(body.split('=')[1])` that loses every space Slack sends.
     const { t } = transport();
-    const session = createSlackSession(t, slackConfig(env));
+    const session = createSlackSession(t, config());
     const seen: FormEvent[] = [];
     session.onFormSubmit(async (event) => {
       seen.push(event);
@@ -359,7 +361,7 @@ describe("the Slack transport and the app's own identity", () => {
         }),
     };
     return {
-      t: eventsTransport(slackConfig(env), log, '/nonexistent/storage', api),
+      t: eventsTransport(config(), log, '/nonexistent/storage', api),
       // Read when it is called rather than captured here: the fetch is lazy, so nothing has asked
       // `auth.test` anything — and no resolver exists — until a request or `start()` does.
       release: (identity) => {
@@ -394,7 +396,7 @@ describe("the Slack transport and the app's own identity", () => {
   function unidentified(): SlackTransport {
     const api = new FakeSlack();
     api.auth = { test: () => Promise.reject(new Error('invalid_auth')) };
-    return eventsTransport(slackConfig(env), log, '/nonexistent/storage', api);
+    return eventsTransport(config(), log, '/nonexistent/storage', api);
   }
 
   it('refuses a delivery when it could not learn who this app is', async () => {
@@ -428,7 +430,7 @@ describe("the Slack transport and the app's own identity", () => {
           : Promise.resolve({ user_id: 'U0BOTUSER', bot_id: 'B0BOTID' });
       },
     };
-    const t = eventsTransport(slackConfig(env), log, '/nonexistent/storage', api);
+    const t = eventsTransport(config(), log, '/nonexistent/storage', api);
     const seen: SlackInbound[] = [];
     t.events.onMessage(async (message) => {
       seen.push(message);
@@ -466,7 +468,7 @@ describe("the Slack transport and the app's own identity", () => {
     // the bot's ids. Coupling a decision on an approval card to a fetch it never needed would
     // strand every card in the channel.
     const t = unidentified();
-    const session = createSlackSession(t, slackConfig(env));
+    const session = createSlackSession(t, config());
     const seen: ActionEvent[] = [];
     session.onAction(async (event) => {
       seen.push(event);
@@ -499,7 +501,7 @@ describe("the Slack transport and the app's own identity", () => {
 describe('the session over this transport', () => {
   it('offers the transport s door as its own, so the host can mount it', () => {
     const { t } = transport();
-    const session = createSlackSession(t, slackConfig(env));
+    const session = createSlackSession(t, config());
     expect(session.http?.path).toBe(SLACK_MOUNT_PATH);
   });
 });

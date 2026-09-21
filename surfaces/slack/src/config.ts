@@ -1,4 +1,4 @@
-import { requiredEnv, type EnvSource } from '@harness/shared';
+import { ConfigError } from '@harness/shared';
 
 export interface SlackConfig {
   botToken: string;
@@ -8,26 +8,28 @@ export interface SlackConfig {
   defaultConversation: string;
 }
 
+/** A value the document has to name, or a refusal saying which field names it. */
+function fromDocument(value: string | undefined, field: string): string {
+  if (value === undefined || value === '') {
+    throw new ConfigError(`the slack surface has no ${field} for this client; surfaces.slack.${field} names it`);
+  }
+  return value;
+}
+
 /**
- * Read this adapter's configuration out of what the host handed over.
+ * Read this adapter's configuration out of what the host handed over, and out of nothing else.
  *
- * `secrets` is what this client's document named, resolved to values by the host's secret source.
- * A deployment that uses the conventional variables — every single-tenant one — declares nothing
- * and gets them from `deps.env`; one running two workspaces in one process resolves two pairs,
- * and each tenant's adapter reads its own.
+ * All three values are this tenant's own: the two secrets its document named, resolved to values
+ * by the host's secret source, and the channel its `surfaces.slack.approvalsChannel` names. There
+ * is no fallback to a deployment-wide variable, and that is the point — on a pooled host, one
+ * would be this tenant's cards going to another tenant's workspace, or its app posting as
+ * another's. A single-tenant deployment names the same three things in its document and points
+ * them at whatever `.env` entries it likes.
  */
-export function slackConfig(env: EnvSource, secrets: Readonly<Record<string, string>> = {}): SlackConfig {
+export function slackConfig(secrets: Readonly<Record<string, string>> = {}, defaultConversation?: string): SlackConfig {
   return {
-    botToken:
-      secrets.botToken ??
-      requiredEnv('SLACK_BOT_TOKEN', ' (the Slack app the host posts as; see docs/runbook.md)', env),
-    signingSecret:
-      secrets.signingSecret ??
-      requiredEnv(
-        'SLACK_SIGNING_SECRET',
-        ' (the Slack app signing secret, which every inbound request is verified against; see docs/runbook.md)',
-        env,
-      ),
-    defaultConversation: requiredEnv('SLACK_APPROVALS_CHANNEL', '', env),
+    botToken: fromDocument(secrets.botToken, 'botToken'),
+    signingSecret: fromDocument(secrets.signingSecret, 'signingSecret'),
+    defaultConversation: fromDocument(defaultConversation, 'approvalsChannel'),
   };
 }

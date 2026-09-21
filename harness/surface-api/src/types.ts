@@ -403,11 +403,11 @@ export interface SurfaceDeps {
    * Where this surface posts when nobody names a conversation, when the client's document names
    * one.
    *
-   * `SurfaceSession.defaultConversation` is what the host reads, and for most adapters the answer
-   * is a deployment-wide setting — Slack's approvals channel is an environment variable. For a
-   * surface whose inbox is per tenant there is nowhere else for it to come from, and a pooled
-   * host cannot have a per-tenant variable: the document names it and the host passes it through,
-   * opaquely, exactly as it passes `tenantKey`.
+   * `SurfaceSession.defaultConversation` is what the host reads, and this is where it comes from:
+   * the document names it and the host passes it through, opaquely, exactly as it passes
+   * `tenantKey`. A deployment-wide variable cannot answer it, because a pooled host has one
+   * environment and many tenants; an adapter that is handed nothing here has no per-tenant
+   * conversation and answers with whatever default it has of its own.
    */
   defaultConversation?: string;
   /**

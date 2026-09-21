@@ -9,45 +9,40 @@ describe('the Slack surface declaration', () => {
     expect([...surface.secrets].sort()).toEqual(['SLACK_BOT_TOKEN', 'SLACK_SIGNING_SECRET']);
   });
 
-  it("uses the values this client's document named, and falls back to the conventional variables", async () => {
-    // Two tenants in one process hold two apps, so what an adapter posts as is what its own
-    // document named — resolved by the host, from an environment variable or from a store, and
-    // handed over as a value.
+  it("takes all three values from this client's document, and reads no environment variable", async () => {
+    // Two tenants in one process hold two apps and two channels, so everything an adapter posts
+    // with is what its own document named — the secrets resolved by the host, the channel copied
+    // through it. The environment here is empty, and that is the assertion.
     const deps = {
-      env: { SLACK_APPROVALS_CHANNEL: 'C0TEST' },
+      env: {},
       log: createLogger('test'),
       storageDir: '/nonexistent',
       secretValues: { botToken: 'xoxb-tenant-a', signingSecret: 'tenant-a-signing' },
+      defaultConversation: 'C0ALPHA',
     };
-    // Neither conventional variable is in this environment at all, so a `connect` that reached
-    // for one would throw a ConfigError naming it.
-    await expect(surface.connect(deps)).resolves.toMatchObject({ name: 'slack' });
-    // And a deployment that resolved nothing falls back to them, and says which one is missing.
-    // Wrapped, because `connect` reads its configuration before it has anything to await and so
-    // raises where it stands: the contract says a caller gets a promise, and this asserts what
-    // that caller sees whichever way the failure arrives.
-    await expect((async () => surface.connect({ ...deps, secretValues: {} }))()).rejects.toThrow(/SLACK_BOT_TOKEN/);
+    await expect(surface.connect(deps)).resolves.toMatchObject({ name: 'slack', defaultConversation: 'C0ALPHA' });
+    // And a tenant whose secrets resolved to nothing is refused by the field the document names,
+    // never by a variable it might have set. Wrapped, because `connect` reads its configuration
+    // before it has anything to await and so raises where it stands: the contract says a caller
+    // gets a promise, and this asserts what that caller sees whichever way the failure arrives.
+    await expect((async () => surface.connect({ ...deps, secretValues: {} }))()).rejects.toThrow(
+      /surfaces\.slack\.botToken/,
+    );
   });
 
-  it('falls back only for a field nothing resolved, because the host never hands over a blank one', () => {
-    // `??` rather than `||`, and that is safe rather than lucky: `resolveSecrets` refuses a value
-    // that is empty or whitespace-only, for every source, before it builds `secretValues` — so
-    // the only thing `??` has to handle here is a field that is *absent*. Until that rule reached
-    // the `{ ref }` path, a blank `client_secrets` row arrived as `''`, `??` kept it, and this
-    // adapter connected with an empty bearer. The rule itself is proven in
-    // `@harness/config-api`'s `secrets.test.ts` and at tenant open in the host's.
-    expect(
-      slackConfig(
-        { SLACK_APPROVALS_CHANNEL: 'C0TEST', SLACK_BOT_TOKEN: 'xoxb-conventional' },
-        { signingSecret: 'sig' },
-      ),
-    ).toMatchObject({ botToken: 'xoxb-conventional', signingSecret: 'sig' });
-    // And a document that named both never reaches a conventional variable at all — neither is
-    // in this environment, so a fallback that fired would throw.
-    expect(slackConfig({ SLACK_APPROVALS_CHANNEL: 'C0TEST' }, { botToken: 'xoxb-a', signingSecret: 'sig-a' })).toEqual({
+  it('refuses a tenant with no channel rather than falling back to a deployment-wide one', () => {
+    // The fallback this replaces was `requiredEnv('SLACK_APPROVALS_CHANNEL')`: on a pooled host
+    // that is one tenant's cards arriving in another tenant's workspace.
+    expect(() => slackConfig({ botToken: 'xoxb-a', signingSecret: 'sig-a' })).toThrow(
+      /surfaces\.slack\.approvalsChannel/,
+    );
+    expect(slackConfig({ botToken: 'xoxb-a', signingSecret: 'sig-a' }, 'C0ALPHA')).toEqual({
       botToken: 'xoxb-a',
       signingSecret: 'sig-a',
-      defaultConversation: 'C0TEST',
+      defaultConversation: 'C0ALPHA',
     });
+    // An empty value is as absent as a missing one: `resolveSecrets` refuses a blank secret for
+    // every source, and a blank channel would post nowhere.
+    expect(() => slackConfig({ botToken: '', signingSecret: 'sig-a' }, 'C0ALPHA')).toThrow(/botToken/);
   });
 });

@@ -69,6 +69,11 @@ const SurfacesShape = z
         teamId: z.string().min(1).max(64),
         signingSecret: SecretRefShape,
         botToken: SecretRefShape,
+        /**
+         * The channel id this client's approval cards go to. Required, and per client: a
+         * deployment-wide variable would send a pooled host's tenants to one workspace.
+         */
+        approvalsChannel: z.string().min(1),
       })
       .strict()
       .optional(),
@@ -165,13 +170,17 @@ export function tenantKeysOf(document: ClientDocument): { surface: string; key: 
  *
  * The third of the three readers of the typed surface sections, and it exists for the same reason
  * as the other two: the host copies an opaque `{ surface, conversation }` pair into the bag an
- * adapter is handed and never learns that a web surface has an inbox. A surface whose default
- * conversation is a deployment-wide setting — Slack's approvals channel is an environment
- * variable — contributes nothing here.
+ * adapter is handed and never learns that a web surface has an inbox or that the other one is a
+ * channel id. A surface that names none — the memory surface — contributes nothing here and keeps
+ * whatever default its adapter has.
  */
 export function surfaceConversationsOf(document: ClientDocument): { surface: string; conversation: string }[] {
+  const conversations: { surface: string; conversation: string }[] = [];
   const web = document.surfaces.web;
-  return web ? [{ surface: 'web', conversation: web.inbox }] : [];
+  if (web) conversations.push({ surface: 'web', conversation: web.inbox });
+  const slack = document.surfaces.slack;
+  if (slack) conversations.push({ surface: 'slack', conversation: slack.approvalsChannel });
+  return conversations;
 }
 
 /** One `SecretRef` a document's surfaces named, with the surface and field it was named under. */

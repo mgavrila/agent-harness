@@ -40,6 +40,7 @@ describe('resolveSecrets', () => {
           teamId: 'T0ABCDEF',
           signingSecret: { env: 'TENANT_A_SIGNING' },
           botToken: { env: 'TENANT_A_BOT' },
+          approvalsChannel: 'C0TEST',
         },
       },
     });

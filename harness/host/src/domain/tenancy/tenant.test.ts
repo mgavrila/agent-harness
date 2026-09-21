@@ -57,7 +57,12 @@ describe('resolving a tenant’s secrets', () => {
         displayName: 'alpha',
         runtime: 'scripted',
         surfaces: {
-          slack: { teamId: 'T001', signingSecret: { ref: 'slack-signing' }, botToken: { env: 'SLACK_BOT_TOKEN' } },
+          slack: {
+            teamId: 'T001',
+            signingSecret: { ref: 'slack-signing' },
+            botToken: { env: 'SLACK_BOT_TOKEN' },
+            approvalsChannel: 'C0TENANT',
+          },
         },
       }),
     );
