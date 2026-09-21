@@ -198,6 +198,33 @@ describe('the Slack transport as an HTTP door', () => {
     expect(api.authTestCalls).toBe(1);
   });
 
+  it('reports its identity state without ever asking for one, which is what a status poll reads', async () => {
+    const { t, api } = transport();
+    const session = createSlackSession(t, config());
+    // Before `start()`: nothing has been asked, so the workspace has not been reached and the
+    // sentence says exactly that, in this adapter's own words.
+    expect(await session.health!()).toEqual({
+      live: false,
+      detail: 'the Slack workspace has not been reached yet',
+    });
+    expect(api.authTestCalls).toBe(0);
+
+    await t.events.start();
+    expect(await session.health!()).toEqual({ live: true });
+    // The hazard this route was designed around: a dashboard polls it, and a poll that asked
+    // Slack would be one call per tenant per tick.
+    expect(api.authTestCalls).toBe(1);
+
+    // A workspace that refuses gets the other fixed sentence, and never Slack's own error text.
+    const refusing = new FakeSlack();
+    refusing.failWith = 'invalid_auth';
+    const t2 = eventsTransport(config(), log, '/nonexistent/storage', refusing);
+    await expect(t2.events.start()).rejects.toThrow();
+    const health = await createSlackSession(t2, config()).health!();
+    expect(health).toEqual({ live: false, detail: 'the Slack workspace refused this app' });
+    expect(JSON.stringify(health)).not.toContain('invalid_auth');
+  });
+
   it('drops a retried delivery and tells Slack not to send it again', async () => {
     const { t } = transport();
     await t.events.start();

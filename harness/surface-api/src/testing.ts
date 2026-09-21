@@ -9,6 +9,7 @@ import type {
   PostKind,
   StreamHandle,
   SurfaceCapabilities,
+  SurfaceHealth,
   SurfaceHttp,
   SurfaceHttpRequest,
   SurfaceHttpResponse,
@@ -383,6 +384,17 @@ export class MemorySurface implements SurfaceSession {
 
   async stop(): Promise<void> {
     this.stopped = true;
+  }
+
+  /**
+   * What this door already knows about itself, which is the two flags above. It reaches nothing,
+   * exactly as the contract says an adapter's must not, so a host test can drive the whole shape
+   * of `GET /v1/status` without a transport.
+   */
+  health(): Promise<SurfaceHealth> {
+    return Promise.resolve(
+      this.started && !this.stopped ? { live: true } : { live: false, detail: 'this door is not open' },
+    );
   }
 
   /**

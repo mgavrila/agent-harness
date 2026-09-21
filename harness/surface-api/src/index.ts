@@ -39,6 +39,7 @@ export type {
   SurfaceHttpResponse,
   SurfaceCapabilities,
   SurfaceDeps,
+  SurfaceHealth,
   SurfaceSession,
   UploadRequest,
 } from './types.js';

@@ -194,5 +194,23 @@ export function createSlackSession(transport: SlackTransport, config: SlackConfi
 
     start: () => events.start(),
     stop: () => events.stop(),
+
+    /**
+     * Whether this workspace has been reached, from what the transport already knows.
+     *
+     * Never an `auth.test` of its own: the host asks its surfaces this on every `GET /v1/status`,
+     * and a poll that called Slack once per tenant per tick is a rate limit nobody chose. The two
+     * sentences are fixed and written here; Slack's own `error` string (`invalid_auth`,
+     * `account_inactive`) never travels.
+     */
+    health: () => {
+      const state = transport.identityState();
+      if (state === 'confirmed') return Promise.resolve({ live: true });
+      return Promise.resolve({
+        live: false,
+        detail:
+          state === 'refused' ? 'the Slack workspace refused this app' : 'the Slack workspace has not been reached yet',
+      });
+    },
   };
 }

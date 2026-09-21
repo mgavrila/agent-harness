@@ -200,6 +200,14 @@ export interface SlackTransport {
   api: SlackApi;
   events: SlackEvents;
   /**
+   * What this transport knows about this app's identity, without asking for it.
+   *
+   * `confirmed` once `auth.test` has answered, `refused` once one has come back an error, and
+   * `pending` before either. The session reports it as its health, so it must reach nothing: a
+   * status route that asked Slack would make one call per tenant per poll.
+   */
+  identityState(): 'confirmed' | 'refused' | 'pending';
+  /**
    * Record that the assistant has posted in the thread `messageId` belongs to. The session calls
    * this wherever a turn replies inside a thread, and the transport counts a later reply there as
    * addressed to the assistant even when nobody mentions it. `messageId` is the message being

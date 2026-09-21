@@ -36,6 +36,9 @@ export function fakeSlackSession(over: Partial<SlackConfig> = {}): {
   const transport = {
     api,
     events,
+    // The wiring this fake skips is the one that asks who this app is, so it answers as a
+    // workspace that has: a session built here reports itself live.
+    identityState: () => 'confirmed' as const,
     notePostedIn: (channel: string, threadTs: string) => {
       noted.push({ channel, threadTs });
     },

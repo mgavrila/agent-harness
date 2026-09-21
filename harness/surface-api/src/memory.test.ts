@@ -215,4 +215,13 @@ describe('MemorySurface', () => {
   it('spells a mention the way a surface with no mention syntax can', () => {
     expect(new MemorySurface().mention('U012')).toBe('@U012');
   });
+
+  it('reports itself live between start and stop, which is the shape a status route reads', async () => {
+    const surface = new MemorySurface();
+    expect(await surface.health()).toEqual({ live: false, detail: 'this door is not open' });
+    await surface.start();
+    expect(await surface.health()).toEqual({ live: true });
+    await surface.stop();
+    expect(await surface.health()).toEqual({ live: false, detail: 'this door is not open' });
+  });
 });

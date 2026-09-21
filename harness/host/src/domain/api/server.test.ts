@@ -254,7 +254,9 @@ describe('the run API: a thread and the status', () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({
       client: CLIENT,
-      surfaces: ['memory'],
+      // One line per loaded surface: its name and whether its adapter says it can be reached.
+      // The memory door is open, so it is live and has nothing to add.
+      surfaces: [{ name: 'memory', live: true }],
       primary_surface: 'memory',
       runs_in_flight: 0,
       draining: false,
@@ -262,6 +264,26 @@ describe('the run API: a thread and the status', () => {
       // tenant rather than one per process. It has not ticked: the interval is thirty seconds.
       scheduler: { lastTickAt: null, lastOkAt: null, lastError: null, lastErrorAt: null, ticking: false },
     });
+  });
+
+  it('reports a surface that cannot be reached, with the sentence its adapter owns and nothing else', async () => {
+    const a = await api([]);
+    const session = a.f.tenant(CLIENT).host.surfaces.primary as unknown as {
+      health: () => Promise<{ live: boolean; detail?: string }>;
+    };
+    const detail = 'the workspace has not been reached yet';
+    session.health = () => Promise.resolve({ live: false, detail, token: 'xoxb-never' } as never);
+    const body = (await (await a.get('/v1/status')).json()) as { surfaces: unknown[] };
+    // The two fields the contract names, copied verbatim, and not one other thing off the
+    // session: a status line carries a fixed sentence, never a token and never a conversation.
+    expect(body.surfaces).toEqual([{ name: 'memory', live: false, detail }]);
+
+    // And an adapter whose own getter breaks costs its line, not the route: every other surface
+    // still reports, and nothing of the failure reaches the caller.
+    session.health = () => Promise.reject(new Error('xoxb-never in an adapter’s stack'));
+    const broken = await a.get('/v1/status');
+    expect(broken.status).toBe(200);
+    expect(((await broken.json()) as { surfaces: unknown[] }).surfaces).toEqual([{ name: 'memory', live: false }]);
   });
 
   it('answers the tenant it serves when a caller names it, and 404 when a caller names another', async () => {

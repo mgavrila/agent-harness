@@ -313,6 +313,18 @@ export interface SurfaceHttp {
 }
 
 /**
+ * Whether this surface can be reached, as the adapter already knows it.
+ *
+ * `detail` is a fixed sentence the adapter owns and writes into its own source: never a token,
+ * never a conversation or a person, and never a transport's own error message or code, which is
+ * a vendor's text arriving in a deployment's dashboard (invariant 21).
+ */
+export interface SurfaceHealth {
+  live: boolean;
+  detail?: string;
+}
+
+/**
  * A connected surface.
  *
  * Every method that talks to the outside world rejects with a `SurfaceError` whose message is
@@ -325,6 +337,15 @@ export interface SurfaceSession {
   readonly capabilities: SurfaceCapabilities;
   /** Where this surface posts when nobody names a conversation. */
   readonly defaultConversation: string;
+  /**
+   * Whether this surface can be reached, reported from what the adapter already knows.
+   *
+   * Optional: a session with none is reported live, because the host has it open and its adapter
+   * has nothing to add. It answers from memoised state and **never calls the outside world** —
+   * `GET /v1/status` is a dashboard's poll, and a poll that made one outbound call per tenant per
+   * tick would be a rate limit the host does not control.
+   */
+  health?(): Promise<SurfaceHealth>;
   /**
    * Who this surface's users are and what groups they are in, when it can say.
    *

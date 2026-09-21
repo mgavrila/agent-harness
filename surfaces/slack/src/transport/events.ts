@@ -135,6 +135,8 @@ export function eventsTransport(
   /** Who this app is, once `auth.test` has said. Read only behind `identified`. */
   let bot: BotIdentity = {};
   let identity: Promise<void> | null = null;
+  /** Set when an `auth.test` has come back refused, so a status can tell that from "not yet". */
+  let refused = false;
 
   /**
    * Ask Slack who this app is, once per process, and remember the asking rather than the answer.
@@ -161,12 +163,26 @@ export function eventsTransport(
       .test()
       .then((result) => {
         bot = { userId: result.user_id, botId: result.bot_id };
+        refused = false;
       })
       .catch((err: unknown) => {
         identity = null;
+        refused = true;
         throw err;
       });
     return identity;
+  };
+
+  /**
+   * What this transport knows about its own identity, without asking for one.
+   *
+   * Read off the memo above and nothing else: `confirmed` once `auth.test` has answered,
+   * `refused` once one has come back an error, `pending` before either. It starts nothing,
+   * because the one caller is a status route and a status route may not make a network call.
+   */
+  const identityState = (): 'confirmed' | 'refused' | 'pending' => {
+    if (bot.userId !== undefined) return 'confirmed';
+    return refused ? 'refused' : 'pending';
   };
 
   /** Whether this app knows who it is. A rejection is an answer here, not an escape. */
@@ -407,6 +423,7 @@ export function eventsTransport(
   return {
     api,
     events,
+    identityState,
     notePostedIn: (channel, threadTs) => threads.notePostedIn(channel, threadTs),
     http: { path: SLACK_MOUNT_PATH, handle },
   };
