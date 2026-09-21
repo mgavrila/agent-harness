@@ -102,6 +102,8 @@ export function sandboxProviderConformance(makeProvider: () => SandboxProvider):
       await sandbox.terminate();
       await sandbox.terminate();
       await expect(sandbox.exec('true', {})).rejects.toBeInstanceOf(ToolError);
+      await expect(sandbox.putFile('/work/a', new Uint8Array())).rejects.toBeInstanceOf(ToolError);
+      await expect(sandbox.getFile('/work/a')).rejects.toBeInstanceOf(ToolError);
     });
 
     it('keeps one session s files away from another s', async () => {
