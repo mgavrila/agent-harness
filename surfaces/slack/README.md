@@ -53,11 +53,20 @@ only after the same check passes.
 and a turn takes seconds to minutes, so an accepted request is answered before the work starts and
 a failure in that work is a log line. A delivery carrying `X-Slack-Retry-Num` is answered 200 with
 `X-Slack-No-Retry: 1` and dropped: the first copy is already in flight or finished, and a second
-turn on one message is worse than a message answered once and slowly.
+turn on one message is worse than a message answered once and slowly. The price of that rule,
+stated plainly: an event acknowledged and not yet run is lost if the process dies, and the retry
+that would have rescued it is refused by the same rule.
 
-`start()` opens no connection. It calls `auth.test` once for the bot's own user and bot ids — what
-a socket's connection context used to carry and what the mention stripper and the thread rule
-compare against — so a wrong token fails the tenant's open rather than every message.
+`auth.test` is asked once per process for the bot's own user and bot ids — what a socket's
+connection context used to carry, and what the mention stripper and the thread rule compare
+against. The asking is memoised as a promise rather than the answer, and both `start()` and every
+delivery wait on it, because the host publishes a tenant into its map before it starts that
+tenant's sessions: a request can arrive while the answer is still in flight. Classifying then
+would leave the mention token in the text, stop the channel copy of an `app_mention` being
+recognised as a duplicate, and cache a thread as somebody else's for the life of the process, so a
+delivery waits for the identity instead. A wrong token fails the tenant's open through the same
+promise, and a request that arrives after that failure is refused `identity_unavailable` rather
+than classified against an empty identity.
 
 ## Inbound: messages, mentions and attachments
 

@@ -72,7 +72,10 @@ function inboundOf(envelope: EventEnvelope): RawMessage | null {
  * and a turn takes seconds to minutes, so every accepted request is answered before the work
  * starts and the work is reported to the log if it fails. A retried delivery is dropped rather
  * than deduplicated: the only duplicate this can see is one Slack sent, the first copy is already
- * in flight or finished, and a table of event ids is a write on the hot path plus a sweep.
+ * in flight or finished, and a table of event ids is a write on the hot path plus a sweep. The
+ * other half of that trade, said out loud: an event acknowledged and not yet run is lost if this
+ * process dies, and the retry that would have rescued it is refused by the same rule. A message
+ * answered once and slowly is the thing being bought, and a lost turn in a crash is the price.
  *
  * Both interaction registrations are catch-alls, as the socket's were: the contract takes one
  * action handler and one view handler and dispatches on the id itself, so there is nothing to
@@ -96,8 +99,37 @@ export function eventsTransport(
   let actionHandler: ((action: SlackAction) => Promise<void>) | null = null;
   let viewHandler: ((view: SlackView) => Promise<void>) | null = null;
   let messageHandler: ((message: SlackInbound) => Promise<void>) | null = null;
-  /** Who this app is, from `auth.test` at `start()`. A socket's context used to carry it. */
+  /** Who this app is, once `auth.test` has said. Read only behind `identified`. */
   let bot: BotIdentity = {};
+  let identity: Promise<void> | null = null;
+
+  /**
+   * Ask Slack who this app is, once per process, and remember the asking rather than the answer.
+   *
+   * The host publishes a tenant into its map before it starts that tenant's sessions, so a
+   * delivery can reach this door while the answer is still in flight. Classifying against an empty
+   * identity is not a smaller version of classifying correctly: the mention token is left in the
+   * text the runtime is handed, the channel copy of an `app_mention` stops being recognised as the
+   * duplicate it is, and a thread lookup caches the thread as somebody else's for as long as the
+   * process lives. So the fetch is memoised as a promise and everything that needs an identity
+   * waits on it — whichever of `start()` and a request asks for it first.
+   *
+   * Not begun when the transport is built: `connect` reaches nothing, which is what lets a client
+   * document be loaded and its surfaces built without a workspace answering.
+   */
+  const identified = (): Promise<void> => {
+    identity ??= api.auth.test().then((result) => {
+      bot = { userId: result.user_id, botId: result.bot_id };
+    });
+    return identity;
+  };
+
+  /** Whether this app knows who it is. A rejection is an answer here, not an escape. */
+  const hasIdentity = (): Promise<boolean> =>
+    identified().then(
+      () => true,
+      () => false,
+    );
 
   /**
    * Start work this request has already been acknowledged for; a failure is a log line.
@@ -109,7 +141,14 @@ export function eventsTransport(
    */
   const later = (what: string, run: () => Promise<void>): void => {
     setImmediate(() => {
-      void run().catch((err: unknown) => log.error(`${what} failed`, err));
+      // `try` as well as `catch`: a handler that threw where it stands rather than rejecting would
+      // escape a bare `.catch` and, at the top of the event loop, take the process down with it.
+      // Every handler this package wires is `async`, but this is a seam somebody else registers on.
+      try {
+        void run().catch((err: unknown) => log.error(`${what} failed`, err));
+      } catch (err: unknown) {
+        log.error(`${what} failed`, err);
+      }
     });
   };
 
@@ -224,13 +263,10 @@ export function eventsTransport(
   };
 
   /**
-   * The answer to one request, which nothing here waits for.
-   *
-   * Deliberately synchronous: every branch either refuses or acknowledges, and the work an
-   * acknowledgement admits to is handed to `later`. Making this a plain function is what says so —
-   * an `async` here would leave room for someone to await a turn before answering Slack.
+   * What can be decided about a request before anything about this app is known, or null to carry
+   * on. Everything here is a property of the request itself.
    */
-  const respond = (request: SurfaceHttpRequest): SurfaceHttpResponse => {
+  const screen = (request: SurfaceHttpRequest): SurfaceHttpResponse | null => {
     const check = verifySignature({
       signature: request.headers['x-slack-signature'],
       timestamp: request.headers['x-slack-request-timestamp'],
@@ -251,10 +287,35 @@ export function eventsTransport(
       log.warn('a retried Slack delivery was dropped; the first one is in flight or already done');
       return { status: 200, headers: { 'x-slack-no-retry': '1' } };
     }
-    const contentType = (request.headers['content-type'] ?? '').split(';')[0].trim();
+    return null;
+  };
+
+  /**
+   * The answer to a screened request, which nothing here waits for.
+   *
+   * Deliberately synchronous: every branch either refuses or acknowledges, and the work an
+   * acknowledgement admits to is handed to `later`. Making this a plain function is what says so —
+   * an `async` here would leave room for someone to await a turn before answering Slack.
+   */
+  const dispatch = (request: SurfaceHttpRequest): SurfaceHttpResponse => {
+    // Lower-cased because a media type is case-insensitive and only the value's own case is ours
+    // to normalise; Slack sends lowercase, and a peer that did not would be refused for nothing.
+    const contentType = (request.headers['content-type'] ?? '').split(';')[0].trim().toLowerCase();
     if (contentType === 'application/json') return handleEvent(request.body);
     if (contentType === 'application/x-www-form-urlencoded') return handleInteractive(request.body);
     return { status: 415, refusal: { reason: 'unsupported_media_type' } };
+  };
+
+  const handle = async (request: SurfaceHttpRequest): Promise<SurfaceHttpResponse> => {
+    const refused = screen(request);
+    if (refused) return refused;
+    // Before anything is classified, and after the signature, so an unsigned request can neither
+    // wait on this nor learn anything from it. Once the answer is in hand this is a microtask; in
+    // the window before it, a delivery waits rather than being read against an empty identity.
+    if (!(await hasIdentity())) {
+      return { status: 503, refusal: { reason: 'identity_unavailable' } };
+    }
+    return dispatch(request);
   };
 
   const events: SlackEvents = {
@@ -271,13 +332,12 @@ export function eventsTransport(
      * Ask Slack who this app is. That is the whole of starting: nothing is connected.
      *
      * The bot's own user id is what the mention stripper removes and what the thread rule matches
-     * a thread's messages against, and a socket's connection context used to carry both. One call
-     * here means a wrong token fails this tenant's open, loudly, instead of quietly classifying
-     * every message as though nobody had been mentioned.
+     * a thread's messages against, and a socket's connection context used to carry both. Awaiting
+     * the same promise every delivery waits on means a wrong token fails this tenant's open,
+     * loudly, instead of quietly classifying every message as though nobody had been mentioned.
      */
     async start() {
-      const identity = await api.auth.test();
-      bot = { userId: identity.user_id, botId: identity.bot_id };
+      await identified();
       log.info('ready for Slack events over HTTPS');
     },
     /**
@@ -296,6 +356,6 @@ export function eventsTransport(
     api,
     events,
     notePostedIn: (channel, threadTs) => threads.notePostedIn(channel, threadTs),
-    http: { path: SLACK_MOUNT_PATH, handle: (request) => Promise.resolve(respond(request)) },
+    http: { path: SLACK_MOUNT_PATH, handle },
   };
 }

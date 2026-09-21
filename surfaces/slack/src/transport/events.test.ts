@@ -1,15 +1,21 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ActionEvent, FormEvent } from '@harness/surface-api';
 import { slackConfig } from '../config.js';
 import { createSlackSession } from '../session.js';
 import { eventsTransport, SLACK_MOUNT_PATH } from './events.js';
 import { FakeSlack } from './fake.js';
 import { signRequest } from './signature.js';
-import type { SlackInbound, SlackTransport } from './types.js';
+import type { SlackAuthTestResult, SlackInbound, SlackTransport } from './types.js';
 
 const SECRET = 'a-signing-secret';
 const env = { SLACK_BOT_TOKEN: 'xoxb-test', SLACK_SIGNING_SECRET: SECRET, SLACK_APPROVALS_CHANNEL: 'C0DEMO' };
 const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+
+// One logger is shared by every case here, so a case that counts its lines has to start from
+// nothing rather than from whatever ran before it.
+beforeEach(() => {
+  vi.clearAllMocks();
+});
 
 /**
  * The transport under test, over the fake Web API.
@@ -109,6 +115,13 @@ describe('the Slack transport as an HTTP door', () => {
     expect(response.refusal).toEqual({ reason: 'unsupported_media_type' });
   });
 
+  it('reads the content type the way HTTP spells it, which is in whatever case it likes', async () => {
+    const body = JSON.stringify({ type: 'url_verification', challenge: 'c-123' });
+    const response = await transport().t.http!.handle(signed(body, 'Application/JSON; charset=UTF-8'));
+    expect(response.status).toBe(200);
+    expect(JSON.parse(response.body ?? '{}')).toEqual({ challenge: 'c-123' });
+  });
+
   it('runs the pipeline for an event callback, after acknowledging it', async () => {
     const { t } = transport();
     await t.events.start();
@@ -159,6 +172,9 @@ describe('the Slack transport as an HTTP door', () => {
     );
     expect(response.status).toBe(200);
     expect(response.headers?.['x-slack-no-retry']).toBe('1');
+    // One line, so an operator reading a log can tell a drop from a delivery that never came.
+    expect(log.warn).toHaveBeenCalledTimes(1);
+    expect(log.warn).toHaveBeenCalledWith(expect.stringContaining('retried'));
     await settle();
     // The first delivery is either in flight or finished; a second turn on one message is worse
     // than a message answered once and slowly.
@@ -252,11 +268,102 @@ describe('the Slack transport and an interaction', () => {
     }
   });
 
+  it('reads a payload whose spaces arrived as plus signs, which is what a form body is', async () => {
+    // `encodeURIComponent` only ever emits `%20`, so every other case here would pass against a
+    // hand-rolled `decodeURIComponent(body.split('=')[1])` that loses every space Slack sends.
+    const { t } = transport();
+    const session = createSlackSession(t, slackConfig(env));
+    const seen: FormEvent[] = [];
+    session.onFormSubmit(async (event) => {
+      seen.push(event);
+    });
+    const payload = JSON.stringify({
+      type: 'view_submission',
+      user: { id: 'U0LEAD' },
+      view: { callback_id: 'approval_edit', private_metadata: 'an approval id', state: { values: {} } },
+    });
+    const body = `payload=${encodeURIComponent(payload).replaceAll('%20', '+')}`;
+    expect(body).toContain('+');
+    expect((await t.http!.handle(signed(body, 'application/x-www-form-urlencoded'))).status).toBe(200);
+    await settle();
+    expect(seen[0]).toMatchObject({ metadata: 'an approval id' });
+  });
+
   it('acknowledges an interaction it has no rule for rather than failing it', async () => {
     const { t } = transport();
     expect((await t.http!.handle(signed(form({ type: 'shortcut' }), 'application/x-www-form-urlencoded'))).status).toBe(
       200,
     );
+  });
+});
+
+describe("the Slack transport and the app's own identity", () => {
+  /** A transport whose `auth.test` answers only when the case says so. */
+  function pending(): { t: SlackTransport; release: (identity: SlackAuthTestResult) => void } {
+    const api = new FakeSlack();
+    let resolve: ((identity: SlackAuthTestResult) => void) | null = null;
+    api.auth = {
+      test: () =>
+        new Promise<SlackAuthTestResult>((r) => {
+          resolve = r;
+        }),
+    };
+    return {
+      t: eventsTransport(slackConfig(env), log, '/nonexistent/storage', api),
+      // Read when it is called rather than captured here: the fetch is lazy, so nothing has asked
+      // `auth.test` anything — and no resolver exists — until a request or `start()` does.
+      release: (identity) => {
+        if (!resolve) throw new Error('auth.test has not been called yet');
+        resolve(identity);
+      },
+    };
+  }
+
+  it('waits for the identity rather than classifying a delivery without one', async () => {
+    // The host publishes a tenant into its map before it starts that tenant's sessions, so a
+    // delivery can reach this door while `auth.test` is still in flight. Classifying it then
+    // would leave the mention token in the text, stop the channel duplicate of an `app_mention`
+    // being dropped, and cache a thread as somebody else's for the life of the process.
+    const { t, release } = pending();
+    const seen: SlackInbound[] = [];
+    t.events.onMessage(async (message) => {
+      seen.push(message);
+    });
+    const answered = t.http!.handle(signed(eventCallback({ ...channelMention, text: '<@U0BOTUSER> hello there' })));
+    const started = t.events.start();
+    release({ user_id: 'U0BOTUSER', bot_id: 'B0BOTID' });
+    await started;
+    expect((await answered).status).toBe(200);
+    await settle();
+    // The mention is stripped, which only an identity can do: this delivery waited for one.
+    expect(seen).toHaveLength(1);
+    expect(seen[0].text).toBe('hello there');
+  });
+
+  it('refuses a delivery when it could not learn who this app is', async () => {
+    const api = new FakeSlack();
+    api.auth = { test: () => Promise.reject(new Error('invalid_auth')) };
+    const t = eventsTransport(slackConfig(env), log, '/nonexistent/storage', api);
+    const seen: SlackInbound[] = [];
+    t.events.onMessage(async (message) => {
+      seen.push(message);
+    });
+    // The same promise fails the tenant's own open, which is what takes it out of service.
+    await expect(t.events.start()).rejects.toThrow(/invalid_auth/);
+    const response = await t.http!.handle(signed(eventCallback(channelMention)));
+    expect(response.status).toBe(503);
+    expect(response.refusal).toEqual({ reason: 'identity_unavailable' });
+    await settle();
+    // Refused, not classified: an empty identity is not a fallback.
+    expect(seen).toEqual([]);
+  });
+
+  it('asks Slack who this app is once, however the first request for it arrives', async () => {
+    const { t, api } = transport();
+    await t.http!.handle(signed(eventCallback(channelMention)));
+    await t.events.start();
+    await settle();
+    expect(api.authTestCalls).toBe(1);
   });
 });
 
