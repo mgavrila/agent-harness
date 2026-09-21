@@ -23,12 +23,24 @@ export function loadKey(env: EnvSource): Buffer {
   return key;
 }
 
-export function encrypt(plain: string, key: Buffer): Buffer {
-  const iv = randomBytes(IV_BYTES);
+/**
+ * One envelope, `iv || tag || ciphertext`, with the IV supplied.
+ *
+ * Internal, and the IV is a parameter for exactly one reason: the spec's vector fixes the bytes a
+ * fixed key, IV and plaintext must produce, and the platform's control plane encrypts with its
+ * own code in its own language. Asserting the vector from *this* side is what proves the two
+ * agree; `encrypt` below is the only caller that ships, and it never reuses an IV because it
+ * never chooses one.
+ */
+export function encryptWith(plain: string, key: Buffer, iv: Buffer): Buffer {
   const cipher = createCipheriv('aes-256-gcm', key, iv);
   const ciphertext = Buffer.concat([cipher.update(plain, 'utf8'), cipher.final()]);
   const tag = cipher.getAuthTag();
   return Buffer.concat([iv, tag, ciphertext]);
+}
+
+export function encrypt(plain: string, key: Buffer): Buffer {
+  return encryptWith(plain, key, randomBytes(IV_BYTES));
 }
 
 export function decrypt(blob: Buffer, key: Buffer): string {
