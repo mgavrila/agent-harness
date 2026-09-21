@@ -8,6 +8,7 @@ import type { KernelConfig, PackRegistry } from '@harness/core-tools';
 import { makeTestDeps, type TestDepsOverrides } from '@harness/core-tools/testing';
 import type { Db } from '@harness/db';
 import { surfacesOf } from '@harness/approvals';
+import type { Logger } from '@harness/shared';
 import type { Principal } from '@harness/identity-api';
 import { StaticIdentity } from '@harness/identity-api/testing';
 import type { RunSkill } from '@harness/runtime-api';
@@ -255,6 +256,12 @@ export async function poolFixture(
     trajectories?: Readonly<Record<string, Trajectory>>;
     dedicated?: string;
     env?: Record<string, string | undefined>;
+    /**
+     * Where this pool's log lines go. Silent by default, which is what a suite wants; a case that
+     * asserts on a line — a surface that failed mid-stream, a refusal nothing else records —
+     * passes a collector.
+     */
+    log?: Logger;
   },
 ): Promise<PoolFixture> {
   const source = new MemoryConfigSource(opts.documents.map((document) => ({ document, version: 'v1' })));
@@ -274,7 +281,7 @@ export async function poolFixture(
   const pool = await createHost({
     db,
     env,
-    log: { info() {}, warn() {}, error() {} },
+    log: opts.log ?? { info() {}, warn() {}, error() {} },
     // The frozen clock `hostFixture` and `makeTestDeps` share, so a row an approval tool stages
     // under one and a decision taken under the other agree on whether it has expired.
     now: () => new Date('2026-09-15T12:00:00Z'),

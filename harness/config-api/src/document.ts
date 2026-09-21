@@ -166,6 +166,12 @@ export function surfaceNamesOf(document: ClientDocument): string[] {
  */
 export function tenantKeysOf(document: ClientDocument): { surface: string; key: string }[] {
   const keys: { surface: string; key: string }[] = [];
+  // A web tenant has no workspace but itself: the requests that reach it are addressed to its own
+  // mount, so its own id is the key an inbound event's hint is matched against. Without this a
+  // pooled host would refuse every web message for a null hint (`pooledResolver`) while a
+  // dedicated one answered — the worst shape a bug can have, because a single-tenant suite would
+  // stay green.
+  if (document.surfaces.web) keys.push({ surface: 'web', key: document.id });
   if (document.surfaces.slack) keys.push({ surface: 'slack', key: document.surfaces.slack.teamId });
   if (document.surfaces.memory?.workspace) {
     keys.push({ surface: 'memory', key: document.surfaces.memory.workspace });

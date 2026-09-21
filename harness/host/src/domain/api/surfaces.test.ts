@@ -5,7 +5,7 @@ import { parseClientDocument, type ClientDocument } from '@harness/config-api';
 import { fixtureDocument } from '@harness/config-api/testing';
 import { auditLog, runs } from '@harness/db';
 import type { Trajectory } from '@harness/runtime-api/testing';
-import { MemorySurface } from '@harness/surface-api/testing';
+import { MEMORY_EVENTS_SUBPATH, MemorySurface } from '@harness/surface-api/testing';
 import { ConfigError, type Logger } from '@harness/shared';
 import { poolFixture, useTestDb, waitFor, type PoolFixture } from '../../testing.js';
 import { assertMounts } from './surfaces.js';
@@ -52,11 +52,13 @@ async function serve(opts: {
   trajectories?: Readonly<Record<string, Trajectory>>;
   dedicated?: string;
   token?: string;
+  log?: Logger;
 }): Promise<Served> {
   const f = await poolFixture(db, {
     documents: opts.documents,
     ...(opts.trajectories ? { trajectories: opts.trajectories } : {}),
     ...(opts.dedicated === undefined ? {} : { dedicated: opts.dedicated }),
+    ...(opts.log ? { log: opts.log } : {}),
   });
   for (const tenant of f.pool.tenants.values()) {
     (tenant.host.surfaces.find('memory') as MemorySurface).mountHttp();
@@ -444,5 +446,86 @@ describe('assertMounts', () => {
     // `messagesfoo` is not below `messages`: the host matches whole segments, so neither can take
     // the other's traffic and refusing this pair would refuse a tenant that is fine.
     expect(() => assertMounts('alpha', [mounted('memory', 'messages'), mounted('other', 'messagesfoo')])).not.toThrow();
+  });
+});
+
+describe('a surface that answers with a stream', () => {
+  /** One read off a live response, so a case can act while the producer is still running. */
+  async function frame(reader: ReadableStreamDefaultReader<Uint8Array>): Promise<string> {
+    const { value, done } = await reader.read();
+    return done ? '' : new TextDecoder().decode(value);
+  }
+
+  it('writes each chunk as it is yielded, rather than when the handler returns', async () => {
+    const s = await serve({ documents: [documentFor('alpha')] });
+    const surface = s.f.surface('alpha');
+    const response = await s.get(`/tenants/alpha/messages/${MEMORY_EVENTS_SUBPATH}`);
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toBe('text/event-stream');
+    const reader = response.body!.getReader();
+    // Emitted one at a time and read one at a time: if the host buffered, the first read would
+    // not return until the producer ended, which it never does.
+    surface.emit('note', { n: 1 });
+    expect(await frame(reader)).toBe('id: 1\nevent: note\ndata: {"n":1}\n\n');
+    surface.emit('note', { n: 2 });
+    expect(await frame(reader)).toBe('id: 2\nevent: note\ndata: {"n":2}\n\n');
+    await reader.cancel();
+  });
+
+  it('hands the surface the client id it resolved from the path', async () => {
+    const s = await serve({ documents: [documentFor('alpha'), documentFor('beta')] });
+    await s.post('/tenants/beta/messages', message('hello'));
+    expect(s.f.surface('beta').requests.at(-1)?.clientId).toBe('beta');
+    expect(s.f.surface('alpha').requests).toEqual([]);
+  });
+
+  it('aborts the request signal when the caller hangs up, and the producer stops', async () => {
+    const s = await serve({ documents: [documentFor('alpha')] });
+    const surface = s.f.surface('alpha');
+    const response = await s.get(`/tenants/alpha/messages/${MEMORY_EVENTS_SUBPATH}`);
+    const reader = response.body!.getReader();
+    surface.emit('note', { n: 1 });
+    expect(await frame(reader)).toBe('id: 1\nevent: note\ndata: {"n":1}\n\n');
+    expect(surface.openStreams).toBe(1);
+    await reader.cancel();
+    // The host listens for the response closing and aborts the signal the request carried; the
+    // producer selects on it and returns. Polled rather than slept on: the close arrives on the
+    // server's tick, not on this one.
+    await waitFor(() => surface.openStreams === 0);
+  });
+
+  it('closes the response when the producer throws, and says so once in the log', async () => {
+    const lines: string[] = [];
+    const s = await serve({
+      documents: [documentFor('alpha')],
+      log: { info() {}, warn() {}, error: (text: string) => lines.push(text) },
+    });
+    const surface = s.f.surface('alpha');
+    const response = await s.get(`/tenants/alpha/messages/${MEMORY_EVENTS_SUBPATH}`);
+    const reader = response.body!.getReader();
+    surface.emit('note', { n: 1 });
+    expect(await frame(reader)).toBe('id: 1\nevent: note\ndata: {"n":1}\n\n');
+    surface.breakStreams('the producer gave up');
+    // The stream ends rather than erroring at the client: the head said 200 long ago, so there is
+    // no status left to change and no frame the host is entitled to invent.
+    expect((await reader.read()).done).toBe(true);
+    await waitFor(() => lines.length > 0);
+    expect(lines[0]).toContain('alpha');
+    expect(lines[0]).toContain('memory');
+  });
+
+  it('audits a refusal before it writes a byte, whatever shape the body would have been', async () => {
+    const s = await serve({ documents: [documentFor('alpha')] });
+    // The door streams on GET only. A POST to the events sub-path is a 405 with `allow`, which is
+    // not a refusal: no row, and no stream opened.
+    const response = await s.post(`/tenants/alpha/messages/${MEMORY_EVENTS_SUBPATH}`, message('hello'));
+    expect(response.status).toBe(405);
+    expect(response.headers.get('allow')).toBe('GET');
+    expect(await refusals()).toEqual([]);
+    expect(s.f.surface('alpha').openStreams).toBe(0);
+    // And the refusal that *is* one still writes exactly one row, before anything reaches the
+    // socket: the door refuses a body that is not a message.
+    expect((await s.post('/tenants/alpha/messages', '{"userId":"U012"}')).status).toBe(400);
+    expect(await refusals()).toHaveLength(1);
   });
 });

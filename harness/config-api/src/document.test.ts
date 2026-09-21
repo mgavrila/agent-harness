@@ -163,6 +163,9 @@ describe('parseClientDocument', () => {
       fixtureDocument({ surfaces: { web: { token: { ref: 'web-token' } }, memory: {}, http: {} } }),
     );
     expect(surfaceSecretsOf(withWeb)).toEqual([{ surface: 'web', field: 'token', ref: 'web-token' }]);
+    // Its own id is its tenant key: a web tenant's workspace is itself, and the host routes a
+    // request to it by the client id in the mount path.
+    expect(tenantKeysOf(withWeb)).toEqual([{ surface: 'web', key: 'fixture' }]);
   });
 
   it("names a memory surface's workspace as a tenant key too, which is what a pooled test routes on", () => {

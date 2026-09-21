@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ActionEvent, FormEvent } from '@harness/surface-api';
+import { bodyText } from '@harness/surface-api/testing';
 import { slackConfig } from '../config.js';
 import { createSlackSession } from '../session.js';
 import { eventsTransport, SLACK_MOUNT_PATH } from './events.js';
@@ -43,6 +44,11 @@ function signed(body: string, contentType = 'application/json', over: Record<str
       ...over,
     },
     body,
+    // What the host resolved from the mount path, and the signal it aborts when the caller goes
+    // away. This transport reads neither — it answers whole bodies — and they are here because
+    // the seam requires them.
+    clientId: 'fixture',
+    signal: new AbortController().signal,
   };
 }
 
@@ -71,7 +77,14 @@ describe('the Slack transport as an HTTP door', () => {
 
   it('answers a non-POST with 405 and no refusal, before anything else is consulted', async () => {
     const { t, api } = transport();
-    const response = await t.http!.handle({ method: 'GET', path: '', headers: {}, body: '' });
+    const response = await t.http!.handle({
+      method: 'GET',
+      path: '',
+      headers: {},
+      body: '',
+      clientId: 'fixture',
+      signal: new AbortController().signal,
+    });
     expect(response.status).toBe(405);
     expect(response.headers).toEqual({ allow: 'POST' });
     expect(response.refusal).toBeUndefined();
@@ -82,14 +95,21 @@ describe('the Slack transport as an HTTP door', () => {
     const { t } = transport();
     const response = await t.http!.handle(signed(JSON.stringify({ type: 'url_verification', challenge: 'c-123' })));
     expect(response.status).toBe(200);
-    expect(JSON.parse(response.body ?? '{}')).toEqual({ challenge: 'c-123' });
+    expect(JSON.parse(await bodyText(response))).toEqual({ challenge: 'c-123' });
     expect(response.refusal).toBeUndefined();
   });
 
   it('refuses an unsigned request, a badly signed one and a stale one, each by its own reason', async () => {
     const { t } = transport();
     const body = eventCallback(channelMention);
-    const unsigned = { method: 'POST', path: '', headers: { 'content-type': 'application/json' }, body };
+    const unsigned = {
+      method: 'POST',
+      path: '',
+      headers: { 'content-type': 'application/json' },
+      body,
+      clientId: 'fixture',
+      signal: new AbortController().signal,
+    };
     expect((await t.http!.handle(unsigned)).refusal).toEqual({ reason: 'missing_signature' });
     const wrong = signed(body);
     expect(
@@ -113,9 +133,16 @@ describe('the Slack transport as an HTTP door', () => {
   it('drops nothing of a refused request into the answer', async () => {
     const { t } = transport();
     const body = eventCallback({ ...channelMention, text: 'a-secret-sentence' });
-    const response = await t.http!.handle({ method: 'POST', path: '', headers: {}, body });
+    const response = await t.http!.handle({
+      method: 'POST',
+      path: '',
+      headers: {},
+      body,
+      clientId: 'fixture',
+      signal: new AbortController().signal,
+    });
     expect(response.status).toBe(401);
-    expect(response.body ?? '').not.toContain('a-secret-sentence');
+    expect(await bodyText(response)).not.toContain('a-secret-sentence');
   });
 
   it('refuses a content type it does not serve', async () => {
@@ -128,7 +155,7 @@ describe('the Slack transport as an HTTP door', () => {
     const body = JSON.stringify({ type: 'url_verification', challenge: 'c-123' });
     const response = await transport().t.http!.handle(signed(body, 'Application/JSON; charset=UTF-8'));
     expect(response.status).toBe(200);
-    expect(JSON.parse(response.body ?? '{}')).toEqual({ challenge: 'c-123' });
+    expect(JSON.parse(await bodyText(response))).toEqual({ challenge: 'c-123' });
   });
 
   it('runs the pipeline for an event callback, after acknowledging it', async () => {
@@ -274,7 +301,7 @@ describe('the Slack transport and an interaction', () => {
     const response = await t.http!.handle(signed(body, 'application/x-www-form-urlencoded'));
     // An empty 200 is what closes the modal, which is what accepting a submission means.
     expect(response.status).toBe(200);
-    expect(response.body ?? '').toBe('');
+    expect(await bodyText(response)).toBe('');
     await settle();
     expect(seen).toHaveLength(1);
     expect(seen[0]).toMatchObject({ userId: 'U0LEAD', formId: 'approval_edit', metadata: 'an-approval-id' });
@@ -430,7 +457,7 @@ describe("the Slack transport and the app's own identity", () => {
       signed(JSON.stringify({ type: 'url_verification', challenge: 'c-123' })),
     );
     expect(response.status).toBe(200);
-    expect(JSON.parse(response.body ?? '{}')).toEqual({ challenge: 'c-123' });
+    expect(JSON.parse(await bodyText(response))).toEqual({ challenge: 'c-123' });
     expect(response.refusal).toBeUndefined();
   });
 

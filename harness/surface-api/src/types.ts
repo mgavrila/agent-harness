@@ -235,6 +235,27 @@ export interface SurfaceHttpRequest {
   path: string;
   headers: Readonly<Record<string, string>>;
   body: string;
+  /**
+   * The tenant this request is for: the client id the host resolved out of the mount path before
+   * it called this handler.
+   *
+   * It is here rather than on `SurfaceDeps` because it is a property of the request and not of
+   * the session — and because it is the one value that cannot be misconfigured. An adapter that
+   * has to report which tenant an event belongs to reports this: it is what the host routed on a
+   * moment earlier, so a document whose key and id drifted apart cannot make an adapter claim a
+   * tenant the host did not route to.
+   */
+  clientId: string;
+  /**
+   * Aborted when the caller goes away.
+   *
+   * A handler that answers with a whole body may ignore it. One that answers with a stream selects
+   * on it and returns, so a closed browser tab does not leave a producer pushing frames into a
+   * socket nobody is reading. It is also aborted after an ordinary response has been sent, because
+   * what the host listens for is the response closing; a handler that has already returned has
+   * nothing left to cancel, so that costs nothing.
+   */
+  signal: AbortSignal;
 }
 
 /**
@@ -246,11 +267,30 @@ export interface SurfaceHttpRequest {
  * of the request body reaches that row: a refused request has not been authenticated, so there is
  * nothing in it worth recording. A surface never writes audit itself; it may import only this
  * contract, `@harness/shared` and its own modules.
+ *
+ * **A refusal is decided before the first byte.** The host reads this field, writes its one audit
+ * row and then sends the head; once the head is written the response is a stream and there is
+ * nothing left to declare. An adapter that discovers a problem mid-stream says so in its own
+ * frames and ends.
  */
 export interface SurfaceHttpResponse {
   status: number;
   headers?: Readonly<Record<string, string>>;
-  body?: string;
+  /**
+   * The whole answer, or the answer as it is produced.
+   *
+   * A **string** is sent in one write and the response ends: an acknowledgement, a JSON body, a
+   * challenge. An **async iterable of strings** is a stream: the host writes the head, writes each
+   * chunk as it is yielded — waiting for the socket to drain, or for the client to go away — and
+   * ends the response when the iterable ends. A chunk is opaque: the host does not know whether it
+   * is a Server-Sent Events frame, a line of NDJSON or a fragment of a file, which is what keeps a
+   * transport's framing inside the adapter that owns it.
+   *
+   * A throw out of the iterable is logged the way a throwing `handle` already is and closes the
+   * response. There is **no error frame**, because the frame vocabulary is the adapter's: an
+   * adapter that wants to tell its client something before it stops yields that something first.
+   */
+  body?: string | AsyncIterable<string>;
   refusal?: { reason: string };
 }
 
