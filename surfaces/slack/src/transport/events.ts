@@ -99,8 +99,7 @@ function inboundOf(envelope: EventEnvelope): RawMessage | null {
  * The host mounts `http` at `/tenants/<clientId>/slack/events` and hands over every request that
  * arrives there. Nothing here is connected: `start()` asks Slack who this app is and that is all
  * it does, so a paused host resumes by answering its next request, and a pooled host serves as
- * many workspaces as it has tenants — which is the whole reason socket mode goes (spec decision
- * 9).
+ * many workspaces as it has tenants, each with its own mount under its own id (spec decision 9).
  *
  * **Acknowledge, then run.** Slack retries a delivery it has not heard about within three seconds
  * and a turn takes seconds to minutes, so every accepted request is answered before the work
