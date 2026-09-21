@@ -61,5 +61,7 @@ document's model string, which is a deployment name the gateway resolves.
 pnpm --filter @harness/gateway test
 ```
 
-No database, no network. `pnpm gateway:config` regenerates `litellm.config.yaml`; if `git status`
-is dirty afterwards, either the renderer or the catalogue changed, and the diff says which.
+No database, no network, and no fixture of its own: the suite reads the shipped `catalogue.yaml`
+and asserts that `litellm.config.yaml` is a current render of it, byte for byte. A catalogue edited
+without `pnpm gateway:config` therefore fails the suite rather than shipping a stale file to the
+Compose bind mount. Re-render and commit both.

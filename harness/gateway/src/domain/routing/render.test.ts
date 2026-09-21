@@ -1,8 +1,24 @@
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, it, expect } from 'vitest';
 import { parse as parseYaml } from 'yaml';
 import { DeploymentCatalogue } from './catalogue.js';
-import { CATALOGUE } from './catalogue.test-helpers.js';
 import { apiKeyEnvFor, renderLiteLlmConfig } from './render.js';
+
+// src/domain/routing -> the package root, where both files live because Compose bind-mounts the
+// rendered one from there.
+const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
+const read = (name: string): string => readFileSync(path.join(packageRoot, name), 'utf8');
+
+/**
+ * The catalogue this deployment ships, read rather than restated.
+ *
+ * Every case below patches this text with `String.replace` to build its negative and variant
+ * cases, so the shipped file's layout is load-bearing: the first entry is the one with a
+ * fallback, `defaults:` is last, and every entry sits at two spaces of indentation.
+ */
+const CATALOGUE = read('catalogue.yaml');
 
 /** The shipped catalogue as a parsed one. The schema is the whole of the parse. */
 const catalogue = (yamlText: string): DeploymentCatalogue => DeploymentCatalogue.parse(parseYaml(yamlText));
@@ -146,5 +162,13 @@ describe('renderLiteLlmConfig', () => {
 
   it('is deterministic', () => {
     expect(renderLiteLlmConfig(catalogue(CATALOGUE))).toBe(rendered);
+  });
+
+  it('is what the committed litellm.config.yaml holds, byte for byte', () => {
+    // The Compose service bind-mounts that exact file, so a catalogue edited without running
+    // `pnpm gateway:config` would ship a proxy serving the previous set of deployments — and a
+    // document naming a deployment the file does not hold fails at its first model call, in
+    // production, not here. Run `pnpm gateway:config` and commit both.
+    expect(rendered).toBe(read('litellm.config.yaml'));
   });
 });
