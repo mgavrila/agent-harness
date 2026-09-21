@@ -111,11 +111,14 @@ async function callerFromQuery(host: Host, url: URL): Promise<Caller> {
  */
 async function openRunRoute(host: Host, req: IncomingMessage, res: ServerResponse): Promise<void> {
   const body = await readBody(req);
+  // The caller went away before the body ended. There is nothing to answer it with and nobody to
+  // answer: writing a status into a dead socket would be a refusal nobody was given.
+  if (body.kind === 'gone') return;
   // The 413 goes out first and the socket is torn up after it, so the caller is told why and a
   // caller that keeps sending anyway is cut off rather than read and discarded for as long as it
   // likes. Destroying before the flush would answer nothing; not destroying at all would let one
   // authenticated connection stream gigabytes past a cap that had already refused it.
-  if (!body.ok) {
+  if (body.kind === 'too_large') {
     return json(res, 413, { error: `a request body may be at most ${API_MAX_BODY_BYTES} bytes` }, () => req.destroy());
   }
   let raw: unknown;

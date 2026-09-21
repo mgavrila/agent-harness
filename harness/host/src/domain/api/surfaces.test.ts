@@ -1,4 +1,4 @@
-import { connect, type AddressInfo } from 'node:net';
+import { connect, type AddressInfo, type Socket } from 'node:net';
 import { eq } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { parseClientDocument, type ClientDocument } from '@harness/config-api';
@@ -527,5 +527,58 @@ describe('a surface that answers with a stream', () => {
     // socket: the door refuses a body that is not a message.
     expect((await s.post('/tenants/alpha/messages', '{"userId":"U012"}')).status).toBe(400);
     expect(await refusals()).toHaveLength(1);
+  });
+});
+
+describe('a caller that hangs up before its body ends', () => {
+  /**
+   * A raw connection to the host's own listener.
+   *
+   * `fetch` cannot half-send a body and then walk away, and that is the whole shape under test.
+   * These cases guard the *consequences* of a hang-up — nothing answered, nothing audited, nothing
+   * left running — rather than the read itself, which is settled in `routes.test.ts` where it can
+   * be observed directly.
+   */
+  async function dial(url: string): Promise<Socket> {
+    const socket = connect(Number(new URL(url).port), '127.0.0.1');
+    await new Promise<void>((resolve) => socket.once('connect', () => resolve()));
+    onTestFinished(() => {
+      socket.destroy();
+    });
+    return socket;
+  }
+
+  it('answers nothing and audits nothing when the body stops half way', async () => {
+    const s = await serve({ documents: [documentFor('alpha')] });
+    const socket = await dial(s.url);
+    // A `content-length` the body never reaches: the read is parked on the rest of it.
+    socket.write('POST /tenants/alpha/messages HTTP/1.1\r\nHost: x\r\ncontent-length: 64\r\n\r\n{"userId":"U012"');
+    await waitFor(() => socket.bytesWritten > 0);
+    socket.destroy();
+    // A round trip on its own connection, which is also what gives the host time to have finished
+    // with the abandoned one.
+    expect((await s.post('/tenants/alpha/messages', message('hello'))).status).toBe(200);
+    // Nobody was refused: a request whose caller left was never finished being made, and invariant
+    // 15 is about a door that turned somebody away. A 413 here would be the wrong row and the
+    // wrong reason — that body was not too large, it was incomplete.
+    expect(await refusals()).toEqual([]);
+    // The door was asked once, by the request that completed, and holds nothing open.
+    expect(s.f.surface('alpha').requests).toHaveLength(1);
+    expect(s.f.surface('alpha').openStreams).toBe(0);
+  });
+
+  it('leaves no stream running when a caller half-closes on the events sub-path', async () => {
+    const s = await serve({ documents: [documentFor('alpha')] });
+    const surface = s.f.surface('alpha');
+    const socket = await dial(s.url);
+    socket.write(`GET /tenants/alpha/messages/${MEMORY_EVENTS_SUBPATH} HTTP/1.1\r\nHost: x\r\n\r\n`);
+    socket.end();
+    // Two orderings are legitimate and this case accepts both: the request may be read whole — a
+    // half-close means "I have finished sending", and nothing of it was lost — in which case the
+    // door opens a stream on a response that is already closing and the early `close` listener
+    // ends it; or the host may have seen the teardown first, in which case the door is never
+    // asked. They end in the same place, and that is what is asserted.
+    await waitFor(() => surface.openStreams === 0);
+    expect(await refusals()).toEqual([]);
   });
 });

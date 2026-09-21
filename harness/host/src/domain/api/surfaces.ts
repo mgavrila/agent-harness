@@ -286,10 +286,18 @@ export async function handleSurfaceRequest(
   const mount = mountFor(tenant.host.surfaces.all, path);
   if (!mount) return noRoute(res);
   const body = await readBody(req);
+  // The caller went away while the body was arriving. Nothing is written, because there is no
+  // socket left to write to, and **nothing is audited**: a row saying `refused` would name a
+  // request nobody finished making, and invariant 15 is about a door that turned somebody away.
+  // The signal is aborted so that anything already running on this request stops with it.
+  if (body.kind === 'gone') {
+    hungUp.abort();
+    return;
+  }
   // Answered, then the socket torn up, for the reason `openRunRoute` gives: a caller told nothing
   // learns nothing, and a caller that keeps sending anyway is cut off rather than read for as
   // long as it likes.
-  if (!body.ok) {
+  if (body.kind === 'too_large') {
     return json(res, 413, { error: `a request body may be at most ${API_MAX_BODY_BYTES} bytes` }, () => req.destroy());
   }
   let response: SurfaceHttpResponse;
