@@ -26,11 +26,11 @@ export function loadKey(env: EnvSource): Buffer {
 /**
  * One envelope, `iv || tag || ciphertext`, with the IV supplied.
  *
- * Internal, and the IV is a parameter for exactly one reason: the spec's vector fixes the bytes a
- * fixed key, IV and plaintext must produce, and the platform's control plane encrypts with its
- * own code in its own language. Asserting the vector from *this* side is what proves the two
- * agree; `encrypt` below is the only caller that ships, and it never reuses an IV because it
- * never chooses one.
+ * Internal, and reachable from outside this package only through `@harness/db/testing`: the IV is
+ * a parameter for exactly one reason, which is that the spec's vector fixes the bytes a fixed key,
+ * IV and plaintext must produce, and the platform's control plane encrypts with its own code in
+ * its own language. Asserting the vector from *this* side is what proves the two agree. `encrypt`
+ * below is the only caller that ships, and it never reuses an IV because it never chooses one.
  */
 export function encryptWith(plain: string, key: Buffer, iv: Buffer): Buffer {
   const cipher = createCipheriv('aes-256-gcm', key, iv);

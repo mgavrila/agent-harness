@@ -2,6 +2,18 @@ import { sql } from 'drizzle-orm';
 import { afterAll, beforeEach } from 'vitest';
 import { createDb, type Db } from './domain/client.js';
 
+/**
+ * `encrypt` with the IV supplied, for the one assertion that needs it: the spec's envelope vector
+ * fixes the bytes a fixed key, IV and plaintext must produce, and the platform's control plane
+ * encrypts with its own code in its own language, so only those bytes prove the two agree.
+ *
+ * It is on this subpath and not the package's own barrel deliberately. Reusing an IV under one key
+ * destroys AES-GCM's confidentiality *and* its authentication, so the only door to an IV-taking
+ * encrypt is the one a test comes through; nothing that ships calls it but `encrypt` itself, which
+ * passes `randomBytes(12)`.
+ */
+export { encryptWith } from './shared/crypto.js';
+
 export const TEST_DATABASE_URL =
   process.env.TEST_DATABASE_URL ?? 'postgres://harness:harness@localhost:15432/harness_test';
 

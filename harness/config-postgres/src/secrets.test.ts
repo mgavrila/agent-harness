@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 // No `type Db`: `useTestDb()` hands one back and nothing here writes the type out. An unused
 // import is a lint error, not a warning.
-import { clientSecrets, decrypt, encrypt, encryptWith, loadKey } from '@harness/db';
-import { useTestDb } from '@harness/db/testing';
+import { clientSecrets, decrypt, encrypt, loadKey } from '@harness/db';
+import { encryptWith, useTestDb } from '@harness/db/testing';
 import { ConfigError } from '@harness/shared';
 import { parseClientDocument, resolveSecrets } from '@harness/config-api';
 import {
@@ -34,8 +34,10 @@ describe('the envelope', () => {
    *
    * It is a test rather than a comment because the platform's control plane encrypts with its own
    * code, in its own language, and only a vector proves the two agree. `encrypt` picks its own IV,
-   * so the encrypt half goes through `encryptWith`, which is the same function with the IV
-   * supplied — that is what makes the assertion about these bytes rather than about a round trip.
+   * so the encrypt half goes through `encryptWith` on `@harness/db/testing`, which is the same
+   * function with the IV supplied — that is what makes the assertion about these bytes rather
+   * than about a round trip, and it is on a test-only subpath because an IV reused under one key
+   * would destroy the envelope's confidentiality and its authentication at once.
    */
   const KEY = Buffer.from('BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=', 'base64');
   const BLOB = '03030303030303030303030338da626a160e623fe0c27fbca31a81945d91db61775c3b310e6d303988259a78';
