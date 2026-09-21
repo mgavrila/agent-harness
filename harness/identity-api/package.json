@@ -1,13 +1,30 @@
 {
   "name": "@harness/identity-api",
   "version": "0.1.0",
-  "private": true,
+  "private": false,
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
     "./testing": "./src/testing.ts"
   },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "publishConfig": {
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "./testing": {
+        "types": "./dist/testing.d.ts",
+        "default": "./dist/testing.js"
+      }
+    }
+  },
   "scripts": {
+    "build": "tsc -p tsconfig.build.json",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
