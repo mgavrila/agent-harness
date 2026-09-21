@@ -42,7 +42,6 @@ export function summarisePlaybook(row: PlaybookRow): PlaybookSummary {
   return {
     name: row.name,
     schedule: row.schedule,
-    timezone: row.timezone,
     skill: row.skill,
     principal_id: row.principalId,
     surface: row.surface,

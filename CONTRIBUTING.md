@@ -356,6 +356,17 @@ complete one; read it alongside this, and read `surfaces/slack` for the real thi
    section. Nothing in the host's own code changes: it still reaches every surface by name,
    through `surfaceSpecifier`.
 
+A surface that is reached by a request returns `http: { path, handle }`, and the host mounts it at
+`/tenants/<clientId>/<path>`. Answer with a string for a whole body, or with an async iterable of
+strings for a stream; the host writes the head, pipes each chunk as it is yielded and ends when
+the iterable ends. Read `request.signal` if you stream — it is aborted when the caller goes away —
+and `request.clientId` if you have to report which tenant an event belongs to.
+
+Your adapter's credentials arrive **resolved**, on `deps.secretValues`, keyed by the field name
+its section of the document uses. Do not read an environment variable for a per-tenant credential:
+a pooled host serves several tenants in one process and has nowhere to put one. `surfaces/web` is
+the example — it reads no environment variable at all.
+
 ## Adding an identity provider
 
 An identity provider — the contract calls it `IdentityProvider`; the kernel, whose vocabulary
@@ -510,11 +521,27 @@ invisible to the rule that `generate` twice prints "No schema changes". Add the 
 `EXTENSIONS` in `harness/db/src/domain/migrate.ts`, which `runMigrations` installs before the
 migrator on every call. `vector`, for the knowledge tables, is the one entry today.
 
+## Adding a secret source
+
+`SecretSource` is two methods in `@harness/config-api`: a `name` and `resolve(clientId, ref)`. Add
+the implementation in its own package, add a line to `SECRET_SOURCES` and a branch to
+`loadSecretSource` in `harness/core-tools/src/domain/config/registry.ts`, and run
+`secretSourceConformance` from `@harness/config-api/testing` against it — the suite is what keeps
+"a source" one thing rather than two.
+
+Two rules the contract fixes and the suite checks: `{ env: NAME }` always means the environment,
+whichever source is configured, and a failure is a `ConfigError` whose message is a clause about
+the _reference_ — never the value, never the row and never a statement. `resolveSecrets` puts the
+client, the surface and the field in front of your clause, which is why the signature does not
+carry them.
+
 ## Adding an environment variable
 
 Read it in `app/`, or through an `@harness/shared` env helper, and never anywhere else.
 Document it in `.env.example` in the same commit: `surface.test.ts` scans the source for every
-name the code reads and fails on any the example file does not document.
+name the code reads and fails on any the example file does not document. The scan walks the
+kernel's seven source roots only (`SOURCE_ROOTS` in `record-surface.ts`). The platform's
+directories document their own variables and are outside it on purpose.
 
 ## Adding a test
 

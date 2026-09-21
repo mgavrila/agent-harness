@@ -16,6 +16,7 @@ export {
   SecretRefShape,
   migrate,
   parseClientDocument,
+  surfaceConversationsOf,
   surfaceNamesOf,
   surfaceSecretsOf,
   tenantKeysOf,
@@ -35,4 +36,14 @@ export {
 export { ROUTES, RouteSpec, RoutingFile, type Route } from './routing.js';
 export { pointerSegments, readPointer, writePointer } from './pointer.js';
 export { resolve } from './resolve.js';
-export type { Blueprint, ConfigSource, JsonPatch, LoadedDocument, Overlay, PatchOp } from './types.js';
+export { envSecretSource, envSecretValue, resolveSecrets } from './secrets.js';
+export type {
+  Blueprint,
+  ConfigSource,
+  JsonPatch,
+  LoadedDocument,
+  Overlay,
+  PatchOp,
+  ResolvedSecrets,
+  SecretSource,
+} from './types.js';

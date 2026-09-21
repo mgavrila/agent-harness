@@ -10,6 +10,7 @@ import {
   readComposeSurface,
   readEnvNames,
   readToolSurface,
+  SOURCE_ROOTS,
   type ToolSurfaceEntry,
 } from './record-surface.js';
 
@@ -31,7 +32,10 @@ const SCAN_ANCHORS = [
   'HARNESS_STORAGE_DIR',
   'VERIFY_NPPES_ENABLED',
   'APPROVAL_TTL_HOURS',
-  'SLACK_APPROVALS_CHANNEL',
+  // Through `requiredEnv`, and read by the stdio server and the host alike. It replaced
+  // SLACK_APPROVALS_CHANNEL here, which no adapter reads any more: a surface's channel and its
+  // credentials come from the tenant's own document.
+  'HARNESS_SECRET_SOURCE',
 ];
 
 describe('public surface', () => {
@@ -47,6 +51,13 @@ describe('public surface', () => {
     for (const anchor of SCAN_ANCHORS) expect(read).toContain(anchor);
     const documented = await envNamesFromExample(path.join(repoRoot, '.env.example'));
     expect(read.filter((name) => !documented.includes(name))).toEqual([]);
+  });
+
+  it('scans the kernel’s own source roots, and none of the platform’s', () => {
+    expect(SOURCE_ROOTS).toEqual(['harness', 'packs', 'surfaces', 'identities', 'runtimes', 'evals', 'scripts']);
+    for (const dir of ['catalog', 'control-plane', 'apps', 'deploy']) {
+      expect(SOURCE_ROOTS, dir).not.toContain(dir);
+    }
   });
 
   it('renders the Compose config the repository recorded, with no secret in it', async () => {
@@ -250,14 +261,24 @@ describe('the Compose stack names no client and mounts no socket', () => {
     expect(await rendered()).not.toMatch(/hermes/i);
   });
 
-  it('gives the host the one Slack app: a token to post with and a secret to verify with', async () => {
+  it('gives the host no surface credential at all: a tenant’s are its document’s', async () => {
     const { services } = parseYaml(await rendered()) as {
       services: Record<string, { environment?: Record<string, string> }>;
     };
-    expect(services.host.environment?.SLACK_BOT_TOKEN).toBeDefined();
-    expect(services.host.environment?.SLACK_SIGNING_SECRET).toBeDefined();
-    // Socket mode is gone, and so is the app-level token it needed.
-    expect(services.host.environment?.SLACK_APP_TOKEN).toBeUndefined();
-    expect(Object.keys(services.host.environment ?? {}).filter((k) => k.startsWith('APPROVALS_SLACK'))).toEqual([]);
+    // Not one of the three conventional names, and no vendor-prefixed name of any kind. A
+    // pooled host has one environment and many tenants, so a variable here would be one
+    // tenant's credential offered to all of them; a dedicated host adds whatever names its own
+    // document's `{ env }` refs chose.
+    const host = Object.keys(services.host.environment ?? {});
+    expect(host.filter((k) => k.startsWith('SLACK') || k.startsWith('APPROVALS_SLACK'))).toEqual([]);
+  });
+
+  it('lets the proxy hold deployments the platform registers, not only the rendered ones', async () => {
+    const { services } = parseYaml(await rendered()) as {
+      services: Record<string, { environment?: Record<string, string> }>;
+    };
+    // `POST /model/new` writes to the model table, which needs both of these.
+    expect(services.litellm.environment?.STORE_MODEL_IN_DB).toBe('True');
+    expect(services.litellm.environment?.DATABASE_URL).toBeDefined();
   });
 });

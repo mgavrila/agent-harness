@@ -22,13 +22,19 @@ src/testing.ts           ./testing: FakeSlack, FakeSlackEvents, fakeSlackSession
 
 ## One Slack app
 
-This adapter reads `SLACK_BOT_TOKEN`, `SLACK_SIGNING_SECRET` (what every inbound request is
-verified against) and `SLACK_APPROVALS_CHANNEL` (where approval cards and released files go). One
-app carries chat and approvals, because one process — the host — serves both; two apps were needed
-only while the chat runtime and the approvals process were separate, and that reasoning is gone
-with the second process. There is no app-level token: nothing here opens a socket. A client
-document may name its own variables for the two credentials, which is how one process serves two
-workspaces; a deployment that names none reads the conventional names above.
+This adapter is handed all three of its settings by the host, already resolved, and reads no
+environment variable at all. The bot token and the signing secret arrive on `deps.secretValues`,
+keyed by the field name the client document used — `surfaces.slack.botToken` and
+`surfaces.slack.signingSecret`, each a `SecretRef`. Where those values came from is not this
+package's business: a store on a pooled deployment, or an `{ env: SOME_NAME }` ref on a dedicated
+one, which the host resolves before this code runs. The channel approval cards and released files
+go to arrives on `deps.defaultConversation`, from `surfaces.slack.approvalsChannel` — per tenant,
+because a deployment-wide one would send a pooled host's tenants to a single workspace. A tenant
+missing any of the three is refused at open, naming the document field. One app carries chat and
+approvals, because one
+process — the host — serves both; two apps were needed only while the chat runtime and the
+approvals process were separate, and that reasoning is gone with the second process. There is no
+app-level token: nothing here opens a socket.
 The app needs Interactivity on (for the approval buttons and the note modal)
 and is subscribed to `message.channels`, `message.groups`, `message.im`, `message.mpim` and
 `app_mention`; its bot scopes are `chat:write`, `app_mentions:read`, `channels:history`,

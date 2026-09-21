@@ -2,6 +2,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import type { ToolDeps } from '@harness/core-tools';
+import { TEST_MODELS } from '@harness/core-tools/testing';
 import { startFakeGateway, type FakeGateway } from '@harness/runtime-api/testing';
 import { runMigrations } from '@harness/db';
 import { EVALS_DATABASE_URL } from '../../corpus.test-helpers.js';
@@ -49,7 +50,8 @@ describe('judgeFreeText', () => {
     expect(gateway.calls).toHaveLength(before + 1);
 
     const call = gateway.calls[before];
-    expect(call.model).toBe('judge');
+    // The deployment the judge's own configuration names, not the route it is on.
+    expect(call.model).toBe(TEST_MODELS.judge);
     const user = call.messages.find((m) => m.role === 'user')?.content ?? '';
     expect(user).toContain('practice_name');
     expect(user).toContain('Medical Group of San Francisco');

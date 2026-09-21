@@ -5,10 +5,22 @@ import { fileURLToPath } from 'node:url';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { TEST_MODELS } from '@harness/core-tools/testing';
 import { startFakeGateway, type FakeGateway } from '@harness/runtime-api/testing';
 import { EVALS_DATABASE_URL, EXTRACTION, VERDICTS, writeEvalCorpus } from '../corpus.test-helpers.js';
 import type { Report } from '../domain/report/types.js';
-import { flagFrom, packNames, packsToMeasure, parseLimitFlag, parsePackFlag, parseUpdateBaselineFlag } from './cli.js';
+import {
+  flagFrom,
+  packNames,
+  packsToMeasure,
+  parseLimitFlag,
+  parsePackFlag,
+  parseServingModel,
+  parseUpdateBaselineFlag,
+} from './cli.js';
+
+/** What a run says it is serving: one deployment per route, the same map the fake answers on. */
+const SERVING = JSON.stringify(TEST_MODELS);
 
 const execFileAsync = promisify(execFile);
 const evalsDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -31,7 +43,7 @@ let gateway: FakeGateway;
 beforeAll(async () => {
   dir = await mkdtemp(path.join(tmpdir(), 'harness-cli-'));
   ({ corpusDir: corpus, casesFile, injectionFile } = await writeEvalCorpus(dir));
-  gateway = await startFakeGateway((call) => ({ content: call.model === 'judge' ? VERDICTS : EXTRACTION }));
+  gateway = await startFakeGateway((call) => ({ content: call.model === TEST_MODELS.judge ? VERDICTS : EXTRACTION }));
 }, 120_000);
 
 afterAll(async () => {
@@ -159,6 +171,26 @@ describe('parseLimitFlag', () => {
   }
 });
 
+describe('parseServingModel', () => {
+  it('takes one deployment per route', () => {
+    expect(parseServingModel(SERVING)).toEqual({ ok: true, models: TEST_MODELS });
+  });
+
+  it('refuses a map that leaves a route unnamed, saying which', () => {
+    const { judge: _judge, ...four } = TEST_MODELS;
+    const result = parseServingModel(JSON.stringify(four));
+    expect(result.ok).toBe(false);
+    expect(result.ok ? '' : result.error).toContain('judge');
+  });
+
+  it('refuses a route nobody serves, and anything that is not an object', () => {
+    expect(parseServingModel(JSON.stringify({ ...TEST_MODELS, gossip: 'x' })).ok).toBe(false);
+    expect(parseServingModel('[]').ok).toBe(false);
+    expect(parseServingModel('not json').ok).toBe(false);
+    expect(parseServingModel(undefined).ok).toBe(false);
+  });
+});
+
 describe('CLI', () => {
   it('exits 2 on an invalid --limit and runs no cases', async () => {
     const outDir = path.join(dir, 'cli-bad-limit-out');
@@ -235,7 +267,10 @@ describe('CLI', () => {
         `--baseline=${baselineFile}`,
         '--update-baseline',
       ],
-      { cwd: evalsDir, env: { ...process.env, LITELLM_MASTER_KEY: 'sk-eval', EVALS_DATABASE_URL } },
+      {
+        cwd: evalsDir,
+        env: { ...process.env, LITELLM_MASTER_KEY: 'sk-eval', EVALS_SERVING_MODEL: SERVING, EVALS_DATABASE_URL },
+      },
     );
 
     const written = JSON.parse(await readFile(baselineFile, 'utf8')) as Report;
@@ -261,6 +296,7 @@ describe('CLI', () => {
         env: {
           ...process.env,
           LITELLM_MASTER_KEY: 'sk-eval',
+          EVALS_SERVING_MODEL: SERVING,
           // Wrong on purpose: if the CLI used this instead of --gateway, every
           // extraction call would fail to connect and no field would ever
           // match, so a passing report here is only possible if --gateway's

@@ -3,7 +3,15 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import type { Level } from '@harness/shared';
-import { approvalIdOf, connectTestClient, makeTestDeps, resultOf, startFakeGateway, useTestDb } from '../testing.js';
+import {
+  TEST_MODELS,
+  approvalIdOf,
+  connectTestClient,
+  makeTestDeps,
+  resultOf,
+  startFakeGateway,
+  useTestDb,
+} from '../testing.js';
 import { createCoreToolsServer } from './catalog.js';
 
 const db = useTestDb();
@@ -24,7 +32,7 @@ async function client(level: Level, id = 'u-reader', kind: 'user' | 'service' = 
   );
   const deps = makeTestDeps(db, {
     knowledgeDir,
-    gateway: { baseUrl: fake.url, apiKey: 'sk-test', timeoutMs: 5_000, maxCallsPerRun: 200 },
+    gateway: { baseUrl: fake.url, apiKey: 'sk-test', models: TEST_MODELS, timeoutMs: 5_000, maxCallsPerRun: 200 },
     principal: {
       id,
       kind,

@@ -16,6 +16,8 @@ const log = createLogger('approvals');
 
 const UNAUTHORIZED_TEXT = 'You are not an approver for this workspace.';
 const NOT_FOUND_TEXT = 'That approval no longer exists.';
+/** An `actionId` no card of this host's carries. Said out loud, because silence looks like a hang. */
+const UNKNOWN_ACTION_TEXT = 'That button is not one this assistant posted.';
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** Best-effort notice to the one person who acted; a failure here is only logged. */
@@ -117,6 +119,20 @@ async function openEdit(session: SurfaceSession, deps: DecisionDeps, event: Acti
 }
 
 /**
+ * An action id for a log line: one of this host's own three, or the word `unknown`.
+ *
+ * The id on the event is whatever the caller sent — a signed request's payload, or a web
+ * workspace's JSON — so writing it down verbatim puts a caller-controlled string in a
+ * deployment's log, which is the shape of defect the forged read cursor was. Nothing is lost:
+ * the three ids this host posts are the only ones it can act on, and the fourth case is the
+ * whole of what an operator needs to know.
+ */
+function actionForLog(actionId: string): string {
+  const known = [APPROVE_ACTION_ID, DECLINE_ACTION_ID, EDIT_ACTION_ID];
+  return known.includes(actionId) ? actionId : 'unknown';
+}
+
+/**
  * Wire one surface's buttons and forms to the decision path.
  *
  * Called once per loaded surface. A decision is accepted from whichever surface posted the card,
@@ -128,9 +144,17 @@ export function registerApprovalHandlers(session: SurfaceSession, deps: Decision
       if (event.actionId === APPROVE_ACTION_ID) await decide(session, deps, event, 'approved');
       else if (event.actionId === DECLINE_ACTION_ID) await decide(session, deps, event, 'declined');
       else if (event.actionId === EDIT_ACTION_ID) await openEdit(session, deps, event);
-      // Anything else belongs to a card this host did not post.
+      else {
+        // A button from a card this host did not post. The press is still delivered and still
+        // acknowledged — it is not a `4xx`, because the door answered before anyone looked at
+        // the id — but the person who pressed it hears back, which is what the surface's own
+        // API reference has always said happens. Dropping it in silence left a workspace
+        // waiting for a frame that never came.
+        log.warn(`an unknown action arrived on surface "${session.name}" and was answered`);
+        await tellUser(session, event.conversation, event.userId, UNKNOWN_ACTION_TEXT);
+      }
     } catch (err) {
-      log.error(`the ${event.actionId} handler failed`, err);
+      log.error(`the ${actionForLog(event.actionId)} action handler failed`, err);
     }
   });
 

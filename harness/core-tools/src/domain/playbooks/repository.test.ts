@@ -57,7 +57,6 @@ describe('playbooks repository', () => {
     expect(summary).toEqual({
       name: 'nightly',
       schedule: '0 7 * * *',
-      timezone: 'UTC',
       skill: 'a-skill',
       principal_id: 'svc-playbooks',
       surface: null,

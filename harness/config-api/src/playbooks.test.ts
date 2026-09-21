@@ -4,7 +4,6 @@ import { parsePlaybooksFile } from './playbooks.js';
 const nightly = {
   name: 'nightly-renewals',
   schedule: '0 7 * * *',
-  timezone: 'America/New_York',
   skill: 'renewals',
   prompt: 'Run the renewals playbook for today.',
   principal: 'svc-playbooks',
@@ -24,19 +23,20 @@ describe('parsePlaybooksFile', () => {
     });
   });
 
-  it('defaults the timezone to UTC and accepts an empty file', () => {
-    const { timezone: _timezone, ...rest } = nightly;
-    expect(parsePlaybooksFile({ playbooks: [rest] })[0].timezone).toBe('UTC');
+  it('accepts an empty file', () => {
     expect(parsePlaybooksFile({})).toEqual([]);
     expect(parsePlaybooksFile(null)).toEqual([]);
   });
 
-  it('refuses a bad schedule, a bad timezone, a user principal, a duplicate name and an unknown key', () => {
+  it('refuses a timezone field: the schedule runs in UTC and the shape is strict', () => {
+    expect(() => parsePlaybooksFile({ playbooks: [{ ...nightly, timezone: 'America/New_York' }] })).toThrow(
+      /playbooks are invalid/,
+    );
+  });
+
+  it('refuses a bad schedule, a user principal, a duplicate name and an unknown key', () => {
     expect(() => parsePlaybooksFile({ playbooks: [{ ...nightly, schedule: 'every morning' }] })).toThrow(
       /schedule must be a cron expression/,
-    );
-    expect(() => parsePlaybooksFile({ playbooks: [{ ...nightly, timezone: 'Nowhere/City' }] })).toThrow(
-      /timezone must be an IANA zone name/,
     );
     expect(() => parsePlaybooksFile({ playbooks: [{ ...nightly, principal: 'u-coordinator' }] })).toThrow(
       /must run as a service principal/,

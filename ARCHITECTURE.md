@@ -47,7 +47,7 @@ harness/config-files a ConfigSource that reads HARNESS_CLIENTS_DIR/<id>/client.y
 harness/config-postgres a ConfigSource over versioned rows: client_documents (one live row per
                     client) and client_document_versions (the history).
 harness/db          schema, migrations, the pool, the encryption primitives.
-harness/gateway     the routing schema and the LiteLLM config renderer.
+harness/gateway     the deployment catalogue and the LiteLLM config renderer.
 harness/surface-api the Surface contract and defineSurface(): cards, forms, conversations, and
                     MemorySurface under its testing subpath. Depends on @harness/shared and zod.
 harness/identity-api the Identity contract and defineIdentityProvider(): Principal, the five
@@ -76,6 +76,8 @@ surfaces/memory     the in-process adapter: no transport, used by the suite and 
 surfaces/http       the surface a headless caller speaks as; opens no socket, posts nothing, and
                     exists so a run driven over the run API has a thread key and an identity
                     namespace.
+surfaces/web        chat, cards and forms over HTTP for a tenant with no Slack; a SurfaceSession
+                    over the HTTP seam.
 identities/static   the identity plug-in that answers for the principals a client document's
                     identity section declares, plus its surface defaults.
 identities/slack-groups the identity plug-in that resolves a level from a Slack workspace's own
@@ -116,10 +118,10 @@ host        ..>  { surfaces/*, identities/*, runtimes/* }   (runtime only: dynam
 
 `@harness/config-api` is the contract a `ConfigSource` implements and the one every reader of a
 client document imports; it is what keeps `core-tools`, `gateway`, `host` and `scripts` agreeing
-on what a document is without importing each other. `@harness/gateway` is no longer the one
-package with no edge to `@harness/shared`: `pnpm gateway:config` now opens the client's own
-`ConfigSource` through `@harness/core-tools`, which is where that edge, and the one to
-`@harness/db`, come from.
+on what a document is without importing each other. `@harness/gateway` reaches none of them: it
+renders `harness/gateway/catalogue.yaml`, the deployments a host serves, and a client document
+names one of those per route. It is the one package with no workspace dependency at all, which is
+the shape "a deployment's catalogue is not a tenant's configuration" takes in the graph.
 
 `scripts` is a leaf. There are no cycles.
 
@@ -136,6 +138,13 @@ A document reaches a host through a **`ConfigSource`**. Two ship: `files`, which
 prose a person edits is prose in a file — and `postgres`, which reads versioned rows the platform
 writes. `HARNESS_CONFIG_SOURCE` picks one and has no default, because a host that guessed would
 start and serve nobody.
+
+Secrets are `SecretRef`s — `{ env: NAME }` or `{ ref: name }` — and never values. Where a `{ ref }`
+resolves is a second contract beside `ConfigSource`: `SecretSource`, with `env` shipped in
+`@harness/config-api` and `postgres` in `@harness/config-postgres` over `client_secrets` and the
+`@harness/db` envelope. `HARNESS_SECRET_SOURCE` names one, with no default. A document's secrets
+resolve once, when its tenant opens, before anything else is built, and reach an adapter as
+**values** on `SurfaceDeps.secretValues` — the host never learns what any of them are called.
 
 A **blueprint** is a complete document with placeholders and a **lock set** of JSON pointers; an
 **overlay** is a tenant's edits as a small JSON Patch. `resolve(blueprint, overlay)` applies the
@@ -326,9 +335,9 @@ is the adapter's business, and `harness/approvals/src/host-vocabulary.test.ts` f
 the host learns the difference.
 
 **The primary surface** is the first surface the schema orders in the client document's `surfaces`
-section (`SURFACE_ORDER`: `slack`, `memory`, `http`, so `http` — which cannot post a card — is
-always last). Approval cards are posted there and only there: one approval, one card, one place
-to answer it. Every loaded surface is still
+section (`SURFACE_ORDER`: `web`, `slack`, `memory`, `http`, so `web` is first when a tenant
+declares it and `http` — which cannot post a card — is always last). Approval cards are posted
+there and only there: one approval, one card, one place to answer it. Every loaded surface is still
 live — a decision is accepted from whichever surface posted the card, which `approvals.surface`
 records, and a staged effect may name any loaded surface in its payload.
 
@@ -372,6 +381,12 @@ A surface either opens its own connection or is reached by a request. One that i
 dedicated deployment and a pooled one alike, because a path is the only place a transport that
 knows nothing about this deployment can be told to carry the tenant.
 
+A surface that is reached by a request offers `http`, and its answer may be a whole body or an
+async iterable of strings the host pipes as they are produced. The host never reads a chunk: an
+adapter owns its own framing end to end, and the web surface's Server-Sent Events frames, its
+route names and its five event names appear nowhere in `harness/host/src` — the host writes what
+it is given and parses none of it.
+
 The host resolves the client from that path through the same resolver a message goes through, so a
 dedicated host refuses another client's id and audits it, and a pooled host opens whichever tenant
 the path names. Then it hands the handler the method, the rest of the path, the lower-cased
@@ -397,9 +412,17 @@ declarations and attached to the GitHub Release as tarballs, with `tool-surface.
 `compose-surface.yaml` beside them. The images are the host and the files worker, at
 `ghcr.io/mgavrila`, and Compose pulls them by `HARNESS_IMAGE_TAG`.
 
-Everything else is private: the kernel, the host, the adapters, the packs. A consumer runs those
-as the image and implements the contracts. That division is the boundary of decision 1b in one
-sentence — the platform depends on what this repository _promises_, not on what it _is_.
+Everything else is private: the kernel, the host, the adapters, the packs. A project outside this
+repository runs those as the image and implements the contracts; it depends on what this
+repository _promises_, not on what it _is_.
+
+One repository, four enforced boundaries. `gateway ◄ os ◄ agents ◄ platform`: `harness/` is the
+OS, `catalog/` is the agents band, and `control-plane/`, `apps/workspace/` and `deploy/` are the
+platform. No kernel package may import any of the four, and `catalog/` may import kernel contracts
+only; both are `pnpm arch` rules, and `scripts/src/domain/boundaries.test.ts` asserts that they
+are still there and still name all four directories. A directory becomes a repository when it
+gains its own owner or release cadence, and the move is mechanical because the boundary was a lint
+rule from the first day.
 
 ## Identity
 

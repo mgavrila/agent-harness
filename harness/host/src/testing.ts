@@ -2,12 +2,13 @@ import { mkdtempSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import type { ClientDocument } from '@harness/config-api';
+import { envSecretSource, type ClientDocument, type SecretSource } from '@harness/config-api';
 import { MemoryConfigSource } from '@harness/config-api/testing';
 import type { KernelConfig, PackRegistry } from '@harness/core-tools';
-import { makeTestDeps, type TestDepsOverrides } from '@harness/core-tools/testing';
+import { TEST_MODELS, makeTestDeps, type TestDepsOverrides } from '@harness/core-tools/testing';
 import type { Db } from '@harness/db';
 import { surfacesOf } from '@harness/approvals';
+import type { Logger } from '@harness/shared';
 import type { Principal } from '@harness/identity-api';
 import { StaticIdentity } from '@harness/identity-api/testing';
 import type { RunSkill } from '@harness/runtime-api';
@@ -135,7 +136,14 @@ export async function hostFixture(
     skills: opts.skills ?? [
       { name: 'sample-skill', version: '1.0.0', description: 'a skill for tests', dir: '/nonexistent' },
     ],
-    model: { baseUrl: 'http://127.0.0.1:1', apiKey: 'sk-test', route: 'chat', fallbackRoute: 'reason' },
+    model: {
+      baseUrl: 'http://127.0.0.1:1',
+      apiKey: 'sk-test',
+      route: 'chat',
+      fallbackRoute: 'reason',
+      model: TEST_MODELS.chat,
+      fallbackModel: TEST_MODELS.reason,
+    },
     budget: {
       maxModelCalls: 30,
       maxToolCalls: 60,
@@ -230,7 +238,11 @@ const FIXTURE_DRAIN_MS = 10_000;
 async function settleDeliveries(pool: HostPool): Promise<void> {
   for (const tenant of pool.tenants.values()) {
     for (const session of tenant.host.surfaces.all) {
-      if (session instanceof MemorySurface) await session.settled();
+      // Duck-typed rather than `instanceof`: two adapters acknowledge before they deliver now,
+      // and a third would be a third import in a file that may not import an adapter at all.
+      // What the fixture needs is the promise, not the class.
+      const settled = (session as { settled?: () => Promise<void> }).settled;
+      if (typeof settled === 'function') await settled.call(session);
     }
   }
 }
@@ -255,6 +267,23 @@ export async function poolFixture(
     trajectories?: Readonly<Record<string, Trajectory>>;
     dedicated?: string;
     env?: Record<string, string | undefined>;
+    /**
+     * Where this pool resolves its tenants' secrets from.
+     *
+     * **The environment source by default**, which is what every deployment has today and what
+     * every existing case in this package was written against: a document naming an `{ env }`
+     * secret this fixture's environment does not set fails with the sentence it has always
+     * failed with, and a `{ ref }` is refused with "this deployment has no secret source". A case
+     * that wants a store — the web surface's bearer, the gateway key — builds a
+     * `MemorySecretSource`, fills it and passes it.
+     */
+    secrets?: SecretSource;
+    /**
+     * Where this pool's log lines go. Silent by default, which is what a suite wants; a case that
+     * asserts on a line — a surface that failed mid-stream, a refusal nothing else records —
+     * passes a collector.
+     */
+    log?: Logger;
   },
 ): Promise<PoolFixture> {
   const source = new MemoryConfigSource(opts.documents.map((document) => ({ document, version: 'v1' })));
@@ -274,11 +303,15 @@ export async function poolFixture(
   const pool = await createHost({
     db,
     env,
-    log: { info() {}, warn() {}, error() {} },
+    log: opts.log ?? { info() {}, warn() {}, error() {} },
     // The frozen clock `hostFixture` and `makeTestDeps` share, so a row an approval tool stages
     // under one and a decision taken under the other agree on whether it has expired.
     now: () => new Date('2026-09-15T12:00:00Z'),
     source,
+    // Over **this fixture's own `env`**, not the ambient one, for the reason every other value in
+    // that bag is: a developer's filled-in `.env` must not reach a tenant and change what a case
+    // proves.
+    secrets: opts.secrets ?? envSecretSource(env),
     dedicatedClient: opts.dedicated ?? null,
   });
   const tenant = (clientId: string): Tenant => {

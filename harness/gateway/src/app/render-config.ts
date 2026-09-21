@@ -1,52 +1,39 @@
-import { writeFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { configSourceNameFrom, loadConfigSource } from '@harness/core-tools';
-import { createDb } from '@harness/db';
-import { createLogger, requiredEnv } from '@harness/shared';
-import type { ConfigSource } from '@harness/config-api';
+import { parse as parseYaml } from 'yaml';
+import { DeploymentCatalogue } from '../domain/routing/catalogue.js';
 import { renderLiteLlmConfig } from '../domain/routing/render.js';
 
-const log = createLogger('gateway');
-// harness/gateway/src/app -> harness/gateway. The target stays at the package root because
+// harness/gateway/src/app -> harness/gateway. Both files stay at the package root because
 // docker-compose.yml bind-mounts `../gateway/litellm.config.yaml`: that path is part of the
-// deployment, not of the source layout. Nothing here resolves a *client* from a package path.
+// deployment, not of the source layout. Nothing here resolves a *client* from a package path,
+// and nothing here reads a client at all — the catalogue is the deployment's, not a tenant's.
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
-/** Render one client's routing table into the LiteLLM config the Compose service mounts. */
-export async function renderClientConfig(source: ConfigSource, clientId: string): Promise<string> {
-  const loaded = await source.load(clientId);
-  if (!loaded) throw new Error(`the ${source.name} config source holds no client "${clientId}"`);
+/** Render the deployment catalogue into the LiteLLM config the Compose service mounts. */
+export async function renderCatalogueConfig(): Promise<string> {
+  const source = path.join(packageRoot, 'catalogue.yaml');
+  const catalogue = DeploymentCatalogue.parse(parseYaml(await readFile(source, 'utf8')));
   const target = path.join(packageRoot, 'litellm.config.yaml');
-  await writeFile(target, renderLiteLlmConfig(loaded.document.routing), 'utf8');
+  await writeFile(target, renderLiteLlmConfig(catalogue), 'utf8');
   return target;
 }
 
 /**
- * Render the client `HARNESS_CLIENT` names, through whatever source `HARNESS_CONFIG_SOURCE` does.
+ * `pnpm gateway:config`.
  *
- * The database handle is opened on the `postgres` branch and on no other: the stored source needs
- * one, and reading a document out of a mounted directory should not open a connection pool to
- * render a YAML file, which is why the registry's handle is optional. It is closed on the failure
- * path too, so a bad routing table exits rather than hanging on an open pool.
+ * No client, no config source and no database: the deployments a gateway serves are the
+ * deployment's own configuration, and every tenant on this host names them from its document.
  */
 async function main(): Promise<void> {
-  const clientId = requiredEnv('HARNESS_CLIENT', ' (whose routing table to render)');
-  const name = configSourceNameFrom(process.env);
-  const opened = name === 'postgres' ? createDb() : null;
-  const source = await loadConfigSource(name, { env: process.env, log, db: opened?.db });
-  try {
-    const target = await renderClientConfig(source, clientId);
-    console.log(`rendered ${clientId} routing to ${target}`);
-  } finally {
-    await source.close?.();
-    await opened?.close();
-  }
+  const target = await renderCatalogueConfig();
+  console.log(`rendered the deployment catalogue to ${target}`);
 }
 
 main().catch((err: unknown) => {
-  // The schema exists to turn an invalid routing table into a readable listing; without this
-  // the rejection went unhandled and the operator got a stack trace with the listing buried.
+  // The schema exists to turn an invalid catalogue into a readable listing; without this the
+  // rejection went unhandled and the operator got a stack trace with the listing buried.
   process.stderr.write(`${err instanceof Error ? err.message : String(err)}\n`);
   process.exitCode = 1;
 });

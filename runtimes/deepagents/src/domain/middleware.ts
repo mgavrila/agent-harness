@@ -26,19 +26,21 @@ export function kernelToolFilter() {
 }
 
 /**
- * A chat model on one gateway route. The base URL is the proxy's OpenAI-compatible endpoint; the
- * key is the proxy's master key, so no vendor key is ever in this process; `user` is the
- * principal id, which the proxy records as the spender (spec decision 16).
+ * A chat model on one gateway deployment, named as the client document names it — never a route
+ * name, which on a pooled host would be every tenant's deployment at once. The base URL is the
+ * proxy's OpenAI-compatible endpoint; the key is the proxy's master key or this tenant's own, so
+ * no vendor key is ever in this process; `user` is the principal id, which the proxy records as
+ * the spender (spec decision 16).
  */
-export function chatModel(model: RunModel, route: string): ChatOpenAI {
+export function chatModel(model: RunModel, deployment: string): ChatOpenAI {
   return new ChatOpenAI({
-    model: route,
+    model: deployment,
     apiKey: model.apiKey,
     configuration: { baseURL: `${model.baseUrl.replace(/\/+$/, '')}/v1` },
     user: model.user,
     // No retry inside the SDK. A retry the run cannot see is a model call the budget does not
-    // count and a wait the run timeout does not know about; the gateway retries a flaky route on
-    // its own, and a route that stays down is what `fallbackRoute` is for.
+    // count and a wait the run timeout does not know about; the gateway retries a flaky
+    // deployment on its own, and one that stays down is what `fallbackModel` is for.
     maxRetries: 0,
   });
 }

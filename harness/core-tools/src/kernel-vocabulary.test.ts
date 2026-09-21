@@ -103,6 +103,14 @@ const DEPLOYMENT_FORBIDDEN = /demo-practice|hermes/i;
  * in an adapter, or the comment that carries it should say what the kernel actually means: a
  * model *vendor*, a *record*, a *file*, a *surface*. Adding an entry here is a decision to write
  * down in ARCHITECTURE.md, not a way to get a red suite green.
+ *
+ * **The scanned roots are the kernel's own, and they do not widen.** Every entry below names a
+ * kernel tree; the platform's directories — `catalog/`, `control-plane/`, `apps/` and `deploy/` —
+ * are outside this list by construction and must stay outside it. The platform names tenants,
+ * customers and vendors because that is what it is for, and a scan that reached it would either
+ * fail on the product's own vocabulary or be relaxed until it proved nothing about the kernel.
+ * `harness/host/src` is scanned, so no route name, event name or frame from the web surface may
+ * appear there.
  */
 const SCANNED = [
   {
@@ -381,6 +389,31 @@ describe('the kernel, the packs, the identity contract and the evals name no are
 
   it('keeps the allowlist empty, because every entry is a kernel that still knows about a pack', () => {
     expect(ALLOWLIST).toEqual([]);
+  });
+
+  it('scans the kernel’s own trees and none of the platform’s', () => {
+    const roots = [...new Set(SCANNED.map((entry) => entry.root))].sort();
+    expect(roots).toEqual([
+      'evals/src',
+      'harness/config-api/src',
+      'harness/core-tools/src',
+      'harness/files/src',
+      'harness/host/src',
+      'harness/identity-api/src',
+      'harness/runtime-api/src',
+      'identities/slack-groups/src',
+      'identities/static/src',
+      'packs/healthcare/src',
+      'packs/stories/src',
+      'runtimes/deepagents/src',
+      'surfaces/http/src',
+    ]);
+    for (const root of roots) {
+      expect(root.startsWith('catalog/'), root).toBe(false);
+      expect(root.startsWith('control-plane/'), root).toBe(false);
+      expect(root.startsWith('apps/'), root).toBe(false);
+      expect(root.startsWith('deploy/'), root).toBe(false);
+    }
   });
 
   it('catches the words it claims to, so an empty result means the rule ran', () => {

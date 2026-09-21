@@ -3,7 +3,14 @@ import * as z from 'zod/v4';
 import { eq } from 'drizzle-orm';
 import { modelCalls, runs } from '@harness/db';
 import { ModelOutputError, ToolError } from '@harness/shared';
-import { makeTestDeps, useTestDb, startFakeGateway, type FakeGateway, type TestDepsOverrides } from '../../testing.js';
+import {
+  TEST_MODELS,
+  makeTestDeps,
+  startFakeGateway,
+  useTestDb,
+  type FakeGateway,
+  type TestDepsOverrides,
+} from '../../testing.js';
 import type { ToolDeps } from '../tooling/types.js';
 import { callModel, callModelJson, gatewayFromEnv } from './gateway.js';
 import { EMBED_ROUTE } from './types.js';
@@ -20,13 +27,19 @@ afterAll(async () => {
 
 function deps(overrides: TestDepsOverrides = {}): ToolDeps {
   return makeTestDeps(db, {
-    gateway: { baseUrl: gateway.url, apiKey: 'sk-test-key', timeoutMs: 5_000, maxCallsPerRun: 100 },
+    gateway: {
+      baseUrl: gateway.url,
+      apiKey: 'sk-test-key',
+      models: TEST_MODELS,
+      timeoutMs: 5_000,
+      maxCallsPerRun: 100,
+    },
     ...overrides,
   });
 }
 
 describe('callModel', () => {
-  it('posts to the route deployment with the master key and returns the text', async () => {
+  it("posts the document's own model string for the route, with the master key", async () => {
     gateway.calls.length = 0;
     gateway.setResponder(() => ({ content: 'hello there', inputTokens: 40, outputTokens: 9, costHeader: '0.000123' }));
     const out = await callModel(deps(), { route: 'chat', messages: [{ role: 'user', content: 'hi' }] });
@@ -35,19 +48,24 @@ describe('callModel', () => {
     expect(out.outputTokens).toBe(9);
     expect(out.costUsd).toBeCloseTo(0.000123, 9);
     const call = gateway.calls.at(-1)!;
-    expect(call.model).toBe('chat');
+    // The deployment this tenant's document names for `chat`, never the route name: on a pooled
+    // host a route name on the wire would make every tenant's chat the same deployment.
+    expect(call.model).toBe(TEST_MODELS.chat);
     expect(call.authorization).toBe('Bearer sk-test-key');
   });
 
   it('records one model_calls row per call, with the run id from the session context', async () => {
     const [run] = await db.insert(runs).values({ client: 'test', principalId: 'test-caller' }).returning();
     const d = deps({ context: { runId: run.id } });
+    // The proxy answers with whatever it served the call from, which may be a fallback of its
+    // own. The row records what was *asked for*, so a tenant's spend joins to the deployment it
+    // named rather than to one it has never heard of.
     gateway.setResponder(() => ({
       content: 'x',
       inputTokens: 5,
       outputTokens: 2,
       costHeader: '0.5',
-      modelName: 'gemini/gemini-3-flash-preview',
+      modelName: 'some/upstream-the-proxy-chose',
     }));
     await callModel(d, { route: 'extract', messages: [{ role: 'user', content: 'go' }] });
     const rows = await db.select().from(modelCalls).where(eq(modelCalls.runId, run.id));
@@ -55,7 +73,7 @@ describe('callModel', () => {
     expect(rows[0]).toMatchObject({
       client: 'test',
       route: 'extract',
-      model: 'gemini/gemini-3-flash-preview',
+      model: TEST_MODELS.extract,
       inputTokens: 5,
       outputTokens: 2,
     });
@@ -100,7 +118,7 @@ describe('callModel', () => {
       },
     }));
     await expect(callModel(deps(), { route: 'extract', messages: [{ role: 'user', content: 'go' }] })).rejects.toThrow(
-      /daily budget/,
+      'model route "extract" is over its budget',
     );
   });
 
@@ -125,7 +143,13 @@ describe('callModel', () => {
     const [run] = await db.insert(runs).values({ client: 'test', principalId: 'test-caller' }).returning();
     const d = deps({
       context: { runId: run.id },
-      gateway: { baseUrl: gateway.url, apiKey: 'sk-test-key', timeoutMs: 5_000, maxCallsPerRun: 2 },
+      gateway: {
+        baseUrl: gateway.url,
+        apiKey: 'sk-test-key',
+        models: TEST_MODELS,
+        timeoutMs: 5_000,
+        maxCallsPerRun: 2,
+      },
     });
     gateway.setResponder(() => ({ content: 'x' }));
     await callModel(d, { route: 'chat', messages: [{ role: 'user', content: '1' }] });
@@ -146,7 +170,13 @@ describe('callModel', () => {
     const other = deps({
       client: 'other-client',
       context: { runId: run.id },
-      gateway: { baseUrl: gateway.url, apiKey: 'sk-test-key', timeoutMs: 5_000, maxCallsPerRun: 2 },
+      gateway: {
+        baseUrl: gateway.url,
+        apiKey: 'sk-test-key',
+        models: TEST_MODELS,
+        timeoutMs: 5_000,
+        maxCallsPerRun: 2,
+      },
     });
     await callModel(other, { route: 'chat', messages: [{ role: 'user', content: '1' }] });
     await callModel(other, { route: 'chat', messages: [{ role: 'user', content: '2' }] });
@@ -158,14 +188,28 @@ describe('callModel', () => {
     const mine = deps({
       client: 'test',
       context: { runId: run.id },
-      gateway: { baseUrl: gateway.url, apiKey: 'sk-test-key', timeoutMs: 5_000, maxCallsPerRun: 2 },
+      gateway: {
+        baseUrl: gateway.url,
+        apiKey: 'sk-test-key',
+        models: TEST_MODELS,
+        timeoutMs: 5_000,
+        maxCallsPerRun: 2,
+      },
     });
     await expect(callModel(mine, { route: 'chat', messages: [{ role: 'user', content: '1' }] })).resolves.toBeTruthy();
   });
 
   it('does not count calls made with no run against the breaker', async () => {
     gateway.setResponder(() => ({ content: 'x' }));
-    const d = deps({ gateway: { baseUrl: gateway.url, apiKey: 'sk-test-key', timeoutMs: 5_000, maxCallsPerRun: 1 } });
+    const d = deps({
+      gateway: {
+        baseUrl: gateway.url,
+        apiKey: 'sk-test-key',
+        models: TEST_MODELS,
+        timeoutMs: 5_000,
+        maxCallsPerRun: 1,
+      },
+    });
     await callModel(d, { route: 'chat', messages: [{ role: 'user', content: '1' }] });
     await expect(callModel(d, { route: 'chat', messages: [{ role: 'user', content: '2' }] })).resolves.toBeTruthy();
   });
@@ -177,7 +221,15 @@ describe('callModel', () => {
     });
     await expect(
       callModel(
-        deps({ gateway: { baseUrl: gateway.url, apiKey: 'sk-test-key', timeoutMs: 30, maxCallsPerRun: 100 } }),
+        deps({
+          gateway: {
+            baseUrl: gateway.url,
+            apiKey: 'sk-test-key',
+            models: TEST_MODELS,
+            timeoutMs: 30,
+            maxCallsPerRun: 100,
+          },
+        }),
         {
           route: 'chat',
           messages: [{ role: 'user', content: 'go' }],
@@ -273,24 +325,29 @@ describe('callModelJson', () => {
  */
 describe('gatewayFromEnv', () => {
   it('requires a master key', () => {
-    expect(() => gatewayFromEnv({})).toThrow(/LITELLM_MASTER_KEY/);
+    expect(() => gatewayFromEnv({}, TEST_MODELS)).toThrow(/LITELLM_MASTER_KEY/);
   });
 
   it('defaults to loopback port 4000', () => {
-    expect(gatewayFromEnv({ LITELLM_MASTER_KEY: 'sk-x' }).baseUrl).toBe('http://127.0.0.1:4000');
+    expect(gatewayFromEnv({ LITELLM_MASTER_KEY: 'sk-x' }, TEST_MODELS).baseUrl).toBe('http://127.0.0.1:4000');
   });
 
   it('reads the base URL, the timeout and the call ceiling off the map it was given', () => {
-    const gateway = gatewayFromEnv({
-      LITELLM_MASTER_KEY: 'sk-x',
-      HARNESS_GATEWAY_URL: 'http://gateway.internal:4000/',
-      HARNESS_GATEWAY_TIMEOUT_MS: '30000',
-      HARNESS_GATEWAY_MAX_CALLS_PER_RUN: '7',
-    });
-    // The trailing slash goes, so a joined path never doubles it.
+    const gateway = gatewayFromEnv(
+      {
+        LITELLM_MASTER_KEY: 'sk-x',
+        HARNESS_GATEWAY_URL: 'http://gateway.internal:4000/',
+        HARNESS_GATEWAY_TIMEOUT_MS: '30000',
+        HARNESS_GATEWAY_MAX_CALLS_PER_RUN: '7',
+      },
+      TEST_MODELS,
+    );
+    // The trailing slash goes, so a joined path never doubles it. The deployment names come from
+    // the document and never from the environment: this deployment's address, that tenant's models.
     expect(gateway).toEqual({
       baseUrl: 'http://gateway.internal:4000',
       apiKey: 'sk-x',
+      models: TEST_MODELS,
       timeoutMs: 30_000,
       maxCallsPerRun: 7,
     });

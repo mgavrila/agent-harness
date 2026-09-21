@@ -1,7 +1,7 @@
 import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { gatewayFromEnv, loadPacks, type Pack } from '@harness/core-tools';
+import { ROUTES, gatewayFromEnv, loadPacks, type Pack, type Route } from '@harness/core-tools';
 import { describeError, optionalEnv } from '@harness/shared';
 import { runEvals } from '../domain/orchestrate.js';
 
@@ -109,6 +109,42 @@ export function parseLimitFlag(argv: readonly string[]): LimitFlagResult {
   return { ok: true, limit: Number(raw) };
 }
 
+type ServingModelResult = { ok: true; models: Record<Route, string> } | { ok: false; error: string };
+
+/**
+ * Which deployment serves each route for this run, from `EVALS_SERVING_MODEL`.
+ *
+ * A server reads this off the client document it loads; the eval runner loads none, so the run
+ * says on its environment what it is measuring — and it must say it for every route, because the
+ * kernel now sends the deployment's name on the wire and a missing one would reach the gateway
+ * as `undefined`. The same map is what the report records as `serving_model`, so the report says
+ * exactly what was served.
+ */
+export function parseServingModel(raw: string | undefined): ServingModelResult {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw ?? '{}');
+  } catch {
+    return { ok: false, error: 'EVALS_SERVING_MODEL must be a JSON object of route to model identifier' };
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    return { ok: false, error: 'EVALS_SERVING_MODEL must be a JSON object of route to model identifier' };
+  }
+  const given = parsed as Record<string, unknown>;
+  const missing = ROUTES.filter((route) => typeof given[route] !== 'string' || given[route] === '');
+  if (missing.length > 0) {
+    return {
+      ok: false,
+      error: `EVALS_SERVING_MODEL names no model for ${missing.join(', ')}; it needs one per route (${ROUTES.join(', ')})`,
+    };
+  }
+  const unknown = Object.keys(given).filter((key) => !(ROUTES as readonly string[]).includes(key));
+  if (unknown.length > 0) {
+    return { ok: false, error: `EVALS_SERVING_MODEL names ${unknown.join(', ')}, which is not a route` };
+  }
+  return { ok: true, models: Object.fromEntries(ROUTES.map((r) => [r, given[r] as string])) as Record<Route, string> };
+}
+
 type UpdateBaselineFlagResult = { ok: true; update: boolean } | { ok: false; error: string };
 
 /**
@@ -149,6 +185,10 @@ export function parseUpdateBaselineFlag(argv: readonly string[]): UpdateBaseline
  *                        the command line.
  *   --update-baseline   After scoring, write the report to the --baseline path (default
  *                        evals/baseline.json). `=true` is accepted too; `=false` is a no-op.
+ *
+ * `EVALS_SERVING_MODEL` is this run's routing table: a JSON object naming one deployment per
+ * route, all five of them, since the runner loads no client document. A missing route is a usage
+ * error, exit 2, with nothing run.
  */
 // Guarded, not bare: `cli.test.ts` imports the two flag parsers above, and an
 // unguarded entrypoint would run a whole eval the moment that import resolved.
@@ -203,7 +243,12 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   }
 
   const corpusDir = path.resolve(flag('corpus') ?? evals.corpusDir ?? path.dirname(evals.casesFile));
-  const gateway = gatewayFromEnv(process.env);
+  const serving = parseServingModel(optionalEnv('EVALS_SERVING_MODEL'));
+  if (!serving.ok) {
+    process.stderr.write(`${serving.error}\n`);
+    process.exit(2);
+  }
+  const gateway = gatewayFromEnv(process.env, serving.models);
   // `--gateway` overrides only the proxy's base URL, for pointing a run at a
   // gateway other than `HARNESS_GATEWAY_URL` (a staging proxy, a fake one in
   // an ad hoc smoke test). The key still comes from the environment: a
@@ -211,7 +256,6 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   // `LITELLM_MASTER_KEY` does not.
   const gatewayOverride = flag('gateway');
   if (gatewayOverride) gateway.baseUrl = gatewayOverride.replace(/\/+$/, '');
-  const routing = JSON.parse(optionalEnv('EVALS_SERVING_MODEL') ?? '{}') as Record<string, string>;
   const limit = limitFlag.limit;
   const baselineFile = path.resolve(flag('baseline') ?? path.join(repoRoot, 'evals/baseline.json'));
 
@@ -224,10 +268,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     databaseUrl: optionalEnv('EVALS_DATABASE_URL') ?? 'postgres://harness:harness@localhost:15432/harness_evals',
     gateway,
     judgeDeps: null,
-    servingModel:
-      Object.keys(routing).length > 0
-        ? routing
-        : { extract: "see the client document's routing section", judge: "see the client document's routing section" },
+    // What was served, from the one map the run actually called with.
+    servingModel: serving.models,
     evalSetVersion: flag('version') ?? '1.0.0',
     limit,
     packs: toMeasure.names,

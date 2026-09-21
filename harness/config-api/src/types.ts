@@ -1,6 +1,7 @@
-import type { ClientDocument } from './document.js';
+import type { ClientDocument, SecretRef } from './document.js';
 
-// `SecretRef` lives in `document.ts`, next to the `SecretRefShape` it is inferred from.
+// `SecretRef` and `SecretRefShape` live in `secret-ref.ts`, which `document.ts` and `routing.ts`
+// both import — a section of the document cannot import the document.
 
 /** One operation of the JSON Patch subset an overlay may use (spec decision 3). */
 export type PatchOp =
@@ -55,4 +56,62 @@ export interface ConfigSource {
   watch?(clientId: string, onChange: (version: string) => void): () => void;
   list?(): Promise<string[]>;
   close?(): Promise<void>;
+}
+
+/**
+ * Where a secret comes from.
+ *
+ * Two methods and no `list`, deliberately: a host resolves what a document names and never
+ * enumerates, and the platform's control plane owns the store and lists it with its own SQL (spec
+ * section 13.7). `name` is what `HARNESS_SECRET_SOURCE` calls this implementation.
+ *
+ * `resolve` answers the secret's **value**. It raises a `ConfigError` whose message is a clause
+ * about the *reference* — "this deployment does not set it", "this deployment's secret store
+ * holds no such secret for that client" — and never the value, never the row and never a
+ * statement: `resolveSecrets` puts the client, the surface and the field in front of that clause,
+ * because the signature here deliberately does not carry them. Anything that is not a
+ * `ConfigError` is treated as a source that broke rather than a secret that is missing.
+ *
+ * **An implementation must never place a secret value in any error it throws.** A `ConfigError`'s
+ * message is shown to an operator and can be stored; anything else has its *kind* — the
+ * constructor name and a `code` — written to the log, and its message deliberately dropped,
+ * because a driver's message is where a connection string or a statement fragment turns up
+ * (invariant 21). A source therefore never needs to redact one, and must never rely on the caller
+ * to. That `code` is printed verbatim, so an implementation that sets one of its own keeps it a
+ * short fixed token — `ECONNREFUSED`, `28P01` — and never free text about what failed.
+ *
+ * `resolve` does **not** have to reject a value that is blank: `resolveSecrets` refuses one for
+ * every source, with the clause an unset variable gets, so no adapter is handed an empty string.
+ *
+ * Every implementation runs `secretSourceConformance` from `@harness/config-api/testing`, which
+ * is what keeps "a source" one thing rather than two.
+ */
+export interface SecretSource {
+  /** Lowercase, stable: `env`, `postgres`. What `HARNESS_SECRET_SOURCE` names. */
+  readonly name: string;
+  resolve(clientId: string, ref: SecretRef): Promise<string>;
+  close?(): Promise<void>;
+}
+
+/**
+ * Every secret one client's document names, resolved to its value.
+ *
+ * Keyed by surface, then by the document's own field name — `{ slack: { botToken: 'xoxb-…' } }` —
+ * which is the shape `SurfaceDeps.secretValues` carries and the reason the host can hand an
+ * adapter its secrets without knowing what any of them are called.
+ *
+ * **Values, not names.** The bag `Plan 11b` shipped carried environment variable names, and a
+ * `{ ref }` has no variable name to carry; the rename from `secrets` to `secretValues` on every
+ * site is what stops a reader from looking a value up as though it were a name.
+ */
+export interface ResolvedSecrets {
+  readonly surfaces: Readonly<Record<string, Readonly<Record<string, string>>>>;
+  /**
+   * This tenant's own gateway key, when its document names one.
+   *
+   * Absent for a tenant with none, and the process key then stands — `gatewayFromEnv`'s
+   * `LITELLM_MASTER_KEY`, which stays required because it is the key for a tenant that declares
+   * none, for the eval runner and for the stdio server.
+   */
+  readonly gatewayKey?: string;
 }

@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { auditLog, runs, threads } from '@harness/db';
 import { parseClientDocument } from '@harness/config-api';
-import { fixtureDocument } from '@harness/config-api/testing';
+import { MemorySecretSource, fixtureDocument } from '@harness/config-api/testing';
 import { MemorySurface } from '@harness/surface-api/testing';
 import { poolFixture, useTestDb, waitFor } from '../../testing.js';
 
@@ -247,7 +247,11 @@ describe('createHost', () => {
   });
 
   it('closes every tenant it opened, and refuses to open another once it is draining', async () => {
-    const f = await poolFixture(db, { documents: [doc('alpha'), doc('beta')] });
+    // A secret source with a `close` to observe: the fixture's default is the environment source,
+    // which has none, so nothing would prove that `pool.close()` reaches it. These documents name
+    // no secret, so this source is never asked to resolve one.
+    const secrets = new MemorySecretSource();
+    const f = await poolFixture(db, { documents: [doc('alpha'), doc('beta')], secrets });
     await f.pool.drain(200);
     expect(f.pool.draining).toBe(true);
     expect(await f.pool.tenantFor('beta')).toBe(f.tenant('beta'));
@@ -255,6 +259,8 @@ describe('createHost', () => {
     expect(f.pool.tenants.size).toBe(0);
     expect(await f.pool.tenantFor('alpha')).toBeNull();
     expect(f.source.closed).toBe(true);
+    // The secret source is per process too, and closed with the config source.
+    expect(secrets.closed).toBe(true);
     await f.close();
   });
 });

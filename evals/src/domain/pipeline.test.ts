@@ -4,6 +4,7 @@ import path from 'node:path';
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { PDFDocument, StandardFonts } from 'pdf-lib';
 import { DEFAULT_POLICY, MASKED, registryOf } from '@harness/core-tools';
+import { TEST_MODELS } from '@harness/core-tools/testing';
 import { definePack, parseExtractionManifest } from '@harness/pack-api';
 import { pack as healthcarePack } from '@harness/pack-healthcare';
 import { generate as generateStories } from '@harness/pack-stories/generate';
@@ -88,7 +89,7 @@ beforeAll(async () => {
   pipeline = await openPipeline({
     databaseUrl: EVALS_DATABASE_URL,
     storageDir: corpus,
-    gateway: { baseUrl: gateway.url, apiKey: 'sk-eval', timeoutMs: 10_000, maxCallsPerRun: 100 },
+    gateway: { baseUrl: gateway.url, apiKey: 'sk-eval', models: TEST_MODELS, timeoutMs: 10_000, maxCallsPerRun: 100 },
     packs: [HEALTHCARE],
   });
 }, 120_000);
@@ -109,7 +110,13 @@ describe('openPipeline', () => {
       openPipeline({
         databaseUrl: 'postgres://nobody@127.0.0.1:1/nothing',
         storageDir: corpus,
-        gateway: { baseUrl: gateway.url, apiKey: 'sk-eval', timeoutMs: 10_000, maxCallsPerRun: 100 },
+        gateway: {
+          baseUrl: gateway.url,
+          apiKey: 'sk-eval',
+          models: TEST_MODELS,
+          timeoutMs: 10_000,
+          maxCallsPerRun: 100,
+        },
         registry: registryOf([]),
       }),
     ).rejects.toThrow('an eval run measures a pack');
@@ -340,7 +347,7 @@ describe('two packs loaded, one measured', () => {
     const shared = {
       databaseUrl: EVALS_DATABASE_URL,
       storageDir: corpus,
-      gateway: { baseUrl: gateway.url, apiKey: 'sk-eval', timeoutMs: 10_000, maxCallsPerRun: 100 },
+      gateway: { baseUrl: gateway.url, apiKey: 'sk-eval', models: TEST_MODELS, timeoutMs: 10_000, maxCallsPerRun: 100 },
       registry: packs,
     };
     stories = await openPipeline({ ...shared, measured: 'stories' });
@@ -420,7 +427,13 @@ describe('both shipped packs loaded in the documented order, the stories pack me
     stories = await openPipeline({
       databaseUrl: EVALS_DATABASE_URL,
       storageDir: storiesCorpus,
-      gateway: { baseUrl: storiesGateway.url, apiKey: 'sk-eval', timeoutMs: 10_000, maxCallsPerRun: 100 },
+      gateway: {
+        baseUrl: storiesGateway.url,
+        apiKey: 'sk-eval',
+        models: TEST_MODELS,
+        timeoutMs: 10_000,
+        maxCallsPerRun: 100,
+      },
       // Healthcare first, exactly as the stories README spells `--packs`: the primary pack
       // is the one this run is *not* measuring, which is the arrangement that used to fail.
       packs: [HEALTHCARE, STORIES],

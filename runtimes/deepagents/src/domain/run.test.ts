@@ -63,7 +63,13 @@ function script(replies: FakeReply[]): void {
 function request(over: Partial<RunRequest> = {}): RunRequest {
   return fixtureRequest({
     tools: fixture.client,
-    model: { baseUrl: gateway.url, apiKey: 'sk-test', route: 'chat', user: 'u-coordinator' },
+    model: {
+      baseUrl: gateway.url,
+      apiKey: 'sk-test',
+      route: 'chat',
+      model: 'acme/gemini/flash',
+      user: 'u-coordinator',
+    },
     skills: [
       {
         name: 'credentialing-intake',
@@ -155,9 +161,17 @@ describe('runDeepAgent', () => {
   });
 
   it('ends with error "cancelled" and no done when the signal aborts mid-run', async () => {
-    gateway.setResponder(() => new Promise<never>(() => {}));
     const controller = new AbortController();
-    setTimeout(() => controller.abort(), 50);
+    // Aborted from inside the model call rather than on a timer. The fake records a call before
+    // it consults the responder, so by the time this runs the request is in flight and
+    // `gateway.calls` already holds exactly one — which is what "mid-run" means here. The timer
+    // this replaces was a guess about how long the run takes to reach its first model call, and
+    // on a slow runner the abort landed before it, taking a different path through the graph and
+    // leaving this case red for a reason that had nothing to do with cancellation.
+    gateway.setResponder(() => {
+      controller.abort();
+      return new Promise<never>(() => {});
+    });
     const events = await run(request({ signal: controller.signal }));
     expect(events).toEqual([{ type: 'error', message: 'cancelled' }]);
     expect(gateway.calls).toHaveLength(1);
@@ -237,9 +251,9 @@ describe('runDeepAgent', () => {
     expect(toolReply.join('\n')).toContain('prefers short answers');
   });
 
-  it('falls back to the second route when the first one fails, and still finishes with done', async () => {
+  it('falls back to the second deployment when the first one fails, and still finishes with done', async () => {
     gateway.setResponder((call) =>
-      call.model === 'chat' ? { status: 500 } : { content: 'answered on the spare route' },
+      call.model === 'acme/gemini/flash' ? { status: 500 } : { content: 'answered on the spare route' },
     );
     const events = await run(
       request({
@@ -247,12 +261,15 @@ describe('runDeepAgent', () => {
           baseUrl: gateway.url,
           apiKey: 'sk-test',
           route: 'chat',
-          fallbackRoute: 'spare',
+          fallbackRoute: 'reason',
+          model: 'acme/gemini/flash',
+          fallbackModel: 'acme/groq/spare',
           user: 'u-coordinator',
         },
       }),
     );
-    expect(gateway.calls.map((c) => c.model)).toEqual(['chat', 'spare']);
+    // Two deployment names on the wire, the document's own, and never the two route names.
+    expect(gateway.calls.map((c) => c.model)).toEqual(['acme/gemini/flash', 'acme/groq/spare']);
     expect(events.at(-1)).toEqual({ type: 'done', text: 'answered on the spare route' });
     // The principal rides on the fallback request too; it is the same run and the same spender.
     for (const call of gateway.calls) expect(call.user).toBe('u-coordinator');

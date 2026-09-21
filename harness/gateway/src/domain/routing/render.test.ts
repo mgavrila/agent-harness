@@ -1,11 +1,27 @@
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, it, expect } from 'vitest';
 import { parse as parseYaml } from 'yaml';
-import { RoutingFile } from '@harness/config-api';
+import { DeploymentCatalogue } from './catalogue.js';
 import { apiKeyEnvFor, renderLiteLlmConfig } from './render.js';
-import { ROUTING } from './routing.test-helpers.js';
 
-/** The fixture as a routing table. The schema is the whole of the parse; the gateway owns none of it. */
-const routing = (yamlText: string): RoutingFile => RoutingFile.parse(parseYaml(yamlText));
+// src/domain/routing -> the package root, where both files live because Compose bind-mounts the
+// rendered one from there.
+const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
+const read = (name: string): string => readFileSync(path.join(packageRoot, name), 'utf8');
+
+/**
+ * The catalogue this deployment ships, read rather than restated.
+ *
+ * Every case below patches this text with `String.replace` to build its negative and variant
+ * cases, so the shipped file's layout is load-bearing: the first entry is the one with a
+ * fallback, `defaults:` is last, and every entry sits at two spaces of indentation.
+ */
+const CATALOGUE = read('catalogue.yaml');
+
+/** The shipped catalogue as a parsed one. The schema is the whole of the parse. */
+const catalogue = (yamlText: string): DeploymentCatalogue => DeploymentCatalogue.parse(parseYaml(yamlText));
 
 describe('apiKeyEnvFor', () => {
   it('maps known provider prefixes', () => {
@@ -21,8 +37,52 @@ describe('apiKeyEnvFor', () => {
   });
 });
 
+describe('DeploymentCatalogue', () => {
+  it('names each deployment by its model unless it says otherwise', () => {
+    const parsed = catalogue(CATALOGUE);
+    expect(parsed.deployments[0].name).toBeUndefined();
+    const named = catalogue(
+      CATALOGUE.replace(
+        '  - model: gemini/gemini-embedding-001\n',
+        '  - name: vectors\n    model: gemini/gemini-embedding-001\n',
+      ),
+    );
+    expect(named.deployments[2].name).toBe('vectors');
+    const out = parseYaml(renderLiteLlmConfig(named)) as { model_list: { model_name: string }[] };
+    expect(out.model_list.map((m) => m.model_name)).toContain('vectors');
+  });
+
+  it('refuses two deployments under one name', () => {
+    const twice = CATALOGUE.replace(
+      '  - model: gemini/gemini-embedding-001\n',
+      '  - model: gemini/gemini-3-flash-preview\n',
+    );
+    expect(DeploymentCatalogue.safeParse(parseYaml(twice)).success).toBe(false);
+  });
+
+  it('refuses a fallback no deployment is named, and says which', () => {
+    const dangling = CATALOGUE.replace('fallbacks: [groq/openai/gpt-oss-120b]', 'fallbacks: [groq/nothing-here]');
+    const result = DeploymentCatalogue.safeParse(parseYaml(dangling));
+    expect(result.success).toBe(false);
+    expect(JSON.stringify(result.error?.issues)).toContain('groq/nothing-here');
+  });
+
+  it('refuses an inline key on a deployment, so a literal credential cannot be smuggled in', () => {
+    const smuggled = CATALOGUE.replace(
+      '    daily_budget_usd: 1\n  - model: gemini/gemini-embedding-001',
+      '    api_key: sk-live\n  - model: gemini/gemini-embedding-001',
+    );
+    expect(DeploymentCatalogue.safeParse(parseYaml(smuggled)).success).toBe(false);
+  });
+
+  it('supplies every default when `defaults` is absent', () => {
+    const bare = catalogue(CATALOGUE.slice(0, CATALOGUE.indexOf('defaults:')));
+    expect(bare.defaults).toEqual({ daily_budget_usd: 1, num_retries: 2, request_timeout_s: 120 });
+  });
+});
+
 describe('renderLiteLlmConfig', () => {
-  const rendered = renderLiteLlmConfig(routing(ROUTING));
+  const rendered = renderLiteLlmConfig(catalogue(CATALOGUE));
   const parsed = parseYaml(rendered) as {
     model_list: { model_name: string; litellm_params: Record<string, unknown> }[];
     router_settings: { fallbacks: Record<string, string[]>[]; num_retries: number };
@@ -30,31 +90,38 @@ describe('renderLiteLlmConfig', () => {
     litellm_settings: Record<string, unknown>;
   };
 
-  it('emits one deployment per route plus one per fallback', () => {
+  it('emits one deployment per catalogue entry, under the name a document names it by', () => {
     expect(parsed.model_list.map((m) => m.model_name)).toEqual([
-      'chat',
-      'chat-fallback-1',
-      'extract',
-      'reason',
-      'judge',
-      'embed',
+      'gemini/gemini-3-flash-preview',
+      'groq/openai/gpt-oss-120b',
+      'gemini/gemini-embedding-001',
     ]);
   });
 
   it('wires the api key env var and the daily budget onto every deployment', () => {
-    const chat = parsed.model_list[0].litellm_params;
-    expect(chat).toMatchObject({
+    expect(parsed.model_list[0].litellm_params).toMatchObject({
       model: 'gemini/gemini-3-flash-preview',
       api_key: 'os.environ/GEMINI_API_KEY',
       max_budget: 2,
       budget_duration: '1d',
     });
-    const fallback = parsed.model_list[1].litellm_params;
-    expect(fallback).toMatchObject({ model: 'groq/openai/gpt-oss-120b', api_key: 'os.environ/GROQ_API_KEY' });
+    expect(parsed.model_list[1].litellm_params).toMatchObject({
+      model: 'groq/openai/gpt-oss-120b',
+      api_key: 'os.environ/GROQ_API_KEY',
+      max_budget: 1,
+    });
   });
 
-  it('declares the fallback chain in router_settings', () => {
-    expect(parsed.router_settings.fallbacks).toEqual([{ chat: ['chat-fallback-1'] }]);
+  it('falls back to the catalogue default budget for an entry that names none', () => {
+    const unbudgeted = renderLiteLlmConfig(catalogue(CATALOGUE.replace('    daily_budget_usd: 2\n', '')));
+    const out = parseYaml(unbudgeted) as { model_list: { litellm_params: Record<string, unknown> }[] };
+    expect(out.model_list[0].litellm_params.max_budget).toBe(1);
+  });
+
+  it('declares the fallback chain in router_settings, for the entries that have one', () => {
+    expect(parsed.router_settings.fallbacks).toEqual([
+      { 'gemini/gemini-3-flash-preview': ['groq/openai/gpt-oss-120b'] },
+    ]);
     expect(parsed.router_settings.num_retries).toBe(2);
   });
 
@@ -71,21 +138,37 @@ describe('renderLiteLlmConfig', () => {
     expect(rendered).not.toMatch(/sk-/);
   });
 
+  it('says in its header where it came from', () => {
+    expect(rendered.startsWith('# GENERATED FILE - do not edit by hand.\n')).toBe(true);
+    expect(rendered).toContain('harness/gateway/catalogue.yaml');
+  });
+
   it('passes api_base through for a local endpoint', () => {
-    const local = routing(
-      ROUTING.replace(
-        '  judge:\n    model: groq/openai/gpt-oss-120b\n    daily_budget_usd: 1\n',
-        '  judge:\n    model: hosted_vllm/Qwen/Qwen3-8B\n    api_base: http://vllm:8000/v1\n',
+    const local = catalogue(
+      CATALOGUE.replace(
+        '  - model: groq/openai/gpt-oss-120b\n    daily_budget_usd: 1\n',
+        '  - name: groq/openai/gpt-oss-120b\n    model: hosted_vllm/Qwen/Qwen3-8B\n    api_base: http://vllm:8000/v1\n',
       ),
     );
     const out = parseYaml(renderLiteLlmConfig(local)) as {
       model_list: { model_name: string; litellm_params: Record<string, unknown> }[];
     };
-    const judge = out.model_list.find((m) => m.model_name === 'judge')!;
-    expect(judge.litellm_params).toMatchObject({ model: 'hosted_vllm/Qwen/Qwen3-8B', api_base: 'http://vllm:8000/v1' });
+    const spare = out.model_list.find((m) => m.model_name === 'groq/openai/gpt-oss-120b')!;
+    expect(spare.litellm_params).toMatchObject({
+      model: 'hosted_vllm/Qwen/Qwen3-8B',
+      api_base: 'http://vllm:8000/v1',
+    });
   });
 
   it('is deterministic', () => {
-    expect(renderLiteLlmConfig(routing(ROUTING))).toBe(rendered);
+    expect(renderLiteLlmConfig(catalogue(CATALOGUE))).toBe(rendered);
+  });
+
+  it('is what the committed litellm.config.yaml holds, byte for byte', () => {
+    // The Compose service bind-mounts that exact file, so a catalogue edited without running
+    // `pnpm gateway:config` would ship a proxy serving the previous set of deployments — and a
+    // document naming a deployment the file does not hold fails at its first model call, in
+    // production, not here. Run `pnpm gateway:config` and commit both.
+    expect(rendered).toBe(read('litellm.config.yaml'));
   });
 });

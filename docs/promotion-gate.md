@@ -218,13 +218,14 @@ returned found no restricted values either.
 To produce a real first baseline, on a day with quota:
 
 ```bash
-EVALS_SERVING_MODEL='{"extract":"gemini/gemini-3-flash-preview"}' \
+# EVALS_SERVING_MODEL names one deployment per route, all five; .env.example has the shape.
+EVALS_SERVING_MODEL='{"chat":"gemini/gemini-3-flash-preview","extract":"gemini/gemini-3-flash-preview","reason":"gemini/gemini-3-flash-preview","judge":"groq/openai/gpt-oss-120b","embed":"gemini/gemini-embedding-001"}' \
   pnpm --filter @harness/evals start -- --limit=24 --version=1.0.0-sample24 --update-baseline=true
 ```
 
 Check the report for `FAIL` lines first. A baseline is only worth committing
-when the failure rate is near zero; otherwise raise the daily budget, add a
-fallback deployment to the client document's own `routing` section, or run a smaller sample.
+when the failure rate is near zero; otherwise raise the deployment's daily budget in
+`harness/gateway/catalogue.yaml`, give it a fallback there, or run a smaller sample.
 Record the sample size in `eval_set_version`, as above, because a 24-case
 sample and the full 162-case corpus are different eval sets.
 

@@ -367,6 +367,149 @@ row delivers exactly where it would have.
 
 There is no down migration. Recovery from a bad 0009 is a database restore, as for 0008.
 
+## The client store as a write contract
+
+Three tables are written by the platform's control plane and read by the kernel:
+`client_documents`, `client_document_versions` and `client_secrets`. `@harness/config-postgres` is
+**not published** — the platform must neither copy kernel code nor depend on an unpublished
+package — so the columns are the contract instead, and these are the columns as they stand:
+
+```
+client_documents
+  client_id      text        PRIMARY KEY
+  schema_version integer     NOT NULL
+  document       jsonb       NOT NULL     -- a whole resolved ClientDocument
+  version        text        NOT NULL     -- what a host caches by and what watch reports
+  blueprint_ref  text        NULL
+  overlay        jsonb       NULL
+  updated_at     timestamptz NOT NULL DEFAULT now()
+
+client_document_versions
+  id             uuid        PRIMARY KEY DEFAULT gen_random_uuid()
+  client_id      text        NOT NULL
+  version        text        NOT NULL
+  document       jsonb       NOT NULL
+  created_by     text        NULL
+  created_at     timestamptz NOT NULL DEFAULT now()
+  UNIQUE (client_id, version)
+
+client_secrets
+  client_id      text        NOT NULL
+  name           text        NOT NULL     -- [a-z][a-z0-9-]*, what a document's { ref } names
+  ciphertext     bytea       NOT NULL     -- the envelope below, raw
+  updated_at     timestamptz NOT NULL DEFAULT now()
+  PRIMARY KEY (client_id, name)
+```
+
+Four rules a writer keeps, and the kernel's own writer keeps them too:
+
+1. **Both document tables in one transaction.** A live row that moved without a history row is a
+   change nobody can review; a history row with no live row is a version nobody is serving.
+2. **The host's watch follows `client_documents.version`.** The `postgres` source polls that one
+   column every thirty seconds and reopens the tenant when it changes. A content change that does
+   not move `version` is a change the host will not notice, and there is no second signal — which
+   is also why rotating a secret is paired with a version bump.
+3. **A version string is written once.** Writing `(client_id, version)` again with *different*
+   content is refused by the kernel's writer and is forbidden to yours. Write content-hash
+   versions and you cannot hit it by accident.
+4. **The kernel validates on read regardless.** `migrate` and `parseClientDocument` run on every
+   load, the row's key must equal the document's `id`, and `knowledge.path` must be absolute. A
+   malformed row fails that tenant and no other.
+
+### The secret envelope
+
+`client_secrets.ciphertext` holds raw bytes, not base64 and not text:
+
+- AES-256-GCM.
+- Key: `HARNESS_ENCRYPTION_KEY`, base64, decoded to **exactly 32 raw bytes**.
+- IV: 12 random bytes. Tag: 16 bytes. No AAD. Plaintext UTF-8.
+- Blob: `iv(12) || tag(16) || ciphertext`.
+
+A vector to check an implementation against, verified in both directions by the kernel's own
+suite:
+
+```
+key_b64    BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=
+iv_hex     030303030303030303030303
+plaintext  xoxb-test-secret
+blob_hex   03030303030303030303030338da626a160e623fe0c27fbca31a81945d91db61775c3b310e6d303988259a78
+```
+
+`writeClientSecret` in `@harness/config-postgres` is the kernel's own writer for that table, and
+what a test and an operator use; a control plane writes the row itself, to the same shape.
+
+## Secrets from a store
+
+`HARNESS_SECRET_SOURCE` says where a document's `SecretRef`s resolve. It is required and has no
+default, for the reason `HARNESS_CONFIG_SOURCE` has none: a host — or the stdio server,
+`harness/core-tools`, which requires it too — that guessed would come up and refuse every tenant
+whose document named a stored secret, with a message saying this deployment had no secret store —
+which it would have had.
+
+- `env` — `{ env: NAME }` reads the process environment, and `{ ref: name }` is refused when the
+  tenant opens. This is every deployment before Plan 11c and every dedicated one after it.
+- `postgres` — `{ ref: name }` selects `client_secrets` by `(client_id, name)` and decrypts with
+  `HARNESS_ENCRYPTION_KEY`. `{ env: NAME }` **still means the environment**, so a document may mix
+  the two: a stored bot token and a deployment-wide gateway URL is the ordinary case.
+
+Secrets resolve **once, when the tenant opens**, before anything else is built — which is what
+makes "add a tenant with no restart" true on a pooled host: write the document and the rows, and
+the tenant opens on its first request. It is also why a rotation needs one more write.
+
+### A tenant's secrets are not a deployment's settings
+
+This is the rule the rest of this section exists to serve, so it is worth stating on its own.
+
+**`.env.example` and a host's environment are a deployment's**: the database URLs,
+`HARNESS_ENCRYPTION_KEY`, `LITELLM_MASTER_KEY`, `HARNESS_HOST_TOKEN`, `HARNESS_SECRET_SOURCE`, the
+config source, the ports and the image tag. A **tenant's** credentials — a bot token, a signing
+secret, a web bearer, a gateway key — are named by that tenant's document as `{ ref: <name> }` and
+stored as rows in `client_secrets`. The control plane writes them from the platform's own
+interface; nobody edits a file on a host to onboard a client, and nothing restarts.
+
+A **dedicated** host is the one place `{ env: NAME }` still earns its keep: one tenant, one
+process, and an operator who owns both. That tenant's document names its own variables and the
+operator sets them in that host's environment. Two tenants in one process would name two different
+variables, which is the thing a pooled host cannot do and the reason the store exists.
+
+There is no conventional variable for a surface credential, and the Compose stack passes none: a
+Slack adapter reads its bot token, its signing secret and its approvals channel from that tenant's
+own document, and from nothing else. On the platform, all three are entered in its interface — the
+two secrets as rows, the channel id as a document field. On a dedicated host the document names the
+two secrets as `{ env: SOME_NAME }`, the operator sets `SOME_NAME` in `.env`, and **adds
+`SOME_NAME` to the host service's `environment` list** in `harness/compose/docker-compose.yml`,
+which is an explicit allowlist rather than an `env_file`. The request URLs, the bot scopes, the
+event subscriptions and the one-app-per-tenant-versus-one-multi-workspace-app choice are "Slack
+over HTTPS" above, whichever secret source a deployment runs.
+
+### Rotating a secret
+
+`postgresConfigSource.watch` polls `client_documents.version` and nothing else, so a
+`client_secrets` row changing is invisible to a running host. **Pair every rotation with a version
+bump on that tenant's document**, in the same transaction the control plane is already opening:
+
+1. write the new `client_secrets` row;
+2. write the document again under a new version string;
+3. the host notices the version within thirty seconds, drains that tenant's turns and reopens it
+   with the new secret.
+
+Rotating without the bump leaves the old value in use until something else reopens the tenant.
+
+### Diagnosing a tenant that will not open
+
+The refusals name the client, the surface, the field and the secret's *name*, and never its value:
+
+```
+client "acme" names the secret "web-token" for web.token, and this deployment's secret store holds no such secret for that client
+surface "@harness/surface-slack": the slack surface has no botToken for this client; surfaces.slack.botToken names it
+client "acme" names the secret "web-token" for web.token, and this deployment has no secret source
+```
+
+The third one means `HARNESS_SECRET_SOURCE=env` and a document that names a stored secret. There
+is no `list` on the secret source, deliberately — a host resolves what a document names and never
+enumerates — so "what does the store hold for this tenant" is a question you answer with SQL
+against `client_secrets`, which is the platform's own table.
+
 ## Model calls
 
 Every gateway call inserts a `model_calls` row: run id, client, route, model,
@@ -379,6 +522,33 @@ from model_calls
 where created_at > now() - interval '1 day'
 group by 1, 2 order by 4 desc;
 ```
+
+### A tenant's own gateway key
+
+`routing.gateway.key` is a `SecretRef`, resolved at tenant open like every other, and sent as the
+bearer for that tenant's model calls in place of `LITELLM_MASTER_KEY`:
+
+```yaml
+routing:
+  gateway:
+    key: { ref: gateway-key }
+  routes:
+    chat: { model: acme/gemini/gemini-3-flash-preview }
+```
+
+The route names do not change; the wire shape does. What goes out as `model:` is the deployment
+this document names for that route, so the tenant travels twice over — in the key, which carries
+its own model allow-list and its own `max_budget`, and in the deployment name the platform
+registered for it (`<clientId>/<vendor>/<model>`). On a pooled host a route name on the wire
+would have made every tenant's `chat` the same deployment. The platform creates that virtual key — its aliases, its
+model allow-list, its `max_budget` — and stores its value under the `ref` the document names,
+before the tenant is released; a tenant whose key the gateway does not recognise fails at its
+first model call, not at open. A tenant that names no key uses the process key, which is what
+every deployment does today — and `LITELLM_MASTER_KEY` stays required either way, because it is
+the key for those tenants, for the eval runner and for the stdio server.
+
+`routing:` is strict now: a mistyped `gatway:` is refused when the document loads rather than
+leaving a tenant on the process key in silence.
 
 **This table is not the budget authority.** Two things make it undercount:
 
@@ -398,9 +568,12 @@ select model, sum(spend) from "LiteLLM_SpendLogs"
 where "startTime" > now() - interval '1 day' group by 1;
 ```
 
-A `model route "extract" is over its daily budget` error means LiteLLM refused
-the call, not that the harness declined to make it. Raise `daily_budget_usd` in
-the client document's own `routing` section and re-run `pnpm gateway:config && pnpm gateway:up`.
+A `model route "extract" is over its budget` error means LiteLLM refused the call, not that the
+harness declined to make it. Where to raise it depends on which budget ran out. On a dedicated
+host it is the deployment's: edit `daily_budget_usd` for that entry in
+`harness/gateway/catalogue.yaml` and re-run `pnpm gateway:config && pnpm gateway:up`. On a pooled
+host it is that tenant's virtual key, whose `max_budget` the platform set when it minted the key;
+the client document sets no budget at all, because it names a deployment and nothing more.
 
 ## Document pipeline
 
@@ -448,10 +621,11 @@ The run exits non-zero on a regression against `evals/baseline.json` or on an
 injection case that did not hold. `docs/promotion-gate.md` is the rule; the
 report names which metric moved and by how much.
 
-`EVALS_SERVING_MODEL` is a JSON object of route to model identifier, and it is
-what lands in the report's `serving_model`. Set it from the routing table the
-run actually used; a score with no model behind it is not comparable to
-anything.
+`EVALS_SERVING_MODEL` is a JSON object of route to deployment name — **one entry per route, all
+five, or the run exits 2 naming the ones it is missing**. It is both what the run *sends* as
+`model:` and what lands in the report's `serving_model`: the eval runner loads no client document,
+so this is its routing table. Set it from the document the run is standing in for; a score with no
+model behind it is not comparable to anything.
 
 The judge is off on the CLI path (`judgeDeps: null`), so a CLI run scores every
 free-text field exactly, reports `judge: null`, and omits `judge.agreement_rate`
@@ -464,12 +638,11 @@ including the route being down.
 
 ### Which model a `model_calls` row names
 
-`model_calls.model` records the **route alias** LiteLLM echoes back — `extract`,
-`judge` — not the underlying deployment that served the call. Per-provider cost
-attribution needs the deployment, which LiteLLM returns in the
-`x-litellm-model-id` response header; recording that header is a later change,
-and until then the deployment behind a route is whatever the client document's own `routing`
-section said at the time of the run.
+`model_calls.model` records the deployment the call **asked for**: the string this tenant's
+document names for that route, which is exactly what went out as `model:`. Which upstream the
+gateway then served it from — a fallback, a retry — is the gateway's own business and is in its
+spend tables, keyed by the same name. Per-request attribution to the upstream needs LiteLLM's
+`x-litellm-model-id` response header, which nothing records yet.
 
 ## Storage
 
@@ -613,9 +786,9 @@ One Slack app per tenant, delivering to a URL. The host holds no connection to S
 every event and every button press arrives as a signed POST, which is what lets a host be paused,
 resumed, pooled behind an ingress, or run as one of many in a process.
 
-| App | Variables | Bot scopes | Other settings |
+| App | What the document names | Bot scopes | Other settings |
 |---|---|---|---|
-| The host's Slack app | `SLACK_BOT_TOKEN`, `SLACK_SIGNING_SECRET` | `chat:write`, `app_mentions:read`, `channels:history`, `groups:history`, `im:history`, `im:read`, `im:write`, `mpim:history`, `users:read`, `usergroups:read`, `files:read`, `files:write` | Socket Mode **off**, Interactivity on, both request URLs set |
+| The host's Slack app | `surfaces.slack.botToken`, `surfaces.slack.signingSecret` (both `SecretRef`s) and `surfaces.slack.approvalsChannel` | `chat:write`, `app_mentions:read`, `channels:history`, `groups:history`, `im:history`, `im:read`, `im:write`, `mpim:history`, `users:read`, `usergroups:read`, `files:read`, `files:write` | Socket Mode **off**, Interactivity on, both request URLs set |
 
 **Both request URLs are the same URL**, and it carries the tenant:
 
@@ -627,8 +800,8 @@ Set it under **Event Subscriptions → Request URL** and under **Interactivity &
 Request URL**. Slack sends a one-time `url_verification` challenge when each is saved; the host
 answers it, over the same verification as everything else, so a URL that saves is a URL whose
 signing secret is already right. Subscribe the app to `message.channels`, `message.groups`,
-`message.im`, `message.mpim` and `app_mention`, and invite the bot to `SLACK_APPROVALS_CHANNEL`
-and to every channel it should answer in.
+`message.im`, `message.mpim` and `app_mention`, and invite the bot to the channel
+`surfaces.slack.approvalsChannel` names and to every channel it should answer in.
 
 **There is no app-level token.** `SLACK_APP_TOKEN` is gone, and a deployment that still sets it is
 setting nothing.
@@ -720,6 +893,92 @@ card was posted on — not by which token is present; see "The host and its surf
 Slack, click the "More" (•••) menu, and choose "Copy member ID"; it is a string starting with
 `U`. Paste it into that principal's `surfaces.slack` field.
 
+### The web surface
+
+A tenant with no Slack declares `surfaces.web` and talks to its agent from the platform's
+workspace instead. `surfaces/web/README.md` is the API reference — the four routes, every
+refusal, the caps and the event stream, byte for byte; this is the operator's view of the same
+surface. Its document:
+
+```yaml
+surfaces:
+  web:
+    token: { ref: web-token }   # or { env: WEB_TOKEN }
+    inbox: inbox                # optional; this is the default
+  http: {}
+identity:
+  defaults:
+    web: member                 # optional; may not name lead or admin
+  principals:
+    - { id: u-coordinator, kind: user, level: lead, displayName: Coordinator, surfaces: { web: U012 } }
+```
+
+`web` is first in the surface order, so it is the primary surface and approval cards go to
+`inbox` — a conversation named by the document rather than one this surface creates; a
+conversation exists the moment something is written to it. The host mounts its door at
+`https://<host>/tenants/<clientId>/web/...`, behind whatever terminates TLS in front of the
+deployment. **The bearer is that tenant's own**, resolved from `web.token` at tenant open exactly
+like any other secret, and it lives in `client_secrets` on a pooled deployment — see "Secrets
+from a store" below. It authenticates the platform's workspace, not the person at the keyboard:
+`userId` comes from the request body as given, so the workspace must authenticate the person
+before it calls.
+
+Four routes, each carrying `Authorization: Bearer <the tenant's token>`:
+
+| Method and path | Body | Answers |
+| --- | --- | --- |
+| `POST …/web/messages` | `{ userId, conversation, text, attachments?: [{ name, path }] }` | `202 {"message": MessageRef}` |
+| `GET …/web/conversations/<id>/events` | — | `202`, `text/event-stream` |
+| `POST …/web/actions` | `{ userId, actionId, value, messageRef }` | `202 {}` |
+| `POST …/web/forms` | `{ userId, formId, values, messageRef }` | `202 {}` |
+
+A conversation is created by writing to it, so there is no route that makes one and none that
+lists them. The tenant's identity plug-in resolves `userId`; a user it does not know is answered
+`202` and the refusal arrives on the conversation's stream as a `notice`, because identity is
+resolved after the door has answered.
+
+The stream is Server-Sent Events:
+
+```
+id: 12
+event: message
+data: {"message":{"surface":"web","conversation":"inbox","id":"w7"},"text":"Hello back.","replyTo":null}
+```
+
+Five event names, and two of them carry more than one payload — discriminate on a key, not on the
+name:
+
+| Event | Payload |
+| --- | --- |
+| `delta` | `{ message, delta }` — a reply being written |
+| `message` | `{ message, text, replyTo }`, plus `file: { filename }` when a file was released |
+| `card` | `{ message, card }` for a posted card, or `{ form }` for a dialogue opened from one |
+| `card_update` | `{ message, card }` — the same card, edited in place |
+| `notice` | `{ message, text, replyTo }` about a message, `{ text, userId }` for one person, or `{ text, dropped: true, reason }` after a resume past the window |
+
+Reconnect with `Last-Event-ID` and the stream resumes after that id. A resume the host can no
+longer cover opens with the `dropped` notice, which carries **no id** so a client's resume point
+does not move to an apology — the window is two hundred frames per conversation, in memory, per
+host, so a workspace behind an ingress with more than one host should expect that notice and
+reload the conversation from the run API rather than trust the gap. **A tenant's document being
+edited closes every open stream on it**, the same as a restart: the tenant reopens with a fresh
+window, and a client that was streaming reconnects into a `dropped` notice with `reason: unknown`
+and then whatever the new window holds.
+
+What a caller gets wrong, and what it is told:
+
+| Condition | Answer |
+| --- | --- |
+| body over 1 MiB | `413`, from the host, before the adapter sees it |
+| missing, malformed or wrong bearer | `401 {"error":"unauthorised"}`, one audit row |
+| body is not JSON, or fails the route's shape | `400 {"error":"<what was wrong>"}` |
+| attachment path outside `<storage>/incoming` | `400`, and no run opens |
+| wrong method on a known path | `405` with `allow` |
+| sub-path no route claims | `404` |
+| an `actionId` nobody knows | `202`; delivered, and the handler that does not recognise it answers with a private `notice` on that conversation |
+| a `formId` nobody knows, or one already submitted | `400 {"error":"that form is not open on this surface"}` |
+| a conversation nobody knows | not a refusal; a conversation is created by being written to |
+
 ### Health
 
 Health is on `http://127.0.0.1:${APPROVALS_HEALTH_HOST_PORT:-8787}/healthz` on the host (container port 8787, `APPROVALS_HEALTH_PORT`). It returns counts
@@ -784,20 +1043,24 @@ client must not go is this repository.
    listing every person, or an `identityPlugin.kind: slack-groups` section instead of declaring
    people at all (see "Directory-backed identity" below). A tenant whose principal is missing from
    the document refuses to open.
-3. Add a `surfaces.slack` section (see "Slack over HTTPS" above) and create one Slack app,
-   pasting its tokens, its signing secret and the approvals channel id into `.env`. The section's
-   `teamId` is the id of the workspace that app is installed in, and an event from any other
-   workspace is refused. **Every
-   `SecretRef` a document names must also be on the Compose host service's environment
-   allowlist**, which is an explicit list and not an `env_file`: a variable that is set in `.env`
-   but missing from that list reaches nothing inside the container, and the tenant refuses to
-   open naming a variable the operator can see is set.
+3. Add a `surfaces.slack` section (see "Slack over HTTPS" above) and create one Slack app. The
+   section names four things: `teamId`, the id of the workspace that app is installed in, so an
+   event from any other workspace is refused; `approvalsChannel`, the channel id this tenant's
+   cards go to; and `botToken` and `signingSecret` as `SecretRef`s. On a dedicated host those two
+   are `{ env: SOME_NAME }` refs and the operator sets `SOME_NAME` in `.env`; on the platform they
+   are `{ ref }`s and are entered in its interface. **Every `SecretRef` a document names as
+   `{ env }` must also be on the Compose host service's environment allowlist**, which is an
+   explicit list and not an `env_file`: a variable that is set in `.env` but missing from that list
+   reaches nothing inside the container, and the tenant refuses to open naming a variable the
+   operator can see is set.
 4. Review the document's `persona` and `policy` sections before the first run, and the markdown
    under the directory its `knowledge` section names (`{ source: 'dir', path }`) — the scaffolder
    copied the fixture's, which is a worked example rather than this client's content. Set
    `knowledge: { source: 'store' }` if this client has no knowledge base; nothing requires one.
-5. Review the document's `routing` section, whose `embed` route came from the fixture like every
-   other route, and check its width once with the `curl` under "Knowledge" before the first sync.
+5. Review the document's `routing` section: each route names one deployment the gateway serves,
+   and on a dedicated host every one of those names must be an entry in
+   `harness/gateway/catalogue.yaml`. The `embed` route came from the fixture like every other; check
+   its width once with the `curl` under "Knowledge" before the first sync.
 6. Start it under its own Compose project so it does not collide with another client's
    containers and volumes:
    `COMPOSE_PROJECT_NAME=<slug> docker compose --env-file .env -f harness/compose/docker-compose.yml --profile demo up -d`.
@@ -865,8 +1128,8 @@ in order, with the stack down.
    subscriptions: `message.channels`, `message.groups`, `message.im`, `message.mpim` and
    `app_mention`. Delete the second app. Remove `APPROVALS_SLACK_BOT_TOKEN`,
    `APPROVALS_SLACK_APP_TOKEN`, `SLACK_HOME_CHANNEL`, `SLACK_HOME_CHANNEL_NAME`,
-   `SLACK_ALLOWED_USERS` and `MEMORY_ALLOWED_USERS` from `.env`. Invite the bot to
-   `SLACK_APPROVALS_CHANNEL` and to every channel it should answer in.
+   `SLACK_ALLOWED_USERS` and `MEMORY_ALLOWED_USERS` from `.env`. Invite the bot to the channel
+   the document's `surfaces.slack.approvalsChannel` names and to every channel it should answer in.
 3. **Rewrite `identity.yaml`.** Replace the retired service principals with `svc-host`, or point
    `HARNESS_HOST_PRINCIPAL` at a service id the file already declares; the host refuses to start
    otherwise. Replace the placeholder member ids with real Slack member ids — until you do, every
@@ -951,10 +1214,11 @@ and start the host last.
 3. **Grant the application role** `SELECT, INSERT, UPDATE` on the three new tables and `DELETE` on
    `knowledge_chunks`, as under "Database roles". The sync replaces a document's passages; it never
    deletes a document row, because a document whose file is gone is tombstoned instead.
-4. **Add the `embed` route** to `clients/<name>/routing.yaml` and run `pnpm gateway:config`, then
-   restart the gateway. The route is required: a file without it fails the render with
-   `routing.yaml is invalid:` and the missing key, and nothing is written. Check the width once
-   with the `curl` under "Knowledge" before the first sync.
+4. **Add the `embed` route** to the client document's `routing.routes` section, naming the
+   deployment that serves embeddings, and make sure `harness/gateway/catalogue.yaml` has an entry
+   under that name; then run `pnpm gateway:config` and restart the gateway. The route is required:
+   a document without it fails to load with the missing key named, and nothing opens. Check the
+   width once with the `curl` under "Knowledge" before the first sync.
 5. **New environment variables**, all optional, and these five are the whole list:
    `HARNESS_EMBED_DIMS` (default 1024, read by the kernel's configuration, and it must match the
    column), `HARNESS_HOST_TOKEN` (**unset means the run API answers 401**; the listener runs
@@ -1040,10 +1304,12 @@ of the next section: the released section keeps the version it shipped under, an
 **What a deployment consumes.** Set `HARNESS_IMAGE_TAG=0.2.0` in `.env`; Compose pulls both images
 and builds nothing.
 
-**What the platform repository consumes.** The seven packages are attached to the release as
-tarballs, because GitHub Packages requires an npm scope equal to the repository owner and
-`@harness/*` is not one. Pin them by URL, and override the transitive names too — the tarballs
-depend on one another by exact version:
+**What a project outside this repository consumes.** `catalog/` and `control-plane/` need none of
+this — they sit in this same workspace and resolve `@harness/*` directly, under the boundary
+`ARCHITECTURE.md`, "The client document" describes. A project that is not in this repository pins
+the seven published packages as tarballs attached to the release, because GitHub Packages requires
+an npm scope equal to the repository owner and `@harness/*` is not one. Pin them by URL, and
+override the transitive names too — the tarballs depend on one another by exact version:
 
 ```json
 {
@@ -1233,7 +1499,7 @@ schema always orders it last, because it cannot post an approval card — and gi
 | `POST /v1/runs` | `{ surface, conversation, userId, text, attachments? }` → `202` and a Server-Sent Events stream: `run` with the run id, then the runtime's events, then `result` |
 | `POST /v1/runs/:id/cancel?surface=&userId=` | `{ run_id, cancelled }`; `cancelled` is false when the run had already ended |
 | `GET /v1/threads/:id?surface=&userId=` | that thread and its **most recent** messages, newest last, at most 200 — the tail of a long thread, not its beginning |
-| `GET /v1/status` | six fields: `client`, `surfaces`, `primary_surface`, `runs_in_flight`, `draining` and `scheduler` — the scheduler's own status (`lastTickAt`, `lastOkAt`, `lastError`, `lastErrorAt`, `ticking`), which has nowhere else to be read |
+| `GET /v1/status` | six fields: `client`, `surfaces`, `primary_surface`, `runs_in_flight`, `draining` and `scheduler` — the scheduler's own status (`lastTickAt`, `lastOkAt`, `lastError`, `lastErrorAt`, `ticking`), which has nowhere else to be read. `surfaces` is one object per loaded surface, `{ name, live, detail? }`: `live` is what that surface's adapter says about itself from what it already knows, and `detail` is one fixed sentence it owns. A surface that reports nothing is live, and the route makes no outbound call, so polling it costs a tenant nothing. A surface whose transport was unreachable when the tenant opened stays `live: false` until traffic makes it ask again; nothing retries from this route |
 | `GET /v1/usage?from&to` | per-principal, per-day totals for this tenant; see "Usage" below |
 
 ```bash
@@ -1289,22 +1555,47 @@ the `usage_runs` view it reads selects no text column at all, so there is nothin
 nothing a caller could learn about what was said. This is what a billing or usage-reporting system
 reads; it never reaches the kernel's own tables, and the kernel never knows a customer paid.
 
+### Approvals and memory
+
+Two cursor-paged reads for a dashboard and a memory page, authenticated and tenant-resolved
+exactly like `/v1/usage` — the bearer, then `x-harness-client`:
+
+```
+GET /v1/approvals?status=pending&cursor=<opaque>&limit=100
+GET /v1/memory?scope=client&principal=u-member&cursor=<opaque>&limit=100
+```
+
+Both answer `{ "client": "<id>", "rows": [ … ], "next_cursor": "<opaque>" | null }`. Approvals come
+newest first; memory entries come oldest first, the order the model is shown them in. `status` is
+the column's own vocabulary — `pending`, `approved`, `declined`, `expired`, comma-separated for
+several — and anything else is a `400` naming the four. `limit` defaults to 100, may be 1 to 500,
+and is refused rather than clamped outside that.
+
+An approval row carries `id, action, summary, requested_by, status, decided_by, decided_at,
+decision_note, executed_at, expires_at, surface, conversation_id, created_at` and nothing else:
+the payload is the tool's own arguments and is excluded, encrypted or not. A memory row carries
+`id, scope, principal_id, text, created_by, created_at`.
+
+Neither route resolves a principal. The caller is the control plane acting for the tenant, not a
+person acting as themselves, so these two are tenant-scoped and nothing narrower — which is why
+the column lists are the whole of the guarantee.
+
 ## Playbooks
 
 Scheduled work is the client document's own `playbooks` section, read into the `playbooks` table
-when the host starts, and a scheduler loop inside the host that ticks every 30 seconds. The demo
-ships two playbooks as `svc-playbooks`: `credentialing-expirations` at 07:00 `America/New_York`,
-and `knowledge-sync` at 06:30 in the same zone.
+when the host starts, and a scheduler loop inside the host that ticks every 30 seconds, always in
+UTC (decision 16). The demo ships two playbooks as `svc-playbooks`: `credentialing-expirations`
+at 07:00 UTC, and `knowledge-sync` at 06:30 UTC.
 
 **The section.** One entry per playbook: `name` (the key), `schedule` (cron, five or six fields),
-`timezone` (IANA, default `UTC`), `skill` (the host's own or a loaded pack's), `prompt`,
+`skill` (the host's own or a loaded pack's), `prompt`,
 `principal` (a `svc-…` id the document's own `identity` section declares), `deliver` (`none`, the
 default, or `conversation`), optional `surface` and `conversation`, `cost_cap_usd`, `timeout_s`
 (default 600), `enabled` (default true). The schedule is exactly five or six whitespace-separated
-fields that fire at least once: the wider forms the cron library would otherwise take — `@daily`
-and the rest of that family, seven fields, an ISO one-shot date — are rejected, and so is a
-calendar that can never come round again, such as `0 0 30 2 *`. The timezone is checked at parse
-time too. A malformed document stops the host at open, naming the field. Edit the document and
+fields that fire at least once, evaluated in UTC: the wider forms the cron library would otherwise
+take — `@daily` and the rest of that family, seven fields, an ISO one-shot date — are rejected, and
+so is a calendar that can never come round again, such as `0 0 30 2 *`. A malformed document stops
+the host at open, naming the field. Edit the document and
 reopen the tenant: a playbook removed from it is **disabled, not deleted**, so `playbook_runs`
 keeps its history, and a firing that was due while the host was down is **not replayed**
 (decision 13) — `next_run_at` is recomputed from the clock at every start.
@@ -1348,7 +1639,8 @@ attributed by the gateway, in `model_calls`, not by the runtime), so **the dolla
 trip today**. What bounds a playbook run in practice is `timeout_s`,
 `HARNESS_RUN_MAX_MODEL_CALLS` and `HARNESS_RUN_MAX_TOOL_CALLS` (the runtime ends the run with
 `the run exceeded its budget`), the kernel's `HARNESS_GATEWAY_MAX_CALLS_PER_RUN` for model calls
-a tool makes, and LiteLLM's `daily_budget_usd` per route. The cap becomes live the day a runtime
+a tool makes, and the deployment's own `daily_budget_usd` in the gateway's catalogue, or the
+tenant's virtual key `max_budget`. The cap becomes live the day a runtime
 reads `x-litellm-response-cost` into `usage.costUsd`. Either host-side abort is a decision rather
 than a request: once the reported spend passes the cap, or the host's own timer fires, the run
 ends `error` with `the run exceeded its cost cap` or `the run exceeded its time budget` even if

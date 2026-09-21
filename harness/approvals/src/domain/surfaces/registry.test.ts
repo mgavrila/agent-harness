@@ -44,18 +44,17 @@ describe('loadSurfaces', () => {
   });
 
   it('loads slack and http together, in the documented order, with slack primary', async () => {
-    // Slack's `connect` builds a transport from env and opens nothing: there is no socket to
-    // open any more, and `start()` — which `loadSurfaces` never calls — is the only thing that
-    // reaches Slack at all. A fake token is enough to prove the two load together.
-    const slackDeps = {
-      ...deps,
-      env: {
-        SLACK_BOT_TOKEN: 'xoxb-test',
-        SLACK_SIGNING_SECRET: 'a-signing-secret',
-        SLACK_APPROVALS_CHANNEL: 'C0TEST',
+    // Slack's `connect` builds a transport from what the host resolved and opens nothing: there
+    // is no socket to open any more, and `start()` — which `loadSurfaces` never calls — is the
+    // only thing that reaches Slack at all. Fake settings are enough to prove the two load
+    // together, and they arrive as this client's settings rather than as the environment.
+    const settings = {
+      slack: {
+        secretValues: { botToken: 'xoxb-test', signingSecret: 'a-signing-secret' },
+        defaultConversation: 'C0TEST',
       },
     };
-    const surfaces = await loadSurfaces(['@harness/surface-slack', '@harness/surface-http'], slackDeps);
+    const surfaces = await loadSurfaces(['@harness/surface-slack', '@harness/surface-http'], deps, settings);
     expect(surfaces.all).toHaveLength(2);
     expect(surfaces.primary.name).toBe('slack');
     expect(surfaces.find('http')).toBeDefined();

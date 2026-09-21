@@ -1,0 +1,22 @@
+# The deployments this gateway serves, on a dedicated host.
+#
+# A client document names one of these per route (`routing.routes.<route>.model`) and says nothing
+# about what it is; everything a deployment *is* — its upstream model, its endpoint, its
+# credential, its daily budget, what it falls back to — is here. `pnpm gateway:config` renders
+# this file into litellm.config.yaml, which Compose bind-mounts.
+#
+# On a pooled host the platform registers a tenant's deployments through LiteLLM's own
+# `POST /model/new` instead, under `<clientId>/<vendor>/<model>`, and this file is the dedicated
+# deployment's answer to the same question.
+deployments:
+  - model: gemini/gemini-3-flash-preview # provider-prefixed; the deployment name defaults to it
+    daily_budget_usd: 2
+    fallbacks: [groq/openai/gpt-oss-120b] # names of other deployments in this file
+  - model: groq/openai/gpt-oss-120b
+    daily_budget_usd: 1
+  - model: gemini/gemini-embedding-001
+    daily_budget_usd: 1
+defaults:
+  daily_budget_usd: 1
+  num_retries: 2
+  request_timeout_s: 120

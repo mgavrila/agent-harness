@@ -50,13 +50,16 @@ function surfaceFailed(specifier: string, err: unknown, stage: 'initialise' | 'c
  * What one client's document says about one of its surfaces, beyond declaring it.
  *
  * Two opaque things, neither of which this package reads: the key an inbound event's tenant hint
- * is matched against, and the environment variable the document named for each of that surface's
- * credentials. Both are built in the host from `@harness/config-api`, which is the one place a
- * typed surface section is read.
+ * is matched against, and the value behind each of that surface's credentials, resolved by the
+ * host before this package saw it. Both are built in the host from `@harness/config-api`, which
+ * is the one place a typed surface section is read.
  */
 export interface SurfaceSettings {
   readonly tenantKey?: string;
-  readonly secrets?: Readonly<Record<string, string>>;
+  /** Where this surface posts when nobody names a conversation, when the document names one. */
+  readonly defaultConversation?: string;
+  /** This client's credentials for this surface, resolved to their values. Nothing here reads them. */
+  readonly secretValues?: Readonly<Record<string, string>>;
 }
 
 /**

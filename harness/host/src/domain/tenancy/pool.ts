@@ -191,6 +191,9 @@ export async function createHost(deps: HostDeps): Promise<HostPool> {
       keys.clear();
       claimed.clear();
       await deps.source.close?.();
+      // The secret source is per process too, and a postgres one holds nothing but the handle it
+      // was given — but a third implementation might, and the contract has a `close` for that.
+      await deps.secrets.close?.();
     },
   };
 

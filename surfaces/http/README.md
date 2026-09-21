@@ -11,7 +11,11 @@ because an HTTP request has no conversation that outlives it.
 Declare it in a client document beside a surface a human reads:
 
     surfaces:
-      slack: { teamId: T0123456, signingSecret: { env: SLACK_SIGNING_SECRET }, botToken: { env: SLACK_BOT_TOKEN } }
+      slack:
+        teamId: T0123456
+        signingSecret: { env: SLACK_SIGNING_SECRET }
+        botToken: { env: SLACK_BOT_TOKEN }
+        approvalsChannel: C0123456
       http: {}
 
 The schema's own `SURFACE_ORDER` always places `http` last, so the primary surface — where

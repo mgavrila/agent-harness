@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import type { Level } from '@harness/shared';
-import { makeTestDeps, startFakeGateway, useTestDb } from '../../testing.js';
+import { TEST_MODELS, makeTestDeps, startFakeGateway, useTestDb } from '../../testing.js';
 import type { ToolDeps } from '../tooling/types.js';
 import { fuseByReciprocalRank, searchKnowledge, type KnowledgeCandidate } from './search.js';
 import { syncKnowledge } from './sync.js';
@@ -32,7 +32,7 @@ async function synced(): Promise<(level: Level, id?: string) => ToolDeps> {
   const depsFor = (level: Level, id = 'u-reader'): ToolDeps =>
     makeTestDeps(db, {
       knowledgeDir,
-      gateway: { baseUrl: fake.url, apiKey: 'sk-test', timeoutMs: 5_000, maxCallsPerRun: 200 },
+      gateway: { baseUrl: fake.url, apiKey: 'sk-test', models: TEST_MODELS, timeoutMs: 5_000, maxCallsPerRun: 200 },
       principal: {
         id,
         kind: level === 'service' ? 'service' : 'user',

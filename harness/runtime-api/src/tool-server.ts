@@ -101,7 +101,7 @@ export function fixtureRequest(over: Partial<RunRequest> & { tools: Client }): R
     persona: 'You are the test assistant.',
     skills: [],
     memory: '',
-    model: { baseUrl: 'http://127.0.0.1:1', apiKey: 'sk-test', route: 'chat', user: 'u-test' },
+    model: { baseUrl: 'http://127.0.0.1:1', apiKey: 'sk-test', route: 'chat', model: 'test/chat', user: 'u-test' },
     budget: { maxModelCalls: 10, maxToolCalls: 10, timeoutMs: 30_000 },
     signal: new AbortController().signal,
     ...over,

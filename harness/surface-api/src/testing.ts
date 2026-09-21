@@ -9,6 +9,7 @@ import type {
   PostKind,
   StreamHandle,
   SurfaceCapabilities,
+  SurfaceHealth,
   SurfaceHttp,
   SurfaceHttpRequest,
   SurfaceHttpResponse,
@@ -27,6 +28,31 @@ export interface MemorySurfaceOptions {
    * what lets a pooled host's test route a message to the tenant whose document claims that key.
    */
   tenantHint?: string;
+}
+
+/** Where this door's event stream lives, below whatever path `mountHttp` was given. */
+export const MEMORY_EVENTS_SUBPATH = 'events';
+
+/**
+ * How many frames this door keeps for a client that reconnects with `last-event-id`.
+ *
+ * A reference implementation's window, not a product's: fifty frames is enough for a test to
+ * prove that a resume repeats nothing and that a resume past the window starts from what is left,
+ * which are the two behaviours the seam has to make possible. What a real adapter's window should
+ * be is spec section 13.5.
+ */
+export const MEMORY_FRAME_RETENTION = 50;
+
+/** One frame this door has sent, and can send again to a client that resumes. */
+export interface MemoryFrame {
+  id: number;
+  event: string;
+  data: unknown;
+}
+
+/** The wire form of a frame: the whole Server-Sent Events format, which is three lines. */
+function frameText(frame: MemoryFrame): string {
+  return `id: ${frame.id}\nevent: ${frame.event}\ndata: ${JSON.stringify(frame.data)}\n\n`;
 }
 
 /**
@@ -57,6 +83,16 @@ export class MemorySurface implements SurfaceSession {
   readonly streams: { conversation: string; text: string; ended: boolean; replyTo: MessageRef | null }[] = [];
   /** Every request this surface's door received, in order. Empty until something mounts one. */
   readonly requests: SurfaceHttpRequest[] = [];
+  /** Every frame this door has emitted, oldest first, capped at `MEMORY_FRAME_RETENTION`. */
+  readonly frames: MemoryFrame[] = [];
+  /** How many event streams this door has open. A test asserts it falls back to zero. */
+  openStreams = 0;
+
+  private frameSeq = 0;
+  /** The streams parked waiting for something to happen, so `emit` can wake them. */
+  private readonly waiting = new Set<() => void>();
+  /** Set by `breakStreams`: the first open stream to pull throws this and clears it. */
+  private streamFailure: string | null = null;
   /**
    * Not `readonly`, unlike the contract's own declaration: the door is mounted by a caller rather
    * than by the constructor (see `mountHttp`), and an implementation may widen a property the
@@ -227,8 +263,107 @@ export class MemorySurface implements SurfaceSession {
     await Promise.all(this.delivering);
   }
 
+  /**
+   * Push one frame to every open stream, and remember it for a client that resumes.
+   *
+   * This is the door's outbound half. A real adapter emits a frame from its own `postText`,
+   * `postCard` and stream handle; this one is driven by a test, because what the seam has to prove
+   * is that a chunk reaches the socket when it is produced and not when the handler returns.
+   */
+  emit(event: string, data: unknown): void {
+    this.frameSeq += 1;
+    this.frames.push({ id: this.frameSeq, event, data });
+    if (this.frames.length > MEMORY_FRAME_RETENTION) this.frames.shift();
+    this.wake();
+  }
+
+  /**
+   * Make the next pull of an open stream throw, the way a producer that failed does.
+   *
+   * **One stream, not every one**: the first to observe the failure clears it, so with two open
+   * the second carries on. That is enough for what this exists to drive — the host's side of a
+   * throw mid-stream, which is logged and closes the response, with no frame for it — and a door
+   * that failed every stream at once would be inventing a fan-out a real adapter does not have.
+   */
+  breakStreams(message: string): void {
+    this.streamFailure = message;
+    this.wake();
+  }
+
+  private wake(): void {
+    // A copy, because a waiter removes itself from the set as it runs.
+    for (const waiter of [...this.waiting]) waiter();
+  }
+
+  /**
+   * Park until something happens: a frame, a failure, or the caller going away.
+   *
+   * The abort listener is removed on every path, so a long-lived signal does not accumulate one
+   * listener per frame.
+   */
+  private async pause(signal: AbortSignal): Promise<void> {
+    await new Promise<void>((resolve) => {
+      const done = (): void => {
+        this.waiting.delete(done);
+        signal.removeEventListener('abort', done);
+        resolve();
+      };
+      this.waiting.add(done);
+      signal.addEventListener('abort', done, { once: true });
+    });
+  }
+
+  /**
+   * The frames after `last-event-id`, then whatever is emitted, until the caller goes away.
+   *
+   * A resume the window no longer covers starts from the oldest frame still held rather than
+   * failing: the client asked to carry on, and the honest answer is "here is where I can carry on
+   * from". Telling the client that frames were dropped is a vocabulary question and belongs to an
+   * adapter that has one.
+   */
+  private async *eventStream(request: SurfaceHttpRequest): AsyncGenerator<string> {
+    const asked = Number.parseInt(request.headers['last-event-id'] ?? '', 10);
+    let sent = Number.isSafeInteger(asked) && asked > 0 ? asked : 0;
+    this.openStreams += 1;
+    try {
+      for (;;) {
+        const failure = this.streamFailure;
+        if (failure !== null) {
+          this.streamFailure = null;
+          throw new Error(failure);
+        }
+        const next = this.frames.filter((frame) => frame.id > sent);
+        if (next.length > 0) {
+          for (const frame of next) {
+            sent = frame.id;
+            yield frameText(frame);
+          }
+          continue;
+        }
+        // The signal is checked **after** the backlog, not before it: a caller that has already
+        // hung up still gets what the door was holding, and then the stream ends. Testing it
+        // first would make an already-aborted request answer nothing at all, which is the one
+        // shape of this call that has to terminate for a collector to be usable on it.
+        if (request.signal.aborted) return;
+        await this.pause(request.signal);
+      }
+    } finally {
+      // `finally`, so an abort, a throw and a consumer that simply stops pulling all close it.
+      this.openStreams -= 1;
+    }
+  }
+
   private async handleHttp(request: SurfaceHttpRequest): Promise<SurfaceHttpResponse> {
     this.requests.push(request);
+    if (request.path === MEMORY_EVENTS_SUBPATH) {
+      if (request.method !== 'GET') return { status: 405, headers: { allow: 'GET' } };
+      return {
+        status: 200,
+        // The three headers that stop something in between buffering a stream into one response.
+        headers: { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', 'x-accel-buffering': 'no' },
+        body: this.eventStream(request),
+      };
+    }
     if (request.method !== 'POST') return { status: 405, refusal: { reason: 'method_not_allowed' } };
     const message = parseMemoryMessage(request.body);
     // The refusal names the kind and nothing else: the body is not repeated, not summarised and
@@ -249,6 +384,15 @@ export class MemorySurface implements SurfaceSession {
 
   async stop(): Promise<void> {
     this.stopped = true;
+  }
+
+  /**
+   * What this door already knows about itself, which is the two flags above. Synchronous and
+   * reaching nothing, exactly as the contract says an adapter's must be, so a host test can drive
+   * the whole shape of `GET /v1/status` without a transport.
+   */
+  health(): SurfaceHealth {
+    return this.started && !this.stopped ? { live: true } : { live: false, detail: 'this door is not open' };
   }
 
   /**
@@ -307,4 +451,21 @@ function parseMemoryMessage(body: string): { userId: string; text: string } | nu
   const { userId, text } = (parsed ?? {}) as { userId?: unknown; text?: unknown };
   if (typeof userId !== 'string' || userId === '' || typeof text !== 'string' || text === '') return null;
   return { userId, text };
+}
+
+/**
+ * A response body as text, whichever shape it is.
+ *
+ * A string comes back as itself; a stream is drained and joined. **Only call it on a stream that
+ * ends** — an aborted request, or a producer that finishes — because a live event stream has no
+ * end and this would wait for one. A test that wants to read a live stream pulls its iterator
+ * frame by frame instead.
+ */
+export async function bodyText(response: SurfaceHttpResponse): Promise<string> {
+  const body = response.body;
+  if (body === undefined) return '';
+  if (typeof body === 'string') return body;
+  let text = '';
+  for await (const chunk of body) text += chunk;
+  return text;
 }

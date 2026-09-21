@@ -134,8 +134,11 @@ export function runtimeConformance(name: string, harness: ConformanceHarness): v
       if (!harness.modelRequests) return;
       await harness.script({ toolCall: { name: 'records_search', args: { query: 'x' } }, finalText: 'done' });
       await collectRunEvents(
-        session.run(request({ model: { baseUrl: 'unused', apiKey: 'sk', route: 'chat', user: 'u-conformance' } }))
-          .events,
+        session.run(
+          request({
+            model: { baseUrl: 'unused', apiKey: 'sk', route: 'chat', model: 'test/chat', user: 'u-conformance' },
+          }),
+        ).events,
       );
       const requests = harness.modelRequests();
       expect(requests.length).toBeGreaterThan(0);

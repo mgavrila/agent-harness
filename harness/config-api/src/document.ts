@@ -1,9 +1,10 @@
 import * as z from 'zod/v4';
 import { IdentityFileShape, parseIdentityFileWithDefaults } from '@harness/identity-api';
-import { ConfigError } from '@harness/shared';
+import { ConfigError, CONVERSATION_ID_PATTERN } from '@harness/shared';
 import { PlaybooksFileShape, parsePlaybooksFile } from './playbooks.js';
 import { ClientPolicyShape } from './policy.js';
 import { RoutingFile } from './routing.js';
+import { SecretRefShape, type SecretRef } from './secret-ref.js';
 
 /** Bumped when a document's shape changes in a way `migrate` has to answer for. */
 export const CLIENT_DOCUMENT_VERSION = 1;
@@ -28,36 +29,10 @@ const PLUGIN_NAME = /^[a-z][a-z0-9-]*$/;
 /** A skill's directory name, which `readSkillCatalogue` requires the frontmatter `name` to match. */
 const SKILL_NAME = /^[a-z][a-z0-9-]*$/;
 
-/** An environment variable name, which is what a `SecretRef`'s `env` member names. */
-const ENV_NAME = /^[A-Z][A-Z0-9_]*$/;
-
-/** A secret store name, which is what a `SecretRef`'s `ref` member names. */
-const SECRET_NAME = /^[a-z][a-z0-9-]*$/;
-
-/**
- * A reference to a secret, never the secret.
- *
- * `{ env }` names an environment variable the host resolves from its own process environment.
- * `{ ref }` names a secret in the deployment's secret store; until a deployment has one, a
- * document that carries a `{ ref }` parses but is refused when a tenant opens (see
- * `assertSecretsPresent` in the host). Exactly one of the two, never both and never neither: a
- * document that carried a literal value would be a document that got copied into a ticket, so
- * the schema admits no such shape at all.
- */
-export const SecretRefShape = z.union([
-  z
-    .object({ env: z.string().regex(ENV_NAME, 'a secret reference names an environment variable (A-Z, digits, _)') })
-    .strict(),
-  z
-    .object({
-      ref: z
-        .string()
-        .regex(SECRET_NAME, "a secret reference names a secret in the deployment's secret store (a-z, digits, -)"),
-    })
-    .strict(),
-]);
-
-export type SecretRef = z.infer<typeof SecretRefShape>;
+// Re-exported, so that every import of a document's own vocabulary still resolves through this
+// module: the shape moved to a leaf only because `routing.ts` needs it too and the edge from a
+// section back to the document would be a cycle.
+export { SecretRefShape, type SecretRef } from './secret-ref.js';
 
 /**
  * The surfaces a client may declare, in the order the host loads them.
@@ -79,6 +54,12 @@ const SurfacesShape = z
       .object({
         /** The bearer every request to this surface carries; only the platform's control plane holds it. */
         token: SecretRefShape,
+        /**
+         * The conversation this surface posts approval cards and notices to, and the one the
+         * workspace opens a stream on first. A conversation is created by writing to it, so this
+         * names one rather than declaring it.
+         */
+        inbox: z.string().regex(CONVERSATION_ID_PATTERN, 'an inbox is a conversation id').default('inbox'),
       })
       .strict()
       .optional(),
@@ -88,6 +69,11 @@ const SurfacesShape = z
         teamId: z.string().min(1).max(64),
         signingSecret: SecretRefShape,
         botToken: SecretRefShape,
+        /**
+         * The channel id this client's approval cards go to. Required, and per client: a
+         * deployment-wide variable would send a pooled host's tenants to one workspace.
+         */
+        approvalsChannel: z.string().min(1),
       })
       .strict()
       .optional(),
@@ -166,11 +152,35 @@ export function surfaceNamesOf(document: ClientDocument): string[] {
  */
 export function tenantKeysOf(document: ClientDocument): { surface: string; key: string }[] {
   const keys: { surface: string; key: string }[] = [];
+  // A web tenant has no workspace but itself: the requests that reach it are addressed to its own
+  // mount, so its own id is the key an inbound event's hint is matched against. Without this a
+  // pooled host would refuse every web message for a null hint (`pooledResolver`) while a
+  // dedicated one answered — the worst shape a bug can have, because a single-tenant suite would
+  // stay green.
+  if (document.surfaces.web) keys.push({ surface: 'web', key: document.id });
   if (document.surfaces.slack) keys.push({ surface: 'slack', key: document.surfaces.slack.teamId });
   if (document.surfaces.memory?.workspace) {
     keys.push({ surface: 'memory', key: document.surfaces.memory.workspace });
   }
   return keys;
+}
+
+/**
+ * The conversation each surface that has one posts to, by that surface's name.
+ *
+ * The third of the three readers of the typed surface sections, and it exists for the same reason
+ * as the other two: the host copies an opaque `{ surface, conversation }` pair into the bag an
+ * adapter is handed and never learns that a web surface has an inbox or that the other one is a
+ * channel id. A surface that names none — the memory surface — contributes nothing here and keeps
+ * whatever default its adapter has.
+ */
+export function surfaceConversationsOf(document: ClientDocument): { surface: string; conversation: string }[] {
+  const conversations: { surface: string; conversation: string }[] = [];
+  const web = document.surfaces.web;
+  if (web) conversations.push({ surface: 'web', conversation: web.inbox });
+  const slack = document.surfaces.slack;
+  if (slack) conversations.push({ surface: 'slack', conversation: slack.approvalsChannel });
+  return conversations;
 }
 
 /** One `SecretRef` a document's surfaces named, with the surface and field it was named under. */
@@ -187,8 +197,8 @@ export type SurfaceSecretRef = { surface: string; field: string } & SecretRef;
  * adapter — which is allowed to know what its own fields are called — looks its variable up. The
  * value itself never appears: a `SecretRef` names an environment variable or a secret store entry
  * and never the secret itself. An entry named by `{ ref }` rather than `{ env }` travels the same
- * way; it is `assertSecretsPresent`'s job, not this one's, to refuse it while no deployment has a
- * secret store.
+ * way; it is `resolveSecrets`'s job, not this one's, to turn either shape into a value through
+ * whatever secret source the deployment configured.
  */
 export function surfaceSecretsOf(document: ClientDocument): SurfaceSecretRef[] {
   const secrets: SurfaceSecretRef[] = [];

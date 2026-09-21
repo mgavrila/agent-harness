@@ -2,6 +2,7 @@ import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { registryOf } from '@harness/core-tools';
 import type { RunEvent, RuntimeSession } from '@harness/runtime-api';
+import { TEST_MODELS } from '@harness/core-tools/testing';
 import { approvals, auditLog, memoryEntries, messages, modelCalls, runs, threads } from '@harness/db';
 import { COORDINATOR, attachTestHandlers, hostFixture, useTestDb, waitFor, type HostFixture } from '../testing.js';
 import {
@@ -67,7 +68,15 @@ describe('a message on a surface', () => {
     // is what a live run did. This is the fact the prompt line in runtimes/deepagents renders.
     expect(request.principal.displayName).toBe('Coordinator');
     expect(request.principal.level).toBe('lead');
-    expect(request.model).toMatchObject({ route: 'chat', fallbackRoute: 'reason', user: 'u-coordinator' });
+    expect(request.model).toMatchObject({
+      route: 'chat',
+      fallbackRoute: 'reason',
+      // The deployment names travel beside the route names: the runtime sends these, and a
+      // pooled host's two tenants send two different ones.
+      model: TEST_MODELS.chat,
+      fallbackModel: TEST_MODELS.reason,
+      user: 'u-coordinator',
+    });
     expect(request.persona).toBe('You are the test assistant.');
     expect(request.skills.map((s) => s.name)).toEqual(['sample-skill']);
     expect(request.threadId).toBe(thread.id);
@@ -879,6 +888,10 @@ describe("the runtime's own spend", () => {
       [30, 6],
     ]);
     expect(calls.every((call) => call.client === 'test' && call.route === 'chat')).toBe(true);
+    // And each row records the deployment the runtime was told to call, not the route's name:
+    // the same string `callModel` records for the kernel's own calls, so a usage export over
+    // both halves of the bill names one deployment per row.
+    expect(calls.every((call) => call.model === TEST_MODELS.chat)).toBe(true);
 
     // The run's totals are summed from those rows, so the row and the calls cannot disagree.
     const [run] = await db.select().from(runs).where(eq(runs.id, result.runId));

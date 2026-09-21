@@ -7,7 +7,6 @@ import { findPlaybook, listPlaybooks, requestPlaybookRun, summarisePlaybook } fr
 const SummaryShape = z.object({
   name: z.string(),
   schedule: z.string(),
-  timezone: z.string(),
   skill: z.string(),
   principal_id: z.string(),
   surface: z.string().nullable(),
@@ -24,7 +23,7 @@ const SummaryShape = z.object({
 const playbooksList = defineTool({
   name: 'playbooks_list',
   description:
-    'The scheduled playbooks of this deployment, by name: schedule and timezone, the skill and the service principal each runs as, ' +
+    'The scheduled playbooks of this deployment, by name: schedule (evaluated in UTC), the skill and the service principal each runs as, ' +
     'how its reply is delivered, whether it is enabled, and when it last ran and next runs.',
   actionClass: 'read',
   input: z.object({}),

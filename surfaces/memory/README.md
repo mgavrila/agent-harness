@@ -29,8 +29,21 @@ handler `onMessage` registered, the way a real message would, so a host test can
 with no transport at all.
 
 It is also the reference implementation of the surface contract's `http` seam:
-`MemorySurface.mountHttp()` gives it an inbound door that takes `{ userId, text }` as JSON and
+`MemorySurface.mountHttp(path?)` gives it an inbound door that takes `{ userId, text }` as JSON and
 delivers it as a message. **It is off until something calls it**, and this package never does:
 this surface authenticates nobody, so a door to it is a door to speaking as anyone. A host test
 mounts it on the session the pool opened, which is how the host's dispatch is proved against a
 surface that really loaded.
+
+The same door answers a stream at `<path>/events`: `emit(event, data)` pushes one frame to every
+open stream and remembers it, up to `MEMORY_FRAME_RETENTION` frames, for a client that reconnects
+with `last-event-id`. A resume past the window starts from the oldest frame this door still holds
+rather than failing — there is no dropped-frames notice here, because telling a client that frames
+were dropped is a vocabulary question and belongs to an adapter that has one, which is exactly what
+this one is a reference for and not itself. `openStreams` counts how many are open right now, for a
+test to assert falls back to zero, and `breakStreams(message)` makes the next pull of one open
+stream throw, the way a producer that failed does.
+
+This is the seam's reference implementation, proved against by every host test that drives it, and
+not a product surface in its own right: a real adapter owns its own framing, its own event names
+and its own retention policy, the way `surfaces/web` does.

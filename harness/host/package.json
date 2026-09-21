@@ -27,6 +27,7 @@
     "@harness/surface-http": "workspace:*",
     "@harness/surface-memory": "workspace:*",
     "@harness/surface-slack": "workspace:*",
+    "@harness/surface-web": "workspace:*",
     "@modelcontextprotocol/client": "^2.0.0",
     "croner": "10.0.1",
     "dotenv": "^17.4.2",

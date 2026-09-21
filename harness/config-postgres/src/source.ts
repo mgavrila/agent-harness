@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { migrate, type ClientDocument, type ConfigSource, type LoadedDocument } from '@harness/config-api';
 import { clientDocumentVersions, clientDocuments, withTransaction, type Db } from '@harness/db';
 import { ConfigError, describeError, type Logger } from '@harness/shared';
@@ -21,11 +21,51 @@ export interface PostgresConfigSourceOptions {
 }
 
 /**
+ * Canonical JSON: the same object is the same string, whatever order its keys arrive in.
+ *
+ * The stored copy comes back through `jsonb`, which does not keep key order, so a plain
+ * `JSON.stringify` comparison would call an identical rewrite a conflict roughly whenever
+ * Postgres felt like it.
+ *
+ * One asymmetry, stated so the next reader does not introduce it: a property whose value is
+ * explicitly `undefined` renders here as `null`, while a `jsonb` round trip drops the key
+ * altogether — so such a document would compare unequal with itself. A parsed `ClientDocument`
+ * has no such property (zod either fills a default or omits the key), which is why this is a note
+ * and not a branch.
+ */
+function canonical(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
+  if (value !== null && typeof value === 'object') {
+    const entries = Object.entries(value as Record<string, unknown>).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+    return `{${entries.map(([key, entry]) => `${JSON.stringify(key)}:${canonical(entry)}`).join(',')}}`;
+  }
+  return JSON.stringify(value) ?? 'null';
+}
+
+/**
  * Write a client's document as its current version, and record that version in the history.
  *
  * The platform's control plane is the real writer; this exists so that a test, the scaffolder and
  * an operator have one way to put a document in the store, and so that the history is never
  * written without the live row moving with it.
+ *
+ * **A version string is written once** (spec section 6, rule 3). Writing `(client_id, version)`
+ * again with *different* content is refused: the history insert is `onConflictDoNothing`, so a
+ * rewrite would otherwise move the live document and keep the old history — the one case where
+ * the history lies. An identical rewrite stays a no-op, which is what the conformance suite
+ * already asserts.
+ *
+ * The comparison is **inside the transaction, after the insert**, and that order is the whole of
+ * why it is correct. The insert is what serialises two concurrent writers: the loser's
+ * `ON CONFLICT DO NOTHING` waits for the winner to commit and then returns nothing, so the read
+ * that follows it sees the winner's row and compares against a document that is really stored.
+ * A read *before* the insert would have both writers see an empty table and decide against a
+ * document neither of them had written.
+ *
+ * This rule binds the two writers differently and deliberately: the kernel's own writer enforces
+ * it in code, and the platform's control plane — which writes the tables directly and gets a
+ * refusal from nothing — is bound by the contract in spec section 6 alone. It writes content-hash
+ * versions, so it cannot breach it by accident.
  */
 export async function writeClientDocument(
   db: Db,
@@ -35,6 +75,23 @@ export async function writeClientDocument(
 ): Promise<void> {
   const row = { document: document as unknown as Record<string, unknown>, version };
   await withTransaction(db, async (tx) => {
+    const inserted = await tx
+      .insert(clientDocumentVersions)
+      .values({ clientId: document.id, version, document: row.document, createdBy })
+      .onConflictDoNothing()
+      .returning({ id: clientDocumentVersions.id });
+    if (inserted.length === 0) {
+      const [stored] = await tx
+        .select({ document: clientDocumentVersions.document })
+        .from(clientDocumentVersions)
+        .where(and(eq(clientDocumentVersions.clientId, document.id), eq(clientDocumentVersions.version, version)))
+        .limit(1);
+      if (stored && canonical(stored.document) !== canonical(row.document)) {
+        throw new ConfigError(
+          `client "${document.id}": version "${version}" is already stored with different content; a version string identifies one document, so write a new version rather than rewriting this one`,
+        );
+      }
+    }
     await tx
       .insert(clientDocuments)
       .values({ clientId: document.id, schemaVersion: document.schemaVersion, ...row })
@@ -42,10 +99,6 @@ export async function writeClientDocument(
         target: clientDocuments.clientId,
         set: { schemaVersion: document.schemaVersion, ...row, updatedAt: new Date() },
       });
-    await tx
-      .insert(clientDocumentVersions)
-      .values({ clientId: document.id, version, document: row.document, createdBy })
-      .onConflictDoNothing();
   });
 }
 

@@ -8,3 +8,4 @@ export {
   writeClientDocument,
   type PostgresConfigSourceOptions,
 } from './source.js';
+export { postgresSecretSource, writeClientSecret, type PostgresSecretSourceOptions } from './secrets.js';

@@ -22,7 +22,6 @@ const row = (overrides: Partial<PlaybookRow> = {}): PlaybookRow => ({
   client: 'test',
   name: 'nightly',
   schedule: '0 7 * * *',
-  timezone: 'UTC',
   skill: 'sample-skill',
   prompt: 'Run it.',
   principalId: 'svc-playbooks',
@@ -120,7 +119,7 @@ describe('the shipped fixture client (I1)', () => {
     const document = loaded!.document;
     expect(document.playbooks.playbooks.map((p) => p.name)).toEqual(['knowledge-refresh']);
     for (const playbook of document.playbooks.playbooks) {
-      expect(playbook).toMatchObject({ timezone: 'America/New_York', principal: 'svc-playbooks', deliver: 'none' });
+      expect(playbook).toMatchObject({ principal: 'svc-playbooks', deliver: 'none' });
     }
 
     const f = await hostFixture(db, { trajectory: [] });

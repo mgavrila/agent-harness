@@ -6,6 +6,7 @@ import { onTestFinished } from 'vitest';
 import type { Client } from '@modelcontextprotocol/client';
 import { McpServer } from '@modelcontextprotocol/server';
 import type { Db } from '@harness/db';
+import type { Route } from '@harness/config-api';
 import type { Principal } from '@harness/identity-api';
 import { pack as healthcarePack } from '@harness/pack-healthcare';
 import { localParser } from './domain/documents/parser.js';
@@ -22,6 +23,20 @@ import { registryOf } from './domain/packs/registry.js';
 import type { PackRegistry } from './domain/packs/types.js';
 import { PACK_KERNEL } from './domain/packs/kernel.js';
 import { kernelTools } from './tools/catalog.js';
+
+/**
+ * The deployment each route names under test: the fixture document's own strings.
+ *
+ * A test asserting what went on the wire asserts one of these, so the suite proves that the
+ * document's model string travels rather than that a route name does.
+ */
+export const TEST_MODELS: Readonly<Record<Route, string>> = {
+  chat: 'gemini/gemini-3-flash-preview',
+  extract: 'gemini/gemini-3-flash-preview',
+  reason: 'gemini/gemini-3-flash-preview',
+  judge: 'groq/openai/gpt-oss-120b',
+  embed: 'gemini/gemini-embedding-001',
+};
 
 /** The packs a test runs against: the shipped one, with no environment involved. */
 const TEST_PACKS = registryOf([healthcarePack]);
@@ -84,7 +99,13 @@ export function makeTestDeps(db: Db, overrides: TestDepsOverrides = {}): ToolDep
     now: () => new Date('2026-09-15T12:00:00Z'),
     approvalTtlHours: 24,
     confidenceThreshold: DEFAULT_CONFIDENCE_THRESHOLD,
-    gateway: { baseUrl: 'http://127.0.0.1:1', apiKey: 'sk-test', timeoutMs: 5_000, maxCallsPerRun: 100 },
+    gateway: {
+      baseUrl: 'http://127.0.0.1:1',
+      apiKey: 'sk-test',
+      models: TEST_MODELS,
+      timeoutMs: 5_000,
+      maxCallsPerRun: 100,
+    },
     storageDir,
     // Not a real directory: a test that syncs knowledge passes its own, and one that does not
     // gets a path that simply does not exist, which is an empty sync and not an error.

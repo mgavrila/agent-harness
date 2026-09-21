@@ -1,5 +1,5 @@
 import path from 'node:path';
-import type { ClientDocument } from '@harness/config-api';
+import { ROUTES, type ClientDocument, type ResolvedSecrets, type Route } from '@harness/config-api';
 import { loadKey } from '@harness/db';
 import { booleanFromEnv, numberFromEnv, optionalEnv, type EnvSource } from '@harness/shared';
 import { localParser, remoteParser } from '../documents/parser.js';
@@ -38,6 +38,20 @@ export function formsDirFrom(packs: Pick<PackRegistry, 'all'>, raw: string | und
 }
 
 /**
+ * Which deployment serves each of this client's routes, as the document names them.
+ *
+ * One string per route and nothing else: what that deployment is belongs to the gateway, on a
+ * dedicated host in `harness/gateway/catalogue.yaml` and on a pooled one in the registration the
+ * platform made for this tenant.
+ */
+export function modelsOf(document: ClientDocument): Readonly<Record<Route, string>> {
+  return Object.fromEntries(ROUTES.map((route) => [route, document.routing.routes[route].model])) as Record<
+    Route,
+    string
+  >;
+}
+
+/**
  * Where documents are parsed. In Compose, `HARNESS_FILES_URL` names the files worker and the
  * bytes never enter this process; unset, the subprocesses run here, which is what a test and a
  * bare-metal developer want.
@@ -55,10 +69,15 @@ export function parserFromEnv(storageDir: string, filesUrl?: string): DocumentPa
  * nothing here resolves a path from where this file happens to sit: both are what stopped one
  * process from serving two clients.
  */
-export async function buildKernelConfig(document: ClientDocument, env: EnvSource): Promise<KernelConfig> {
+export async function buildKernelConfig(
+  document: ClientDocument,
+  env: EnvSource,
+  secrets: ResolvedSecrets,
+): Promise<KernelConfig> {
   const packs = await loadPacks(document.packs);
   // One root for the whole file store, required and with no default (see storageRoot).
   const storageDir = storageRoot(env);
+  const gateway = gatewayFromEnv(env, modelsOf(document));
 
   return {
     client: document.id,
@@ -68,7 +87,11 @@ export async function buildKernelConfig(document: ClientDocument, env: EnvSource
     now: () => new Date(),
     approvalTtlHours: numberFromEnv('APPROVAL_TTL_HOURS', 24, { min: 1, max: 720 }, env),
     confidenceThreshold: numberFromEnv('CONFIDENCE_THRESHOLD', DEFAULT_CONFIDENCE_THRESHOLD, { min: 0, max: 1 }, env),
-    gateway: gatewayFromEnv(env),
+    // This deployment's gateway, with this tenant's own key when its document named one.
+    // `GatewayConfig.apiKey` is already per tenant and is already the bearer `httpGateway` sends
+    // on every call; `GatewayConfig.models` is per tenant for the same reason, and together they
+    // are what lets one process serve two tenants on one proxy (spec section 4.11).
+    gateway: secrets.gatewayKey === undefined ? gateway : { ...gateway, apiKey: secrets.gatewayKey },
     storageDir,
     knowledgeDir: document.knowledge.source === 'dir' ? document.knowledge.path : null,
     // 1,024 is what migration 0013 created the column at; `assertEmbedDims` is what proves a

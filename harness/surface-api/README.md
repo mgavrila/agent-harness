@@ -15,6 +15,18 @@ the host load an adapter by name at runtime instead of importing it at build tim
 | `src/models.ts`  | the zod shapes of the two outbox payloads, and the two id patterns                           |
 | `src/testing.ts` | `MemorySurface`, reached as `@harness/surface-api/testing`                                   |
 
+`SurfaceDeps` is what an adapter is handed when it connects: `env`, `log`, `storageDir`, an
+optional `tenantKey`, and two more optional fields the host resolves before an adapter ever sees
+them and never itself reads — `secretValues`, this tenant's credentials for this surface already
+resolved to their values, keyed by the document's own field name, and `defaultConversation`, the
+conversation the client's document named as this surface's default when nobody names one. Both are
+opaque to the host: it copies them from the document into the bag and moves on.
+
+A session may also offer `health()`: a **synchronous, non-throwing** `{ live, detail? }` read off
+what the adapter already knows, which `GET /v1/status` reports one line of per loaded surface. It
+never calls the outside world — the route is a dashboard's poll — and `detail`, when there is one,
+is a fixed sentence the adapter wrote. A session that offers none is reported live.
+
 `MemorySurface` is both the fake every host test drives and the whole of `@harness/surface-memory`,
 so the thing the suite proves the host against is the thing that runs. It is also the first
 _inbound_ surface: `say(userId, text, over?)` drives whatever handler `onMessage` registered, the
@@ -56,6 +68,31 @@ by.
 
 `MemorySurface.mountHttp()` is the reference implementation, and it is off until it is called:
 this surface authenticates nobody, so a door to it is a door to speaking as anyone.
+
+### Answering with a stream
+
+`SurfaceHttpResponse.body` is a string **or** an async iterable of strings. A string is sent in one
+write and the response ends. An iterable is a stream: the host writes the head, writes each chunk
+as it is yielded — waiting for the socket to drain, or for the client to go away — and ends the
+response when the iterable ends. A chunk is opaque to the host, so an adapter keeps every byte of
+its own framing: Server-Sent Events, NDJSON, anything.
+
+Two request fields exist for it. `signal` is aborted when the caller goes away, and a producer
+selects on it and returns rather than pushing frames into a dead socket. `clientId` is the tenant
+the host resolved from the mount path, which is what an adapter reports as an event's
+`tenantHint`: it cannot disagree with the route the request actually took.
+
+A **refusal is decided before the first byte**. The host reads `refusal`, writes its one audit row
+and then writes the head; after that the response is a stream and there is nothing left to
+declare. An adapter that discovers a problem mid-stream says so in its own frames and ends. A
+throw out of the iterable is logged and closes the response, with no error frame — the vocabulary
+is the adapter's, not the host's.
+
+`MemorySurface`'s door is the reference: `POST <mount>` takes a message, and
+`GET <mount>/events` answers a stream with `id:` on every frame and honours `last-event-id`. It
+answers `200` where a real adapter may prefer `202` — `@harness/surface-web` does, and so does the
+run API's own stream, because "accepted, and what follows is the thing happening" is the truer
+reading. The seam fixes neither: the status is the adapter's, like every other byte of its answer.
 
 Authorisation is not this package's business. Who may act — decide an approval, or have a
 message answered — is the identity plug-in's answer (`@harness/identity-api`), resolved from a

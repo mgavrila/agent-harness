@@ -54,37 +54,27 @@ policy:
     # docs/architecture/tool-surface.json would have to move with it.
     hide: []
 
+# Which deployment serves each job. A route names one deployment the gateway serves and nothing
+# else: on this dedicated deployment, an entry in harness/gateway/catalogue.yaml; on a pooled
+# host, one the platform registered for this tenant. Budgets, fallbacks and endpoints belong to
+# the deployment, never to the document.
 routing:
   routes:
     chat:
       model: gemini/gemini-3-flash-preview
-      fallbacks:
-        - groq/openai/gpt-oss-120b
-      daily_budget_usd: 2
     extract:
       model: gemini/gemini-3-flash-preview
-      daily_budget_usd: 5
     reason:
       model: gemini/gemini-3-flash-preview
-      fallbacks:
-        - groq/openai/gpt-oss-120b
-      daily_budget_usd: 2
     judge:
       model: groq/openai/gpt-oss-120b
-      daily_budget_usd: 1
     embed:
       model: gemini/gemini-embedding-001
-      daily_budget_usd: 1
-  defaults:
-    daily_budget_usd: 1
-    num_retries: 2
-    request_timeout_s: 120
 
 playbooks:
   playbooks:
     - name: knowledge-refresh
       schedule: '30 6 * * *'
-      timezone: America/New_York
       skill: knowledge-refresh
       prompt: Refresh the knowledge base for today. Follow the skill exactly, including its silence rule.
       principal: svc-playbooks

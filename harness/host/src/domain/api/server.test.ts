@@ -3,7 +3,7 @@ import { eq } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { parseClientDocument } from '@harness/config-api';
 import { fixtureDocument } from '@harness/config-api/testing';
-import { messages, runs, threads } from '@harness/db';
+import { approvals, memoryEntries, messages, runs, threads } from '@harness/db';
 import type { Trajectory } from '@harness/runtime-api/testing';
 import { COORDINATOR, MEMBER, poolFixture, useTestDb, type PoolFixture } from '../../testing.js';
 import { WITHHELD } from '../threads/repository.js';
@@ -254,7 +254,9 @@ describe('the run API: a thread and the status', () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({
       client: CLIENT,
-      surfaces: ['memory'],
+      // One line per loaded surface: its name and whether its adapter says it can be reached.
+      // The memory door is open, so it is live and has nothing to add.
+      surfaces: [{ name: 'memory', live: true }],
       primary_surface: 'memory',
       runs_in_flight: 0,
       draining: false,
@@ -262,6 +264,29 @@ describe('the run API: a thread and the status', () => {
       // tenant rather than one per process. It has not ticked: the interval is thirty seconds.
       scheduler: { lastTickAt: null, lastOkAt: null, lastError: null, lastErrorAt: null, ticking: false },
     });
+  });
+
+  it('reports a surface that cannot be reached, with the sentence its adapter owns and nothing else', async () => {
+    const a = await api([]);
+    const session = a.f.tenant(CLIENT).host.surfaces.primary as unknown as {
+      health: () => { live: boolean; detail?: string };
+    };
+    const detail = 'the workspace has not been reached yet';
+    session.health = () => ({ live: false, detail, token: 'xoxb-never' }) as never;
+    const body = (await (await a.get('/v1/status')).json()) as { surfaces: unknown[] };
+    // The two fields the contract names, copied verbatim, and not one other thing off the
+    // session: a status line carries a fixed sentence, never a token and never a conversation.
+    expect(body.surfaces).toEqual([{ name: 'memory', live: false, detail }]);
+
+    // And an adapter whose own getter breaks costs its line, not the route: the contract says
+    // `health` does not throw, and this is what the host does when one does anyway — every other
+    // surface still reports, and nothing of the failure reaches the caller.
+    session.health = () => {
+      throw new Error('xoxb-never in an adapter’s stack');
+    };
+    const broken = await a.get('/v1/status');
+    expect(broken.status).toBe(200);
+    expect(((await broken.json()) as { surfaces: unknown[] }).surfaces).toEqual([{ name: 'memory', live: false }]);
   });
 
   it('answers the tenant it serves when a caller names it, and 404 when a caller names another', async () => {
@@ -370,5 +395,116 @@ describe('the run API: a thread and the status', () => {
     const a = await api([]);
     expect((await a.get('/v1/nothing')).status).toBe(404);
     expect((await a.get('/')).status).toBe(404);
+  });
+});
+
+describe('the read routes', () => {
+  /** One approval of the served client, and one of somebody else. */
+  async function seed(): Promise<void> {
+    for (const client of [CLIENT, 'other']) {
+      await db.insert(approvals).values({
+        client,
+        action: 'forms_release',
+        payload: { tool: 'forms_release', args: { file_id: 'roster/secret.csv' } },
+        summary: `forms_release (external) requested by u-coordinator`,
+        requestedBy: 'u-coordinator',
+        idempotencyKey: `k-${client}`,
+        expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+      });
+      await db.insert(memoryEntries).values({
+        client,
+        scope: 'client',
+        text: `a note belonging to ${client}`,
+        createdBy: 'u-coordinator',
+      });
+    }
+  }
+
+  it('answers both routes behind the bearer, and neither without it', async () => {
+    const a = await api([]);
+    for (const route of ['/v1/approvals', '/v1/memory']) {
+      expect((await a.get(route)).status, route).toBe(200);
+      expect((await a.get(route, 'wrong')).status, route).toBe(401);
+      expect((await fetch(`${a.url}${route}`)).status, route).toBe(401);
+    }
+  });
+
+  it('answers this tenant’s rows and none of another’s, in the envelope the platform pages on', async () => {
+    const a = await api([]);
+    await seed();
+    const body = (await (await a.get('/v1/approvals')).json()) as {
+      client: string;
+      rows: { summary: string }[];
+      next_cursor: string | null;
+    };
+    expect(body.client).toBe(CLIENT);
+    expect(body.rows).toHaveLength(1);
+    expect(body.next_cursor).toBeNull();
+    expect(JSON.stringify(body)).not.toContain('roster/secret.csv');
+    const memory = (await (await a.get('/v1/memory')).json()) as { rows: { text: string }[] };
+    expect(memory.rows.map((row) => row.text)).toEqual([`a note belonging to ${CLIENT}`]);
+  });
+
+  it('accepts the four status values, one or several, and refuses a fifth with a 400 naming them', async () => {
+    const a = await api([]);
+    for (const status of ['pending', 'approved', 'declined', 'expired', 'approved,declined']) {
+      expect((await a.get(`/v1/approvals?status=${status}`)).status, status).toBe(200);
+    }
+    // There is no `decided` alias: a filter vocabulary that differs from the column is a second
+    // spelling of one fact, and a platform engineer asking the obvious must not get a 400 for it.
+    const refused = await a.get('/v1/approvals?status=decided');
+    expect(refused.status).toBe(400);
+    expect(((await refused.json()) as { error: string }).error).toContain('pending');
+  });
+
+  it('refuses a scope that is not one, a cursor that does not decode and a limit out of bounds', async () => {
+    const a = await api([]);
+    expect((await a.get('/v1/memory?scope=everything')).status).toBe(400);
+    expect((await a.get('/v1/approvals?cursor=nonsense')).status).toBe(400);
+    // A forged cursor, well-formed apart from an id no `uuid` column could hold. Both read
+    // routes answer 400 with the same body; before this it reached the driver, came back a
+    // 22P02, and the 500 it became carried the caller's string into the deployment's log.
+    const forged = Buffer.from(`2026-09-10T09:00:00.000Z|'; drop table approvals; --`).toString('base64url');
+    for (const route of ['/v1/approvals', '/v1/memory']) {
+      const response = await a.get(`${route}?cursor=${encodeURIComponent(forged)}`);
+      expect(response.status, route).toBe(400);
+      expect(await response.json()).toEqual({ error: 'cursor is not one of ours' });
+    }
+    for (const limit of ['0', '-1', '1.5', 'many', '501']) {
+      expect((await a.get(`/v1/approvals?limit=${limit}`)).status, limit).toBe(400);
+    }
+    expect((await a.get('/v1/approvals?limit=500')).status).toBe(200);
+  });
+
+  it('pages, and hands back a cursor that fetches the rest', async () => {
+    const a = await api([]);
+    for (const n of [1, 2, 3]) {
+      await db.insert(memoryEntries).values({
+        client: CLIENT,
+        scope: 'client',
+        text: `note ${n}`,
+        createdBy: 'u-coordinator',
+      });
+    }
+    const first = (await (await a.get('/v1/memory?limit=2')).json()) as {
+      rows: { text: string }[];
+      next_cursor: string;
+    };
+    expect(first.rows).toHaveLength(2);
+    const second = (await (
+      await a.get(`/v1/memory?limit=2&cursor=${encodeURIComponent(first.next_cursor)}`)
+    ).json()) as {
+      rows: { text: string }[];
+      next_cursor: string | null;
+    };
+    expect(second.rows).toHaveLength(1);
+    expect(second.next_cursor).toBeNull();
+  });
+
+  it('answers 404 for a client this host does not serve, the way every /v1 route does', async () => {
+    const a = await api([]);
+    const response = await a.get('/v1/approvals', undefined, { [CLIENT_HEADER]: 'somebody-else' });
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({ error: 'no such client' });
   });
 });

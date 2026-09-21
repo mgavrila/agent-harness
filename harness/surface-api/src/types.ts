@@ -235,6 +235,27 @@ export interface SurfaceHttpRequest {
   path: string;
   headers: Readonly<Record<string, string>>;
   body: string;
+  /**
+   * The tenant this request is for: the client id the host resolved out of the mount path before
+   * it called this handler.
+   *
+   * It is here rather than on `SurfaceDeps` because it is a property of the request and not of
+   * the session — and because it is the one value that cannot be misconfigured. An adapter that
+   * has to report which tenant an event belongs to reports this: it is what the host routed on a
+   * moment earlier, so a document whose key and id drifted apart cannot make an adapter claim a
+   * tenant the host did not route to.
+   */
+  clientId: string;
+  /**
+   * Aborted when the caller goes away.
+   *
+   * A handler that answers with a whole body may ignore it. One that answers with a stream selects
+   * on it and returns, so a closed browser tab does not leave a producer pushing frames into a
+   * socket nobody is reading. It is also aborted after an ordinary response has been sent, because
+   * what the host listens for is the response closing; a handler that has already returned has
+   * nothing left to cancel, so that costs nothing.
+   */
+  signal: AbortSignal;
 }
 
 /**
@@ -246,11 +267,30 @@ export interface SurfaceHttpRequest {
  * of the request body reaches that row: a refused request has not been authenticated, so there is
  * nothing in it worth recording. A surface never writes audit itself; it may import only this
  * contract, `@harness/shared` and its own modules.
+ *
+ * **A refusal is decided before the first byte.** The host reads this field, writes its one audit
+ * row and then sends the head; once the head is written the response is a stream and there is
+ * nothing left to declare. An adapter that discovers a problem mid-stream says so in its own
+ * frames and ends.
  */
 export interface SurfaceHttpResponse {
   status: number;
   headers?: Readonly<Record<string, string>>;
-  body?: string;
+  /**
+   * The whole answer, or the answer as it is produced.
+   *
+   * A **string** is sent in one write and the response ends: an acknowledgement, a JSON body, a
+   * challenge. An **async iterable of strings** is a stream: the host writes the head, writes each
+   * chunk as it is yielded — waiting for the socket to drain, or for the client to go away — and
+   * ends the response when the iterable ends. A chunk is opaque: the host does not know whether it
+   * is a Server-Sent Events frame, a line of NDJSON or a fragment of a file, which is what keeps a
+   * transport's framing inside the adapter that owns it.
+   *
+   * A throw out of the iterable is logged the way a throwing `handle` already is and closes the
+   * response. There is **no error frame**, because the frame vocabulary is the adapter's: an
+   * adapter that wants to tell its client something before it stops yields that something first.
+   */
+  body?: string | AsyncIterable<string>;
   refusal?: { reason: string };
 }
 
@@ -273,6 +313,18 @@ export interface SurfaceHttp {
 }
 
 /**
+ * Whether this surface can be reached, as the adapter already knows it.
+ *
+ * `detail` is a fixed sentence the adapter owns and writes into its own source: never a token,
+ * never a conversation or a person, and never a transport's own error message or code, which is
+ * a vendor's text arriving in a deployment's dashboard (invariant 21).
+ */
+export interface SurfaceHealth {
+  live: boolean;
+  detail?: string;
+}
+
+/**
  * A connected surface.
  *
  * Every method that talks to the outside world rejects with a `SurfaceError` whose message is
@@ -285,6 +337,21 @@ export interface SurfaceSession {
   readonly capabilities: SurfaceCapabilities;
   /** Where this surface posts when nobody names a conversation. */
   readonly defaultConversation: string;
+  /**
+   * Whether this surface can be reached, reported from what the adapter already knows.
+   *
+   * **Synchronous and non-throwing**, and it answers from memoised state: it never calls the
+   * outside world, and it never starts the call that would fill that state. `GET /v1/status` is a
+   * dashboard's poll — one outbound call per tenant per tick would be a rate limit the host does
+   * not control, and an adapter that awaited one could hold the whole status route up. A
+   * transport asks at `start()`, which the host does when a tenant opens; a `start()` that failed
+   * reports `live: false` until the next delivery asks again, and the retry belongs there rather
+   * than in a status route.
+   *
+   * Optional: a session with none is reported live, because the host has it open and its adapter
+   * has nothing to add.
+   */
+  health?(): SurfaceHealth;
   /**
    * Who this surface's users are and what groups they are in, when it can say.
    *
@@ -360,15 +427,32 @@ export interface SurfaceDeps {
    */
   tenantKey?: string;
   /**
-   * The environment variable this client's document named for each of this surface's credentials,
-   * keyed by the document's own field name — `{ botToken: 'SLACK_BOT_TOKEN' }`.
+   * Where this surface posts when nobody names a conversation, when the client's document names
+   * one.
    *
-   * The counterpart of `Surface.secrets`, which says what an adapter reads: this says what *this
-   * tenant* calls it. An adapter falls back to the conventional name for a field the document did
-   * not name, so a single-tenant deployment configures nothing; two tenants in one process name
-   * two pairs, and neither adapter can read the other's.
+   * `SurfaceSession.defaultConversation` is what the host reads, and this is where it comes from:
+   * the document names it and the host passes it through, opaquely, exactly as it passes
+   * `tenantKey`. A deployment-wide variable cannot answer it, because a pooled host has one
+   * environment and many tenants; an adapter that is handed nothing here has no per-tenant
+   * conversation and answers with whatever default it has of its own.
    */
-  secrets?: Readonly<Record<string, string>>;
+  defaultConversation?: string;
+  /**
+   * This client's credentials for this surface, resolved to their values, keyed by the document's
+   * own field name — `{ botToken: 'xoxb-…' }`.
+   *
+   * **The whole of what an adapter gets**, and the only place it may read a credential from: what
+   * *this tenant*'s document named, resolved by the host through whatever secret source the
+   * deployment configured. An adapter reads no environment variable of its own and falls back to
+   * none — a field the document did not name is a refusal when the tenant opens, naming the
+   * field, because on a pooled host a deployment-wide fallback is one tenant's app acting as
+   * another's. Two tenants in one process each get their own bag, and neither adapter can read
+   * the other's.
+   *
+   * **Values, never names, and never logged.** A resolved secret does not appear in a log line,
+   * an error message, an audit row, a refusal or a run API response (invariant 21).
+   */
+  secretValues?: Readonly<Record<string, string>>;
 }
 
 /** What a `@harness/surface-*` package exports as `surface`. */
@@ -377,8 +461,10 @@ export interface Surface {
   name: string;
   version: string;
   /**
-   * The environment variable names this adapter reads that are credentials: the host must never
-   * forward one to a runtime and must never log one.
+   * The conventional names a document is likely to point this adapter's `{ env }` refs at, and
+   * which are therefore credentials: the host must never forward one to a runtime and must never
+   * log one. Not what the adapter reads — it reads `SurfaceDeps.secretValues` and nothing else —
+   * but what a deployment that keeps its secrets in the environment will have called them.
    */
   secrets: readonly string[];
   connect(deps: SurfaceDeps): Promise<SurfaceSession>;

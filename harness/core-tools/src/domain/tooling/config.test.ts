@@ -24,7 +24,7 @@ describe('buildKernelConfig', () => {
         knowledge: { source: 'dir', path: '/srv/tenants/alpha/knowledge' },
       }),
     );
-    const config = await buildKernelConfig(document, env);
+    const config = await buildKernelConfig(document, env, { surfaces: {} });
     expect(config.client).toBe('alpha');
     expect(config.policy.classes.external).toBe('blocked');
     // Merged over the kernel's own matrix, not replacing it.
@@ -35,22 +35,26 @@ describe('buildKernelConfig', () => {
   });
 
   it('serves no pack for a document that names none, which used to need an empty variable', async () => {
-    const config = await buildKernelConfig(parseClientDocument(fixtureDocument({ packs: [] })), env);
+    const config = await buildKernelConfig(parseClientDocument(fixtureDocument({ packs: [] })), env, { surfaces: {} });
     expect(config.packs.all).toEqual([]);
     expect(config.hiddenTools).toEqual([]);
   });
 
   it('has no knowledge directory for a document whose knowledge lives in the store', async () => {
-    const config = await buildKernelConfig(parseClientDocument(fixtureDocument()), env);
+    const config = await buildKernelConfig(parseClientDocument(fixtureDocument()), env, { surfaces: {} });
     expect(config.knowledgeDir).toBeNull();
   });
 
   it('reads the storage root, the key and the gateway from the map it was given, not the ambient one', async () => {
-    const config = await buildKernelConfig(parseClientDocument(fixtureDocument()), {
-      ...env,
-      HARNESS_STORAGE_DIR: '/tmp/harness-somewhere-else',
-      HARNESS_GATEWAY_URL: 'http://127.0.0.1:9999',
-    });
+    const config = await buildKernelConfig(
+      parseClientDocument(fixtureDocument()),
+      {
+        ...env,
+        HARNESS_STORAGE_DIR: '/tmp/harness-somewhere-else',
+        HARNESS_GATEWAY_URL: 'http://127.0.0.1:9999',
+      },
+      { surfaces: {} },
+    );
     expect(config.storageDir).toBe('/tmp/harness-somewhere-else');
     expect(config.gateway.baseUrl).toBe('http://127.0.0.1:9999');
     expect(config.encryptionKey).toHaveLength(32);
@@ -58,11 +62,26 @@ describe('buildKernelConfig', () => {
 
   it('fails on a map with no storage root and on one with no gateway key, naming each', async () => {
     const { HARNESS_STORAGE_DIR: _dir, ...noStorage } = env;
-    await expect(buildKernelConfig(parseClientDocument(fixtureDocument()), noStorage)).rejects.toThrow(
-      /HARNESS_STORAGE_DIR/,
-    );
+    await expect(
+      buildKernelConfig(parseClientDocument(fixtureDocument()), noStorage, { surfaces: {} }),
+    ).rejects.toThrow(/HARNESS_STORAGE_DIR/);
     const { LITELLM_MASTER_KEY: _key, ...noGateway } = env;
-    await expect(buildKernelConfig(parseClientDocument(fixtureDocument()), noGateway)).rejects.toThrow(ConfigError);
+    await expect(
+      buildKernelConfig(parseClientDocument(fixtureDocument()), noGateway, { surfaces: {} }),
+    ).rejects.toThrow(ConfigError);
+  });
+
+  it("sends this tenant's own gateway key when its document named one, and the process key when it did not", async () => {
+    const document = parseClientDocument(fixtureDocument());
+    expect((await buildKernelConfig(document, env, { surfaces: {} })).gateway.apiKey).toBe(env.LITELLM_MASTER_KEY);
+    const own = await buildKernelConfig(document, env, { surfaces: {}, gatewayKey: 'sk-tenant-alpha' });
+    expect(own.gateway.apiKey).toBe('sk-tenant-alpha');
+    // And nothing else about the gateway moves: the URL, the timeout and the per-run breaker are
+    // the deployment's, whoever the tenant is.
+    expect(own.gateway.baseUrl).toBe((await buildKernelConfig(document, env, { surfaces: {} })).gateway.baseUrl);
+    expect(own.gateway.maxCallsPerRun).toBe(
+      (await buildKernelConfig(document, env, { surfaces: {} })).gateway.maxCallsPerRun,
+    );
   });
 });
 

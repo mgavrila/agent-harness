@@ -49,7 +49,7 @@ describe('the two per-run model-call limits', () => {
   });
 });
 
-describe('assertSecretsPresent', () => {
+describe('resolving a tenant’s secrets', () => {
   it('refuses a client whose document names a secret this deployment has no secret source for', async () => {
     const withRef = parseClientDocument(
       fixtureDocument({
@@ -57,7 +57,12 @@ describe('assertSecretsPresent', () => {
         displayName: 'alpha',
         runtime: 'scripted',
         surfaces: {
-          slack: { teamId: 'T001', signingSecret: { ref: 'slack-signing' }, botToken: { env: 'SLACK_BOT_TOKEN' } },
+          slack: {
+            teamId: 'T001',
+            signingSecret: { ref: 'slack-signing' },
+            botToken: { env: 'SLACK_BOT_TOKEN' },
+            approvalsChannel: 'C0TENANT',
+          },
         },
       }),
     );

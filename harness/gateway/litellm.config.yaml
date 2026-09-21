@@ -1,44 +1,20 @@
 # GENERATED FILE - do not edit by hand.
-# Rendered from a client document's routing section by harness/gateway/src/app/render-config.ts.
+# Rendered from harness/gateway/catalogue.yaml by harness/gateway/src/app/render-config.ts.
 # Regenerate with: pnpm gateway:config
 model_list:
-  - model_name: chat
+  - model_name: gemini/gemini-3-flash-preview
     litellm_params:
       model: gemini/gemini-3-flash-preview
       api_key: os.environ/GEMINI_API_KEY
       max_budget: 2
       budget_duration: 1d
-  - model_name: chat-fallback-1
-    litellm_params:
-      model: groq/openai/gpt-oss-120b
-      api_key: os.environ/GROQ_API_KEY
-      max_budget: 2
-      budget_duration: 1d
-  - model_name: extract
-    litellm_params:
-      model: gemini/gemini-3-flash-preview
-      api_key: os.environ/GEMINI_API_KEY
-      max_budget: 5
-      budget_duration: 1d
-  - model_name: reason
-    litellm_params:
-      model: gemini/gemini-3-flash-preview
-      api_key: os.environ/GEMINI_API_KEY
-      max_budget: 2
-      budget_duration: 1d
-  - model_name: reason-fallback-1
-    litellm_params:
-      model: groq/openai/gpt-oss-120b
-      api_key: os.environ/GROQ_API_KEY
-      max_budget: 2
-      budget_duration: 1d
-  - model_name: judge
+  - model_name: groq/openai/gpt-oss-120b
     litellm_params:
       model: groq/openai/gpt-oss-120b
       api_key: os.environ/GROQ_API_KEY
       max_budget: 1
       budget_duration: 1d
-  - model_name: embed
+  - model_name: gemini/gemini-embedding-001
     litellm_params:
       model: gemini/gemini-embedding-001
       api_key: os.environ/GEMINI_API_KEY
@@ -46,10 +22,8 @@ model_list:
       budget_duration: 1d
 router_settings:
   fallbacks:
-    - chat:
-        - chat-fallback-1
-    - reason:
-        - reason-fallback-1
+    - gemini/gemini-3-flash-preview:
+        - groq/openai/gpt-oss-120b
   num_retries: 2
   allowed_fails: 3
   cooldown_time: 30

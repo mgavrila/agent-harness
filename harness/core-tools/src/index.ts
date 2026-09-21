@@ -35,6 +35,8 @@ export {
   configSourceNameFrom,
   loadClientDocument,
   loadConfigSource,
+  loadSecretSource,
+  secretSourceNameFrom,
   type ConfigSourceDeps,
 } from './domain/config/registry.js';
 export {

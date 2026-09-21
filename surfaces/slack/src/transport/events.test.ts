@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ActionEvent, FormEvent } from '@harness/surface-api';
+import { bodyText } from '@harness/surface-api/testing';
 import { slackConfig } from '../config.js';
 import { createSlackSession } from '../session.js';
 import { eventsTransport, SLACK_MOUNT_PATH } from './events.js';
@@ -8,7 +9,9 @@ import { signRequest } from './signature.js';
 import type { SlackAuthTestResult, SlackInbound, SlackTransport } from './types.js';
 
 const SECRET = 'a-signing-secret';
-const env = { SLACK_BOT_TOKEN: 'xoxb-test', SLACK_SIGNING_SECRET: SECRET, SLACK_APPROVALS_CHANNEL: 'C0DEMO' };
+/** What the host resolves from this client's document and hands the adapter. */
+const secrets = { botToken: 'xoxb-test', signingSecret: SECRET };
+const config = () => slackConfig(secrets, 'C0DEMO');
 const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
 
 // One logger is shared by every case here, so a case that counts its lines has to start from
@@ -27,7 +30,7 @@ beforeEach(() => {
  */
 function transport(): { t: SlackTransport; api: FakeSlack } {
   const api = new FakeSlack();
-  return { t: eventsTransport(slackConfig(env), log, '/nonexistent/storage', api), api };
+  return { t: eventsTransport(config(), log, '/nonexistent/storage', api), api };
 }
 
 /** A signed request, as the host would hand one over. */
@@ -43,6 +46,11 @@ function signed(body: string, contentType = 'application/json', over: Record<str
       ...over,
     },
     body,
+    // What the host resolved from the mount path, and the signal it aborts when the caller goes
+    // away. This transport reads neither — it answers whole bodies — and they are here because
+    // the seam requires them.
+    clientId: 'fixture',
+    signal: new AbortController().signal,
   };
 }
 
@@ -71,7 +79,14 @@ describe('the Slack transport as an HTTP door', () => {
 
   it('answers a non-POST with 405 and no refusal, before anything else is consulted', async () => {
     const { t, api } = transport();
-    const response = await t.http!.handle({ method: 'GET', path: '', headers: {}, body: '' });
+    const response = await t.http!.handle({
+      method: 'GET',
+      path: '',
+      headers: {},
+      body: '',
+      clientId: 'fixture',
+      signal: new AbortController().signal,
+    });
     expect(response.status).toBe(405);
     expect(response.headers).toEqual({ allow: 'POST' });
     expect(response.refusal).toBeUndefined();
@@ -82,14 +97,21 @@ describe('the Slack transport as an HTTP door', () => {
     const { t } = transport();
     const response = await t.http!.handle(signed(JSON.stringify({ type: 'url_verification', challenge: 'c-123' })));
     expect(response.status).toBe(200);
-    expect(JSON.parse(response.body ?? '{}')).toEqual({ challenge: 'c-123' });
+    expect(JSON.parse(await bodyText(response))).toEqual({ challenge: 'c-123' });
     expect(response.refusal).toBeUndefined();
   });
 
   it('refuses an unsigned request, a badly signed one and a stale one, each by its own reason', async () => {
     const { t } = transport();
     const body = eventCallback(channelMention);
-    const unsigned = { method: 'POST', path: '', headers: { 'content-type': 'application/json' }, body };
+    const unsigned = {
+      method: 'POST',
+      path: '',
+      headers: { 'content-type': 'application/json' },
+      body,
+      clientId: 'fixture',
+      signal: new AbortController().signal,
+    };
     expect((await t.http!.handle(unsigned)).refusal).toEqual({ reason: 'missing_signature' });
     const wrong = signed(body);
     expect(
@@ -113,9 +135,16 @@ describe('the Slack transport as an HTTP door', () => {
   it('drops nothing of a refused request into the answer', async () => {
     const { t } = transport();
     const body = eventCallback({ ...channelMention, text: 'a-secret-sentence' });
-    const response = await t.http!.handle({ method: 'POST', path: '', headers: {}, body });
+    const response = await t.http!.handle({
+      method: 'POST',
+      path: '',
+      headers: {},
+      body,
+      clientId: 'fixture',
+      signal: new AbortController().signal,
+    });
     expect(response.status).toBe(401);
-    expect(response.body ?? '').not.toContain('a-secret-sentence');
+    expect(await bodyText(response)).not.toContain('a-secret-sentence');
   });
 
   it('refuses a content type it does not serve', async () => {
@@ -128,7 +157,7 @@ describe('the Slack transport as an HTTP door', () => {
     const body = JSON.stringify({ type: 'url_verification', challenge: 'c-123' });
     const response = await transport().t.http!.handle(signed(body, 'Application/JSON; charset=UTF-8'));
     expect(response.status).toBe(200);
-    expect(JSON.parse(response.body ?? '{}')).toEqual({ challenge: 'c-123' });
+    expect(JSON.parse(await bodyText(response))).toEqual({ challenge: 'c-123' });
   });
 
   it('runs the pipeline for an event callback, after acknowledging it', async () => {
@@ -167,6 +196,37 @@ describe('the Slack transport as an HTTP door', () => {
     await settle();
     expect(seen[0].text).toBe('hello there');
     expect(api.authTestCalls).toBe(1);
+  });
+
+  it('reports its identity state without ever asking for one, which is what a status poll reads', async () => {
+    const { t, api } = transport();
+    const session = createSlackSession(t, config());
+    // Before `start()`: nothing has been asked, so the workspace has not been reached and the
+    // sentence says exactly that, in this adapter's own words.
+    expect(session.health!()).toEqual({
+      live: false,
+      detail: 'the Slack workspace has not been reached yet',
+    });
+    // The hazard this shape was designed around, pinned: reporting health asks Slack nothing. A
+    // dashboard polls this route, and a poll that called `auth.test` would be one outbound call
+    // per tenant per tick — so the count is unmoved before `start()` has asked, and unmoved by
+    // every later report.
+    expect(api.authTestCalls).toBe(0);
+
+    await t.events.start();
+    expect(api.authTestCalls).toBe(1);
+    expect(session.health!()).toEqual({ live: true });
+    expect(session.health!()).toEqual({ live: true });
+    expect(api.authTestCalls).toBe(1);
+
+    // A workspace that refuses gets the other fixed sentence, and never Slack's own error text.
+    const refusing = new FakeSlack();
+    refusing.failWith = 'invalid_auth';
+    const t2 = eventsTransport(config(), log, '/nonexistent/storage', refusing);
+    await expect(t2.events.start()).rejects.toThrow();
+    const health = createSlackSession(t2, config()).health!();
+    expect(health).toEqual({ live: false, detail: 'the Slack workspace refused this app' });
+    expect(JSON.stringify(health)).not.toContain('invalid_auth');
   });
 
   it('drops a retried delivery and tells Slack not to send it again', async () => {
@@ -228,7 +288,7 @@ describe('the Slack transport and an interaction', () => {
 
   it('delivers a block action to the session s action handler, which is where approvals listen', async () => {
     const { t } = transport();
-    const session = createSlackSession(t, slackConfig(env));
+    const session = createSlackSession(t, config());
     const seen: ActionEvent[] = [];
     session.onAction(async (event) => {
       seen.push(event);
@@ -257,7 +317,7 @@ describe('the Slack transport and an interaction', () => {
 
   it('delivers a view submission with its metadata and its values', async () => {
     const { t } = transport();
-    const session = createSlackSession(t, slackConfig(env));
+    const session = createSlackSession(t, config());
     const seen: FormEvent[] = [];
     session.onFormSubmit(async (event) => {
       seen.push(event);
@@ -274,7 +334,7 @@ describe('the Slack transport and an interaction', () => {
     const response = await t.http!.handle(signed(body, 'application/x-www-form-urlencoded'));
     // An empty 200 is what closes the modal, which is what accepting a submission means.
     expect(response.status).toBe(200);
-    expect(response.body ?? '').toBe('');
+    expect(await bodyText(response)).toBe('');
     await settle();
     expect(seen).toHaveLength(1);
     expect(seen[0]).toMatchObject({ userId: 'U0LEAD', formId: 'approval_edit', metadata: 'an-approval-id' });
@@ -295,7 +355,7 @@ describe('the Slack transport and an interaction', () => {
     // `encodeURIComponent` only ever emits `%20`, so every other case here would pass against a
     // hand-rolled `decodeURIComponent(body.split('=')[1])` that loses every space Slack sends.
     const { t } = transport();
-    const session = createSlackSession(t, slackConfig(env));
+    const session = createSlackSession(t, config());
     const seen: FormEvent[] = [];
     session.onFormSubmit(async (event) => {
       seen.push(event);
@@ -332,7 +392,7 @@ describe("the Slack transport and the app's own identity", () => {
         }),
     };
     return {
-      t: eventsTransport(slackConfig(env), log, '/nonexistent/storage', api),
+      t: eventsTransport(config(), log, '/nonexistent/storage', api),
       // Read when it is called rather than captured here: the fetch is lazy, so nothing has asked
       // `auth.test` anything — and no resolver exists — until a request or `start()` does.
       release: (identity) => {
@@ -367,7 +427,7 @@ describe("the Slack transport and the app's own identity", () => {
   function unidentified(): SlackTransport {
     const api = new FakeSlack();
     api.auth = { test: () => Promise.reject(new Error('invalid_auth')) };
-    return eventsTransport(slackConfig(env), log, '/nonexistent/storage', api);
+    return eventsTransport(config(), log, '/nonexistent/storage', api);
   }
 
   it('refuses a delivery when it could not learn who this app is', async () => {
@@ -401,7 +461,7 @@ describe("the Slack transport and the app's own identity", () => {
           : Promise.resolve({ user_id: 'U0BOTUSER', bot_id: 'B0BOTID' });
       },
     };
-    const t = eventsTransport(slackConfig(env), log, '/nonexistent/storage', api);
+    const t = eventsTransport(config(), log, '/nonexistent/storage', api);
     const seen: SlackInbound[] = [];
     t.events.onMessage(async (message) => {
       seen.push(message);
@@ -430,7 +490,7 @@ describe("the Slack transport and the app's own identity", () => {
       signed(JSON.stringify({ type: 'url_verification', challenge: 'c-123' })),
     );
     expect(response.status).toBe(200);
-    expect(JSON.parse(response.body ?? '{}')).toEqual({ challenge: 'c-123' });
+    expect(JSON.parse(await bodyText(response))).toEqual({ challenge: 'c-123' });
     expect(response.refusal).toBeUndefined();
   });
 
@@ -439,7 +499,7 @@ describe("the Slack transport and the app's own identity", () => {
     // the bot's ids. Coupling a decision on an approval card to a fetch it never needed would
     // strand every card in the channel.
     const t = unidentified();
-    const session = createSlackSession(t, slackConfig(env));
+    const session = createSlackSession(t, config());
     const seen: ActionEvent[] = [];
     session.onAction(async (event) => {
       seen.push(event);
@@ -472,7 +532,7 @@ describe("the Slack transport and the app's own identity", () => {
 describe('the session over this transport', () => {
   it('offers the transport s door as its own, so the host can mount it', () => {
     const { t } = transport();
-    const session = createSlackSession(t, slackConfig(env));
+    const session = createSlackSession(t, config());
     expect(session.http?.path).toBe(SLACK_MOUNT_PATH);
   });
 });

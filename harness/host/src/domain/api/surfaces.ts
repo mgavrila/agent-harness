@@ -2,7 +2,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { CLIENT_ID_PATTERN } from '@harness/config-api';
 import { hashArgs, writeAudit } from '@harness/core-tools';
 import type { Db } from '@harness/db';
-import { ConfigError } from '@harness/shared';
+import { ConfigError, type Logger } from '@harness/shared';
 import {
   SURFACE_HTTP_PATH_PATTERN,
   SURFACE_REFUSAL_REASON_PATTERN,
@@ -11,8 +11,8 @@ import {
   type SurfaceSession,
 } from '@harness/surface-api';
 import type { HostPool } from '../tenancy/types.js';
-import { json, readBody } from './http.js';
-import { API_MAX_BODY_BYTES, TENANT_PREFIX } from './types.js';
+import { json, readBody, tooLarge } from './http.js';
+import { TENANT_PREFIX } from './types.js';
 
 /**
  * Serving a surface that is reached by a request (spec section 4.6).
@@ -146,12 +146,65 @@ function noRoute(res: ServerResponse): void {
   json(res, 404, { error: 'no such route' });
 }
 
-function send(res: ServerResponse, response: SurfaceHttpResponse): void {
+/**
+ * Wait for the socket to drain, or for the caller to go away — whichever comes first.
+ *
+ * `res.write` answers false when the kernel buffer is full, and a producer that ignored that
+ * would hold the whole response in this process's memory for a client reading it slowly. Waiting
+ * on `drain` alone is the trap on the other side: a client that disappears mid-write never
+ * drains, and the generator would be parked forever. So both events settle it — and `close` is
+ * also what aborts the request's signal, so the producer is already on its way out.
+ */
+async function drained(res: ServerResponse): Promise<void> {
+  await new Promise<void>((resolve) => {
+    const done = (): void => {
+      res.off('drain', done);
+      res.off('close', done);
+      resolve();
+    };
+    res.once('drain', done);
+    res.once('close', done);
+  });
+}
+
+/**
+ * Send what the surface answered: a whole body, or a stream of chunks as they are produced.
+ *
+ * The head is written once, from the surface's own status and headers, and after that this
+ * function copies bytes it does not read. A chunk is whatever the adapter yielded — a
+ * Server-Sent Events frame, a line of NDJSON, a fragment of anything — which is what keeps a
+ * transport's framing inside the adapter and out of this file.
+ *
+ * A throw out of the iterable ends the response with what has already been written. There is no
+ * error frame and no status change: the status went out with the head, and inventing a frame here
+ * would mean this file knew what the adapter's frames look like.
+ */
+async function send(res: ServerResponse, response: SurfaceHttpResponse, log: Logger, what: string): Promise<void> {
   // The surface's own headers win: it knows what it is answering. Plain text is the default
   // because an acknowledgement is usually empty and a body typed `application/json` that is not
   // JSON is worse than one typed as text.
   res.writeHead(response.status, { 'content-type': 'text/plain; charset=utf-8', ...(response.headers ?? {}) });
-  res.end(response.body ?? '');
+  const body = response.body;
+  if (body === undefined || typeof body === 'string') {
+    res.end(body ?? '');
+    return;
+  }
+  // The head goes out now rather than with the first chunk. Node buffers it until something is
+  // written, and a client that waits for the headers before it reads — which every reader of an
+  // event stream does — would be waiting on a frame the producer has not made yet, while the
+  // producer waits for nothing at all. Only the streaming branch needs it: a whole body writes
+  // the head and the bytes in the same breath.
+  res.flushHeaders();
+  try {
+    for await (const chunk of body) {
+      if (res.writableEnded || res.destroyed) break;
+      if (!res.write(chunk)) await drained(res);
+    }
+  } catch (err) {
+    log.error(`${what} failed mid-stream`, err);
+  } finally {
+    if (!res.writableEnded) res.end();
+  }
 }
 
 /**
@@ -201,6 +254,18 @@ export async function handleSurfaceRequest(
   if (asked === '' || path === '' || !CLIENT_ID_PATTERN.test(asked)) {
     return noRoute(res);
   }
+  // Before the first `await`, and that is the point of its being here rather than beside the call
+  // it serves. Opening a tenant on demand is a real wait — a config load, a secret decrypt, a
+  // runtime connect — and so is reading a body off a socket, and a caller that gives up inside
+  // either has already made `res` emit `close`. A listener registered after that never fires, so a
+  // streaming handler would be handed a signal nobody will ever abort and park on it forever.
+  //
+  // It fires for an ordinary answer too, once that answer has been sent, which costs a handler
+  // that has already returned nothing.
+  const hungUp = new AbortController();
+  res.on('close', () => hungUp.abort());
+  // And the close may already have happened, in which case there is no event left to hear.
+  if (res.closed || res.destroyed) hungUp.abort();
   const method = req.method ?? '';
   if (pool.resolver.resolve({ from: 'api', clientId: asked }) !== asked) {
     if (pool.dedicatedClient !== null) {
@@ -221,12 +286,15 @@ export async function handleSurfaceRequest(
   const mount = mountFor(tenant.host.surfaces.all, path);
   if (!mount) return noRoute(res);
   const body = await readBody(req);
-  // Answered, then the socket torn up, for the reason `openRunRoute` gives: a caller told nothing
-  // learns nothing, and a caller that keeps sending anyway is cut off rather than read for as
-  // long as it likes.
-  if (!body.ok) {
-    return json(res, 413, { error: `a request body may be at most ${API_MAX_BODY_BYTES} bytes` }, () => req.destroy());
+  // The caller went away while the body was arriving. Nothing is written, because there is no
+  // socket left to write to, and **nothing is audited**: a row saying `refused` would name a
+  // request nobody finished making, and invariant 15 is about a door that turned somebody away.
+  // The signal is aborted so that anything already running on this request stops with it.
+  if (body.kind === 'gone') {
+    hungUp.abort();
+    return;
   }
+  if (body.kind === 'too_large') return tooLarge(req, res);
   let response: SurfaceHttpResponse;
   try {
     response = await mount.http.handle({
@@ -236,6 +304,11 @@ export async function handleSurfaceRequest(
       // The bytes as they arrived, decoded as UTF-8 and not parsed: a surface that verifies a
       // signature computes it over exactly this.
       body: body.text,
+      // The tenant this request resolved to, a few lines above. An adapter that reports which
+      // workspace an event came from reports this one, and cannot disagree with the route the
+      // request actually took.
+      clientId: tenant.clientId,
+      signal: hungUp.signal,
     });
   } catch (err) {
     // A handler that threw refused nobody, so nothing is audited: invariant 15 is about a door
@@ -250,6 +323,8 @@ export async function handleSurfaceRequest(
     return json(res, 500, { error: 'surface failure' });
   }
   if (response.refusal) {
+    // Before the head, and that is the whole of invariant 20's ordering: once `send` has written
+    // a status there is no refusal left to declare, whether the body is a string or a stream.
     await auditRefusal(pool.db, {
       client: tenant.clientId,
       asked,
@@ -260,5 +335,10 @@ export async function handleSurfaceRequest(
     });
     pool.log.warn(`tenant ${tenant.clientId}: surface "${mount.session.name}" refused a request`);
   }
-  send(res, response);
+  await send(
+    res,
+    response,
+    pool.log,
+    `tenant ${tenant.clientId}: surface "${mount.session.name}" at "${mount.http.path}"`,
+  );
 }

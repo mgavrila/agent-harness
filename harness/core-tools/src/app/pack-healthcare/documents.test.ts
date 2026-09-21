@@ -6,7 +6,15 @@ import { eq } from 'drizzle-orm';
 import { documents, records, fields as fieldsTable, attachments as attachmentsTable } from '@harness/db';
 import { pack as healthcarePack } from '@harness/pack-healthcare';
 import type { ToolDeps } from '../../domain/tooling/types.js';
-import { connectTools, makeTestDeps, resultOf, useTestDb, startFakeGateway, type FakeGateway } from '../../testing.js';
+import {
+  TEST_MODELS,
+  connectTools,
+  makeTestDeps,
+  resultOf,
+  startFakeGateway,
+  useTestDb,
+  type FakeGateway,
+} from '../../testing.js';
 import { writePdf } from '../../domain/documents/pdf.test-helpers.js';
 
 const db = useTestDb();
@@ -154,7 +162,7 @@ describe('documents_classify and documents_extract', () => {
   function connectWithGateway(overrides: Partial<ToolDeps> = {}) {
     const d = makeTestDeps(db, {
       storageDir,
-      gateway: { baseUrl: gateway.url, apiKey: 'sk-test', timeoutMs: 10_000, maxCallsPerRun: 100 },
+      gateway: { baseUrl: gateway.url, apiKey: 'sk-test', models: TEST_MODELS, timeoutMs: 10_000, maxCallsPerRun: 100 },
       ...overrides,
     });
     deps = d;

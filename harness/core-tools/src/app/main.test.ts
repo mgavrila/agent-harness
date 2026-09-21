@@ -62,6 +62,9 @@ async function connect(client: string, principal = 'svc-local'): Promise<Client>
       DATABASE_URL: TEST_DATABASE_URL,
       HARNESS_ENCRYPTION_KEY: randomBytes(32).toString('base64'),
       HARNESS_CONFIG_SOURCE: 'files',
+      // Required, with no default. These documents name their secrets as environment variables,
+      // which is what `env` resolves.
+      HARNESS_SECRET_SOURCE: 'env',
       HARNESS_CLIENTS_DIR: clientsDir,
       HARNESS_CLIENT: client,
       HARNESS_PRINCIPAL: principal,

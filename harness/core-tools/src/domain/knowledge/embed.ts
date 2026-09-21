@@ -15,7 +15,6 @@ import type { ToolDeps } from '../tooling/types.js';
 export const EMBED_BATCH = 64;
 
 interface EmbeddingsResponse {
-  model?: string;
   data?: { index?: number; embedding?: number[] }[];
   usage?: { prompt_tokens?: number };
 }
@@ -39,7 +38,9 @@ async function embedBatch(deps: ToolDeps, texts: readonly string[]): Promise<num
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${deps.gateway.apiKey}` },
       body: JSON.stringify({
-        model: EMBED_ROUTE,
+        // The document's own deployment name for the embed route, exactly as `callModel` sends
+        // the one for a chat route.
+        model: deps.gateway.models[EMBED_ROUTE],
         input: texts,
         dimensions: deps.embedDims,
         user: deps.principal.id,
@@ -69,7 +70,8 @@ async function embedBatch(deps: ToolDeps, texts: readonly string[]): Promise<num
     runId: deps.context.runId ?? null,
     client: deps.client,
     route: EMBED_ROUTE,
-    model: payload.model ?? EMBED_ROUTE,
+    // The string sent, never `payload.model`: the row records the deployment this tenant named.
+    model: deps.gateway.models[EMBED_ROUTE],
     inputTokens: payload.usage?.prompt_tokens ?? 0,
     // An embeddings deployment produces no completion tokens; the column stays 0 rather than null
     // so a sum over model_calls needs no special case for this route.

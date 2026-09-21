@@ -9,10 +9,10 @@ import {
 } from '@harness/approvals';
 import {
   parsePlaybooksFile,
+  resolveSecrets,
+  surfaceConversationsOf,
   surfaceNamesOf,
-  surfaceSecretsOf,
   tenantKeysOf,
-  type ClientDocument,
 } from '@harness/config-api';
 import { buildKernelConfig, loadIdentity, reconcile, type GatewayConfig } from '@harness/core-tools';
 import { outRoot } from '@harness/core-tools/storage';
@@ -43,33 +43,6 @@ const SKILLS_SUBDIR = 'skills';
 
 /** How long a tenant's scheduler is given to finish the tick in flight while it closes. */
 const SCHEDULER_STOP_MS = 10_000;
-
-/**
- * Check that every secret the document *refers to* is actually present.
- *
- * A `SecretRef` names either an environment variable or a secret store entry, never the secret
- * itself. `{ env }`'s value stays in the process environment and reaches the surface through
- * `deps.env`, exactly as it does today; the chance this adds is to fail at load, naming the
- * tenant and the variable, instead of at the first message with a transport error nobody can
- * attribute. `{ ref }` names an entry in the deployment's secret store, which nothing in this
- * repository has yet, so it is refused here the same way — at load, naming the tenant and the
- * secret — rather than by a surface that cannot resolve it. `surfaceSecretsOf` is what reads the
- * typed surface sections, so this file names no surface's own fields.
- */
-function assertSecretsPresent(document: ClientDocument, env: EnvSource): void {
-  for (const ref of surfaceSecretsOf(document)) {
-    if ('ref' in ref) {
-      throw new ConfigError(
-        `client "${document.id}" names the secret "${ref.ref}" for ${ref.surface}.${ref.field}, and this deployment has no secret source`,
-      );
-    }
-    if ((optionalEnv(ref.env, env) ?? '').trim() === '') {
-      throw new ConfigError(
-        `client "${document.id}" declares the "${ref.surface}" surface, which needs ${ref.env}; this deployment does not set it`,
-      );
-    }
-  }
-}
 
 /**
  * What one turn may spend, and the one check that the two per-run model-call limits agree.
@@ -152,8 +125,13 @@ export async function openTenant(pool: HostPool, loaded: LoadedDocument): Promis
 async function buildTenant(pool: HostPool, loaded: LoadedDocument, opened: Stoppable[]): Promise<Tenant> {
   const { document, version } = loaded;
   const log = pool.log;
-  const config = await buildKernelConfig(document, pool.env);
-  assertSecretsPresent(document, pool.env);
+  // Before anything is built, and before `buildKernelConfig` (spec section 4.10). Two reasons the
+  // order matters: a deployment whose secret source is broken should be told that before it is
+  // told anything about its gateway, and section 4.11's per-tenant gateway key is resolved here
+  // and handed to `buildKernelConfig`. It is also what makes "add a tenant with no restart" true
+  // — a pooled host opens a new tenant on its first request and resolves its secrets then.
+  const secrets = await resolveSecrets(document, { source: pool.secrets, log });
+  const config = await buildKernelConfig(document, pool.env, secrets);
   const budget = runBudget(config.client, config.gateway, pool.env);
 
   // The document into the table, once per open, and before a surface or the runtime connects: a
@@ -167,21 +145,18 @@ async function buildTenant(pool: HostPool, loaded: LoadedDocument, opened: Stopp
   );
 
   // What the document says about each surface it declares: the key an inbound event's hint is
-  // matched against, and the variable it named for each of that surface's secrets. Both come out
-  // of `@harness/config-api`, which is where the typed surface sections are read, so this file
-  // names no surface's own field — `field` is as opaque here as `env` already was.
+  // matched against, the value behind each of that surface's secrets, and where its cards go.
+  // All three come out of `@harness/config-api`, which is where the typed surface sections are
+  // read, so this file names no surface's own field — `field` is as opaque here as `env` ever
+  // was, and the value it keys is never logged, never audited and never put in a message.
   const settings: Record<string, SurfaceSettings> = {};
-  for (const { surface, key } of tenantKeysOf(document)) {
-    settings[surface] = { ...settings[surface], tenantKey: key };
-  }
-  // `assertSecretsPresent`, above, has already thrown for any `{ ref }` entry, so every one left
-  // here names an environment variable; the guard is for the type checker, not the deployment.
-  for (const ref of surfaceSecretsOf(document)) {
-    if (!('env' in ref)) continue;
-    settings[ref.surface] = {
-      ...settings[ref.surface],
-      secrets: { ...settings[ref.surface]?.secrets, [ref.field]: ref.env },
-    };
+  const set = (surface: string, part: Partial<SurfaceSettings>): void => {
+    settings[surface] = { ...settings[surface], ...part };
+  };
+  for (const { surface, key } of tenantKeysOf(document)) set(surface, { tenantKey: key });
+  for (const [surface, secretValues] of Object.entries(secrets.surfaces)) set(surface, { secretValues });
+  for (const { surface, conversation } of surfaceConversationsOf(document)) {
+    set(surface, { defaultConversation: conversation });
   }
   const surfaces = await loadSurfaces(
     surfaceNamesOf(document).map(surfaceSpecifier),
@@ -244,7 +219,16 @@ async function buildTenant(pool: HostPool, loaded: LoadedDocument, opened: Stopp
     persona: document.persona,
     // The kernel's own skills first, then this client's, then every pack's.
     skills: await readSkillCatalogue([kernelSkillsDir(), skillsDir, ...config.packs.skillsDirs()]),
-    model: { baseUrl: config.gateway.baseUrl, apiKey: config.gateway.apiKey, route: 'chat', fallbackRoute: 'reason' },
+    // The route names the job and the deployment names what serves it: both travel, because the
+    // runtime sends the second and the host records the first.
+    model: {
+      baseUrl: config.gateway.baseUrl,
+      apiKey: config.gateway.apiKey,
+      route: 'chat',
+      fallbackRoute: 'reason',
+      model: config.gateway.models.chat,
+      fallbackModel: config.gateway.models.reason,
+    },
     budget,
     servicePrincipal,
     log,

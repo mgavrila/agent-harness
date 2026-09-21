@@ -43,7 +43,6 @@ export async function syncPlaybooks(
         client: opts.client,
         name: def.name,
         schedule: def.schedule,
-        timezone: def.timezone,
         skill: def.skill,
         prompt: def.prompt,
         principalId: def.principal,
@@ -53,7 +52,7 @@ export async function syncPlaybooks(
         costCapUsd: def.cost_cap_usd,
         timeoutS: def.timeout_s,
         enabled: def.enabled,
-        nextRunAt: def.enabled ? nextRunAfter(def.schedule, def.timezone, opts.now, where(def.name)) : null,
+        nextRunAt: def.enabled ? nextRunAfter(def.schedule, opts.now, where(def.name)) : null,
         updatedAt: opts.now,
       };
       await tx
@@ -223,7 +222,7 @@ export async function claimDuePlaybooks(db: Db, opts: { client: string; now: Dat
       const [advanced] = await tx
         .update(playbooks)
         .set({
-          nextRunAt: nextRunAfter(playbook.schedule, playbook.timezone, opts.now, `playbook "${playbook.name}"`),
+          nextRunAt: nextRunAfter(playbook.schedule, opts.now, `playbook "${playbook.name}"`),
           lastRunAt: opts.now,
           updatedAt: opts.now,
         })

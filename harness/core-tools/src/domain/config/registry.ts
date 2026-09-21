@@ -1,9 +1,12 @@
-import type { ClientDocument, ConfigSource } from '@harness/config-api';
+import { envSecretSource, type ClientDocument, type ConfigSource, type SecretSource } from '@harness/config-api';
 import type { Db } from '@harness/db';
 import { ConfigError, envOrDefault, requiredEnv, type EnvSource, type Logger } from '@harness/shared';
 
 /** The sources this build ships. A third one is a package and one line here. */
 const SOURCES = ['files', 'postgres'] as const;
+
+/** The secret sources this build ships. A third one is a package and one line here. */
+const SECRET_SOURCES = ['env', 'postgres'] as const;
 
 export interface ConfigSourceDeps {
   env: EnvSource;
@@ -55,6 +58,40 @@ export async function loadConfigSource(name: string, deps: ConfigSourceDeps): Pr
     return postgresConfigSource({ db: deps.db, log: deps.log });
   }
   throw new ConfigError(`no config source named "${name}"; this build ships ${SOURCES.join(' and ')}`);
+}
+
+/**
+ * Where this process resolves a document's secrets from. Required, with no default.
+ *
+ * No default for the same reason `HARNESS_CONFIG_SOURCE` has none, and more sharply: a host that
+ * guessed `env` would come up, open every tenant whose document names only variables, and refuse
+ * every tenant whose document names a stored secret — with a message about a deployment having no
+ * secret source, which would be a deployment that had one and had not been told.
+ */
+export function secretSourceNameFrom(env: EnvSource): string {
+  const name = requiredEnv('HARNESS_SECRET_SOURCE', ` (one of: ${SECRET_SOURCES.join(', ')})`, env);
+  if (!(SECRET_SOURCES as readonly string[]).includes(name)) {
+    throw new ConfigError(`HARNESS_SECRET_SOURCE is "${name}"; this build ships ${SECRET_SOURCES.join(' and ')}`);
+  }
+  return name;
+}
+
+/**
+ * Build the named secret source.
+ *
+ * `env` is a static import: it ships inside `@harness/config-api`, which this file already holds
+ * for its types, so there is nothing to defer. `postgres` is a dynamic import for the reason
+ * `loadConfigSource` uses one — a process that reads its secrets from the environment should not
+ * pay for a package that opens a database.
+ */
+export async function loadSecretSource(name: string, deps: ConfigSourceDeps): Promise<SecretSource> {
+  if (name === 'env') return envSecretSource(deps.env);
+  if (name === 'postgres') {
+    if (!deps.db) throw new ConfigError('the postgres secret source reads its secrets from a database; open one');
+    const { postgresSecretSource } = await import('@harness/config-postgres');
+    return postgresSecretSource({ db: deps.db, env: deps.env, log: deps.log });
+  }
+  throw new ConfigError(`no secret source named "${name}"; this build ships ${SECRET_SOURCES.join(' and ')}`);
 }
 
 /**

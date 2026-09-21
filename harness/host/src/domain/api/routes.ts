@@ -5,28 +5,29 @@ import * as z from 'zod/v4';
 import { containsRestrictedPattern } from '@harness/core-tools/redaction';
 import type { Principal } from '@harness/identity-api';
 import { RUN_FAILED_MESSAGE } from '@harness/runtime-api';
-import { CONVERSATION_ID_PATTERN, SURFACE_NAME_PATTERN, assertInsideRoot } from '@harness/shared';
+import { CONVERSATION_ID_PATTERN, SURFACE_NAME_PATTERN, assertInsideRoot, type Logger } from '@harness/shared';
+import type { SurfaceSession } from '@harness/surface-api';
 import { cancelRun, runTurn, serialize, type TurnEvent } from '../conversation.js';
 import type { Host } from '../host.js';
 import type { SchedulerStatus } from '../playbooks/scheduler.js';
 import type { HostPool } from '../tenancy/types.js';
 import { WITHHELD, findOrCreateThread } from '../threads/repository.js';
-import { json, readBody } from './http.js';
+import { json, readBody, tooLarge } from './http.js';
+import {
+  APPROVAL_STATUSES,
+  MEMORY_SCOPES,
+  READ_DEFAULT_LIMIT,
+  READ_MAX_LIMIT,
+  UUID,
+  decodeCursor,
+  readApprovals,
+  readMemory,
+} from './reads.js';
 import { findRunFor, readThreadFor } from './repository.js';
 import { handleSurfaceRequest } from './surfaces.js';
 import { sseStream } from './sse.js';
 import { USAGE_DEFAULT_DAYS, USAGE_MAX_DAYS, endOfUtcDay, readUsage, startOfUtcDay } from './usage.js';
-import {
-  API_MAX_ATTACHMENTS,
-  API_MAX_BODY_BYTES,
-  API_MAX_TEXT_CHARS,
-  CLIENT_HEADER,
-  TENANT_PREFIX,
-  type RunApiOptions,
-} from './types.js';
-
-/** A uuid, checked before it reaches Postgres: an id of any other shape is "no such thing", not an error. */
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+import { API_MAX_ATTACHMENTS, API_MAX_TEXT_CHARS, CLIENT_HEADER, TENANT_PREFIX, type RunApiOptions } from './types.js';
 
 /** One day, for the usage window's default and its bound. */
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -111,13 +112,10 @@ async function callerFromQuery(host: Host, url: URL): Promise<Caller> {
  */
 async function openRunRoute(host: Host, req: IncomingMessage, res: ServerResponse): Promise<void> {
   const body = await readBody(req);
-  // The 413 goes out first and the socket is torn up after it, so the caller is told why and a
-  // caller that keeps sending anyway is cut off rather than read and discarded for as long as it
-  // likes. Destroying before the flush would answer nothing; not destroying at all would let one
-  // authenticated connection stream gigabytes past a cap that had already refused it.
-  if (!body.ok) {
-    return json(res, 413, { error: `a request body may be at most ${API_MAX_BODY_BYTES} bytes` }, () => req.destroy());
-  }
+  // The caller went away before the body ended. There is nothing to answer it with and nobody to
+  // answer: writing a status into a dead socket would be a refusal nobody was given.
+  if (body.kind === 'gone') return;
+  if (body.kind === 'too_large') return tooLarge(req, res);
   let raw: unknown;
   try {
     raw = JSON.parse(body.text);
@@ -220,6 +218,31 @@ async function threadRoute(host: Host, url: URL, res: ServerResponse, threadId: 
 }
 
 /**
+ * One surface's line in the status: its name, whether it is live, and the one sentence its
+ * adapter has to add.
+ *
+ * A session that offers no `health` is live — the host has it open and its adapter has nothing to
+ * say. The contract says the call is synchronous and does not throw, so the route cannot be held
+ * up by an adapter and cannot be brought down by one; the `try` is belt and braces, because a
+ * status that failed over one adapter's broken getter would hide every other surface's state.
+ * `detail` is opaque text the host copies and never reads, which is what keeps a vendor's
+ * vocabulary out of this file.
+ */
+function surfaceStatus(session: SurfaceSession, log: Logger): { name: string; live: boolean; detail?: string } {
+  try {
+    const health = session.health?.();
+    if (!health) return { name: session.name, live: true };
+    // The two fields the contract names, copied one at a time rather than spread: an adapter
+    // that answered with more than it was asked would otherwise put whatever it added into a
+    // deployment's dashboard.
+    return { name: session.name, live: health.live, ...(health.detail === undefined ? {} : { detail: health.detail }) };
+  } catch (err) {
+    log.warn(`surface "${session.name}" could not report its health`, err);
+    return { name: session.name, live: false };
+  }
+}
+
+/**
  * What one tenant is doing (decision 16): the surfaces it loaded, the runs in flight, and its
  * scheduler's own status, which had nowhere to be reported until this route existed.
  *
@@ -232,7 +255,7 @@ async function threadRoute(host: Host, url: URL, res: ServerResponse, threadId: 
 function statusRoute(host: Host, res: ServerResponse, scheduler: { status(): SchedulerStatus }): void {
   json(res, 200, {
     client: host.client,
-    surfaces: host.surfaces.all.map((session) => session.name),
+    surfaces: host.surfaces.all.map((session) => surfaceStatus(session, host.log)),
     primary_surface: host.surfaces.primary.name,
     runs_in_flight: host.active.size,
     draining: host.draining,
@@ -280,6 +303,63 @@ async function usageRoute(host: Host, url: URL, res: ServerResponse): Promise<vo
 }
 
 /**
+ * One page of this tenant's approvals (spec section 4.12).
+ *
+ * `status` is the column's own vocabulary and nothing else — `pending`, `approved`, `declined`,
+ * `expired`, comma-separated for several — so a dashboard can render what it filtered on. An
+ * unknown value is a 400 naming the four rather than an empty page, which is the failure a
+ * caller cannot tell from "there are none".
+ */
+async function approvalsRoute(host: Host, url: URL, res: ServerResponse): Promise<void> {
+  const limit = readLimit(url);
+  if (limit === null) return json(res, 400, { error: `limit is a whole number between 1 and ${READ_MAX_LIMIT}` });
+  const asked = url.searchParams.get('status');
+  const statuses = asked === null ? [] : asked.split(',').map((value) => value.trim());
+  const unknown = statuses.find((value) => !(APPROVAL_STATUSES as readonly string[]).includes(value));
+  if (unknown !== undefined) {
+    return json(res, 400, { error: `status is one of ${APPROVAL_STATUSES.join(', ')}, comma-separated for several` });
+  }
+  const cursor = url.searchParams.get('cursor');
+  if (cursor !== null && decodeCursor(cursor) === null) return json(res, 400, { error: 'cursor is not one of ours' });
+  const page = await readApprovals(host.db, { client: host.client, statuses, cursor, limit });
+  return json(res, 200, { client: host.client, ...page });
+}
+
+/** One page of this tenant's memory entries (spec section 4.12), oldest first. */
+async function memoryRoute(host: Host, url: URL, res: ServerResponse): Promise<void> {
+  const limit = readLimit(url);
+  if (limit === null) return json(res, 400, { error: `limit is a whole number between 1 and ${READ_MAX_LIMIT}` });
+  const scope = url.searchParams.get('scope');
+  if (scope !== null && !(MEMORY_SCOPES as readonly string[]).includes(scope)) {
+    return json(res, 400, { error: `scope is one of ${MEMORY_SCOPES.join(', ')}` });
+  }
+  const cursor = url.searchParams.get('cursor');
+  if (cursor !== null && decodeCursor(cursor) === null) return json(res, 400, { error: 'cursor is not one of ours' });
+  const principal = url.searchParams.get('principal');
+  const page = await readMemory(host.db, {
+    client: host.client,
+    ...(scope === null ? {} : { scope }),
+    ...(principal === null ? {} : { principal }),
+    cursor,
+    limit,
+  });
+  return json(res, 200, { client: host.client, ...page });
+}
+
+/**
+ * The page size, or null for one this API will not serve.
+ *
+ * A limit is refused rather than clamped: a caller handed a silently smaller page believes they
+ * have the whole of it, and the one thing a paged export must not do is look complete.
+ */
+function readLimit(url: URL): number | null {
+  const raw = url.searchParams.get('limit');
+  if (raw === null) return READ_DEFAULT_LIMIT;
+  const limit = Number(raw);
+  return Number.isInteger(limit) && limit >= 1 && limit <= READ_MAX_LIMIT ? limit : null;
+}
+
+/**
  * Route one request: the run API below `/v1`, and every tenant's surface mounts below `/tenants`.
  *
  * Every `/v1` route is behind the bearer check, and then behind the tenant check. `/tenants` is
@@ -323,6 +403,8 @@ export async function handleApiRequest(
   const host = tenant.host;
   if (req.method === 'GET' && route === '/v1/status') return statusRoute(host, res, tenant.scheduler);
   if (req.method === 'GET' && route === '/v1/usage') return usageRoute(host, url, res);
+  if (req.method === 'GET' && route === '/v1/approvals') return approvalsRoute(host, url, res);
+  if (req.method === 'GET' && route === '/v1/memory') return memoryRoute(host, url, res);
   if (req.method === 'POST' && route === '/v1/runs') return openRunRoute(host, req, res);
   const cancel = /^\/v1\/runs\/([^/]+)\/cancel$/.exec(route);
   if (req.method === 'POST' && cancel) return cancelRoute(host, url, res, cancel[1]);

@@ -18,11 +18,12 @@ export const surface: Surface = defineSurface({
   name: 'slack',
   version: '0.1.0',
   // The token this app posts as, and the secret every inbound request is verified against. There
-  // is no app-level token: nothing here opens a socket.
+  // is no app-level token: nothing here opens a socket. Both are names a document may point its
+  // `{ env }` refs at; this adapter reads the resolved values and never an environment variable.
   secrets: ['SLACK_BOT_TOKEN', 'SLACK_SIGNING_SECRET'],
   // Not `async`: building the transport opens nothing, so there is nothing here to await.
   connect: (deps) => {
-    const config = slackConfig(deps.env, deps.secrets ?? {});
+    const config = slackConfig(deps.secretValues, deps.defaultConversation);
     return Promise.resolve(createSlackSession(eventsTransport(config, deps.log, deps.storageDir), config));
   },
 });

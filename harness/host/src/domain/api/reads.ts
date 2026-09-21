@@ -1,0 +1,275 @@
+import { and, asc, desc, eq, inArray, sql, type Column, type SQL, type Table } from 'drizzle-orm';
+import { approvals, memoryEntries, type Db } from '@harness/db';
+
+/**
+ * What the platform's control plane reads, per tenant, for a dashboard and a memory page.
+ *
+ * Two routes with **identical authentication and tenant resolution** to `/v1/usage` — the bearer,
+ * then `x-harness-client` through the pool's resolver — and no principal resolution at all: the
+ * caller is the control plane acting for the tenant, not a person acting as themselves. That is
+ * why the column lists below are the whole of the guarantee, and why a test asserts each one
+ * whole (invariant 23).
+ *
+ * Snake case, because this is what goes on the wire, exactly as `UsageRow` is.
+ */
+
+/** The four values the `approvals.status` column is ever written with, and nothing else. */
+export const APPROVAL_STATUSES = ['pending', 'approved', 'declined', 'expired'] as const;
+export type ApprovalStatus = (typeof APPROVAL_STATUSES)[number];
+
+/** The two scopes a memory entry has. */
+export const MEMORY_SCOPES = ['principal', 'client'] as const;
+
+/** How many rows one page holds when a caller names no limit, and the most it may ask for. */
+export const READ_DEFAULT_LIMIT = 100;
+export const READ_MAX_LIMIT = 500;
+
+export interface Page<T> {
+  rows: T[];
+  /** The cursor for the next page, or null at the end. */
+  next_cursor: string | null;
+}
+
+/**
+ * One approval of this tenant.
+ *
+ * `payload` and `payload_encrypted` are the tool's own arguments and are **excluded** — invariant
+ * 16's rule applied to an export it did not name, which invariant 23 makes explicit.
+ * `idempotency_key`, `message_ref`, `thread_id` and `claimed_at` are the poller's bookkeeping and
+ * are excluded too.
+ */
+export interface ApprovalReadRow {
+  id: string;
+  action: string;
+  summary: string;
+  requested_by: string;
+  status: string;
+  decided_by: string | null;
+  decided_at: string | null;
+  decision_note: string | null;
+  executed_at: string | null;
+  expires_at: string;
+  surface: string | null;
+  conversation_id: string | null;
+  created_at: string;
+}
+
+/**
+ * One memory entry of this tenant.
+ *
+ * `text` is included, because that is the entry — a memory page with no memories is not a page —
+ * and because `memory_list` returns exactly this to the model already. `principal_id` is
+ * included, which `memory_list`'s own entry shape omits: a tool's caller *is* the principal, and
+ * a tenant-scoped export has no such excuse. An id is an id rather than content, so invariant 16
+ * does not reach it. `thread_id` is excluded; it is a join key.
+ */
+export interface MemoryReadRow {
+  id: string;
+  scope: string;
+  principal_id: string | null;
+  text: string;
+  created_by: string;
+  created_at: string;
+}
+
+/**
+ * The sort key of the last row a page returned, as one opaque string.
+ *
+ * `(created_at, id)` in that route's own direction, so it is stable under insertion and carries
+ * no offset: a row written between two reads lands where its own key puts it and moves no page.
+ * base64url, because it travels in a query string.
+ */
+export function encodeCursor(at: Date, id: string): string {
+  return Buffer.from(`${at.toISOString()}|${id}`, 'utf8').toString('base64url');
+}
+
+/**
+ * A uuid, checked before it reaches Postgres: an id of any other shape is "no such thing", not an
+ * error. The run API's own routes check path ids against this too.
+ */
+export const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * The other direction, or null for anything that is not one of ours.
+ *
+ * Both halves are checked against what `encodeCursor` writes rather than against what a parser
+ * will tolerate: the timestamp has to be the ISO instant it round-trips as, and the id has to be
+ * a uuid, because both tables key on one. A forged id used to reach the driver as `WHERE id = $2`
+ * against a `uuid` column, which answered `22P02` — a 500 whose message carried the caller's own
+ * string into this deployment's error log. It is a 400 here, and nothing of the cursor is
+ * written down (spec section 4.12).
+ */
+export function decodeCursor(raw: string): { at: Date; id: string } | null {
+  const decoded = Buffer.from(raw, 'base64url').toString('utf8');
+  const separator = decoded.indexOf('|');
+  if (separator === -1) return null;
+  const stamp = decoded.slice(0, separator);
+  const at = new Date(stamp);
+  const id = decoded.slice(separator + 1);
+  if (Number.isNaN(at.getTime()) || at.toISOString() !== stamp || !UUID.test(id)) return null;
+  return { at, id };
+}
+
+/** `limit + 1` rows, so a page knows whether there is another without counting the table. */
+const overRead = (limit: number): number => limit + 1;
+
+function pageOf<T>(rows: T[], limit: number, keyOf: (row: T) => { at: Date; id: string }): Page<T> {
+  if (rows.length <= limit) return { rows, next_cursor: null };
+  const page = rows.slice(0, limit);
+  const last = keyOf(page[page.length - 1]);
+  return { rows: page, next_cursor: encodeCursor(last.at, last.id) };
+}
+
+/**
+ * "Past the cursor", as one row comparison against the anchor row's **own stored key**.
+ *
+ * A row comparison, so the pair is compared as one key rather than as two predicates — which is
+ * what makes a page stable when two rows share a timestamp. The right side looks the anchor's
+ * stored values up rather than using `after.at` directly: `created_at` came back through this
+ * driver's timestamp parser, which only keeps millisecond precision, while `now()` (what the
+ * column defaults to) carries microseconds. Comparing against the row's own stored value sidesteps
+ * that loss; comparing against the floored `after.at` instead can both hand back the anchor row
+ * again and drop a genuinely older row that shares its floored millisecond. `client` is repeated
+ * in the subquery so an id from another tenant can't be used to probe this one's timestamps, even
+ * though the outer query is already scoped. The `COALESCE` is for a row a retention job deleted
+ * between two reads: with nothing left to look up, this falls back to the cursor's own (still
+ * usable) values rather than an empty subquery result, which would otherwise make every later row
+ * vanish along with the anchor and the page look finished when it is not.
+ *
+ * Written once for both routes: the two differ only in which table they read and which way their
+ * page runs, and the anchor trick is the part that must not drift.
+ */
+function pastCursor(opts: {
+  table: Table;
+  createdAt: Column;
+  id: Column;
+  client: string;
+  after: { at: Date; id: string };
+  /** The route's own order: true for a page that descends, false for one that climbs. */
+  newestFirst: boolean;
+}): SQL {
+  const anchor = (column: 'created_at' | 'id', fallback: Date | string): SQL =>
+    sql`COALESCE((SELECT ${sql.identifier(column)} FROM ${opts.table} WHERE id = ${opts.after.id} AND client = ${opts.client}), ${fallback})`;
+  const key = sql`(${opts.createdAt}, ${opts.id})`;
+  const anchorKey = sql`(${anchor('created_at', opts.after.at)}, ${anchor('id', opts.after.id)})`;
+  return opts.newestFirst ? sql`${key} < ${anchorKey}` : sql`${key} > ${anchorKey}`;
+}
+
+export interface ReadApprovalsOptions {
+  client: string;
+  statuses?: readonly string[];
+  cursor?: string | null;
+  limit: number;
+}
+
+/** One page of this tenant's approvals, newest first. */
+export async function readApprovals(db: Db, opts: ReadApprovalsOptions): Promise<Page<ApprovalReadRow>> {
+  const after = opts.cursor ? decodeCursor(opts.cursor) : null;
+  const rows = await db
+    .select({
+      id: approvals.id,
+      action: approvals.action,
+      summary: approvals.summary,
+      requestedBy: approvals.requestedBy,
+      status: approvals.status,
+      decidedBy: approvals.decidedBy,
+      decidedAt: approvals.decidedAt,
+      decisionNote: approvals.decisionNote,
+      executedAt: approvals.executedAt,
+      expiresAt: approvals.expiresAt,
+      surface: approvals.surface,
+      conversationId: approvals.conversationId,
+      createdAt: approvals.createdAt,
+    })
+    .from(approvals)
+    .where(
+      and(
+        // The tenant predicate, and there is no way to widen it: the client is the one the request
+        // resolved to, never one the caller asked for.
+        eq(approvals.client, opts.client),
+        opts.statuses && opts.statuses.length > 0 ? inArray(approvals.status, [...opts.statuses]) : undefined,
+        after
+          ? pastCursor({
+              table: approvals,
+              createdAt: approvals.createdAt,
+              id: approvals.id,
+              client: opts.client,
+              after,
+              newestFirst: true,
+            })
+          : undefined,
+      ),
+    )
+    .orderBy(desc(approvals.createdAt), desc(approvals.id))
+    .limit(overRead(opts.limit));
+  const mapped: ApprovalReadRow[] = rows.map((row) => ({
+    id: row.id,
+    action: row.action,
+    summary: row.summary,
+    requested_by: row.requestedBy,
+    status: row.status,
+    decided_by: row.decidedBy,
+    decided_at: row.decidedAt?.toISOString() ?? null,
+    decision_note: row.decisionNote,
+    executed_at: row.executedAt?.toISOString() ?? null,
+    expires_at: row.expiresAt.toISOString(),
+    surface: row.surface,
+    conversation_id: row.conversationId,
+    created_at: row.createdAt.toISOString(),
+  }));
+  return pageOf(mapped, opts.limit, (row) => ({ at: new Date(row.created_at), id: row.id }));
+}
+
+export interface ReadMemoryOptions {
+  client: string;
+  scope?: string;
+  principal?: string;
+  cursor?: string | null;
+  limit: number;
+}
+
+/**
+ * One page of this tenant's memory entries, **oldest first** — the order `listMemory` already
+ * uses, so a page of this export and a page the model was shown read the same way round.
+ */
+export async function readMemory(db: Db, opts: ReadMemoryOptions): Promise<Page<MemoryReadRow>> {
+  const after = opts.cursor ? decodeCursor(opts.cursor) : null;
+  const rows = await db
+    .select({
+      id: memoryEntries.id,
+      scope: memoryEntries.scope,
+      principalId: memoryEntries.principalId,
+      text: memoryEntries.text,
+      createdBy: memoryEntries.createdBy,
+      createdAt: memoryEntries.createdAt,
+    })
+    .from(memoryEntries)
+    .where(
+      and(
+        eq(memoryEntries.client, opts.client),
+        opts.scope ? eq(memoryEntries.scope, opts.scope) : undefined,
+        opts.principal ? eq(memoryEntries.principalId, opts.principal) : undefined,
+        after
+          ? pastCursor({
+              table: memoryEntries,
+              createdAt: memoryEntries.createdAt,
+              id: memoryEntries.id,
+              client: opts.client,
+              after,
+              newestFirst: false,
+            })
+          : undefined,
+      ),
+    )
+    .orderBy(asc(memoryEntries.createdAt), asc(memoryEntries.id))
+    .limit(overRead(opts.limit));
+  const mapped: MemoryReadRow[] = rows.map((row) => ({
+    id: row.id,
+    scope: row.scope,
+    principal_id: row.principalId,
+    text: row.text,
+    created_by: row.createdBy,
+    created_at: row.createdAt.toISOString(),
+  }));
+  return pageOf(mapped, opts.limit, (row) => ({ at: new Date(row.created_at), id: row.id }));
+}

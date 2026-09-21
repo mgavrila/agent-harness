@@ -4,7 +4,7 @@ import { modelCalls, withTransaction } from '@harness/db';
 import { ConfigError, ToolError } from '@harness/shared';
 import { openRun } from '../session/repository.js';
 import type { ToolDeps } from '../tooling/types.js';
-import { makeTestDeps, startFakeGateway, useTestDb } from '../../testing.js';
+import { TEST_MODELS, makeTestDeps, startFakeGateway, useTestDb } from '../../testing.js';
 import { EMBED_BATCH, assertEmbedDims, embedTexts } from './embed.js';
 
 const db = useTestDb();
@@ -32,7 +32,7 @@ async function onFakeGateway(): Promise<{ deps: ToolDeps; fake: FakeGateway }> {
   const deps = makeTestDeps(db, {
     context,
     embedDims: 16,
-    gateway: { baseUrl: fake.url, apiKey: 'sk-test', timeoutMs: 5_000, maxCallsPerRun: 100 },
+    gateway: { baseUrl: fake.url, apiKey: 'sk-test', models: TEST_MODELS, timeoutMs: 5_000, maxCallsPerRun: 100 },
   });
   return { deps, fake };
 }
@@ -49,12 +49,24 @@ describe('embedTexts', () => {
     expect(await embedTexts(deps, ['the office closes at five'])).toEqual([vectors[0]]);
   });
 
+  it("asks for the document's own embed deployment, never the route name", async () => {
+    const { deps, fake } = await onFakeGateway();
+    await embedTexts(deps, ['one']);
+    expect(fake.embeddings.map((call) => call.model)).toEqual([TEST_MODELS.embed]);
+  });
+
   it('attributes the spend to the run, on the embed route', async () => {
     const { deps } = await onFakeGateway();
     await embedTexts(deps, ['one', 'two']);
     const rows = await db.select().from(modelCalls);
     expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ route: 'embed', model: 'embed', runId: deps.context.runId, outputTokens: 0 });
+    // `model` is the string sent, which is the document's deployment for the embed route.
+    expect(rows[0]).toMatchObject({
+      route: 'embed',
+      model: TEST_MODELS.embed,
+      runId: deps.context.runId,
+      outputTokens: 0,
+    });
     expect(rows[0].inputTokens).toBeGreaterThan(0);
   });
 
@@ -85,9 +97,7 @@ describe('embedTexts', () => {
       errorBody: { error: { message: 'Budget has been exceeded: secret prompt echo' } },
     }));
     const overBudget = (await embedTexts(deps, ['one']).catch((err: unknown) => err as Error)) as Error;
-    expect(overBudget.message).toBe(
-      'model route "embed" is over its daily budget; raise it in the client document\'s routing section',
-    );
+    expect(overBudget.message).toBe('model route "embed" is over its budget');
     expect(overBudget.message).not.toContain('secret prompt echo');
 
     // A 429 whose body does not say "budget" is a rate limit, not an exhausted budget: the same

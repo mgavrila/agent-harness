@@ -153,6 +153,26 @@ describe('parseIdentityFileWithDefaults', () => {
       memory: 'member',
     });
   });
+
+  it('bounds what a web default may mint, and admits the levels below the ceiling', () => {
+    for (const level of ['member', 'practitioner']) {
+      expect(parseIdentityFileWithDefaults({ defaults: { web: level }, principals: [manager] }).defaults).toEqual({
+        web: level,
+      });
+    }
+    for (const level of ['lead', 'admin']) {
+      expect(() => parseIdentityFileWithDefaults({ defaults: { web: level }, principals: [manager] })).toThrow(
+        ConfigError,
+      );
+      expect(() => parseIdentityFileWithDefaults({ defaults: { web: level }, principals: [manager] })).toThrow(
+        /may not default to/,
+      );
+    }
+    // And the ban on the other surface is untouched: `http` may have no default at all.
+    expect(() => parseIdentityFileWithDefaults({ defaults: { http: 'member' }, principals: [manager] })).toThrow(
+      ConfigError,
+    );
+  });
 });
 
 describe('shapeDisplayName', () => {

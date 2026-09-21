@@ -44,6 +44,15 @@ describe('playbook tools', () => {
     expect(listed[0]).not.toHaveProperty('prompt');
   });
 
+  it('never carries a timezone: the schedule runs in UTC', async () => {
+    await seed('nightly');
+    const client = await connectAs(TEST_PRINCIPAL);
+    const { playbooks: listed } = resultOf<{ playbooks: Record<string, unknown>[] }>(
+      await client.callTool({ name: 'playbooks_list', arguments: {} }),
+    );
+    expect(listed[0]).not.toHaveProperty('timezone');
+  });
+
   it('lets an admin request a run now, stamped with who asked, and blocks everyone else', async () => {
     const playbook = await seed('nightly');
     const admin = await connectAs(ADMIN);

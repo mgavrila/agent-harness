@@ -93,7 +93,7 @@ export async function runDeepAgent(request: RunRequest, ctx: RunContext, queue: 
       onBudgetExceeded: exceed,
       signal,
     });
-    const model = chatModel(request.model, request.model.route);
+    const model = chatModel(request.model, request.model.model);
     const middleware = [
       // The permissions go on this middleware, not only on `createDeepAgent`: a custom middleware
       // named `FilesystemMiddleware` REPLACES the default one, and the agent's own `permissions`
@@ -105,8 +105,8 @@ export async function runDeepAgent(request: RunRequest, ctx: RunContext, queue: 
       // model reads seeded state and no filesystem.
       createFilesystemMiddleware({ tools: READ_ONLY_FS_TOOLS, permissions: DENY_ALL_WRITES }),
       kernelToolFilter(),
-      ...(request.model.fallbackRoute
-        ? [modelFallbackMiddleware(chatModel(request.model, request.model.fallbackRoute))]
+      ...(request.model.fallbackModel
+        ? [modelFallbackMiddleware(chatModel(request.model, request.model.fallbackModel))]
         : []),
     ];
     const agent = createDeepAgent({

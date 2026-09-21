@@ -6,12 +6,13 @@ import { eq } from 'drizzle-orm';
 import { documents, records, fields as fieldsTable, decrypt } from '@harness/db';
 import type { ToolDeps } from '../domain/tooling/types.js';
 import {
+  TEST_MODELS,
   connectTools,
   makeTestDeps,
   resultOf,
+  startFakeGateway,
   textOf,
   useTestDb,
-  startFakeGateway,
   type FakeGateway,
   type TestDepsOverrides,
 } from '../testing.js';
@@ -202,7 +203,7 @@ describe('documents_classify and documents_extract', () => {
   function connectWithGateway(overrides: TestDepsOverrides = {}) {
     const d = makeTestDeps(db, {
       storageDir,
-      gateway: { baseUrl: gateway.url, apiKey: 'sk-test', timeoutMs: 10_000, maxCallsPerRun: 100 },
+      gateway: { baseUrl: gateway.url, apiKey: 'sk-test', models: TEST_MODELS, timeoutMs: 10_000, maxCallsPerRun: 100 },
       ...overrides,
     });
     deps = d;

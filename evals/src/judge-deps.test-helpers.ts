@@ -14,6 +14,7 @@
  */
 import { randomBytes } from 'node:crypto';
 import { DEFAULT_POLICY, PACK_KERNEL, localParser, registryOf, type ToolDeps } from '@harness/core-tools';
+import { TEST_MODELS } from '@harness/core-tools/testing';
 import { createDb } from '@harness/db';
 import { pack as healthcarePack } from '@harness/pack-healthcare';
 import { EVALS_DATABASE_URL } from './corpus.test-helpers.js';
@@ -54,7 +55,13 @@ export function openJudgeDeps(opts: { gatewayUrl: string; storageDir: string }):
       now: () => new Date(),
       approvalTtlHours: 24,
       confidenceThreshold: 0.85,
-      gateway: { baseUrl: opts.gatewayUrl, apiKey: 'sk-eval', timeoutMs: 10_000, maxCallsPerRun: 100 },
+      gateway: {
+        baseUrl: opts.gatewayUrl,
+        apiKey: 'sk-eval',
+        models: TEST_MODELS,
+        timeoutMs: 10_000,
+        maxCallsPerRun: 100,
+      },
       storageDir: opts.storageDir,
       // The judge reaches for neither, and gets the pipeline's own values rather than a stub.
       knowledgeDir: null,

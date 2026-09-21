@@ -7,6 +7,7 @@ import { parseClientDocument } from '@harness/config-api';
 import { fixtureDocument } from '@harness/config-api/testing';
 import { describeError } from '@harness/shared';
 import { localParser } from '../domain/documents/parser.js';
+import { modelsOf } from '../domain/tooling/config.js';
 import { connectInProcess } from '../domain/tooling/in-process.js';
 import { DEFAULT_POLICY } from '../domain/tooling/policy.js';
 import { DEFAULT_CONFIDENCE_THRESHOLD, type ToolDeps } from '../domain/tooling/types.js';
@@ -56,7 +57,13 @@ export async function surfaceDeps(): Promise<ToolDeps> {
     now: () => new Date('2026-01-01T00:00:00Z'),
     approvalTtlHours: 24,
     confidenceThreshold: DEFAULT_CONFIDENCE_THRESHOLD,
-    gateway: { baseUrl: 'http://127.0.0.1:1', apiKey: 'unused', timeoutMs: 1_000, maxCallsPerRun: 1 },
+    gateway: {
+      baseUrl: 'http://127.0.0.1:1',
+      apiKey: 'unused',
+      models: modelsOf(document),
+      timeoutMs: 1_000,
+      maxCallsPerRun: 1,
+    },
     storageDir: '/nonexistent/surface',
     knowledgeDir: null,
     embedDims: 1_024,
@@ -163,8 +170,8 @@ export const ENV_READING_HELPERS = [
 ] as const;
 
 /**
- * The directories the environment scan walks. This is every place shipping TypeScript lives
- * today. `clients/` and the repository root are absent because neither holds a `.ts` file —
+ * The directories the environment scan walks. This is every place shipping kernel TypeScript
+ * lives today. `clients/` and the repository root are absent because neither holds a `.ts` file —
  * `clients/` is the one fixture client document and what it includes, and the root holds only
  * config. Add the directory here if you put source in
  * either, or the variables it reads will go unrecorded and the `.env.example` check will pass
@@ -177,8 +184,13 @@ export const ENV_READING_HELPERS = [
  * same reason again: a runtime plug-in reads its configuration off `RuntimeDeps.env` rather than
  * the ambient environment, and the scan walks it so that a variable it reads is documented like
  * every other one.
+ *
+ * **The platform's directories are outside this list and stay outside it** (spec section 12,
+ * constraint 16): `catalog/`, `control-plane/`, `apps/` and `deploy/` document their own
+ * variables, and pulling them in here would put a product's configuration into the OS's
+ * contract. Exported so `surface.test.ts` can assert the list rather than trust it.
  */
-const SOURCE_ROOTS = ['harness', 'packs', 'surfaces', 'identities', 'runtimes', 'evals', 'scripts'];
+export const SOURCE_ROOTS = ['harness', 'packs', 'surfaces', 'identities', 'runtimes', 'evals', 'scripts'];
 const DIRECT_ENV = /process\.env\.([A-Z][A-Z0-9_]*)/g;
 const INDEXED_ENV = /process\.env\[\s*'([A-Z][A-Z0-9_]*)'\s*\]/g;
 const HELPER_ENV = new RegExp(

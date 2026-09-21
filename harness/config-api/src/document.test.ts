@@ -5,6 +5,7 @@ import {
   SecretRefShape,
   migrate,
   parseClientDocument,
+  surfaceConversationsOf,
   surfaceNamesOf,
   surfaceSecretsOf,
   tenantKeysOf,
@@ -52,6 +53,7 @@ describe('parseClientDocument', () => {
             teamId: 'T001',
             signingSecret: { env: 'SLACK_SIGNING_SECRET' },
             botToken: { env: 'SLACK_BOT_TOKEN' },
+            approvalsChannel: 'C0TEST',
           },
         },
       }),
@@ -82,7 +84,12 @@ describe('parseClientDocument', () => {
     const raw = fixtureDocument({
       surfaces: {
         memory: {},
-        slack: { teamId: 'T001', signingSecret: 'xoxb-not-a-reference', botToken: { env: 'SLACK_BOT_TOKEN' } },
+        slack: {
+          teamId: 'T001',
+          signingSecret: 'xoxb-not-a-reference',
+          botToken: { env: 'SLACK_BOT_TOKEN' },
+          approvalsChannel: 'C0TEST',
+        },
       },
     });
     expect(() => parseClientDocument(raw)).toThrow(ConfigError);
@@ -93,7 +100,12 @@ describe('parseClientDocument', () => {
     const raw = fixtureDocument({
       surfaces: {
         memory: {},
-        slack: { teamId: 'T001', signingSecret: { env: 'slack signing secret' }, botToken: { env: 'SLACK_BOT_TOKEN' } },
+        slack: {
+          teamId: 'T001',
+          signingSecret: { env: 'slack signing secret' },
+          botToken: { env: 'SLACK_BOT_TOKEN' },
+          approvalsChannel: 'C0TEST',
+        },
       },
     });
     expect(() => parseClientDocument(raw)).toThrow(/env/);
@@ -128,6 +140,7 @@ describe('parseClientDocument', () => {
             teamId: 'T0ABCDEF',
             signingSecret: { env: 'SLACK_SIGNING_SECRET' },
             botToken: { env: 'SLACK_BOT_TOKEN' },
+            approvalsChannel: 'C0TEST',
           },
         },
       }),
@@ -146,6 +159,7 @@ describe('parseClientDocument', () => {
             teamId: 'T0ABCDEF',
             signingSecret: { env: 'SLACK_SIGNING_SECRET' },
             botToken: { env: 'SLACK_BOT_TOKEN' },
+            approvalsChannel: 'C0TEST',
           },
         },
       }),
@@ -163,6 +177,35 @@ describe('parseClientDocument', () => {
       fixtureDocument({ surfaces: { web: { token: { ref: 'web-token' } }, memory: {}, http: {} } }),
     );
     expect(surfaceSecretsOf(withWeb)).toEqual([{ surface: 'web', field: 'token', ref: 'web-token' }]);
+    // Its own id is its tenant key: a web tenant's workspace is itself, and the host routes a
+    // request to it by the client id in the mount path.
+    expect(tenantKeysOf(withWeb)).toEqual([{ surface: 'web', key: 'fixture' }]);
+    // The inbox the schema defaults, and the one a document names instead. It travels to the
+    // adapter the way the tenant key does: opaquely, through the host.
+    expect(surfaceConversationsOf(withWeb)).toEqual([{ surface: 'web', conversation: 'inbox' }]);
+    const named = parseClientDocument(
+      fixtureDocument({ surfaces: { web: { token: { ref: 'web-token' }, inbox: 'reception' }, http: {} } }),
+    );
+    expect(surfaceConversationsOf(named)).toEqual([{ surface: 'web', conversation: 'reception' }]);
+    // A document that declares no web surface names no conversation at all.
+    expect(surfaceConversationsOf(parseClientDocument(fixtureDocument()))).toEqual([]);
+  });
+
+  it("names a slack surface's approvals channel, which used to be one variable for the whole deployment", () => {
+    const slack = {
+      teamId: 'T0ABCDEF',
+      signingSecret: { env: 'SLACK_SIGNING_SECRET' },
+      botToken: { env: 'SLACK_BOT_TOKEN' },
+    };
+    const withSlack = parseClientDocument(
+      fixtureDocument({ surfaces: { slack: { ...slack, approvalsChannel: 'C0ALPHA' }, http: {} } }),
+    );
+    // Per client, so two tenants in one process send their cards to two workspaces. The host
+    // copies it opaquely and never learns it is a channel.
+    expect(surfaceConversationsOf(withSlack)).toEqual([{ surface: 'slack', conversation: 'C0ALPHA' }]);
+    // Required when the section is declared: a tenant with no channel has nowhere to post, and a
+    // deployment-wide fallback would be another tenant's workspace.
+    expect(() => parseClientDocument(fixtureDocument({ surfaces: { slack, http: {} } }))).toThrow(ConfigError);
   });
 
   it("names a memory surface's workspace as a tenant key too, which is what a pooled test routes on", () => {
