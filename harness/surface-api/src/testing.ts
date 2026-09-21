@@ -90,7 +90,7 @@ export class MemorySurface implements SurfaceSession {
   private frameSeq = 0;
   /** The streams parked waiting for something to happen, so `emit` can wake them. */
   private readonly waiting = new Set<() => void>();
-  /** Set by `breakStreams`: the next pull of every open stream throws this and clears it. */
+  /** Set by `breakStreams`: the first open stream to pull throws this and clears it. */
   private streamFailure: string | null = null;
   /**
    * Not `readonly`, unlike the contract's own declaration: the door is mounted by a caller rather
