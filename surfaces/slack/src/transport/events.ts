@@ -110,9 +110,8 @@ function inboundOf(envelope: EventEnvelope): RawMessage | null {
  * process dies, and the retry that would have rescued it is refused by the same rule. A message
  * answered once and slowly is the thing being bought, and a lost turn in a crash is the price.
  *
- * Both interaction registrations are catch-alls, as the socket's were: the contract takes one
- * action handler and one view handler and dispatches on the id itself, so there is nothing to
- * route here. An interaction this host did not post is acknowledged and dropped by the handler
+ * Both interaction registrations are catch-alls: the contract takes one action handler and one
+ * view handler and dispatches on the id itself, so there is nothing to route here. An interaction this host did not post is acknowledged and dropped by the handler
  * above rather than ignored here — acknowledging something unknown costs nothing, and leaving it
  * unacknowledged shows a person an error for a message this host has no opinion about.
  *
@@ -383,9 +382,10 @@ export function eventsTransport(
      * Ask Slack who this app is. That is the whole of starting: nothing is connected.
      *
      * The bot's own user id is what the mention stripper removes and what the thread rule matches
-     * a thread's messages against, and a socket's connection context used to carry both. Awaiting
-     * the same promise every delivery waits on means a wrong token fails this tenant's open,
-     * loudly, instead of quietly classifying every message as though nobody had been mentioned.
+     * a thread's messages against, and `auth.test` is the only thing that says what it is.
+     * Awaiting the same promise every delivery waits on means a wrong token fails this tenant's
+     * open, loudly, instead of quietly classifying every message as though nobody had been
+     * mentioned.
      */
     async start() {
       await identified();

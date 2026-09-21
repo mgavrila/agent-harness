@@ -102,8 +102,8 @@ export interface SlackApi {
   /**
    * Who this app is.
    *
-   * The mention stripper and the thread rule both compare against the bot's own ids, and over the
-   * Events API nothing else carries them: a socket's connection context used to. Called once, at
+   * The mention stripper and the thread rule both compare against the bot's own ids, and this is
+   * the only call that carries them: no delivery names the app it was sent to. Called once, at
    * `start()`, so a token that is wrong fails the tenant's open rather than every message.
    */
   auth: {
