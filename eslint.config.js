@@ -106,10 +106,13 @@ const PROCESS_ENV_IS_FINE = [
   'harness/db/src/**/*.ts',
   '**/drizzle.config.ts',
   // The platform packages: `catalog` and `control-plane` read theirs the same way the kernel
-  // does (env.ts, app/, tests), plus the two more places the platform's own convention allows —
-  // testing/ fixtures, the migration entrypoint, and the workspace app's two server-only files.
-  '**/src/testing/**',
-  '**/src/domain/db/migrate.ts',
+  // does (env.ts, app/, tests), plus the places the platform's own convention allows beyond
+  // that — testing/ fixtures, the migration entrypoint, the control plane's own env.ts, and
+  // the workspace app's two server-only files. Anchored to the platform trees, not `**/`, so
+  // the kernel's rule keeps its full reach over kernel trees.
+  'control-plane/src/testing/**',
+  'control-plane/src/domain/db/migrate.ts',
+  'control-plane/src/shared/env.ts',
   'apps/workspace/next.config.ts',
   'apps/workspace/lib/env.ts',
 ];

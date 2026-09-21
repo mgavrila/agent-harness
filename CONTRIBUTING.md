@@ -568,3 +568,8 @@ failure you would have seen here. The job deliberately does not set `HARNESS_STO
 `HARNESS_ENCRYPTION_KEY` in its ambient environment, because two tests assert on their absence;
 every test that needs them passes them explicitly, so do not "fix" that by adding either one to
 the workflow's `env:` block.
+
+`pnpm test` and `pnpm -r typecheck` now include the platform packages (`catalog`,
+`control-plane`), so a platform failure makes the repository's CI red and blocks a `v*` tag the
+same as a kernel failure would. The platform's owner fixes a platform failure and a kernel
+maintainer fixes a kernel one, on the same PR discipline either way.

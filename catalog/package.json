@@ -17,7 +17,7 @@
     "@harness/pack-api": "workspace:*",
     "@harness/shared": "workspace:*",
     "@harness/surface-api": "workspace:*",
-    "yaml": "2.8.2",
+    "yaml": "^2.9.1",
     "zod": "4.6.5"
   },
   "devDependencies": {
