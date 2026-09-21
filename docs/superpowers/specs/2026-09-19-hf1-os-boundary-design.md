@@ -188,7 +188,7 @@ export interface ClientDocument {
   persona: string;                       // today's SOUL.md body
   identity: IdentityFile;                // today's identity.yaml (identity-api schema)
   policy: PolicyFile & { tools?: { hide?: string[] } };
-  routing: RoutingFile;                  // today's routing.yaml (gateway schema)
+  routing: RoutingFile;                  // the config-api routing section: one deployment name per route
   playbooks: PlaybookFile;               // today's playbooks.yaml (host schema)
   skills: Record<string, string>;        // name → markdown, today's skills/ dir
   knowledge: { source: 'dir'; path: string } | { source: 'store' };
@@ -798,12 +798,19 @@ environment variable name. The rename forces every site, and these are all of th
 - `harness/host/src/domain/tenancy/tenant.ts` — the settings loop that builds
   `{ [ref.field]: ref.env }` now writes the resolved value, and its `if (!('env' in ref)) continue`
   guard goes with `assertSecretsPresent`.
-- `surfaces/slack/src/index.ts` and `surfaces/slack/src/config.ts` — `slackConfig(deps.env, deps.secretValues ?? {})`,
-  and each field becomes `secrets.botToken ?? requiredEnv('SLACK_BOT_TOKEN', …, env)`.
+- `surfaces/slack/src/index.ts` and `surfaces/slack/src/config.ts` —
+  `slackConfig(deps.secretValues, deps.defaultConversation)`, and each field is read from that bag
+  alone.
 
-The conventional-name fallback survives, but **its expression does not**: it moves from inside
-`requiredEnv`'s first argument to a `??` around the whole call, which is what keeps the literal
-`SLACK_BOT_TOKEN` in the adapter's own source where the env-read scan can find it.
+**Amended by decision 25.** This section first kept the conventional-name fallback and moved only
+its expression, so that the literal `SLACK_BOT_TOKEN` stayed in the adapter's source where the
+env-read scan could find it. There is no fallback now, in any expression: an adapter reads its
+credentials from `secretValues` and its conversation from `defaultConversation`, and a field the
+document did not name is a refusal when the tenant opens, naming `surfaces.slack.<field>`. A
+dedicated host still keeps its secrets in `.env` — it names them itself, with `{ env: SOME_NAME }`
+refs, which the host resolves before the adapter runs. The env-read scan keeps its `requiredEnv`
+anchor on `HARNESS_SECRET_SOURCE` instead (`SCAN_ANCHORS` in
+`harness/core-tools/src/app/surface.test.ts`).
 
 **Rotation does not reopen a tenant.** `postgresConfigSource.watch` polls `client_documents.version` and
 nothing else, so a `client_secrets` row changing is invisible to a running host — for a web token, a bot

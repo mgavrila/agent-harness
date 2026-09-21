@@ -65,6 +65,11 @@ a document that names its own deployments, and two lists a dashboard can hold.
   `.env.example`, from the Compose host service and from the docs.
 - **`STORE_MODEL_IN_DB: 'True'`** on the Compose `litellm` service, so the platform can register a
   tenant's deployments through `POST /model/new`.
+- **The eval runner names its own deployments.** It loads no client document, so
+  `EVALS_SERVING_MODEL` is its routing table: it must name one deployment per route, all five, and
+  a run whose value is missing any of them **exits 2 naming the missing routes** before anything
+  is measured. The same map is what the report records as `serving_model`, so a report says what
+  was served rather than a placeholder.
 - **Playbooks are scheduled in UTC.** `playbooks[].timezone` is removed — migration 0016 drops the
   column — and a document that still names one fails to parse. The `playbooks_list` tool's output
   loses the field with it, which is the one change to the tool surface in this release.
@@ -113,10 +118,17 @@ a document that names its own deployments, and two lists a dashboard can hold.
    stored as rows; on a dedicated host, the document names them as `{ env: SOME_NAME }` and the
    operator sets `SOME_NAME` in `.env` and adds it to the host service's `environment` in
    `harness/compose/docker-compose.yml`.
-5. If you build a surface adapter, rename `deps.secrets` to `deps.secretValues` and read values
-   rather than looking names up; `health()` is optional and a surface without one is reported live.
-6. If you poll `GET /v1/status`, read `surfaces` as objects rather than as names.
-7. The tool surface moved once: `playbooks_list` no longer reports `timezone`. Nothing else in
+5. **Widen `EVALS_SERVING_MODEL` to all five routes** wherever an eval run is configured — `.env`,
+   CI, the promotion-gate command. The two-key value that was enough before now exits 2. The shape
+   `.env.example` ships is
+   `{"chat":…,"extract":…,"reason":…,"judge":…,"embed":…}`, each value a deployment the gateway
+   serves.
+6. If you build a surface adapter, rename `deps.secrets` to `deps.secretValues` and read values
+   rather than looking names up — an adapter reads no environment variable of its own now, and a
+   field its document did not name is a refusal at open. `health()` is optional and a surface
+   without one is reported live.
+7. If you poll `GET /v1/status`, read `surfaces` as objects rather than as names.
+8. The tool surface moved once: `playbooks_list` no longer reports `timezone`. Nothing else in
    `docs/architecture/tool-surface.json` changed, and no route moved.
    `docs/architecture/compose-surface.yaml` moved twice, for `HARNESS_SECRET_SOURCE` and for this
    release's `litellm` and host-service changes.

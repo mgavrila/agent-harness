@@ -441,12 +441,13 @@ export interface SurfaceDeps {
    * This client's credentials for this surface, resolved to their values, keyed by the document's
    * own field name — `{ botToken: 'xoxb-…' }`.
    *
-   * The counterpart of `Surface.secrets`, which says which *variables* an adapter reads when it
-   * is given nothing: this is what **this tenant** actually holds, resolved by the host from its
-   * document's `SecretRef`s through whatever secret source the deployment configured. An adapter
-   * falls back to the conventional variable for a field the document did not name, so a
-   * single-tenant deployment configures nothing; two tenants in one process each get their own,
-   * and neither adapter can read the other's.
+   * **The whole of what an adapter gets**, and the only place it may read a credential from: what
+   * *this tenant*'s document named, resolved by the host through whatever secret source the
+   * deployment configured. An adapter reads no environment variable of its own and falls back to
+   * none — a field the document did not name is a refusal when the tenant opens, naming the
+   * field, because on a pooled host a deployment-wide fallback is one tenant's app acting as
+   * another's. Two tenants in one process each get their own bag, and neither adapter can read
+   * the other's.
    *
    * **Values, never names, and never logged.** A resolved secret does not appear in a log line,
    * an error message, an audit row, a refusal or a run API response (invariant 21).
@@ -460,8 +461,10 @@ export interface Surface {
   name: string;
   version: string;
   /**
-   * The environment variable names this adapter reads that are credentials: the host must never
-   * forward one to a runtime and must never log one.
+   * The conventional names a document is likely to point this adapter's `{ env }` refs at, and
+   * which are therefore credentials: the host must never forward one to a runtime and must never
+   * log one. Not what the adapter reads — it reads `SurfaceDeps.secretValues` and nothing else —
+   * but what a deployment that keeps its secrets in the environment will have called them.
    */
   secrets: readonly string[];
   connect(deps: SurfaceDeps): Promise<SurfaceSession>;

@@ -22,6 +22,11 @@ resolved to their values, keyed by the document's own field name, and `defaultCo
 conversation the client's document named as this surface's default when nobody names one. Both are
 opaque to the host: it copies them from the document into the bag and moves on.
 
+A session may also offer `health()`: a **synchronous, non-throwing** `{ live, detail? }` read off
+what the adapter already knows, which `GET /v1/status` reports one line of per loaded surface. It
+never calls the outside world — the route is a dashboard's poll — and `detail`, when there is one,
+is a fixed sentence the adapter wrote. A session that offers none is reported live.
+
 `MemorySurface` is both the fake every host test drives and the whole of `@harness/surface-memory`,
 so the thing the suite proves the host against is the thing that runs. It is also the first
 _inbound_ surface: `say(userId, text, over?)` drives whatever handler `onMessage` registered, the
