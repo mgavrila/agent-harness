@@ -1,8 +1,8 @@
-import type { ClientDocument } from '@harness/config-api';
+import { resolveSecrets, type ClientDocument } from '@harness/config-api';
 import { createDb } from '@harness/db';
 import { parseIdentityFileWithDefaults, type Principal } from '@harness/identity-api';
 import { ConfigError, createLogger, envOrDefault } from '@harness/shared';
-import { loadClientDocument } from '../domain/config/registry.js';
+import { loadClientDocument, loadSecretSource, secretSourceNameFrom } from '../domain/config/registry.js';
 import { loadIdentity } from '../domain/identity/registry.js';
 import { buildKernelConfig } from '../domain/tooling/config.js';
 import { depsForRun } from '../domain/tooling/deps.js';
@@ -50,7 +50,13 @@ export async function resolvePrincipal(document: ClientDocument, env: NodeJS.Pro
 export async function buildDepsFromEnv(): Promise<{ deps: ToolDeps; close: () => Promise<void> }> {
   const { db, close } = createDb();
   const document = await loadClientDocument({ env: process.env, log, db });
-  const config = await buildKernelConfig(document, process.env);
+  // The stdio server has one client for its whole life, so it resolves that client's secrets once
+  // and lets the source go: a process that serves one client has nothing to watch, and a source
+  // left open would hold a connection for the life of the process for no reader — the same
+  // reasoning `loadClientDocument` already applies to the config source.
+  const source = await loadSecretSource(secretSourceNameFrom(process.env), { env: process.env, log, db });
+  const secrets = await resolveSecrets(document, { source, log }).finally(() => source.close?.());
+  const config = await buildKernelConfig(document, process.env, secrets);
   const principal = await resolvePrincipal(document, process.env);
   const context = await openRun(db, { client: config.client, principal });
   return { deps: depsForRun(config, { db, principal, context }), close };

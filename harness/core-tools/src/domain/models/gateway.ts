@@ -56,14 +56,13 @@ interface ChatCompletionResponse {
  */
 export function gatewayError(route: Route, status: number, body: string): ToolError {
   if (/budget/i.test(body)) {
-    return new ToolError(
-      `model route "${route}" is over its daily budget; raise it in the client document's routing section`,
-    );
+    // Not "raise it in the client document's routing section": that is right for a route's
+    // `daily_budget_usd` and wrong for a virtual key's `max_budget`, which lives in the gateway.
+    return new ToolError(`model route "${route}" is over its budget`);
   }
   if (status === 401 || status === 403) {
-    return new ToolError(
-      `model route "${route}" was rejected by the gateway (HTTP ${status}); check LITELLM_MASTER_KEY`,
-    );
+    // Not "check LITELLM_MASTER_KEY": a tenant with its own key was not rejected on that one.
+    return new ToolError(`model route "${route}" was rejected by the gateway (HTTP ${status})`);
   }
   return new ToolError(`model route "${route}" failed at the gateway (HTTP ${status})`);
 }

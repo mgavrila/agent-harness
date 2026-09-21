@@ -1,5 +1,5 @@
 import path from 'node:path';
-import type { ClientDocument } from '@harness/config-api';
+import type { ClientDocument, ResolvedSecrets } from '@harness/config-api';
 import { loadKey } from '@harness/db';
 import { booleanFromEnv, numberFromEnv, optionalEnv, type EnvSource } from '@harness/shared';
 import { localParser, remoteParser } from '../documents/parser.js';
@@ -55,7 +55,11 @@ export function parserFromEnv(storageDir: string, filesUrl?: string): DocumentPa
  * nothing here resolves a path from where this file happens to sit: both are what stopped one
  * process from serving two clients.
  */
-export async function buildKernelConfig(document: ClientDocument, env: EnvSource): Promise<KernelConfig> {
+export async function buildKernelConfig(
+  document: ClientDocument,
+  env: EnvSource,
+  secrets: ResolvedSecrets,
+): Promise<KernelConfig> {
   const packs = await loadPacks(document.packs);
   // One root for the whole file store, required and with no default (see storageRoot).
   const storageDir = storageRoot(env);
@@ -68,7 +72,12 @@ export async function buildKernelConfig(document: ClientDocument, env: EnvSource
     now: () => new Date(),
     approvalTtlHours: numberFromEnv('APPROVAL_TTL_HOURS', 24, { min: 1, max: 720 }, env),
     confidenceThreshold: numberFromEnv('CONFIDENCE_THRESHOLD', DEFAULT_CONFIDENCE_THRESHOLD, { min: 0, max: 1 }, env),
-    gateway: gatewayFromEnv(env),
+    // This deployment's gateway, with this tenant's own key when its document named one.
+    // `GatewayConfig.apiKey` is already per tenant and is already the bearer `httpGateway` sends
+    // on every call, so the key is the whole of the change: the route names, the wire shape and
+    // `model_calls`' own `client` column are untouched (spec section 4.11).
+    gateway:
+      secrets.gatewayKey === undefined ? gatewayFromEnv(env) : { ...gatewayFromEnv(env), apiKey: secrets.gatewayKey },
     storageDir,
     knowledgeDir: document.knowledge.source === 'dir' ? document.knowledge.path : null,
     // 1,024 is what migration 0013 created the column at; `assertEmbedDims` is what proves a

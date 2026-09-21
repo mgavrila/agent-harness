@@ -100,7 +100,7 @@ describe('callModel', () => {
       },
     }));
     await expect(callModel(deps(), { route: 'extract', messages: [{ role: 'user', content: 'go' }] })).rejects.toThrow(
-      /daily budget/,
+      'model route "extract" is over its budget',
     );
   });
 

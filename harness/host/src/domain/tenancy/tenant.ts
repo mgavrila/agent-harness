@@ -131,7 +131,7 @@ async function buildTenant(pool: HostPool, loaded: LoadedDocument, opened: Stopp
   // and handed to `buildKernelConfig`. It is also what makes "add a tenant with no restart" true
   // — a pooled host opens a new tenant on its first request and resolves its secrets then.
   const secrets = await resolveSecrets(document, { source: pool.secrets, log });
-  const config = await buildKernelConfig(document, pool.env);
+  const config = await buildKernelConfig(document, pool.env, secrets);
   const budget = runBudget(config.client, config.gateway, pool.env);
 
   // The document into the table, once per open, and before a surface or the runtime connects: a

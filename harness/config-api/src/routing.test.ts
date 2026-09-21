@@ -37,3 +37,31 @@ describe('RoutingFile', () => {
     );
   });
 });
+
+describe('the routing section', () => {
+  const routes = {
+    chat: { model: 'gemini/gemini-3-flash-preview' },
+    extract: { model: 'gemini/gemini-3-flash-preview' },
+    reason: { model: 'gemini/gemini-3-flash-preview' },
+    judge: { model: 'groq/openai/gpt-oss-120b' },
+    embed: { model: 'gemini/gemini-embedding-001' },
+  };
+
+  it('takes an optional gateway key, as a reference and never as a value', () => {
+    const parsed = RoutingFile.parse({ routes, gateway: { key: { ref: 'gateway-key' } } });
+    expect(parsed.gateway).toEqual({ key: { ref: 'gateway-key' } });
+    expect(RoutingFile.parse({ routes }).gateway).toBeUndefined();
+    // A literal key is the one thing this section may never carry, which is what `SecretRefShape`
+    // is for — the same rule `RouteSpec.api_key` has had since the gateway renderer existed.
+    expect(() => RoutingFile.parse({ routes, gateway: { key: 'sk-live-whatever' } })).toThrow();
+  });
+
+  it('refuses a key under a name nobody reads, rather than stripping it', () => {
+    // `gatway:` used to be silently dropped, and a tenant would then believe it had its own key
+    // while every call went out on the process key — a credential falling back in silence. The
+    // section is strict now, so a typo is a refusal at load (spec section 12, constraint 21).
+    expect(() => RoutingFile.parse({ routes, gatway: { key: { ref: 'gateway-key' } } })).toThrow();
+    expect(() => RoutingFile.parse({ routes, gateway: { keys: { ref: 'gateway-key' } } })).toThrow();
+    expect(() => RoutingFile.parse({ routes, defaults: { daily_budget_usd: 2 }, extra: true })).toThrow();
+  });
+});

@@ -1,6 +1,7 @@
 import type { ClientDocument, SecretRef } from './document.js';
 
-// `SecretRef` lives in `document.ts`, next to the `SecretRefShape` it is inferred from.
+// `SecretRef` and `SecretRefShape` live in `secret-ref.ts`, which `document.ts` and `routing.ts`
+// both import — a section of the document cannot import the document.
 
 /** One operation of the JSON Patch subset an overlay may use (spec decision 3). */
 export type PatchOp =
@@ -104,4 +105,12 @@ export interface SecretSource {
  */
 export interface ResolvedSecrets {
   readonly surfaces: Readonly<Record<string, Readonly<Record<string, string>>>>;
+  /**
+   * This tenant's own gateway key, when its document names one.
+   *
+   * Absent for a tenant with none, and the process key then stands — `gatewayFromEnv`'s
+   * `LITELLM_MASTER_KEY`, which stays required because it is the key for a tenant that declares
+   * none, for the eval runner and for the stdio server.
+   */
+  readonly gatewayKey?: string;
 }

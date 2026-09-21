@@ -85,9 +85,7 @@ describe('embedTexts', () => {
       errorBody: { error: { message: 'Budget has been exceeded: secret prompt echo' } },
     }));
     const overBudget = (await embedTexts(deps, ['one']).catch((err: unknown) => err as Error)) as Error;
-    expect(overBudget.message).toBe(
-      'model route "embed" is over its daily budget; raise it in the client document\'s routing section',
-    );
+    expect(overBudget.message).toBe('model route "embed" is over its budget');
     expect(overBudget.message).not.toContain('secret prompt echo');
 
     // A 429 whose body does not say "budget" is a rate limit, not an exhausted budget: the same

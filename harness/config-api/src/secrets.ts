@@ -164,5 +164,13 @@ export async function resolveSecrets(
     );
     surfaces[ref.surface] = { ...surfaces[ref.surface], [ref.field]: value };
   }
-  return { surfaces };
+  const gateway = document.routing.gateway;
+  if (!gateway) return { surfaces };
+  const gatewayKey = await resolveAt(
+    document.id,
+    { where: 'routing.gateway.key', declares: 'declares a gateway key' },
+    gateway.key,
+    deps,
+  );
+  return { surfaces, gatewayKey };
 }

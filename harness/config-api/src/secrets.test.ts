@@ -141,4 +141,45 @@ describe('resolveSecrets', () => {
     expect(written).not.toContain('client_secrets');
     expect(written).not.toContain('ciphertext');
   });
+
+  it('resolves a tenant’s own gateway key, and leaves it out for a tenant with none', async () => {
+    const source = new MemorySecretSource();
+    source.put('fixture', 'gateway-key', 'sk-tenant-fixture');
+    const document = withSecrets({
+      routing: {
+        routes: {
+          chat: { model: 'gemini/gemini-3-flash-preview' },
+          extract: { model: 'gemini/gemini-3-flash-preview' },
+          reason: { model: 'gemini/gemini-3-flash-preview' },
+          judge: { model: 'groq/openai/gpt-oss-120b' },
+          embed: { model: 'gemini/gemini-embedding-001' },
+        },
+        gateway: { key: { ref: 'gateway-key' } },
+      },
+    });
+    expect(await resolveSecrets(document, { source, log })).toEqual({
+      surfaces: {},
+      gatewayKey: 'sk-tenant-fixture',
+    });
+    // A document that names none resolves none: the process key stands, exactly as it does today.
+    expect(await resolveSecrets(withSecrets({}), { source, log })).toEqual({ surfaces: {} });
+  });
+
+  it('refuses a gateway key the store does not hold, naming where it was declared', async () => {
+    const document = withSecrets({
+      routing: {
+        routes: {
+          chat: { model: 'gemini/gemini-3-flash-preview' },
+          extract: { model: 'gemini/gemini-3-flash-preview' },
+          reason: { model: 'gemini/gemini-3-flash-preview' },
+          judge: { model: 'groq/openai/gpt-oss-120b' },
+          embed: { model: 'gemini/gemini-embedding-001' },
+        },
+        gateway: { key: { ref: 'gateway-key' } },
+      },
+    });
+    await expect(resolveSecrets(document, { source: new MemorySecretSource(), log })).rejects.toThrow(
+      'client "fixture" names the secret "gateway-key" for routing.gateway.key',
+    );
+  });
 });

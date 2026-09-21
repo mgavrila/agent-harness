@@ -4,6 +4,7 @@ import { ConfigError, CONVERSATION_ID_PATTERN } from '@harness/shared';
 import { PlaybooksFileShape, parsePlaybooksFile } from './playbooks.js';
 import { ClientPolicyShape } from './policy.js';
 import { RoutingFile } from './routing.js';
+import { SecretRefShape, type SecretRef } from './secret-ref.js';
 
 /** Bumped when a document's shape changes in a way `migrate` has to answer for. */
 export const CLIENT_DOCUMENT_VERSION = 1;
@@ -28,36 +29,10 @@ const PLUGIN_NAME = /^[a-z][a-z0-9-]*$/;
 /** A skill's directory name, which `readSkillCatalogue` requires the frontmatter `name` to match. */
 const SKILL_NAME = /^[a-z][a-z0-9-]*$/;
 
-/** An environment variable name, which is what a `SecretRef`'s `env` member names. */
-const ENV_NAME = /^[A-Z][A-Z0-9_]*$/;
-
-/** A secret store name, which is what a `SecretRef`'s `ref` member names. */
-const SECRET_NAME = /^[a-z][a-z0-9-]*$/;
-
-/**
- * A reference to a secret, never the secret.
- *
- * `{ env }` names an environment variable the host resolves from its own process environment.
- * `{ ref }` names a secret in the deployment's secret store; a deployment whose
- * `HARNESS_SECRET_SOURCE` has no store refuses such a document when a tenant opens (see
- * `resolveSecrets` in `./secrets.ts`). Exactly one of the two, never both and never neither: a
- * document that carried a literal value would be a document that got copied into a ticket, so
- * the schema admits no such shape at all.
- */
-export const SecretRefShape = z.union([
-  z
-    .object({ env: z.string().regex(ENV_NAME, 'a secret reference names an environment variable (A-Z, digits, _)') })
-    .strict(),
-  z
-    .object({
-      ref: z
-        .string()
-        .regex(SECRET_NAME, "a secret reference names a secret in the deployment's secret store (a-z, digits, -)"),
-    })
-    .strict(),
-]);
-
-export type SecretRef = z.infer<typeof SecretRefShape>;
+// Re-exported, so that every import of a document's own vocabulary still resolves through this
+// module: the shape moved to a leaf only because `routing.ts` needs it too and the edge from a
+// section back to the document would be a cycle.
+export { SecretRefShape, type SecretRef } from './secret-ref.js';
 
 /**
  * The surfaces a client may declare, in the order the host loads them.
