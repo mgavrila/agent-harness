@@ -24,13 +24,13 @@ const root = path.resolve(here);
  * `surfaces/slack`, or the comment carrying it should say what the host actually means: a
  * surface, a conversation, a message, a card.
  *
- * `socket ?mode` is here since Plan 11b: the Slack adapter receives signed requests now and
+ * `socket[ _-]?mode` is here since Plan 11b: the Slack adapter receives signed requests now and
  * nothing in this repository holds a vendor's connection, so a kernel that names one is a kernel
  * describing a transport it no longer has. A plain `socket` is not forbidden — the host binds
  * one — and neither is `webhook`, `signature` or `hmac`: those are HTTP, which the host is
  * allowed to know about.
  */
-const FORBIDDEN = /slack|bolt|block ?kit|thread_ts|\bblocks\b|socket ?mode/i;
+const FORBIDDEN = /slack|bolt|block ?kit|thread_ts|\bblocks\b|socket[ _-]?mode/i;
 
 const ALLOWLIST: { file: string; contains: string; reason: string }[] = [];
 
@@ -75,7 +75,13 @@ describe('the approvals host names no messaging surface', () => {
       '// the Block Kit card',
       'thread_ts: row.messageRef,',
       'a Slack channel id',
+      // All four ways the transport's name is written: a space, a hyphen, an underscore and
+      // nothing at all. The hyphen is the npm package's own spelling and the likeliest re-entry,
+      // and none of these three lines carries another forbidden word to pass on.
       '// opened in Socket Mode',
+      '// the old socket-mode client',
+      'const socket_mode = false;',
+      'if (socketMode) return;',
     ]) {
       expect(FORBIDDEN.test(line), line).toBe(true);
     }
