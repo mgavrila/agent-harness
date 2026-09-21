@@ -1,5 +1,5 @@
 import { ConfigError, optionalEnv, type EnvSource, type Logger } from '@harness/shared';
-import { surfaceSecretsOf, type ClientDocument, type SecretRef, type SurfaceSecretRef } from './document.js';
+import { surfaceSecretsOf, type ClientDocument, type SecretRef } from './document.js';
 import type { ResolvedSecrets, SecretSource } from './types.js';
 
 /**
@@ -132,11 +132,6 @@ async function resolveAt(
   }
 }
 
-/** The site a surface's reference was declared at, in both shapes. */
-function surfaceSite(ref: SurfaceSecretRef): SecretSite {
-  return { where: `${ref.surface}.${ref.field}`, declares: `declares the "${ref.surface}" surface` };
-}
-
 /**
  * Every secret this document names, resolved to its value, before anything else is built.
  *
@@ -158,7 +153,9 @@ export async function resolveSecrets(
   for (const ref of surfaceSecretsOf(document)) {
     const value = await resolveAt(
       document.id,
-      surfaceSite(ref),
+      { where: `${ref.surface}.${ref.field}`, declares: `declares the "${ref.surface}" surface` },
+      // Narrowed back to the reference itself: `surface` and `field` are this file's bookkeeping
+      // and are no business of a source's.
       'env' in ref ? { env: ref.env } : { ref: ref.ref },
       deps,
     );

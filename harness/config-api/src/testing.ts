@@ -98,6 +98,26 @@ export class MemoryConfigSource implements ConfigSource {
   }
 }
 
+/**
+ * A fresh harness per case, closed whether the case passed or not.
+ *
+ * Both conformance suites are built this way: a case that fails must not leave a connection, a
+ * watcher or a pool behind for the next one, and a `finally` in one suite and not the other is
+ * exactly the difference that goes unnoticed until a suite starts hanging.
+ */
+function eachCase<T extends { close(): Promise<void> }>(
+  makeSource: () => Promise<T>,
+): (body: (harness: T) => Promise<void>) => Promise<void> {
+  return async (body) => {
+    const harness = await makeSource();
+    try {
+      await body(harness);
+    } finally {
+      await harness.close();
+    }
+  };
+}
+
 /** What a source implementation hands the conformance suite so it can drive it. */
 export interface ConfigSourceHarness {
   source: ConfigSource;
@@ -122,14 +142,7 @@ export interface ConfigSourceHarness {
  * that fails does not leave a connection or a watcher behind for the next one.
  */
 export function configSourceConformance(makeSource: () => Promise<ConfigSourceHarness>): void {
-  const withSource = async (body: (harness: ConfigSourceHarness) => Promise<void>): Promise<void> => {
-    const harness = await makeSource();
-    try {
-      await body(harness);
-    } finally {
-      await harness.close();
-    }
-  };
+  const withSource = eachCase(makeSource);
 
   describe('ConfigSource conformance', () => {
     it('answers null for a client it does not hold, rather than throwing', async () => {
@@ -285,14 +298,7 @@ export interface SecretSourceHarness {
  * resolve `CONFORMANCE_SECRET_VARIABLE` from whatever environment it was built over.
  */
 export function secretSourceConformance(makeSource: () => Promise<SecretSourceHarness>): void {
-  const withSource = async (body: (harness: SecretSourceHarness) => Promise<void>): Promise<void> => {
-    const harness = await makeSource();
-    try {
-      await body(harness);
-    } finally {
-      await harness.close();
-    }
-  };
+  const withSource = eachCase(makeSource);
 
   describe('SecretSource conformance', () => {
     it('is named in lowercase, which is what HARNESS_SECRET_SOURCE matches', async () => {
