@@ -1363,19 +1363,19 @@ reads; it never reaches the kernel's own tables, and the kernel never knows a cu
 ## Playbooks
 
 Scheduled work is the client document's own `playbooks` section, read into the `playbooks` table
-when the host starts, and a scheduler loop inside the host that ticks every 30 seconds. The demo
-ships two playbooks as `svc-playbooks`: `credentialing-expirations` at 07:00 `America/New_York`,
-and `knowledge-sync` at 06:30 in the same zone.
+when the host starts, and a scheduler loop inside the host that ticks every 30 seconds, always in
+UTC (decision 16). The demo ships two playbooks as `svc-playbooks`: `credentialing-expirations`
+at 07:00 UTC, and `knowledge-sync` at 06:30 UTC.
 
 **The section.** One entry per playbook: `name` (the key), `schedule` (cron, five or six fields),
-`timezone` (IANA, default `UTC`), `skill` (the host's own or a loaded pack's), `prompt`,
+`skill` (the host's own or a loaded pack's), `prompt`,
 `principal` (a `svc-…` id the document's own `identity` section declares), `deliver` (`none`, the
 default, or `conversation`), optional `surface` and `conversation`, `cost_cap_usd`, `timeout_s`
 (default 600), `enabled` (default true). The schedule is exactly five or six whitespace-separated
-fields that fire at least once: the wider forms the cron library would otherwise take — `@daily`
-and the rest of that family, seven fields, an ISO one-shot date — are rejected, and so is a
-calendar that can never come round again, such as `0 0 30 2 *`. The timezone is checked at parse
-time too. A malformed document stops the host at open, naming the field. Edit the document and
+fields that fire at least once, evaluated in UTC: the wider forms the cron library would otherwise
+take — `@daily` and the rest of that family, seven fields, an ISO one-shot date — are rejected, and
+so is a calendar that can never come round again, such as `0 0 30 2 *`. A malformed document stops
+the host at open, naming the field. Edit the document and
 reopen the tenant: a playbook removed from it is **disabled, not deleted**, so `playbook_runs`
 keeps its history, and a firing that was due while the host was down is **not replayed**
 (decision 13) — `next_run_at` is recomputed from the clock at every start.

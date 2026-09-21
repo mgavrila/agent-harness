@@ -31,15 +31,6 @@ function validSchedule(schedule: string): boolean {
   }
 }
 
-function validTimezone(timezone: string): boolean {
-  try {
-    new Intl.DateTimeFormat('en-US', { timeZone: timezone });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 /** One entry of the client document's `playbooks` section (kernel spec 5.6). */
 export const PlaybookShape = z
   .object({
@@ -47,10 +38,6 @@ export const PlaybookShape = z
     schedule: z
       .string()
       .refine(validSchedule, 'schedule must be a cron expression of five or six fields that fires at least once'),
-    timezone: z
-      .string()
-      .refine(validTimezone, 'timezone must be an IANA zone name such as UTC or America/New_York')
-      .default('UTC'),
     skill: z.string().min(1),
     prompt: z.string().min(1).max(4_000),
     principal: z.string().regex(PRINCIPAL_ID_PATTERN, 'principal must be an id the document declares'),

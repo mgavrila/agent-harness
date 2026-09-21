@@ -1,0 +1,1 @@
+ALTER TABLE "playbooks" DROP COLUMN "timezone";

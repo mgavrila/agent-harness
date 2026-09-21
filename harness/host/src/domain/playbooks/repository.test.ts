@@ -14,7 +14,6 @@ const NOW = new Date('2026-09-15T12:00:00Z');
 const nightly: PlaybookDefinition = {
   name: 'nightly',
   schedule: '0 7 * * *',
-  timezone: 'UTC',
   skill: 'a-skill',
   prompt: 'Run it.',
   principal: 'svc-playbooks',

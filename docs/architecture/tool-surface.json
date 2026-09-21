@@ -2042,9 +2042,6 @@
                   "schedule": {
                     "type": "string"
                   },
-                  "timezone": {
-                    "type": "string"
-                  },
                   "skill": {
                     "type": "string"
                   },
@@ -2097,7 +2094,6 @@
                 "required": [
                   "name",
                   "schedule",
-                  "timezone",
                   "skill",
                   "principal_id",
                   "surface",

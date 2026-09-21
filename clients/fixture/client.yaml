@@ -84,7 +84,6 @@ playbooks:
   playbooks:
     - name: knowledge-refresh
       schedule: '30 6 * * *'
-      timezone: America/New_York
       skill: knowledge-refresh
       prompt: Refresh the knowledge base for today. Follow the skill exactly, including its silence rule.
       principal: svc-playbooks

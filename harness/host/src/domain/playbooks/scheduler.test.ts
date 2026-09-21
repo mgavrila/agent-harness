@@ -39,7 +39,6 @@ const log = { info() {}, warn() {}, error() {} };
 const NIGHTLY: PlaybookDefinition = {
   name: 'nightly',
   schedule: '0 7 * * *',
-  timezone: 'UTC',
   skill: 'credentialing-expirations',
   prompt: 'Run the credentialing-expirations playbook for today. Follow the skill exactly, including its silence rule.',
   principal: 'svc-playbooks',

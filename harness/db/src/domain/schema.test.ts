@@ -174,7 +174,7 @@ describe('schema', () => {
         costCapUsd: 0.5,
       })
       .returning();
-    expect(playbook).toMatchObject({ timezone: 'UTC', deliver: 'none', timeoutS: 600, enabled: true, nextRunAt: null });
+    expect(playbook).toMatchObject({ deliver: 'none', timeoutS: 600, enabled: true, nextRunAt: null });
     const [run] = await db
       .insert(playbookRuns)
       .values({ client: 'test', playbookId: playbook.id, scheduledAt: new Date('2026-09-16T07:00:00Z') })

@@ -20,7 +20,6 @@ export type PlaybookRunStatus = (typeof PLAYBOOK_RUN_STATUSES)[number];
 export interface PlaybookSummary {
   name: string;
   schedule: string;
-  timezone: string;
   skill: string;
   principal_id: string;
   surface: string | null;

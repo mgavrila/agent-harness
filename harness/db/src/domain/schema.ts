@@ -426,9 +426,8 @@ export const playbooks = pgTable(
     id: uuid('id').primaryKey().defaultRandom(),
     client: text('client').notNull(),
     name: text('name').notNull(),
-    /** A cron expression, five or six fields. */
+    /** A cron expression, five or six fields, evaluated in UTC (decision 16). */
     schedule: text('schedule').notNull(),
-    timezone: text('timezone').notNull().default('UTC'),
     skill: text('skill').notNull(),
     prompt: text('prompt').notNull(),
     /** The service principal the run acts as. */
