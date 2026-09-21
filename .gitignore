@@ -43,3 +43,9 @@ evals/results/
 # node
 node_modules/
 dist/
+
+# platform
+.next/
+deploy/compose/.env
+apps/workspace/test-results/
+apps/workspace/playwright-report/

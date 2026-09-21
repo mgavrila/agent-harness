@@ -1,0 +1,42 @@
+{
+  "name": "@hf1/control-plane",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./client": "./src/client.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "start": "tsx src/app/main.ts",
+    "migrate": "tsx src/domain/db/migrate.ts",
+    "db:generate": "drizzle-kit generate"
+  },
+  "dependencies": {
+    "@harness/config-api": "workspace:*",
+    "@harness/identity-api": "workspace:*",
+    "@harness/pack-api": "workspace:*",
+    "@harness/shared": "workspace:*",
+    "@harness/surface-api": "workspace:*",
+    "@hf1/catalog": "workspace:*",
+    "@hono/node-server": "1.19.6",
+    "@hono/zod-validator": "0.7.4",
+    "drizzle-orm": "0.45.2",
+    "hono": "4.10.6",
+    "openid-client": "6.8.1",
+    "pg": "8.23.0",
+    "rfc6902": "5.1.2",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "26.5.1",
+    "@types/pg": "8.23.1",
+    "drizzle-kit": "0.31.10",
+    "jose": "6.1.3",
+    "tsx": "4.23.13",
+    "typescript": "7.0.2",
+    "vitest": "5.0.0"
+  }
+}
