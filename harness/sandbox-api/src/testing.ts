@@ -74,7 +74,7 @@ export class MemorySandboxProvider implements SandboxProvider {
 export function sandboxProviderConformance(makeProvider: () => SandboxProvider): void {
   const session: SandboxSession = { client: 'conformance', runId: 'r-conformance', principalId: 'u-conformance' };
 
-  describe(`the sandbox provider contract`, () => {
+  describe('the sandbox provider contract', () => {
     it('acquires a sandbox for a session and reports a name', async () => {
       const provider = makeProvider();
       expect(provider.name).not.toBe('');

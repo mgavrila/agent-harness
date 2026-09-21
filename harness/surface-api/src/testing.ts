@@ -69,8 +69,13 @@ export class MemorySurface implements SurfaceSession {
   failWith?: string;
 
   private seq = 0;
-  /** The deliveries this door has acknowledged and not yet finished, so a test can await them. */
-  private readonly delivering: Promise<void>[] = [];
+  /**
+   * The deliveries this door has acknowledged and not yet finished, so a test can await them.
+   *
+   * Each one removes itself once it settles, so a long suite driving one surface holds the
+   * handful still in flight rather than every message it has ever sent.
+   */
+  private readonly delivering = new Set<Promise<void>>();
   private actionHandler: ((event: ActionEvent) => Promise<void>) | null = null;
   private formHandler: ((event: FormEvent) => Promise<void>) | null = null;
   private messageHandler: ((event: MessageEvent) => Promise<void>) | null = null;
@@ -232,7 +237,9 @@ export class MemorySurface implements SurfaceSession {
     // Acknowledge, then run. `say` rejects when no handler is registered, which is a race at
     // startup rather than a fault in the request, so it is swallowed here and the sender is told
     // the door took the message.
-    this.delivering.push(this.say(message.userId, message.text).catch(() => undefined));
+    const delivery = this.say(message.userId, message.text).catch(() => undefined);
+    this.delivering.add(delivery);
+    void delivery.finally(() => this.delivering.delete(delivery));
     return { status: 200, headers: { 'content-type': 'application/json' }, body: '{"ok":true}' };
   }
 
