@@ -1,0 +1,28 @@
+{
+  "name": "@hf1/catalog",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./testing": "./src/testing.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@harness/config-api": "workspace:*",
+    "@harness/identity-api": "workspace:*",
+    "@harness/pack-api": "workspace:*",
+    "@harness/shared": "workspace:*",
+    "@harness/surface-api": "workspace:*",
+    "yaml": "2.8.2",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "26.5.1",
+    "typescript": "7.0.2",
+    "vitest": "5.0.0"
+  }
+}
