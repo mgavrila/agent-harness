@@ -50,10 +50,6 @@ class Recent<T> {
     }
   }
 
-  get(key: string): T | undefined {
-    return this.entries.get(key);
-  }
-
   /** Read an entry and forget it, so a handle that is used once cannot be used twice. */
   take(key: string): T | undefined {
     const found = this.entries.get(key);

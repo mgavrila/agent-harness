@@ -77,6 +77,15 @@ interface Frame {
   data: unknown;
 }
 
+/**
+ * One frame on the wire, which is the only place this format is written.
+ *
+ * `id` is omitted for the dropped notice and for nothing else: a client's `Last-Event-ID` must
+ * not move to a frame that is an apology rather than a message (see `open`).
+ */
+const wire = (event: WebEvent, data: unknown, id?: number): string =>
+  `${id === undefined ? '' : `id: ${id}\n`}event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+
 interface Conversation {
   frames: Frame[];
   seq: number;
@@ -189,14 +198,14 @@ export class ConversationStreams {
         // the client's id: an id from another host, or from this one before it restarted, would
         // otherwise filter out every frame this conversation goes on to produce.
         sent = 0;
-        yield `event: notice\ndata: ${JSON.stringify({ text: DROPPED_TEXT, dropped: true, reason: dropped })}\n\n`;
+        yield wire('notice', { text: DROPPED_TEXT, dropped: true, reason: dropped });
       }
       for (;;) {
         const next = (this.conversations.get(conversation)?.frames ?? []).filter((frame) => frame.id > sent);
         if (next.length > 0) {
           for (const frame of next) {
             sent = frame.id;
-            yield `id: ${frame.id}\nevent: ${frame.event}\ndata: ${JSON.stringify(frame.data)}\n\n`;
+            yield wire(frame.event, frame.data, frame.id);
           }
           continue;
         }
@@ -224,17 +233,17 @@ export class ConversationStreams {
   private async pause(signal: AbortSignal): Promise<boolean> {
     return new Promise<boolean>((resolve) => {
       const settle = (keepAlive: boolean) => (): void => {
-        this.waiting.delete(wake);
-        signal.removeEventListener('abort', abort);
+        this.waiting.delete(done);
+        signal.removeEventListener('abort', done);
         if (timer !== undefined) clearTimeout(timer);
         resolve(keepAlive);
       };
-      const wake = settle(false);
-      const abort = settle(false);
+      // One closure for both ways of being woken early, so unregistering either unregisters both.
+      const done = settle(false);
       const timer = this.keepAliveMs > 0 ? setTimeout(settle(true), this.keepAliveMs) : undefined;
       timer?.unref();
-      this.waiting.add(wake);
-      signal.addEventListener('abort', abort, { once: true });
+      this.waiting.add(done);
+      signal.addEventListener('abort', done, { once: true });
     });
   }
 }

@@ -273,6 +273,18 @@ export function createDoor(inbound: WebInbound): SurfaceHttp {
     return json(202, {});
   };
 
+  /**
+   * The three POST routes, by path, so the path is read once and matched once.
+   *
+   * A `GET` on one of them is a 405 rather than a 404: the route exists, and saying so costs a
+   * caller who has already authenticated nothing.
+   */
+  const posts = new Map<string, (request: SurfaceHttpRequest) => SurfaceHttpResponse | Promise<SurfaceHttpResponse>>([
+    ['messages', handleMessage],
+    ['actions', handleAction],
+    ['forms', handleForm],
+  ]);
+
   const handle = async (request: SurfaceHttpRequest): Promise<SurfaceHttpResponse> => {
     if (!bearerOk(request.headers.authorization, inbound.token)) {
       return refused('bad_bearer', 'unauthorised');
@@ -294,10 +306,10 @@ export function createDoor(inbound: WebInbound): SurfaceHttp {
         body: inbound.streams.open(events[1], request.signal, request.headers['last-event-id'] ?? null),
       };
     }
-    if (request.path === 'messages' || request.path === 'actions' || request.path === 'forms') {
+    const post = posts.get(request.path);
+    if (post !== undefined) {
       if (request.method !== 'POST') return { status: 405, headers: { allow: 'POST' } };
-      if (request.path === 'messages') return handleMessage(request);
-      return request.path === 'actions' ? handleAction(request) : handleForm(request);
+      return post(request);
     }
     return json(404, { error: 'no such route' });
   };
