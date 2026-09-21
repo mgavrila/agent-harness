@@ -3,7 +3,7 @@ import { eq } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { parseClientDocument, type ClientDocument } from '@harness/config-api';
 import { fixtureDocument } from '@harness/config-api/testing';
-import { auditLog } from '@harness/db';
+import { auditLog, runs } from '@harness/db';
 import type { Trajectory } from '@harness/runtime-api/testing';
 import { MemorySurface } from '@harness/surface-api/testing';
 import { ConfigError, type Logger } from '@harness/shared';
@@ -168,6 +168,26 @@ describe('a surface mounted on the host', () => {
     await waitFor(() => surface.texts.length > 0);
     expect(surface.texts[0].text).toBe('Hello back.');
     expect(await refusals()).toEqual([]);
+  });
+
+  it('leaves no turn of its own in flight once the fixture has closed', async () => {
+    const s = await serve({
+      documents: [documentFor('alpha')],
+      trajectories: { alpha: [{ say: 'Hello back.' }] },
+    });
+    const surface = s.f.surface('alpha');
+    expect((await s.post('/tenants/alpha/messages', message('hello'))).status).toBe(200);
+    // Closed on the acknowledgement, with no `waitFor` in between, because closing is what has to
+    // wait: every other case here answers on the 200 and returns while the turn that 200 started
+    // is still opening its run and writing its `messages` row, on the pool they all share. The
+    // next case's `resetDatabase` then meets that turn rather than an idle database — `TRUNCATE`
+    // wants an `AccessExclusiveLock` on `runs` while the insert holds `messages` and needs a
+    // `RowShareLock` on `runs` for its foreign key — and Postgres ends the cycle with `40P01
+    // deadlock detected`, killing whichever of the two it picks. It picked the truncate.
+    await s.f.close();
+    const [row] = await db.select().from(runs);
+    expect(row?.status).toBe('done');
+    expect(surface.texts.map((text) => text.text)).toEqual(['Hello back.']);
   });
 
   it('needs no bearer of its own, while the run API still needs one', async () => {
