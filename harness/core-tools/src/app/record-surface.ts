@@ -7,6 +7,7 @@ import { parseClientDocument } from '@harness/config-api';
 import { fixtureDocument } from '@harness/config-api/testing';
 import { describeError } from '@harness/shared';
 import { localParser } from '../domain/documents/parser.js';
+import { modelsOf } from '../domain/tooling/config.js';
 import { connectInProcess } from '../domain/tooling/in-process.js';
 import { DEFAULT_POLICY } from '../domain/tooling/policy.js';
 import { DEFAULT_CONFIDENCE_THRESHOLD, type ToolDeps } from '../domain/tooling/types.js';
@@ -56,7 +57,13 @@ export async function surfaceDeps(): Promise<ToolDeps> {
     now: () => new Date('2026-01-01T00:00:00Z'),
     approvalTtlHours: 24,
     confidenceThreshold: DEFAULT_CONFIDENCE_THRESHOLD,
-    gateway: { baseUrl: 'http://127.0.0.1:1', apiKey: 'unused', timeoutMs: 1_000, maxCallsPerRun: 1 },
+    gateway: {
+      baseUrl: 'http://127.0.0.1:1',
+      apiKey: 'unused',
+      models: modelsOf(document),
+      timeoutMs: 1_000,
+      maxCallsPerRun: 1,
+    },
     storageDir: '/nonexistent/surface',
     knowledgeDir: null,
     embedDims: 1_024,

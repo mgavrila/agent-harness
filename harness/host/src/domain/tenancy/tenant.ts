@@ -219,7 +219,16 @@ async function buildTenant(pool: HostPool, loaded: LoadedDocument, opened: Stopp
     persona: document.persona,
     // The kernel's own skills first, then this client's, then every pack's.
     skills: await readSkillCatalogue([kernelSkillsDir(), skillsDir, ...config.packs.skillsDirs()]),
-    model: { baseUrl: config.gateway.baseUrl, apiKey: config.gateway.apiKey, route: 'chat', fallbackRoute: 'reason' },
+    // The route names the job and the deployment names what serves it: both travel, because the
+    // runtime sends the second and the host records the first.
+    model: {
+      baseUrl: config.gateway.baseUrl,
+      apiKey: config.gateway.apiKey,
+      route: 'chat',
+      fallbackRoute: 'reason',
+      model: config.gateway.models.chat,
+      fallbackModel: config.gateway.models.reason,
+    },
     budget,
     servicePrincipal,
     log,

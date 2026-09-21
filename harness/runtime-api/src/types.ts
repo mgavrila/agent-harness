@@ -78,8 +78,21 @@ export interface RunHistoryTurn {
 export interface RunModel {
   baseUrl: string;
   apiKey: string;
+  /**
+   * The job this run's conversation is, and the label its rows and its tests carry. It is not
+   * what goes on the wire.
+   */
   route: string;
+  /** The same for the fallback, when the host configured one. */
   fallbackRoute?: string;
+  /**
+   * The deployment to name on the wire, as this tenant's document names it for `route`. Sent as
+   * `model:` on every request and recorded as the model of every `usage` event, because on a
+   * pooled host two tenants' conversations are two deployments.
+   */
+  model: string;
+  /** The deployment for `fallbackRoute`, present exactly when that is. */
+  fallbackModel?: string;
   user: string;
 }
 

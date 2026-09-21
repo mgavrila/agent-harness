@@ -15,12 +15,15 @@ import {
 } from './types.js';
 
 /**
- * How this deployment reaches the model gateway, off the environment it is handed.
+ * How this deployment reaches the model gateway, off the environment it is handed, and which
+ * deployment serves each of this tenant's routes.
  *
  * The map is a parameter and never the ambient one, so a process that serves two clients can
  * hand each its own — and so that nothing here reads a global to decide what a run may call.
+ * `models` comes from the client document for the same reason: the address and the key are the
+ * deployment's, the deployment names are the tenant's.
  */
-export function gatewayFromEnv(env: EnvSource): GatewayConfig {
+export function gatewayFromEnv(env: EnvSource, models: Readonly<Record<Route, string>>): GatewayConfig {
   const apiKey = requiredEnv('LITELLM_MASTER_KEY', '', env);
   // Read off the map directly, not through optionalEnv/numberFromEnv: those treat an empty
   // string as unset, and this function has always treated an empty HARNESS_GATEWAY_URL as the
@@ -37,11 +40,10 @@ export function gatewayFromEnv(env: EnvSource): GatewayConfig {
   if (!Number.isInteger(maxCalls) || maxCalls < 1 || maxCalls > 10_000) {
     throw new Error('HARNESS_GATEWAY_MAX_CALLS_PER_RUN must be a whole number between 1 and 10000');
   }
-  return { baseUrl: raw.replace(/\/+$/, ''), apiKey, timeoutMs: timeout, maxCallsPerRun: maxCalls };
+  return { baseUrl: raw.replace(/\/+$/, ''), apiKey, models, timeoutMs: timeout, maxCallsPerRun: maxCalls };
 }
 
 interface ChatCompletionResponse {
-  model?: string;
   choices?: { message?: { content?: string | null } }[];
   usage?: { prompt_tokens?: number; completion_tokens?: number };
 }
@@ -56,8 +58,9 @@ interface ChatCompletionResponse {
  */
 export function gatewayError(route: Route, status: number, body: string): ToolError {
   if (/budget/i.test(body)) {
-    // Not "raise it in the client document's routing section": that is right for a route's
-    // `daily_budget_usd` and wrong for a virtual key's `max_budget`, which lives in the gateway.
+    // Not "raise it in the client document's routing section": a budget refusal is the virtual
+    // key's `max_budget` or the deployment's own, and both of those live in the gateway. A
+    // document names a deployment and sets no budget at all.
     return new ToolError(`model route "${route}" is over its budget`);
   }
   if (status === 401 || status === 403) {
@@ -95,7 +98,9 @@ export function httpGateway(config: GatewayConfig): ModelGateway {
   return {
     async call(opts: ModelCallOptions): Promise<ModelCallResult> {
       const body: Record<string, unknown> = {
-        model: opts.route,
+        // The document's own deployment name, never the route: on a pooled host every tenant's
+        // `chat` would otherwise be the same deployment.
+        model: config.models[opts.route],
         messages: opts.messages,
       };
       if (opts.temperature !== undefined) body.temperature = opts.temperature;
@@ -128,7 +133,10 @@ export function httpGateway(config: GatewayConfig): ModelGateway {
 
       const payload = (await response.json()) as ChatCompletionResponse;
       const text = payload.choices?.[0]?.message?.content ?? '';
-      const model = payload.model ?? opts.route;
+      // What was asked for, not what the proxy answered with: `model_calls.model` records the
+      // deployment this tenant named, and which upstream the gateway then served it from — a
+      // fallback, a retry — is the gateway's own business and its own spend table's.
+      const model = config.models[opts.route];
       const inputTokens = payload.usage?.prompt_tokens ?? 0;
       const outputTokens = payload.usage?.completion_tokens ?? 0;
 

@@ -8,7 +8,7 @@ import { describe, expect, it, onTestFinished } from 'vitest';
 import { createDb, knowledgeChunks, knowledgeDocuments } from '@harness/db';
 import { TEST_DATABASE_URL } from '@harness/db/testing';
 import { ToolError } from '@harness/shared';
-import { makeTestDeps, startFakeGateway, useTestDb, type FakeGateway } from '../../testing.js';
+import { TEST_MODELS, makeTestDeps, startFakeGateway, useTestDb, type FakeGateway } from '../../testing.js';
 import type { ToolDeps } from '../tooling/types.js';
 import { syncKnowledge } from './sync.js';
 
@@ -37,7 +37,7 @@ async function clientFolder(client = 'test'): Promise<{
   const deps = makeTestDeps(db, {
     client,
     knowledgeDir: dir,
-    gateway: { baseUrl: fake.url, apiKey: 'sk-test', timeoutMs: 5_000, maxCallsPerRun: 100 },
+    gateway: { baseUrl: fake.url, apiKey: 'sk-test', models: TEST_MODELS, timeoutMs: 5_000, maxCallsPerRun: 100 },
   });
   const write = async (rel: string, text: string): Promise<void> => {
     await mkdir(path.dirname(path.join(dir, rel)), { recursive: true });

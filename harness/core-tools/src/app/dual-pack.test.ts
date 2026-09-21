@@ -8,7 +8,15 @@ import { generate } from '@harness/pack-stories/generate';
 import { loadPacks, registryOf } from '../domain/packs/registry.js';
 import { isRestrictedName } from '../shared/redaction/names.js';
 import { createCoreToolsServer, publishedTools } from '../tools/catalog.js';
-import { connectTestClient, makeTestDeps, resultOf, startFakeGateway, textOf, useTestDb } from '../testing.js';
+import {
+  TEST_MODELS,
+  connectTestClient,
+  makeTestDeps,
+  resultOf,
+  startFakeGateway,
+  textOf,
+  useTestDb,
+} from '../testing.js';
 
 const db = useTestDb();
 const packs = registryOf([healthcarePack, storiesPack]);
@@ -178,7 +186,7 @@ describe('two packs in one process', () => {
     const deps = makeTestDeps(db, {
       packs,
       storageDir: corpus,
-      gateway: { baseUrl: fake.url, apiKey: 'sk-test', timeoutMs: 5_000, maxCallsPerRun: 100 },
+      gateway: { baseUrl: fake.url, apiKey: 'sk-test', models: TEST_MODELS, timeoutMs: 5_000, maxCallsPerRun: 100 },
     });
     const client = await connectTestClient(() => createCoreToolsServer(deps));
 

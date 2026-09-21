@@ -42,7 +42,14 @@ export interface Host {
   runtime: RuntimeSession;
   persona: string;
   skills: readonly RunSkill[];
-  model: { baseUrl: string; apiKey: string; route: string; fallbackRoute?: string };
+  model: {
+    baseUrl: string;
+    apiKey: string;
+    route: string;
+    fallbackRoute?: string;
+    model: string;
+    fallbackModel?: string;
+  };
   budget: HostBudget;
   /** The host's own identity: who reconcile runs as, and who stages a playbook's failure notice. */
   servicePrincipal: Principal;

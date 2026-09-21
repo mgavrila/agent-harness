@@ -7,9 +7,13 @@ describe('the agent configuration', () => {
     expect(DENY_ALL_WRITES).toEqual([{ operations: ['write'], paths: ['/**'], mode: 'deny' }]);
   });
 
-  it('builds a chat model on the gateway route with the principal as the user', () => {
-    const model = chatModel({ baseUrl: 'http://gateway', apiKey: 'sk-x', route: 'chat', user: 'u-1' }, 'reason');
-    expect(model.model).toBe('reason');
+  it('builds a chat model on the named deployment with the principal as the user', () => {
+    const model = chatModel(
+      { baseUrl: 'http://gateway', apiKey: 'sk-x', route: 'chat', model: 'acme/gemini/flash', user: 'u-1' },
+      'acme/groq/spare',
+    );
+    // The deployment the caller named, not the route the run is on.
+    expect(model.model).toBe('acme/groq/spare');
     expect(model.user).toBe('u-1');
     expect(model.clientConfig.baseURL).toBe('http://gateway/v1');
   });

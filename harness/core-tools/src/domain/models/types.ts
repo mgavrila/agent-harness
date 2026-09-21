@@ -12,8 +12,18 @@ export const EMBED_ROUTE: Route = 'embed';
 export interface GatewayConfig {
   /** Origin of the LiteLLM proxy, no trailing slash. */
   baseUrl: string;
-  /** The proxy master key. A model vendor's own keys never leave the proxy. */
+  /** The proxy master key, or this tenant's own. A model vendor's own keys never leave the proxy. */
   apiKey: string;
+  /**
+   * Which deployment serves each job, as this client's document names it — the string sent as
+   * `model:` on every call and recorded in `model_calls.model`.
+   *
+   * Per tenant, and that is the point: on a pooled host two tenants' `chat` are two deployments,
+   * registered under names of the platform's choosing, and a route name on the wire would have
+   * made them one. What a deployment *is* — its upstream model, its budget, its fallbacks — is
+   * the gateway's configuration and is never read here.
+   */
+  models: Readonly<Record<Route, string>>;
   timeoutMs: number;
   /**
    * The runaway breaker from spec section 4.2. LiteLLM's `max_budget` is a
@@ -45,7 +55,7 @@ export interface ModelCallOptions {
 
 export interface ModelCallResult {
   text: string;
-  /** The model the gateway actually used, which may be a fallback. */
+  /** The deployment this call named: the document's own model string, as sent. */
   model: string;
   inputTokens: number;
   outputTokens: number;

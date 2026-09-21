@@ -63,7 +63,13 @@ function script(replies: FakeReply[]): void {
 function request(over: Partial<RunRequest> = {}): RunRequest {
   return fixtureRequest({
     tools: fixture.client,
-    model: { baseUrl: gateway.url, apiKey: 'sk-test', route: 'chat', user: 'u-coordinator' },
+    model: {
+      baseUrl: gateway.url,
+      apiKey: 'sk-test',
+      route: 'chat',
+      model: 'acme/gemini/flash',
+      user: 'u-coordinator',
+    },
     skills: [
       {
         name: 'credentialing-intake',
@@ -245,9 +251,9 @@ describe('runDeepAgent', () => {
     expect(toolReply.join('\n')).toContain('prefers short answers');
   });
 
-  it('falls back to the second route when the first one fails, and still finishes with done', async () => {
+  it('falls back to the second deployment when the first one fails, and still finishes with done', async () => {
     gateway.setResponder((call) =>
-      call.model === 'chat' ? { status: 500 } : { content: 'answered on the spare route' },
+      call.model === 'acme/gemini/flash' ? { status: 500 } : { content: 'answered on the spare route' },
     );
     const events = await run(
       request({
@@ -255,12 +261,15 @@ describe('runDeepAgent', () => {
           baseUrl: gateway.url,
           apiKey: 'sk-test',
           route: 'chat',
-          fallbackRoute: 'spare',
+          fallbackRoute: 'reason',
+          model: 'acme/gemini/flash',
+          fallbackModel: 'acme/groq/spare',
           user: 'u-coordinator',
         },
       }),
     );
-    expect(gateway.calls.map((c) => c.model)).toEqual(['chat', 'spare']);
+    // Two deployment names on the wire, the document's own, and never the two route names.
+    expect(gateway.calls.map((c) => c.model)).toEqual(['acme/gemini/flash', 'acme/groq/spare']);
     expect(events.at(-1)).toEqual({ type: 'done', text: 'answered on the spare route' });
     // The principal rides on the fallback request too; it is the same run and the same spender.
     for (const call of gateway.calls) expect(call.user).toBe('u-coordinator');

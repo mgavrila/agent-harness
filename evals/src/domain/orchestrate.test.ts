@@ -5,6 +5,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import type { ToolDeps } from '@harness/core-tools';
 import { pack as healthcarePack } from '@harness/pack-healthcare';
 import { startFakeGateway, type FakeGateway } from '@harness/runtime-api/testing';
+import { TEST_MODELS } from '@harness/core-tools/testing';
 import { EVALS_DATABASE_URL, EXTRACTION, VERDICTS, writeEvalCorpus } from '../corpus.test-helpers.js';
 import { openJudgeDeps } from '../judge-deps.test-helpers.js';
 import { runEvals, selectCases, injectionCasesFor } from './orchestrate.js';
@@ -54,7 +55,7 @@ beforeAll(async () => {
     'utf8',
   );
 
-  gateway = await startFakeGateway((call) => ({ content: call.model === 'judge' ? VERDICTS : EXTRACTION }));
+  gateway = await startFakeGateway((call) => ({ content: call.model === TEST_MODELS.judge ? VERDICTS : EXTRACTION }));
 
   ({ deps: judgeDeps, close: closeDb } = openJudgeDeps({ gatewayUrl: gateway.url, storageDir: corpus }));
 }, 120_000);
@@ -73,7 +74,7 @@ function options(overrides: Partial<Parameters<typeof runEvals>[0]> = {}) {
     outDir: path.join(dir, 'results'),
     baselineFile: null,
     databaseUrl: EVALS_DATABASE_URL,
-    gateway: { baseUrl: gateway.url, apiKey: 'sk-eval', timeoutMs: 10_000, maxCallsPerRun: 100 },
+    gateway: { baseUrl: gateway.url, apiKey: 'sk-eval', models: TEST_MODELS, timeoutMs: 10_000, maxCallsPerRun: 100 },
     judgeDeps,
     servingModel: { extract: 'fake/extract', judge: 'fake/judge' },
     evalSetVersion: 'test-1',
@@ -124,9 +125,9 @@ describe('runEvals', () => {
   }, 180_000);
 
   it('reports no agreement rate at all when the judge route is down', async () => {
-    gateway.setResponder((call) => (call.model === 'judge' ? { status: 500 } : { content: EXTRACTION }));
+    gateway.setResponder((call) => (call.model === TEST_MODELS.judge ? { status: 500 } : { content: EXTRACTION }));
     const { report } = await runEvals(options());
-    gateway.setResponder((call) => ({ content: call.model === 'judge' ? VERDICTS : EXTRACTION }));
+    gateway.setResponder((call) => ({ content: call.model === TEST_MODELS.judge ? VERDICTS : EXTRACTION }));
 
     expect(report.judge).toBeNull();
     expect(report.metrics).not.toHaveProperty('judge.agreement_rate');
@@ -145,7 +146,7 @@ describe('runEvals', () => {
     // baselined a working-judge run would also pick up a field-accuracy
     // regression (the judge-forgiven miss going back to being a miss), which
     // would pass even if run.ts ignored `stoppedMeasuring` entirely.
-    gateway.setResponder((call) => (call.model === 'judge' ? { status: 500 } : { content: EXTRACTION }));
+    gateway.setResponder((call) => (call.model === TEST_MODELS.judge ? { status: 500 } : { content: EXTRACTION }));
     const broken = await runEvals(options());
     expect(broken.report.judge).toBeNull();
     expect(broken.report.metrics).not.toHaveProperty('judge.agreement_rate');
@@ -155,7 +156,7 @@ describe('runEvals', () => {
     await writeFile(baselineFile, JSON.stringify(baseline, null, 2), 'utf8');
 
     const { exitCode, markdown } = await runEvals(options({ baselineFile }));
-    gateway.setResponder((call) => ({ content: call.model === 'judge' ? VERDICTS : EXTRACTION }));
+    gateway.setResponder((call) => ({ content: call.model === TEST_MODELS.judge ? VERDICTS : EXTRACTION }));
 
     expect(exitCode).toBe(1);
     expect(markdown).toContain('HOLD');
@@ -171,7 +172,7 @@ describe('runEvals', () => {
     // still holding a literal 0.85 would call that a field that should have
     // been pending and fail an injection case that never leaked anything.
     gateway.setResponder((call) =>
-      call.model === 'judge'
+      call.model === TEST_MODELS.judge
         ? { content: VERDICTS }
         : {
             content: JSON.stringify({
@@ -182,7 +183,7 @@ describe('runEvals', () => {
           },
     );
     const { report, exitCode } = await runEvals(options({ confidenceThreshold: 0.5 }));
-    gateway.setResponder((call) => ({ content: call.model === 'judge' ? VERDICTS : EXTRACTION }));
+    gateway.setResponder((call) => ({ content: call.model === TEST_MODELS.judge ? VERDICTS : EXTRACTION }));
 
     expect(report.injection.cases).toBe(1);
     expect(report.injection.failures).toEqual([]);
@@ -207,7 +208,7 @@ describe('runEvals', () => {
 
   it('exits non-zero when an injection case does not hold, with no baseline at all', async () => {
     gateway.setResponder((call) =>
-      call.model === 'judge'
+      call.model === TEST_MODELS.judge
         ? { content: VERDICTS }
         : {
             content: JSON.stringify({
@@ -227,7 +228,7 @@ describe('runEvals', () => {
     const { exitCode, report } = await runEvals(options());
     expect(report.injection.passed).toBe(0);
     expect(exitCode).toBe(1);
-    gateway.setResponder((call) => ({ content: call.model === 'judge' ? VERDICTS : EXTRACTION }));
+    gateway.setResponder((call) => ({ content: call.model === TEST_MODELS.judge ? VERDICTS : EXTRACTION }));
   }, 180_000);
 });
 

@@ -5,7 +5,7 @@ import path from 'node:path';
 import { envSecretSource, type ClientDocument, type SecretSource } from '@harness/config-api';
 import { MemoryConfigSource } from '@harness/config-api/testing';
 import type { KernelConfig, PackRegistry } from '@harness/core-tools';
-import { makeTestDeps, type TestDepsOverrides } from '@harness/core-tools/testing';
+import { TEST_MODELS, makeTestDeps, type TestDepsOverrides } from '@harness/core-tools/testing';
 import type { Db } from '@harness/db';
 import { surfacesOf } from '@harness/approvals';
 import type { Logger } from '@harness/shared';
@@ -136,7 +136,14 @@ export async function hostFixture(
     skills: opts.skills ?? [
       { name: 'sample-skill', version: '1.0.0', description: 'a skill for tests', dir: '/nonexistent' },
     ],
-    model: { baseUrl: 'http://127.0.0.1:1', apiKey: 'sk-test', route: 'chat', fallbackRoute: 'reason' },
+    model: {
+      baseUrl: 'http://127.0.0.1:1',
+      apiKey: 'sk-test',
+      route: 'chat',
+      fallbackRoute: 'reason',
+      model: TEST_MODELS.chat,
+      fallbackModel: TEST_MODELS.reason,
+    },
     budget: {
       maxModelCalls: 30,
       maxToolCalls: 60,

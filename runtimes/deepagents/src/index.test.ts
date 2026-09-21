@@ -63,7 +63,7 @@ describe('the deepagents runtime', () => {
         tools: fixture.client,
         threadId,
         input: { text, attachments: [] },
-        model: { baseUrl: gateway.url, apiKey: 'sk-test', route: 'chat', user: 'u-resume' },
+        model: { baseUrl: gateway.url, apiKey: 'sk-test', route: 'chat', model: 'acme/gemini/flash', user: 'u-resume' },
       });
     try {
       gateway.setResponder(() => ({ content: 'first answer' }));

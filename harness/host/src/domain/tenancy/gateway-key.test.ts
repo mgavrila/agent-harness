@@ -8,7 +8,13 @@ import { HOST_PRINCIPAL, poolFixture, useTestDb } from '../../testing.js';
 
 const db = useTestDb();
 
-/** A tenant whose document names its own gateway key, or leaves the process key standing. */
+/**
+ * A tenant whose document names its own gateway key, or leaves the process key standing.
+ *
+ * Its `chat` deployment is named the way the platform registers one on a pooled host —
+ * `<clientId>/<vendor>/<model>` — so two tenants here name two different deployments and a call
+ * that carried the route name instead would be visible.
+ */
 const tenant = (id: string, key?: string): ClientDocument =>
   parseClientDocument(
     fixtureDocument({
@@ -18,7 +24,7 @@ const tenant = (id: string, key?: string): ClientDocument =>
       surfaces: { memory: { workspace: id } },
       routing: {
         routes: {
-          chat: { model: 'gemini/gemini-3-flash-preview' },
+          chat: { model: `${id}/gemini/gemini-3-flash-preview` },
           extract: { model: 'gemini/gemini-3-flash-preview' },
           reason: { model: 'gemini/gemini-3-flash-preview' },
           judge: { model: 'groq/openai/gpt-oss-120b' },
@@ -30,7 +36,7 @@ const tenant = (id: string, key?: string): ClientDocument =>
   );
 
 describe('a per-tenant gateway key', () => {
-  it('sends each tenant its own bearer, and never the other’s (invariant 22)', async () => {
+  it('sends each tenant its own bearer and its own deployment, never the other’s (invariant 22)', async () => {
     // The shipped fake gateway, on a real loopback socket: the real `httpGateway` reaches it over
     // a real connection and it records the `authorization` header of every call, which is what
     // makes this a test of the credential that actually went out rather than of the config that
@@ -61,11 +67,21 @@ describe('a per-tenant gateway key', () => {
       'Bearer sk-tenant-alpha',
       'Bearer sk-tenant-beta',
     ]);
-    // And the attribution is unchanged: one row per call, each naming its own tenant and the
-    // route it asked for. The tenant is in the credential *and* in the row, which is what makes
-    // a budget and an evaluation record agree about whose call it was.
+    // And each call named that tenant's own deployment. On a pooled host this is the second half
+    // of the boundary: one key, one deployment, one tenant. A route name here would have sent
+    // both tenants to whatever `chat` happened to mean on the proxy.
+    expect(gateway.calls.map((call) => call.model)).toEqual([
+      'alpha/gemini/gemini-3-flash-preview',
+      'beta/gemini/gemini-3-flash-preview',
+    ]);
+    // And the attribution is unchanged: one row per call, each naming its own tenant, the route
+    // it asked for and the deployment it sent. The tenant is in the key *and* in the row, which
+    // is what makes a budget and an evaluation record agree about whose call it was.
     const rows = await db.select().from(modelCalls);
-    expect(rows.map((row) => `${row.client}:${row.route}`).sort()).toEqual(['alpha:chat', 'beta:chat']);
+    expect(rows.map((row) => `${row.client}:${row.route}:${row.model}`).sort()).toEqual([
+      'alpha:chat:alpha/gemini/gemini-3-flash-preview',
+      'beta:chat:beta/gemini/gemini-3-flash-preview',
+    ]);
   });
 
   it('falls back to the process key for a tenant whose document names none', async () => {

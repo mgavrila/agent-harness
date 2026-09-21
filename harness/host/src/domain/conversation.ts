@@ -331,7 +331,9 @@ export async function runTurn(host: Host, turn: TurnInput): Promise<TurnResult> 
                 runId,
                 client: host.client,
                 route: host.model.route,
-                model: host.model.route,
+                // The string the runtime put on the wire, which is the document's deployment for
+                // this route — the same rule `callModel` follows for the kernel's own calls.
+                model: host.model.model,
                 inputTokens: event.inputTokens,
                 outputTokens: event.outputTokens,
                 costUsd: event.costUsd,
