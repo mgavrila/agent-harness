@@ -2,6 +2,8 @@ node_modules
 pnpm-lock.yaml
 harness/db/drizzle
 harness/gateway/litellm.config.yaml
+**/drizzle/**
+**/.next/**
 packs/healthcare/forms/*.pdf
 packs/healthcare/synthetic/out
 # Skill files are prompts: an agent reads the raw bytes, so whitespace is content, not layout.
