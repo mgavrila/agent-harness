@@ -4,9 +4,11 @@ import { describe, expect, it } from 'vitest';
 import { clientSecrets, decrypt, encrypt, loadKey } from '@harness/db';
 import { useTestDb } from '@harness/db/testing';
 import { ConfigError } from '@harness/shared';
+import { parseClientDocument, resolveSecrets } from '@harness/config-api';
 import {
   CONFORMANCE_SECRET_VALUE,
   CONFORMANCE_SECRET_VARIABLE,
+  fixtureDocument,
   secretSourceConformance,
 } from '@harness/config-api/testing';
 import { postgresSecretSource, writeClientSecret } from './secrets.js';
@@ -88,6 +90,20 @@ describe('postgresSecretSource', () => {
     expect(failure).toBeInstanceOf(ConfigError);
     expect(failure.message).toContain('HARNESS_ENCRYPTION_KEY');
     expect(failure.message).not.toMatch(/[0-9a-f]{24}/);
+  });
+
+  it('a blank row is refused before it reaches a surface, through the real store', async () => {
+    // The end of the empty-secret path, over Postgres rather than a fake: the row exists, it
+    // decrypts, and what it decrypts to is nothing. `resolveSecrets` is what refuses it, which is
+    // why this asserts through `resolveSecrets` rather than through the source — the source's own
+    // answer is the blank string it was given, and the rule belongs above every source.
+    await writeClientSecret(db, { clientId: 'alpha', name: 'web-token', value: '   ' }, loadKey(env));
+    const document = parseClientDocument(
+      fixtureDocument({ id: 'alpha', displayName: 'alpha', surfaces: { web: { token: { ref: 'web-token' } } } }),
+    );
+    await expect(resolveSecrets(document, { source: postgresSecretSource({ db, env, log }), log })).rejects.toThrow(
+      'client "alpha" names the secret "web-token" for web.token, and this deployment does not set it',
+    );
   });
 
   it('refuses to be built at all by a deployment with no usable key', () => {

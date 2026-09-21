@@ -1,7 +1,7 @@
 import { and, eq } from 'drizzle-orm';
 import { envSecretValue, type SecretSource } from '@harness/config-api';
 import { clientSecrets, decrypt, encrypt, loadKey, type Db } from '@harness/db';
-import { ConfigError, describeError, type EnvSource, type Logger } from '@harness/shared';
+import { ConfigError, type EnvSource, type Logger } from '@harness/shared';
 
 export interface PostgresSecretSourceOptions {
   db: Db;
@@ -19,6 +19,11 @@ export interface PostgresSecretSourceOptions {
  * writes are the ones the suite exercises. A second write of the same `(client_id, name)` is a
  * rotation and replaces the row — a secret has one current value, and a history of credentials is
  * a history of things that still open doors.
+ *
+ * **A rotation reaches a running tenant when that tenant next opens**, not when the row is
+ * written: `resolveSecrets` runs once per open, so an already-open tenant keeps the value it
+ * resolved until its document version moves or the host restarts. Onboarding needs no restart;
+ * rotating does.
  */
 export async function writeClientSecret(
   db: Db,
@@ -67,8 +72,11 @@ export function postgresSecretSource(opts: PostgresSecretSourceOptions): SecretS
         return decrypt(row.ciphertext, key);
       } catch (err) {
         // The envelope did not open: a restored database, a rotated key, a corrupt row. The
-        // detail goes to the log, because a decryption error can carry the bytes it failed on.
-        opts.log.warn(`config-postgres: a stored secret for ${clientId} did not decrypt: ${describeError(err)}`);
+        // line names the tenant and the *kind* of failure and not what the failure said — a
+        // decryption error can carry the bytes it failed on, which is the reason the old version
+        // of this line was wrong to write `describeError(err)` into it (invariant 21).
+        const kind = err instanceof Error ? err.constructor.name : typeof err;
+        opts.log.warn(`config-postgres: a stored secret for ${clientId} did not decrypt (${kind})`);
         throw new ConfigError(
           "this deployment's secret store holds a value that does not open with HARNESS_ENCRYPTION_KEY",
         );

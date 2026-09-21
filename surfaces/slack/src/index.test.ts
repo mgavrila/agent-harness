@@ -1,5 +1,6 @@
 import { createLogger } from '@harness/shared';
 import { describe, expect, it } from 'vitest';
+import { slackConfig } from './config.js';
 import { surface } from './index.js';
 
 describe('the Slack surface declaration', () => {
@@ -26,5 +27,27 @@ describe('the Slack surface declaration', () => {
     // raises where it stands: the contract says a caller gets a promise, and this asserts what
     // that caller sees whichever way the failure arrives.
     await expect((async () => surface.connect({ ...deps, secretValues: {} }))()).rejects.toThrow(/SLACK_BOT_TOKEN/);
+  });
+
+  it('falls back only for a field nothing resolved, because the host never hands over a blank one', () => {
+    // `??` rather than `||`, and that is safe rather than lucky: `resolveSecrets` refuses a value
+    // that is empty or whitespace-only, for every source, before it builds `secretValues` — so
+    // the only thing `??` has to handle here is a field that is *absent*. Until that rule reached
+    // the `{ ref }` path, a blank `client_secrets` row arrived as `''`, `??` kept it, and this
+    // adapter connected with an empty bearer. The rule itself is proven in
+    // `@harness/config-api`'s `secrets.test.ts` and at tenant open in the host's.
+    expect(
+      slackConfig(
+        { SLACK_APPROVALS_CHANNEL: 'C0TEST', SLACK_BOT_TOKEN: 'xoxb-conventional' },
+        { signingSecret: 'sig' },
+      ),
+    ).toMatchObject({ botToken: 'xoxb-conventional', signingSecret: 'sig' });
+    // And a document that named both never reaches a conventional variable at all — neither is
+    // in this environment, so a fallback that fired would throw.
+    expect(slackConfig({ SLACK_APPROVALS_CHANNEL: 'C0TEST' }, { botToken: 'xoxb-a', signingSecret: 'sig-a' })).toEqual({
+      botToken: 'xoxb-a',
+      signingSecret: 'sig-a',
+      defaultConversation: 'C0TEST',
+    });
   });
 });

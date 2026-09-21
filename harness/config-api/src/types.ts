@@ -71,6 +71,16 @@ export interface ConfigSource {
  * because the signature here deliberately does not carry them. Anything that is not a
  * `ConfigError` is treated as a source that broke rather than a secret that is missing.
  *
+ * **An implementation must never place a secret value in any error it throws.** A `ConfigError`'s
+ * message is shown to an operator and can be stored; anything else has its *kind* — the
+ * constructor name and a `code` — written to the log, and its message deliberately dropped,
+ * because a driver's message is where a connection string or a statement fragment turns up
+ * (invariant 21). A source therefore never needs to redact one, and must never rely on the caller
+ * to.
+ *
+ * `resolve` does **not** have to reject a value that is blank: `resolveSecrets` refuses one for
+ * every source, with the clause an unset variable gets, so no adapter is handed an empty string.
+ *
  * Every implementation runs `secretSourceConformance` from `@harness/config-api/testing`, which
  * is what keeps "a source" one thing rather than two.
  */

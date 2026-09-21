@@ -83,8 +83,30 @@ describe('resolveSecrets', () => {
     });
   });
 
+  it('refuses a stored value that is blank, the way it refuses a variable that is unset', async () => {
+    // "Empty is unset" is the rule every other reader in this repository follows, and until now
+    // only the `{ env }` path obeyed it: a control plane that wrote a blank row would open a
+    // tenant whose adapter holds an empty bearer, and it would fail at the first message, far
+    // from the cause. The check lives here rather than in a source so that every source obeys it
+    // — including one nobody in this repository wrote.
+    const source = new MemorySecretSource();
+    const document = withSecrets({ surfaces: { web: { token: { ref: 'web-token' } }, memory: {} } });
+    for (const blank of ['', '   ', '\n\t']) {
+      source.put('fixture', 'web-token', blank);
+      // The clause is the one an unset variable gets, not the one a missing row gets: the row is
+      // there, so "holds no such secret for that client" would be untrue. What the deployment has
+      // not done is set a value.
+      await expect(resolveSecrets(document, { source, log })).rejects.toThrow(
+        'client "fixture" names the secret "web-token" for web.token, and this deployment does not set it',
+      );
+    }
+    // And one space either side of a real value is still a real value, because a token is opaque.
+    source.put('fixture', 'web-token', ' tok ');
+    expect(await resolveSecrets(document, { source, log })).toEqual({ surfaces: { web: { token: ' tok ' } } });
+  });
+
   it('never repeats a value, and never repeats what a broken source said (invariant 21)', async () => {
-    const lines: unknown[] = [];
+    const lines: unknown[][] = [];
     const broken = {
       name: 'broken',
       resolve: async (): Promise<string> => {
@@ -106,6 +128,17 @@ describe('resolveSecrets', () => {
     expect(failure.message).toContain('the "broken" secret source failed');
     expect(failure.message).not.toContain('tok-alpha');
     expect(failure.message).not.toContain('client_secrets');
+    // **Nor into the log.** One line, saying that this source failed and what kind of error it
+    // was, and nothing the error itself said: a driver's message is the one place a connection
+    // string or a statement fragment turns up, and `log.ts` says a line carries neither.
     expect(lines).toHaveLength(1);
+    // Every argument the line was given, rendered the way the real logger renders one — an error
+    // passed as a second argument would stringify to its message, so this catches that too.
+    const written = lines.flat().map(String).join(' ');
+    expect(written).toContain('the "broken" secret source failed');
+    expect(written).toContain('Error');
+    expect(written).not.toContain('tok-alpha');
+    expect(written).not.toContain('client_secrets');
+    expect(written).not.toContain('ciphertext');
   });
 });

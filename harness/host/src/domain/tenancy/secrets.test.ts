@@ -76,6 +76,18 @@ describe('resolving a tenant’s secrets when it opens', () => {
     expect(failure.message).not.toContain('cannot load surface');
   });
 
+  it('refuses a stored value that is blank, so no adapter is ever handed an empty credential', async () => {
+    // The counterpart of the unset-variable case above, and the reason it matters: before this
+    // rule reached the `{ ref }` path, a blank row opened a tenant and the Slack adapter's
+    // `secretValues.botToken ?? requiredEnv(…)` kept the empty string, because `??` does not
+    // fire on `''`. The tenant came up and posted with an empty bearer.
+    const secrets = new MemorySecretSource();
+    secrets.put('alpha', 'web-token', '   ');
+    await expect(host(webTenant('alpha', { ref: 'web-token' }), secrets)).rejects.toThrow(
+      'client "alpha" names the secret "web-token" for web.token, and this deployment does not set it',
+    );
+  });
+
   it('keeps two tenants’ secrets apart under one name (invariant 21)', async () => {
     const secrets = new MemorySecretSource();
     secrets.put('alpha', 'web-token', 'tok-alpha');

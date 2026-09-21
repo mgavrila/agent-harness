@@ -1,6 +1,17 @@
-import { ConfigError, describeError, optionalEnv, type EnvSource, type Logger } from '@harness/shared';
+import { ConfigError, optionalEnv, type EnvSource, type Logger } from '@harness/shared';
 import { surfaceSecretsOf, type ClientDocument, type SecretRef, type SurfaceSecretRef } from './document.js';
 import type { ResolvedSecrets, SecretSource } from './types.js';
+
+/**
+ * What a reference that resolved to nothing is told.
+ *
+ * One clause for two faults that are the same fault: a variable this deployment did not set, and
+ * a stored value that is there and is blank. "Empty is unset" is the rule `requiredEnv` and
+ * `optionalEnv` already apply to every other setting in this repository, and a secret is the one
+ * place breaking it is worst — an adapter handed an empty bearer opens, connects and fails at the
+ * first message, with a transport error nobody can attribute.
+ */
+const UNSET = 'this deployment does not set it';
 
 /**
  * A secret the environment holds, or a refusal naming nothing but the fact.
@@ -16,7 +27,7 @@ import type { ResolvedSecrets, SecretSource } from './types.js';
  */
 export function envSecretValue(env: EnvSource, name: string): string {
   const value = optionalEnv(name, env);
-  if (value === undefined) throw new ConfigError('this deployment does not set it');
+  if (value === undefined) throw new ConfigError(UNSET);
   return value;
 }
 
@@ -33,13 +44,14 @@ export function envSecretSource(env: EnvSource): SecretSource {
   return {
     name: 'env',
     // Not `async`: there is nothing here to await, and this repository's lint treats an `async`
-    // that awaits nothing in shipping code as a signature nobody checked. The executor is what
-    // keeps the contract instead — `resolve` promises a promise, so a refusal has to be a
-    // rejection and not a synchronous throw, which is what the conformance suite asserts on.
+    // that awaits nothing in shipping code as a signature nobody checked. Deferring through a
+    // resolved promise is what keeps the contract instead — `resolve` promises a promise, so a
+    // refusal has to be a rejection and not a synchronous throw, which is what the conformance
+    // suite asserts on.
     resolve: (_clientId, ref) =>
-      new Promise<string>((answer) => {
+      Promise.resolve().then(() => {
         if ('ref' in ref) throw new ConfigError('this deployment has no secret source');
-        answer(envSecretValue(env, ref.env));
+        return envSecretValue(env, ref.env);
       }),
   };
 }
@@ -53,24 +65,50 @@ interface SecretSite {
 }
 
 /**
+ * What a broken source's error *is*, with nothing that it says.
+ *
+ * A constructor name and a `code` are enough to tell a refused connection from a timeout from a
+ * decryption failure, and neither can carry a connection string, a statement fragment or a value.
+ * `describeError` is deliberately not used here: it answers the message, which is the one part of
+ * a driver's error that must never be written down (invariant 21).
+ */
+function kindOf(err: unknown): string {
+  const name = err instanceof Error ? err.constructor.name : typeof err;
+  const code = (err as { code?: unknown } | null | undefined)?.code;
+  return typeof code === 'string' || typeof code === 'number' ? `${name} (${code})` : name;
+}
+
+/**
  * The source's own clause, and only when the source meant it to be read.
  *
  * A `ConfigError` from a source is a sentence about a *reference*, written to be shown. Anything
  * else is a driver, a socket or a decryption failure, and those carry fragments of statements and
- * of values (invariant 21), so the original goes to the log and the caller gets a clause naming
- * the source and nothing else.
+ * of values — so neither the caller's message nor **the log line** repeats what it said. The log
+ * gets one fixed sentence and the error's kind; `log.ts` states the rule this follows, and
+ * invariant 21 names logs explicitly.
+ *
+ * The error is not passed as the logger's second argument either: `createLogger` appends
+ * `describeError` of it, which would put the message back in the line it was kept out of.
  */
 function clauseOf(err: unknown, source: SecretSource, log: Logger): string {
   if (err instanceof ConfigError) return err.message;
-  log.error(`the "${source.name}" secret source failed: ${describeError(err)}`, err);
+  log.error(`the "${source.name}" secret source failed: ${kindOf(err)}`);
   return `the "${source.name}" secret source failed`;
 }
 
 /**
- * One reference, resolved, or a `ConfigError` naming the client, the place and the reason.
+ * One reference, resolved and checked, or a `ConfigError` naming the client, the place and the
+ * reason.
  *
  * The two messages are the ones Plan 11a and Task 1 shipped, byte for byte, because an operator
  * who has seen one of them should not have to learn a second wording for the same fault.
+ *
+ * **A value that is blank is a value nobody set**, and it is refused here rather than in a source
+ * for two reasons. It is the only place every source passes through, so the guarantee an adapter
+ * relies on — `secretValues` never carries an empty string — holds for a source nobody in this
+ * repository wrote. And the clause is right here and would be wrong there: a blank row *is* a row,
+ * so a store's own "holds no such secret for that client" would be untrue, where "this deployment
+ * does not set it" is exactly what happened.
  */
 async function resolveAt(
   client: string,
@@ -79,7 +117,11 @@ async function resolveAt(
   deps: { source: SecretSource; log: Logger },
 ): Promise<string> {
   try {
-    return await deps.source.resolve(client, ref);
+    const value = await deps.source.resolve(client, ref);
+    // Trimmed only to decide; the value itself is handed on untouched, because a token is opaque
+    // bytes and one with a space at either end is a token somebody meant to store.
+    if (value.trim() === '') throw new ConfigError(UNSET);
+    return value;
   } catch (err) {
     const clause = clauseOf(err, deps.source, deps.log);
     throw new ConfigError(
