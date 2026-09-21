@@ -169,7 +169,11 @@ export class ConversationStreams {
    * client that asked for its history and cannot be told it was refused.
    */
   open(conversation: string, signal: AbortSignal, lastEventId: string | null): AsyncIterable<string> {
-    const asked = Number.parseInt(lastEventId ?? '', 10);
+    // Digits and nothing else, so a header this host never wrote is absent rather than half
+    // read: `Number.parseInt('5abc', 10)` is 5, which would resume a client at a point it never
+    // asked for. An `EventSource` sends back exactly what it was given, so anything else came
+    // from something that is not one.
+    const asked = /^\d+$/.test(lastEventId ?? '') ? Number(lastEventId) : 0;
     const resumeAfter = Number.isSafeInteger(asked) && asked > 0 ? asked : 0;
     return this.stream(conversation, signal, resumeAfter);
   }

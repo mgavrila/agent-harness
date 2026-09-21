@@ -36,6 +36,20 @@ describe('ConversationStreams', () => {
     ]);
   });
 
+  it('treats a Last-Event-ID that is not a number as absent, rather than reading half of it', async () => {
+    const streams = new ConversationStreams();
+    for (const n of [1, 2, 3]) streams.emit('inbox', 'message', { n });
+    // `Number.parseInt('2abc', 10)` is 2, so a lenient parse would resume this client after the
+    // second frame — a point it never asked for. A fresh open replays the whole window instead.
+    for (const header of ['2abc', ' 2', '2.0', '+2', 'two', '']) {
+      const frames = await drain(streams.open('inbox', new AbortController().signal, header), 3);
+      expect(
+        frames.map((f) => f.slice(0, 5)),
+        header,
+      ).toEqual(['id: 1', 'id: 2', 'id: 3']);
+    }
+  });
+
   it('opens a resume past the window with a notice, before the first frame it can still send', async () => {
     const streams = new ConversationStreams();
     for (let n = 1; n <= WEB_FRAME_RETENTION + 3; n += 1) streams.emit('inbox', 'message', { n });
