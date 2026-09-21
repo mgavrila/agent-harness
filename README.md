@@ -31,7 +31,7 @@ harness/config-postgres/ a ConfigSource over versioned rows in client_documents
 harness/surface-api/ the Surface contract a messaging adapter implements
 harness/identity-api/ the Identity contract a principal resolver implements
 harness/db/          schema, migrations, the pool, encryption
-harness/gateway/     the routing schema and the LiteLLM config renderer
+harness/gateway/     the deployment catalogue and the LiteLLM config renderer
 harness/core-tools/  the pack-agnostic kernel and MCP server: shared/, domain/, tools/, app/
 harness/runtime-api/ the Runtime contract, ScriptedRuntime, the fake gateway and the conformance kit
 harness/sandbox-api/ the Sandbox contract, reserved: acquire, exec, put, get, terminate. Nothing
@@ -97,7 +97,7 @@ cp .env.example .env            # then set HARNESS_ENCRYPTION_KEY=$(openssl rand
 # HARNESS_SECRET_SOURCE=env — where a document's secret references resolve; required, no default.
 pnpm db:up                      # Postgres 16 with pgvector, databases harness and harness_test
 pnpm db:migrate
-pnpm gateway:config             # render HARNESS_CLIENT's routing (the fixture, by default) -> LiteLLM config
+pnpm gateway:config             # render harness/gateway/catalogue.yaml -> LiteLLM config
 pnpm gateway:up                 # LiteLLM proxy on 127.0.0.1:4000
 pnpm test
 pnpm --filter @harness/core-tools start   # core-tools MCP server on stdio

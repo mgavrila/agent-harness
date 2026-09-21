@@ -11,12 +11,25 @@ or versioned rows (`@harness/config-postgres`) — behind the `ConfigSource` int
 **Surfaces.** `SURFACE_ORDER` fixes both which surfaces a document may declare and the order the
 host loads them in: the first one present is the primary, where an approval card goes.
 
-| surface  | fields                                                      | tenant key                            |
-| -------- | ----------------------------------------------------------- | ------------------------------------- |
-| `web`    | `token: SecretRef`                                          | none; the path names the tenant       |
-| `slack`  | `teamId`, `signingSecret: SecretRef`, `botToken: SecretRef` | `teamId`                              |
-| `memory` | `workspace?`                                                | `workspace`, when set                 |
-| `http`   | none                                                        | none; and it may never be the primary |
+| surface  | fields                                                                          | tenant key                            |
+| -------- | ------------------------------------------------------------------------------- | ------------------------------------- |
+| `web`    | `token: SecretRef`                                                              | none; the path names the tenant       |
+| `slack`  | `teamId`, `signingSecret: SecretRef`, `botToken: SecretRef`, `approvalsChannel` | `teamId`                              |
+| `memory` | `workspace?`                                                                    | `workspace`, when set                 |
+| `http`   | none                                                                            | none; and it may never be the primary |
+
+Two of those fields are not secrets and travel to the adapter as plain settings: `web.inbox` and
+`slack.approvalsChannel`, the conversation each surface posts to when nobody names one.
+`surfaceConversationsOf` reads them out of the typed sections so the host can copy them opaquely,
+the way it copies a tenant key — it never learns that one is an inbox and the other a channel.
+
+**Routing.** `routing.routes.<route>.model` is the name of a deployment the gateway serves, and
+that string is what the kernel sends as `model:` on every call. It is the whole of a route: what
+the deployment _is_ — its upstream model, its endpoint, its budget, its fallbacks — belongs to the
+gateway, to `harness/gateway/catalogue.yaml` on a dedicated host and to the platform's
+registrations on a pooled one. The schema is strict, so a document that still carries `fallbacks`,
+`api_base`, `daily_budget_usd` or `defaults` is refused at load rather than parsed into a field
+nothing renders.
 
 A **SecretRef** is `{ env: string }` or `{ ref: string }`, never both keys and never neither. An
 `env` names an environment variable, resolved from the process environment under every source. A

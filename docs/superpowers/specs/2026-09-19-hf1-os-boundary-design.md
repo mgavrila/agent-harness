@@ -82,7 +82,7 @@ After Plans 11–12:
 
 | Diagram box | What it is in our terms | Where |
 | --- | --- | --- |
-| hf1 AI Gateway: provider access, model routing, AI budgets | LiteLLM gateway rendered per client from `routing`; virtual keys with budgets per tenant | exists; budgets wired by the platform |
+| hf1 AI Gateway: provider access, model routing, AI budgets | LiteLLM deployments come from the deployment catalogue on a dedicated host and from the platform's registrations on a pooled one; a document names one per route; virtual keys with budgets per tenant | exists; budgets wired by the platform |
 | hf1 AI Gateway: data controls | restricted-identifier redaction on every host-side write; files worker boundary | exists |
 | hf1 AI Gateway: evaluation records | `@harness/evals` runner and baselines; audit tables | exists; surfaced by Dashboards |
 | Jev, the typesafe AI | typed model access behind the gateway seam | Plan 12 |
@@ -192,7 +192,7 @@ export interface ClientDocument {
   playbooks: PlaybookFile;               // today's playbooks.yaml (host schema)
   skills: Record<string, string>;        // name → markdown, today's skills/ dir
   knowledge: { source: 'dir'; path: string } | { source: 'store' };
-  surfaces: { slack?: { teamId: string; signingSecret: SecretRef; botToken: SecretRef }; http?: {} };
+  surfaces: { slack?: { teamId: string; signingSecret: SecretRef; botToken: SecretRef; approvalsChannel: string }; http?: {} };
   identityPlugin: { kind: 'static' | 'slack-groups'; /* plug-in settings */ }; // "plug-in", never "provider": the kernel-vocabulary scan forbids the word
   runtime: 'deepagents';
   plugins?: DeclaredPlugin[];            // §4.8, Plan 12
@@ -512,7 +512,8 @@ top of it.
 
 Every decision below was taken by the kernel session on 2026-09-21 and is recorded verbatim in the Plan
 11b ledger (15:30, 15:40, 16:05, 16:20, 21:05), with four further rulings taken on this addendum's first
-review and marked **(review ruling)**. The baseline is main at `4a1f969` (Plans 11a and 11b merged) plus
+review and marked **(review ruling)**, and four taken on the branch's final review and marked
+**(fix-wave ruling)**. The baseline is main at `4a1f969` (Plans 11a and 11b merged) plus
 `486c0a4`, the `@harness/config-api` schema commit of Plan 11c Task 1, which landed first so the platform
 could link the package. The platform session's `kernel-followups-from-platform.md` items 1–7 are the
 **request** behind it; this spec remains the authority, and every place the two disagree is ruled below.
@@ -527,11 +528,15 @@ arrives at the addendum first.
 | -- | -------- | -------- | --- |
 | 17 | A tenant with no Slack | **A web surface**, `surfaces/web` → `@harness/surface-web`, declared as `surfaces.web: { token: SecretRef; inbox?: string }` and **first** in `SURFACE_ORDER` so it can be a client's primary. It is a `SurfaceSession` over Plan 11b's `SurfaceHttp` seam: messages in, an SSE stream out, actions and forms back. Every request carries the tenant's bearer. | P1 is UI-first, and a tenant may have no Slack at all. Without this such a tenant has no chat and nowhere to put an approval card: `http` may not be primary by schema rule, and `memory` posts nowhere. The kernel already has the card model, the forms pipeline and a mounted door; what it does not have is a way for a door to answer with a stream, which decision 23 adds. |
 | 18 | Where a secret comes from | **A `SecretSource` contract** beside `ConfigSource` in `@harness/config-api`, with two implementations: `env` (today's behaviour, shipped in `@harness/config-api` itself) and `postgres` (`client_secrets`, the `@harness/db` AES-GCM envelope, shipped in `@harness/config-postgres`). `HARNESS_SECRET_SOURCE=env\|postgres`, **no default**. Resolved once when a tenant opens, so onboarding needs no restart. A document may mix `{ env }` and `{ ref }`. | On a pooled host an `{ env }` secret means a process restart per onboarding, which drains every other tenant on that host. P1's exit criterion is "no deploy step". No default because a host that guessed would come up reading the wrong secrets and say nothing. |
-| 19 | Per-tenant model budgets | **`routing.gateway: { key: SecretRef }`**, optional, resolved through the secret source at tenant open and sent as the bearer for that tenant's model calls in place of `LITELLM_MASTER_KEY`. Route names are unchanged; absent, the process key is used, exactly as today. | The platform asked for the model name to carry the tenant (`<clientId>--chat`). The key is the cheaper half of the same thing: LiteLLM's virtual keys already carry `aliases`, a `models` allow-list and `max_budget`, so the tenant travels in the credential and the kernel keeps `model: <route>`. Registering deployments and minting keys is the platform's P2. |
+| 19 | Per-tenant model budgets | **`routing.gateway: { key: SecretRef }`**, optional, resolved through the secret source at tenant open and sent as the bearer for that tenant's model calls in place of `LITELLM_MASTER_KEY`. Route names are unchanged; absent, the process key is used, exactly as today. | The platform asked for the model name to carry the tenant (`<clientId>--chat`). The key is the cheaper half of the same thing: LiteLLM's virtual keys already carry `aliases`, a `models` allow-list and `max_budget`, so the tenant travels in the credential. **Amended by decision 24**: the kernel no longer keeps `model: <route>` — it sends the document's own deployment name, so the tenant travels in the key *and* in the deployment. Registering deployments and minting keys is the platform's P2. |
 | 20 | What the workspace reads | **`GET /v1/approvals` and `GET /v1/memory`** on the run API, cursor-paged, authenticated and tenant-resolved exactly as `/v1/usage`. | A dashboard and a memory page need a durable list. Today the only way to see a pending approval is the card stream of whichever surface it was posted to, which is not a list and is not queryable. |
 | 21 | Who writes the store | **`@harness/config-postgres` stays unpublished**, and §6 states `client_documents`, `client_document_versions` and `client_secrets` as a **stable write contract** at the columns they have today. The platform's control plane writes them itself, in one transaction, and the host's watch follows `client_documents.version`. | The platform must neither copy kernel code nor depend on an unpublished package. A table contract is the smaller promise: it names columns rather than a function signature, and it is what the host already reads. |
 | 22 | A rewritten version | A version string written a second time with **different** content is **refused** by the kernel's own writer, and is forbidden to the platform's by the §6 contract. | `writeClientDocument` upserts the live row and `onConflictDoNothing`s the history row, so rewriting a version silently keeps the old history and moves the live document — the one case where the history lies. The platform writes content-hash versions and will never hit it; the kernel refuses it anyway, because a store whose history can be wrong is a store nobody can audit. |
 | 23 **(review ruling)** | A door that answers with a stream | **`SurfaceHttpResponse.body` becomes `string \| AsyncIterable<string>`**, and `SurfaceHttpRequest` gains `clientId` and `signal: AbortSignal`. The host writes the head, pipes each chunk with `res.write`, and ends the response when the iterable ends; it aborts the signal when the client disconnects. | The seam Plan 11b shipped is buffered in both directions — `send()` does one `writeHead` then `res.end(body ?? '')` — so an SSE stream is not implementable on it. An async iterable of strings is the smallest shape that fixes it: the adapter keeps every byte of its own framing, the host keeps the body cap, the refusal rule and the mount, and nothing in `harness/host/src` learns an event name. |
+| 24 **(fix-wave ruling)** | What a document names a model by | **A route names a deployment the gateway serves**, and the kernel sends that string as `model:` on every call path — the chat routes, the embeddings route and the runtime's conversation — and records it in `model_calls.model`. `RouteSpec` becomes `{ model }` and nothing else: `fallbacks`, `api_base`, `daily_budget_usd` and `routing.defaults` are removed, and a document still carrying one is refused at load. `harness/gateway` renders `harness/gateway/catalogue.yaml`, the deployments this host serves, with no client and no config source. | Decision 19 kept `model: <route>`, which cannot work on a pooled host: every tenant's `chat` would resolve to one deployment, and the platform now lets a project choose its models per route and bring its own key, registered as `<clientId>/<vendor>/<model>`. The cost is that the four removed fields stop being a document's business: they configured a LiteLLM deployment keyed on the route name, which no longer exists, and a document field that renders nothing is the silent-fallback class constraint 21 was written against. Per-tenant budgets are the virtual key's (decision 19), and a dedicated host's are the catalogue's. |
+| 25 **(fix-wave ruling)** | Where a tenant's approval cards go | **`surfaces.slack.approvalsChannel`**, required when the section is declared and carried to the adapter by `surfaceConversationsOf` exactly as a web inbox is. `slackConfig` reads its bot token, its signing secret and its channel from what the host resolved for that tenant and has **no `requiredEnv` fallback of any kind**; `SLACK_BOT_TOKEN`, `SLACK_SIGNING_SECRET` and `SLACK_APPROVALS_CHANNEL` leave `.env.example`, Compose and the docs. | A deployment-wide variable cannot answer a per-tenant question: on a pooled host it is one tenant's cards arriving in another tenant's workspace, and one tenant's app posting as another's. The document already named both secrets as required refs, so the fallback was dead code on a dedicated host and a cross-tenant fallback on a pooled one. A dedicated host names whatever `.env` entries it likes through `{ env }` refs. |
+| 26 **(fix-wave ruling)** | Deployments the platform registers | **`STORE_MODEL_IN_DB: 'True'`** on the Compose `litellm` service, which already has its `DATABASE_URL`. | The platform registers a tenant's deployments through LiteLLM's own `POST /model/new`, which writes to the model table; without it the proxy serves only what the mounted config renders, and decision 24's pooled half has nowhere to put a tenant's models. |
+| 27 **(fix-wave ruling)** | Whether a surface can be reached | **`GET /v1/status` reports `surfaces: [{ name, live, detail? }]`**, fed by an optional `SurfaceSession.health()`. A session that offers none is `live: true`; one whose getter rejects is `live: false` with nothing said; `detail` is a fixed sentence the adapter owns, never a token and never a transport's own error text (invariant 21). An adapter answers from state it already holds and **never calls the outside world**. | A dashboard needs to know that a tenant's workspace has not been reached, and the status route was names only. The network rule is the hazard: the route is a poll, and one outbound call per tenant per tick is a rate limit the host does not control — so Slack reports its memoised `auth.test` and asks nothing. |
 
 ## 16. Four boundaries, one repository (amends section 3.2)
 
@@ -686,7 +691,8 @@ directory is a `400`, and no run opens.
 | `userId` the identity plug-in will not resolve | `202`; the refusal arrives on the conversation's stream as a `notice` frame carrying `UNAUTHORISED_TEXT`, because identity resolves in `handleMessage` *after* the door has answered and `SurfaceDeps` has no identity access at all |
 | wrong method on a known path | `405` with `allow`, no refusal (the Slack door's rule) |
 | sub-path no route claims | `404`, no refusal |
-| `actionId` or `formId` the host does not know | `202`; the handlers ignore an unknown id, because a card this host did not post is not an error |
+| `formId` the host does not know, or one already answered | `400 {"error":"that form is not open on this surface"}`; the dialogue's metadata names the thing being decided, so an unknown one is refused rather than delivered as a submission about nothing |
+| `actionId` the host does not know | `202`; the press is delivered, and the handler that does not recognise it answers with a private `notice` on that conversation — a card this host did not post is not an error, but silence looks like a hang |
 | `conversation` nobody has used | `202`; writing to a conversation creates it |
 
 A body is only useful if it is typed: `surfaces.ts`'s `send` defaults to `text/plain; charset=utf-8`
@@ -701,8 +707,8 @@ surface, and **`defaults.web` is allowed**, unlike `http`. It needs no code chan
 pattern admits any surface name. It does need one bound — see invariant 24 and §13.6.
 
 **Capabilities.** `{ streaming: true, update: true, forms: true, privateReply: true, inlineConfirm: false }`.
-`mention(userId)` returns `@<displayName>` where the principal has one and `@<userId>` where it does not;
-a display name is rendered into the runtime's rules block, so `PrincipalShape` applies as everywhere else.
+`mention(userId)` returns `@<userId>`, always (plan decision 7): the surface has no directory of its
+own, and a name it invented would be a name the workspace cannot address anybody by.
 
 **The bearer.** Every request carries `Authorization: Bearer <token>`, compared against the tenant's
 resolved `surfaces.web.token` in constant time. The compare is the adapter's own: `pnpm arch` forbids a
@@ -836,8 +842,12 @@ never the row it came from.
 routing:
   gateway:
     key: { ref: gateway-key }
-  routes: { … }
-  defaults: { … }
+  routes:
+    chat: { model: gemini/gemini-3-flash-preview }   # the name of one deployment, and nothing else
+    extract: { model: gemini/gemini-3-flash-preview }
+    reason: { model: gemini/gemini-3-flash-preview }
+    judge: { model: groq/openai/gpt-oss-120b }
+    embed: { model: gemini/gemini-embedding-001 }
 ```
 
 Resolved by `resolveSecrets` at tenant open (§4.10) and handed to `buildKernelConfig`, which carries it
@@ -854,11 +864,12 @@ host on which every tenant has its own key still cannot start without it. That i
 an oversight to fix: it is the key for a tenant that declares none, for the eval runner and for the
 stdio server, and a deployment that genuinely has none can set it to a value LiteLLM will reject.
 
-Nothing else moves. `callModel` keeps `model: opts.route`, so the five route names are unchanged and the
-`embed` route still goes to `POST /v1/embeddings`. `model_calls` rows keep their `client` column, so
-budgets and evaluation records attribute per tenant whether or not the tenant has a key. The platform,
-on release, registers the tenant's deployments (`<clientId>-chat`, …) and mints one virtual key with
-`aliases`, a `models` allow-list and `max_budget`/`budget_duration`; that is P2 and is not kernel work.
+The five route names are unchanged, and the `embed` route still goes to `POST /v1/embeddings` — but
+what travels as `model:` is the document's own string, not the route (decision 24). `model_calls` rows
+keep their `client` column and record that string, so budgets and evaluation records attribute per
+tenant and per deployment whether or not the tenant has a key. The platform, on release, registers the
+tenant's deployments (`<clientId>/<vendor>/<model>`) and mints one virtual key with a `models`
+allow-list and `max_budget`/`budget_duration`; that is P2 and is not kernel work.
 
 Two sentences in `gatewayError` name the wrong thing once a tenant has its own key, and both are
 rewritten in the same task. A 401 or 403 says "check `LITELLM_MASTER_KEY`", which for such a tenant is
@@ -867,7 +878,8 @@ rejected by the gateway (HTTP `<status>`)". A budget refusal says "raise it in t
 routing section", which is right for a route's `daily_budget_usd` and wrong for a virtual key's
 `max_budget`, which lives in LiteLLM; it becomes "model route `<route>` is over its budget". Both
 messages reach `audit_log.error` and the agent, so neither should teach which credential a deployment
-uses.
+uses. A budget refusal is now the virtual key's `max_budget` or the deployment's own, both of which
+live in the gateway: a document names a deployment and sets no budget at all (decision 24).
 
 ### 4.12 Run API reads
 
@@ -941,7 +953,9 @@ the column lists above are the whole of the guarantee and why invariant 23 asser
 
 ## 18. Data model additions (extends section 6)
 
-**One new table, one migration in Plan 11c**, by plain `drizzle-kit generate`. Nothing else in 11c is DDL.
+**One new table and two migrations in Plan 11c**, both by plain `drizzle-kit generate`: 0015 creates
+`client_secrets` below, and 0016 drops `playbooks.timezone`, by the UTC ruling (decision 16) — a cron
+expression is read in UTC, and the playbooks tool's output loses the field with the column.
 
 ```sql
 client_secrets (
@@ -1015,8 +1029,10 @@ Rules the writer must keep, and the kernel's own writer keeps:
     digest of the client id asked for, the method and the path. The method and the path are *in* that
     row and are not readable from it, which is `hashArgs`'s point and is what the test asserts.
 21. A secret resolved from the store never appears in a log line, an error message, an audit row, a
-    surface refusal, a run API response or a `RunEvent`; and a tenant's `{ ref }` resolves only rows whose
-    `client_id` is that tenant's.
+    surface refusal, a status response, a run API response or a `RunEvent`; and a tenant's `{ ref }`
+    resolves only rows whose `client_id` is that tenant's. A surface's `health().detail` is a fixed
+    sentence the adapter wrote, and the host copies `live` and `detail` and nothing else off it
+    (decision 27).
 22. A per-tenant gateway key is never sent on another tenant's model call: two tenants open in one pooled
     host, each with its own key, send their own and only their own.
 23. The run API's read routes return no row belonging to another tenant, and no column the lists in §4.12

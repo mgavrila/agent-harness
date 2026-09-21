@@ -22,17 +22,16 @@ src/testing.ts           ./testing: FakeSlack, FakeSlackEvents, fakeSlackSession
 
 ## One Slack app
 
-This adapter is handed its bot token and its signing secret already resolved, on
-`deps.secretValues`, keyed by the field name the client document used —
-`surfaces.slack.botToken` and `surfaces.slack.signingSecret`, each a `SecretRef`. Where those
-values came from is not this package's business: a store, on a pooled deployment, or the process
-environment on a dedicated one. `SLACK_BOT_TOKEN` and `SLACK_SIGNING_SECRET` are the conventional
-names this adapter falls back to for a field the document did not name — every deployment before
-Plan 11c, and a dedicated one after it — and a pooled deployment names its own pair per tenant in
-`client_secrets` instead. `SLACK_APPROVALS_CHANNEL` (where approval cards and released files go)
-is different: it is a deployment's own setting, always read from the environment, because the
-document schema names no field for it — an approvals channel is a property of the app's
-installation, not a per-tenant credential. One app carries chat and approvals, because one
+This adapter is handed all three of its settings by the host, already resolved, and reads no
+environment variable at all. The bot token and the signing secret arrive on `deps.secretValues`,
+keyed by the field name the client document used — `surfaces.slack.botToken` and
+`surfaces.slack.signingSecret`, each a `SecretRef`. Where those values came from is not this
+package's business: a store on a pooled deployment, or an `{ env: SOME_NAME }` ref on a dedicated
+one, which the host resolves before this code runs. The channel approval cards and released files
+go to arrives on `deps.defaultConversation`, from `surfaces.slack.approvalsChannel` — per tenant,
+because a deployment-wide one would send a pooled host's tenants to a single workspace. A tenant
+missing any of the three is refused at open, naming the document field. One app carries chat and
+approvals, because one
 process — the host — serves both; two apps were needed only while the chat runtime and the
 approvals process were separate, and that reasoning is gone with the second process. There is no
 app-level token: nothing here opens a socket.

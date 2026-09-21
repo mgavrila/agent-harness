@@ -86,10 +86,11 @@ workspace, holding a bearer only the control plane has.
 Only the `401` is audited, and it repeats nothing of the request: not the header, not the body, not
 the path. No refusal body echoes anything the caller sent.
 
-A button press on a card this host never posted is **not** an error: it is delivered, and the
-handler that does not recognise it says so on the stream. A form submission is different, because
-the dialogue's metadata is what names the thing being decided — an unknown one is refused rather
-than delivered as a submission about nothing.
+A button press on a card this host never posted is **not** an error: it is delivered, the door
+answers `202`, and the handler that does not recognise it answers on the stream — a private
+`notice` reading "That button is not one this assistant posted." A form submission is different,
+because the dialogue's metadata is what names the thing being decided: an unknown `formId`, or one
+already answered, is a `400` rather than a submission about nothing.
 
 ## The stream
 
@@ -104,16 +105,16 @@ comment line, `: keep-alive\n\n`, goes out on an idle stream every 15 seconds an
 Five events, two of which carry more than one payload — a client discriminates on a key, not on the
 name:
 
-| Event         | Payload                                                                     | Sent when                                                |
-| ------------- | --------------------------------------------------------------------------- | -------------------------------------------------------- |
-| `delta`       | `{ message, delta }`                                                        | a reply is being written                                 |
-| `message`     | `{ message, text, replyTo }`, plus `file: { filename }` for a released file | a reply is complete                                      |
-| `card`        | `{ message, card }`                                                         | an approval card is posted                               |
-| `card`        | `{ message, form }`                                                         | a dialogue is opened from a button on that card          |
-| `card_update` | `{ message, card }`                                                         | a posted card is edited in place                         |
-| `notice`      | `{ message, text, replyTo }`                                                | the host said something _about_ a message                |
-| `notice`      | `{ text, userId }`                                                          | a private note, for the workspace to route to one person |
-| `notice`      | `{ text, dropped: true, reason }`                                           | a resume could not be honoured (below)                   |
+| Event         | Payload                                                                     | Sent when                                                                                                                               |
+| ------------- | --------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `delta`       | `{ message, delta }`                                                        | a reply is being written                                                                                                                |
+| `message`     | `{ message, text, replyTo }`, plus `file: { filename }` for a released file | a reply is complete                                                                                                                     |
+| `card`        | `{ message, card }`                                                         | an approval card is posted                                                                                                              |
+| `card`        | `{ message, form }`                                                         | a dialogue is opened from a button on that card                                                                                         |
+| `card_update` | `{ message, card }`                                                         | a posted card is edited in place                                                                                                        |
+| `notice`      | `{ message, text, replyTo }`                                                | the host said something _about_ a message                                                                                               |
+| `notice`      | `{ text, userId }`                                                          | a private note, for the workspace to route to one person — an unrecognised button press, or a decision by somebody who may not make one |
+| `notice`      | `{ text, dropped: true, reason }`                                           | a resume could not be honoured (below)                                                                                                  |
 
 A form's frame carries the `message` of the card it was opened from: that is what the submission
 sends back as `messageRef`, and two dialogues open on two cards in one conversation are told apart

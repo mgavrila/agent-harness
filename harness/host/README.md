@@ -116,22 +116,27 @@ surface has to answer whether or not this deployment uses the run API at all. An
 `HARNESS_HOST_TOKEN` closes `/v1` — every route there answers `401` — rather than closing the
 socket.
 
-| Route                                             | What it answers                                                                                                                |
-| ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| `POST /v1/runs`                                   | `202` and a Server-Sent Events stream: `run` with the run id, the runtime's own events, then `result`                          |
-| `POST /v1/runs/:id/cancel?surface=&userId=`       | `{ run_id, cancelled }`                                                                                                        |
-| `GET /v1/threads/:id?surface=&userId=`            | the thread and its most recent 200 messages, newest last                                                                       |
-| `GET /v1/status`                                  | the client, the loaded surfaces, the primary one, the runs in flight, whether the host is draining, and the scheduler's status |
-| `GET /v1/usage?from=&to=`                         | per-principal, per-day usage totals for this tenant                                                                            |
-| `GET /v1/approvals?status=&cursor=&limit=`        | a cursor-paged, tenant-scoped page of this client's approvals, newest first (`src/domain/api/reads.ts`)                        |
-| `GET /v1/memory?scope=&principal=&cursor=&limit=` | a cursor-paged, tenant-scoped page of this client's memory entries, oldest first                                               |
+| Route                                             | What it answers                                                                                                                                                    |
+| ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `POST /v1/runs`                                   | `202` and a Server-Sent Events stream: `run` with the run id, the runtime's own events, then `result`                                                              |
+| `POST /v1/runs/:id/cancel?surface=&userId=`       | `{ run_id, cancelled }`                                                                                                                                            |
+| `GET /v1/threads/:id?surface=&userId=`            | the thread and its most recent 200 messages, newest last                                                                                                           |
+| `GET /v1/status`                                  | the client, one line per loaded surface (`{ name, live, detail? }`), the primary one, the runs in flight, whether the host is draining, and the scheduler's status |
+| `GET /v1/usage?from=&to=`                         | per-principal, per-day usage totals for this tenant                                                                                                                |
+| `GET /v1/approvals?status=&cursor=&limit=`        | a cursor-paged, tenant-scoped page of this client's approvals, newest first (`src/domain/api/reads.ts`)                                                            |
+| `GET /v1/memory?scope=&principal=&cursor=&limit=` | a cursor-paged, tenant-scoped page of this client's memory entries, oldest first                                                                                   |
+
+A surface reports whether it can be reached, and the status route asks it: a session's optional
+`health()` answers from what its adapter already knows, never from a call to the outside world,
+and a surface that offers none is reported live. `detail` is a fixed sentence the adapter owns,
+copied and never read.
 
 A surface's own mount may answer a stream instead of a whole body — `SurfaceHttpResponse.body` as
 an async iterable of strings — and the host pipes each chunk as it is produced without reading or
 parsing any of it; an adapter owns its own framing end to end.
 
 Every route is behind `Authorization: Bearer $HARNESS_HOST_TOKEN`, compared in constant time, the
-status route included. **An empty token answers 401 on all five**, and the `listening` line ends
+status route included. **An empty token answers 401 on all seven**, and the `listening` line ends
 `runApi=closed (set HARNESS_HOST_TOKEN)` rather than `runApi=open`. The bearer secret says the
 caller may use the API; it never says who they are acting as. That stays the identity plug-in's
 answer, from the `surface` and `userId` the request names, resolved exactly as an adapter's message
@@ -198,7 +203,9 @@ src/domain/playbooks/notice.ts     stagePlaybookNotice, playbookNoticeKey
 src/domain/playbooks/scheduler.ts  startScheduler, executePlaybook, SCHEDULER_TICK_MS
 src/domain/api/types.ts        the run API's limits and defaults: the body, text and attachment caps
 src/domain/api/sse.ts          the Server-Sent Events writer: 202, the three headers, the keep-alive
-src/domain/api/routes.ts       bearerOk, readBody, callerOf, the four routes
+src/domain/api/http.ts         json, readBody, tooLarge: the body cap and the one JSON writer
+src/domain/api/reads.ts        encodeCursor, decodeCursor, readApprovals, readMemory: the two cursor-paged reads
+src/domain/api/routes.ts       bearerOk, callerOf, surfaceStatus, the seven routes
 src/domain/api/repository.ts   findRunFor, readThreadFor: this principal's row or nothing
 src/domain/api/server.ts       startRunApi: the node:http listener over the pool
 src/domain/tenancy/resolver-types.ts InboundRef, ClientResolver: the leaf conversation.ts imports

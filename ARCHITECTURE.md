@@ -47,7 +47,7 @@ harness/config-files a ConfigSource that reads HARNESS_CLIENTS_DIR/<id>/client.y
 harness/config-postgres a ConfigSource over versioned rows: client_documents (one live row per
                     client) and client_document_versions (the history).
 harness/db          schema, migrations, the pool, the encryption primitives.
-harness/gateway     the routing schema and the LiteLLM config renderer.
+harness/gateway     the deployment catalogue and the LiteLLM config renderer.
 harness/surface-api the Surface contract and defineSurface(): cards, forms, conversations, and
                     MemorySurface under its testing subpath. Depends on @harness/shared and zod.
 harness/identity-api the Identity contract and defineIdentityProvider(): Principal, the five
@@ -118,10 +118,10 @@ host        ..>  { surfaces/*, identities/*, runtimes/* }   (runtime only: dynam
 
 `@harness/config-api` is the contract a `ConfigSource` implements and the one every reader of a
 client document imports; it is what keeps `core-tools`, `gateway`, `host` and `scripts` agreeing
-on what a document is without importing each other. `@harness/gateway` is no longer the one
-package with no edge to `@harness/shared`: `pnpm gateway:config` now opens the client's own
-`ConfigSource` through `@harness/core-tools`, which is where that edge, and the one to
-`@harness/db`, come from.
+on what a document is without importing each other. `@harness/gateway` reaches none of them: it
+renders `harness/gateway/catalogue.yaml`, the deployments a host serves, and a client document
+names one of those per route. It is the one package with no workspace dependency at all, which is
+the shape "a deployment's catalogue is not a tenant's configuration" takes in the graph.
 
 `scripts` is a leaf. There are no cycles.
 

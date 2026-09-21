@@ -472,14 +472,15 @@ process, and an operator who owns both. That tenant's document names its own var
 operator sets them in that host's environment. Two tenants in one process would name two different
 variables, which is the thing a pooled host cannot do and the reason the store exists.
 
-The Compose stack still passes `SLACK_BOT_TOKEN`, `SLACK_SIGNING_SECRET` and
-`SLACK_APPROVALS_CHANNEL` through to the host, for exactly that dedicated case — they are the
-conventional names the Slack adapter falls back to when a document names nothing — and they are
-commented out in `.env.example` because they are a dedicated host's business rather than a
-deployment default. A pooled host leaves all three unset. The request URLs, the bot scopes, the event subscriptions
-and the one-app-per-tenant-versus-one-multi-workspace-app choice are "Slack over HTTPS" above,
-whichever secret source a deployment runs — only where `SLACK_BOT_TOKEN` and
-`SLACK_SIGNING_SECRET` end up differs.
+There is no conventional variable for a surface credential, and the Compose stack passes none: a
+Slack adapter reads its bot token, its signing secret and its approvals channel from that tenant's
+own document, and from nothing else. On the platform, all three are entered in its interface — the
+two secrets as rows, the channel id as a document field. On a dedicated host the document names the
+two secrets as `{ env: SOME_NAME }`, the operator sets `SOME_NAME` in `.env`, and **adds
+`SOME_NAME` to the host service's `environment` list** in `harness/compose/docker-compose.yml`,
+which is an explicit allowlist rather than an `env_file`. The request URLs, the bot scopes, the
+event subscriptions and the one-app-per-tenant-versus-one-multi-workspace-app choice are "Slack
+over HTTPS" above, whichever secret source a deployment runs.
 
 ### Rotating a secret
 
@@ -500,7 +501,7 @@ The refusals name the client, the surface, the field and the secret's *name*, an
 
 ```
 client "acme" names the secret "web-token" for web.token, and this deployment's secret store holds no such secret for that client
-client "acme" declares the "slack" surface, which needs SLACK_BOT_TOKEN; this deployment does not set it
+surface "@harness/surface-slack": the slack surface has no botToken for this client; surfaces.slack.botToken names it
 client "acme" names the secret "web-token" for web.token, and this deployment has no secret source
 ```
 
@@ -531,12 +532,15 @@ bearer for that tenant's model calls in place of `LITELLM_MASTER_KEY`:
 routing:
   gateway:
     key: { ref: gateway-key }
-  routes: { … }
+  routes:
+    chat: { model: acme/gemini/gemini-3-flash-preview }
 ```
 
-The route names do not change and neither does the wire shape: the tenant travels in the
-credential, because a LiteLLM virtual key already carries its own aliases, its own model
-allow-list and its own `max_budget`. The platform creates that virtual key — its aliases, its
+The route names do not change; the wire shape does. What goes out as `model:` is the deployment
+this document names for that route, so the tenant travels twice over — in the key, which carries
+its own model allow-list and its own `max_budget`, and in the deployment name the platform
+registered for it (`<clientId>/<vendor>/<model>`). On a pooled host a route name on the wire
+would have made every tenant's `chat` the same deployment. The platform creates that virtual key — its aliases, its
 model allow-list, its `max_budget` — and stores its value under the `ref` the document names,
 before the tenant is released; a tenant whose key the gateway does not recognise fails at its
 first model call, not at open. A tenant that names no key uses the process key, which is what
@@ -564,9 +568,12 @@ select model, sum(spend) from "LiteLLM_SpendLogs"
 where "startTime" > now() - interval '1 day' group by 1;
 ```
 
-A `model route "extract" is over its daily budget` error means LiteLLM refused
-the call, not that the harness declined to make it. Raise `daily_budget_usd` in
-the client document's own `routing` section and re-run `pnpm gateway:config && pnpm gateway:up`.
+A `model route "extract" is over its budget` error means LiteLLM refused the call, not that the
+harness declined to make it. Where to raise it depends on which budget ran out. On a dedicated
+host it is the deployment's: edit `daily_budget_usd` for that entry in
+`harness/gateway/catalogue.yaml` and re-run `pnpm gateway:config && pnpm gateway:up`. On a pooled
+host it is that tenant's virtual key, whose `max_budget` the platform set when it minted the key;
+the client document sets no budget at all, because it names a deployment and nothing more.
 
 ## Document pipeline
 
@@ -614,10 +621,11 @@ The run exits non-zero on a regression against `evals/baseline.json` or on an
 injection case that did not hold. `docs/promotion-gate.md` is the rule; the
 report names which metric moved and by how much.
 
-`EVALS_SERVING_MODEL` is a JSON object of route to model identifier, and it is
-what lands in the report's `serving_model`. Set it from the routing table the
-run actually used; a score with no model behind it is not comparable to
-anything.
+`EVALS_SERVING_MODEL` is a JSON object of route to deployment name — **one entry per route, all
+five, or the run exits 2 naming the ones it is missing**. It is both what the run *sends* as
+`model:` and what lands in the report's `serving_model`: the eval runner loads no client document,
+so this is its routing table. Set it from the document the run is standing in for; a score with no
+model behind it is not comparable to anything.
 
 The judge is off on the CLI path (`judgeDeps: null`), so a CLI run scores every
 free-text field exactly, reports `judge: null`, and omits `judge.agreement_rate`
@@ -630,12 +638,11 @@ including the route being down.
 
 ### Which model a `model_calls` row names
 
-`model_calls.model` records the **route alias** LiteLLM echoes back — `extract`,
-`judge` — not the underlying deployment that served the call. Per-provider cost
-attribution needs the deployment, which LiteLLM returns in the
-`x-litellm-model-id` response header; recording that header is a later change,
-and until then the deployment behind a route is whatever the client document's own `routing`
-section said at the time of the run.
+`model_calls.model` records the deployment the call **asked for**: the string this tenant's
+document names for that route, which is exactly what went out as `model:`. Which upstream the
+gateway then served it from — a fallback, a retry — is the gateway's own business and is in its
+spend tables, keyed by the same name. Per-request attribution to the upstream needs LiteLLM's
+`x-litellm-model-id` response header, which nothing records yet.
 
 ## Storage
 
@@ -779,9 +786,9 @@ One Slack app per tenant, delivering to a URL. The host holds no connection to S
 every event and every button press arrives as a signed POST, which is what lets a host be paused,
 resumed, pooled behind an ingress, or run as one of many in a process.
 
-| App | Variables | Bot scopes | Other settings |
+| App | What the document names | Bot scopes | Other settings |
 |---|---|---|---|
-| The host's Slack app | `SLACK_BOT_TOKEN`, `SLACK_SIGNING_SECRET` | `chat:write`, `app_mentions:read`, `channels:history`, `groups:history`, `im:history`, `im:read`, `im:write`, `mpim:history`, `users:read`, `usergroups:read`, `files:read`, `files:write` | Socket Mode **off**, Interactivity on, both request URLs set |
+| The host's Slack app | `surfaces.slack.botToken`, `surfaces.slack.signingSecret` (both `SecretRef`s) and `surfaces.slack.approvalsChannel` | `chat:write`, `app_mentions:read`, `channels:history`, `groups:history`, `im:history`, `im:read`, `im:write`, `mpim:history`, `users:read`, `usergroups:read`, `files:read`, `files:write` | Socket Mode **off**, Interactivity on, both request URLs set |
 
 **Both request URLs are the same URL**, and it carries the tenant:
 
@@ -793,8 +800,8 @@ Set it under **Event Subscriptions → Request URL** and under **Interactivity &
 Request URL**. Slack sends a one-time `url_verification` challenge when each is saved; the host
 answers it, over the same verification as everything else, so a URL that saves is a URL whose
 signing secret is already right. Subscribe the app to `message.channels`, `message.groups`,
-`message.im`, `message.mpim` and `app_mention`, and invite the bot to `SLACK_APPROVALS_CHANNEL`
-and to every channel it should answer in.
+`message.im`, `message.mpim` and `app_mention`, and invite the bot to the channel
+`surfaces.slack.approvalsChannel` names and to every channel it should answer in.
 
 **There is no app-level token.** `SLACK_APP_TOKEN` is gone, and a deployment that still sets it is
 setting nothing.
@@ -968,7 +975,7 @@ What a caller gets wrong, and what it is told:
 | attachment path outside `<storage>/incoming` | `400`, and no run opens |
 | wrong method on a known path | `405` with `allow` |
 | sub-path no route claims | `404` |
-| an `actionId` nobody knows | `202`; delivered, and the handler says on the stream that it does not recognise it |
+| an `actionId` nobody knows | `202`; delivered, and the handler that does not recognise it answers with a private `notice` on that conversation |
 | a `formId` nobody knows, or one already submitted | `400 {"error":"that form is not open on this surface"}` |
 | a conversation nobody knows | not a refusal; a conversation is created by being written to |
 
@@ -1036,20 +1043,24 @@ client must not go is this repository.
    listing every person, or an `identityPlugin.kind: slack-groups` section instead of declaring
    people at all (see "Directory-backed identity" below). A tenant whose principal is missing from
    the document refuses to open.
-3. Add a `surfaces.slack` section (see "Slack over HTTPS" above) and create one Slack app,
-   pasting its tokens, its signing secret and the approvals channel id into `.env`. The section's
-   `teamId` is the id of the workspace that app is installed in, and an event from any other
-   workspace is refused. **Every
-   `SecretRef` a document names must also be on the Compose host service's environment
-   allowlist**, which is an explicit list and not an `env_file`: a variable that is set in `.env`
-   but missing from that list reaches nothing inside the container, and the tenant refuses to
-   open naming a variable the operator can see is set.
+3. Add a `surfaces.slack` section (see "Slack over HTTPS" above) and create one Slack app. The
+   section names four things: `teamId`, the id of the workspace that app is installed in, so an
+   event from any other workspace is refused; `approvalsChannel`, the channel id this tenant's
+   cards go to; and `botToken` and `signingSecret` as `SecretRef`s. On a dedicated host those two
+   are `{ env: SOME_NAME }` refs and the operator sets `SOME_NAME` in `.env`; on the platform they
+   are `{ ref }`s and are entered in its interface. **Every `SecretRef` a document names as
+   `{ env }` must also be on the Compose host service's environment allowlist**, which is an
+   explicit list and not an `env_file`: a variable that is set in `.env` but missing from that list
+   reaches nothing inside the container, and the tenant refuses to open naming a variable the
+   operator can see is set.
 4. Review the document's `persona` and `policy` sections before the first run, and the markdown
    under the directory its `knowledge` section names (`{ source: 'dir', path }`) — the scaffolder
    copied the fixture's, which is a worked example rather than this client's content. Set
    `knowledge: { source: 'store' }` if this client has no knowledge base; nothing requires one.
-5. Review the document's `routing` section, whose `embed` route came from the fixture like every
-   other route, and check its width once with the `curl` under "Knowledge" before the first sync.
+5. Review the document's `routing` section: each route names one deployment the gateway serves,
+   and on a dedicated host every one of those names must be an entry in
+   `harness/gateway/catalogue.yaml`. The `embed` route came from the fixture like every other; check
+   its width once with the `curl` under "Knowledge" before the first sync.
 6. Start it under its own Compose project so it does not collide with another client's
    containers and volumes:
    `COMPOSE_PROJECT_NAME=<slug> docker compose --env-file .env -f harness/compose/docker-compose.yml --profile demo up -d`.
@@ -1117,8 +1128,8 @@ in order, with the stack down.
    subscriptions: `message.channels`, `message.groups`, `message.im`, `message.mpim` and
    `app_mention`. Delete the second app. Remove `APPROVALS_SLACK_BOT_TOKEN`,
    `APPROVALS_SLACK_APP_TOKEN`, `SLACK_HOME_CHANNEL`, `SLACK_HOME_CHANNEL_NAME`,
-   `SLACK_ALLOWED_USERS` and `MEMORY_ALLOWED_USERS` from `.env`. Invite the bot to
-   `SLACK_APPROVALS_CHANNEL` and to every channel it should answer in.
+   `SLACK_ALLOWED_USERS` and `MEMORY_ALLOWED_USERS` from `.env`. Invite the bot to the channel
+   the document's `surfaces.slack.approvalsChannel` names and to every channel it should answer in.
 3. **Rewrite `identity.yaml`.** Replace the retired service principals with `svc-host`, or point
    `HARNESS_HOST_PRINCIPAL` at a service id the file already declares; the host refuses to start
    otherwise. Replace the placeholder member ids with real Slack member ids — until you do, every
@@ -1203,10 +1214,11 @@ and start the host last.
 3. **Grant the application role** `SELECT, INSERT, UPDATE` on the three new tables and `DELETE` on
    `knowledge_chunks`, as under "Database roles". The sync replaces a document's passages; it never
    deletes a document row, because a document whose file is gone is tombstoned instead.
-4. **Add the `embed` route** to `clients/<name>/routing.yaml` and run `pnpm gateway:config`, then
-   restart the gateway. The route is required: a file without it fails the render with
-   `routing.yaml is invalid:` and the missing key, and nothing is written. Check the width once
-   with the `curl` under "Knowledge" before the first sync.
+4. **Add the `embed` route** to the client document's `routing.routes` section, naming the
+   deployment that serves embeddings, and make sure `harness/gateway/catalogue.yaml` has an entry
+   under that name; then run `pnpm gateway:config` and restart the gateway. The route is required:
+   a document without it fails to load with the missing key named, and nothing opens. Check the
+   width once with the `curl` under "Knowledge" before the first sync.
 5. **New environment variables**, all optional, and these five are the whole list:
    `HARNESS_EMBED_DIMS` (default 1024, read by the kernel's configuration, and it must match the
    column), `HARNESS_HOST_TOKEN` (**unset means the run API answers 401**; the listener runs
@@ -1487,7 +1499,7 @@ schema always orders it last, because it cannot post an approval card — and gi
 | `POST /v1/runs` | `{ surface, conversation, userId, text, attachments? }` → `202` and a Server-Sent Events stream: `run` with the run id, then the runtime's events, then `result` |
 | `POST /v1/runs/:id/cancel?surface=&userId=` | `{ run_id, cancelled }`; `cancelled` is false when the run had already ended |
 | `GET /v1/threads/:id?surface=&userId=` | that thread and its **most recent** messages, newest last, at most 200 — the tail of a long thread, not its beginning |
-| `GET /v1/status` | six fields: `client`, `surfaces`, `primary_surface`, `runs_in_flight`, `draining` and `scheduler` — the scheduler's own status (`lastTickAt`, `lastOkAt`, `lastError`, `lastErrorAt`, `ticking`), which has nowhere else to be read |
+| `GET /v1/status` | six fields: `client`, `surfaces`, `primary_surface`, `runs_in_flight`, `draining` and `scheduler` — the scheduler's own status (`lastTickAt`, `lastOkAt`, `lastError`, `lastErrorAt`, `ticking`), which has nowhere else to be read. `surfaces` is one object per loaded surface, `{ name, live, detail? }`: `live` is what that surface's adapter says about itself from what it already knows, and `detail` is one fixed sentence it owns. A surface that reports nothing is live, and the route makes no outbound call, so polling it costs a tenant nothing |
 | `GET /v1/usage?from&to` | per-principal, per-day totals for this tenant; see "Usage" below |
 
 ```bash
@@ -1627,7 +1639,8 @@ attributed by the gateway, in `model_calls`, not by the runtime), so **the dolla
 trip today**. What bounds a playbook run in practice is `timeout_s`,
 `HARNESS_RUN_MAX_MODEL_CALLS` and `HARNESS_RUN_MAX_TOOL_CALLS` (the runtime ends the run with
 `the run exceeded its budget`), the kernel's `HARNESS_GATEWAY_MAX_CALLS_PER_RUN` for model calls
-a tool makes, and LiteLLM's `daily_budget_usd` per route. The cap becomes live the day a runtime
+a tool makes, and the deployment's own `daily_budget_usd` in the gateway's catalogue, or the
+tenant's virtual key `max_budget`. The cap becomes live the day a runtime
 reads `x-litellm-response-cost` into `usage.costUsd`. Either host-side abort is a decision rather
 than a request: once the reported spend passes the cap, or the host's own timer fires, the run
 ends `error` with `the run exceeded its cost cap` or `the run exceeded its time budget` even if

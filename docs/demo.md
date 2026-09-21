@@ -23,25 +23,28 @@ pnpm demo:up
 
 `pnpm new-client` writes one client document, `../harness-tenants/demo-practice/client.yaml`, and
 a `persona.md` beside it — never into this repository. Add a `surfaces.slack` section to that
-document (`teamId`, and `signingSecret` and `botToken` as `{ env: <NAME> }` references naming the
-environment variables below) before creating the Slack app. `teamId` is the id of the workspace
-the app is installed in — the `T…` segment of any workspace URL — and the host refuses an event
-from any other.
+document (`teamId`; `signingSecret` and `botToken` as `{ env: <NAME> }` references naming the
+variables you will set in `.env`; and `approvalsChannel`, the `C…` id of the channel approval
+cards go to) before creating the Slack app. `teamId` is the id of the workspace the app is
+installed in — the `T…` segment of any workspace URL — and the host refuses an event from any
+other.
 
 Create one Slack app before filling in `.env`, with Socket Mode **off** and Interactivity on. Its
 bot scopes are `chat:write`, `app_mentions:read`, `channels:history`, `groups:history`,
 `im:history`, `im:read`, `im:write`, `mpim:history`, `users:read`, `files:read`, `files:write`.
 Point both request URLs — Event Subscriptions and Interactivity — at
-`https://<tunnel or host>/tenants/<clientId>/slack/events`. Paste `SLACK_BOT_TOKEN`,
-`SLACK_SIGNING_SECRET` and `SLACK_APPROVALS_CHANNEL` into `.env`. One app carries both chat and
-approvals, because one process — the host — serves both.
+`https://<tunnel or host>/tenants/<clientId>/slack/events`. Put the bot token and the signing
+secret into `.env` under the two names the document's `{ env }` refs chose, and add both names to
+the host service's `environment` list in `harness/compose/docker-compose.yml`, which is an
+explicit allowlist. One app carries both chat and approvals, because one process — the host —
+serves both.
 
 The host posts on whichever surface is first in the client document's `surfaces` section, by the
 schema's own fixed order (`slack`, `memory`, `http`). The demo's document declares `slack`, which
 is why Slack is what you see here.
 
-Then in Slack, invite the bot to `SLACK_APPROVALS_CHANNEL` and to every other channel it should
-answer in. Generate the synthetic provider files with the generator from the document-pipeline
+Then in Slack, invite the bot to the channel `approvalsChannel` names and to every other channel
+it should answer in. Generate the synthetic provider files with the generator from the document-pipeline
 plan (`packs/healthcare/synthetic/`) and keep three of them — a state licence, a malpractice
 certificate and a W-9 for one doctor — open in a folder.
 
@@ -137,16 +140,16 @@ runtime stamps the skill it activated.
 
 ### 6. Swap the model provider (30 seconds)
 
-Edit the client document's own `routing` section to point the `chat` route at a different
-provider, run `pnpm gateway:config` to re-render it, restart the gateway, and ask the same
-expirations question.
+Add the other provider's deployment to `harness/gateway/catalogue.yaml`, point the document's
+`chat` route at that deployment's name, run `pnpm gateway:config` to re-render the proxy config,
+restart the gateway, and ask the same expirations question.
 
 ```bash
 docker compose --env-file .env -f harness/compose/docker-compose.yml restart litellm
 ```
 
-Nothing in the harness changed. The routing table is the only thing that knows
-which provider serves which route.
+Nothing in the harness changed. The document says which deployment serves the job, and the
+catalogue says what that deployment is.
 
 ## What to say if something fails
 
@@ -171,7 +174,7 @@ Run this before the demo. Each line either passes or tells you what is wrong.
 - [ ] `docker compose --env-file .env -f harness/compose/docker-compose.yml --profile demo ps` shows `postgres`, `litellm`, `files` and `host` up.
 - [ ] `curl http://127.0.0.1:8787/healthz` answers `"ok": true`.
 - [ ] `psql "$DATABASE_URL" -c "select path, min_level from knowledge_documents order by path"` shows the two demo documents, if you are demonstrating the knowledge base.
-- [ ] `docker compose --env-file .env -f harness/compose/docker-compose.yml --profile demo exec host printenv SLACK_SIGNING_SECRET` prints the one secret.
+- [ ] `docker compose --env-file .env -f harness/compose/docker-compose.yml --profile demo exec host printenv <the name your document's signingSecret ref chose>` prints the one secret.
 - [ ] A direct message to the bot is answered.
 - [ ] A mention in a channel is answered, and an unmentioned message in that channel is not.
 - [ ] Asking the bot "what tools do you have?" lists the kernel's own tool names plus `read_file`, `ls`, `glob` and `grep`, and **no** terminal tool.

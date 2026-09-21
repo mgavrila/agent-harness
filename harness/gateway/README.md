@@ -1,41 +1,59 @@
 # @harness/gateway
 
-The model routing table and the LiteLLM config renderer. Every model call in the harness names
-a _job_ — `chat`, `extract`, `reason`, `judge` — never a provider, so switching providers is a
-change to the client document's own `routing` section and nothing else.
+The deployment catalogue and the LiteLLM config renderer. Every model call in the harness names a
+_job_ — `chat`, `extract`, `reason`, `judge`, `embed` — and a client document says which deployment
+serves each job, so switching providers for one tenant is a change to that document and switching
+what a deployment _is_ is a change here.
 
-`pnpm gateway:config` reads the client `HARNESS_CLIENT` names through whatever `ConfigSource`
-`HARNESS_CONFIG_SOURCE` picks (`@harness/core-tools`'s `configSourceNameFrom`/`loadConfigSource`,
-the same registry the kernel uses), not a file this package resolves on its own — which is why it
-depends on `@harness/core-tools` and `@harness/db` now, and is no longer the one package with no
-edge to `@harness/shared`.
+`pnpm gateway:config` reads `harness/gateway/catalogue.yaml` and writes `litellm.config.yaml`. It
+reads no client, no config source and no database, which is why this package depends on neither
+`@harness/config-api` nor `@harness/core-tools` nor `@harness/db`: a deployment's catalogue is the
+deployment's, and one rendered file serves every tenant on the host.
 
 ## Layout
 
 ```
-src/domain/routing/parse.ts   parseRouting: an inline routing table -> RoutingFile, with a
-                               readable error (kept for a document embedded as raw YAML; the
-                               render pipeline itself reads the field already parsed)
-src/domain/routing/render.ts  apiKeyEnvFor, renderLiteLlmConfig: RoutingFile -> LiteLLM YAML
-src/app/render-config.ts      the `pnpm gateway:config` entrypoint: renderClientConfig(source, clientId)
-src/index.ts                  the public API
-litellm.config.yaml           GENERATED. Compose bind-mounts this exact path; do not move it.
+catalogue.yaml                       the deployments this host serves. Tracked; edited by hand.
+src/domain/routing/catalogue.ts      DeploymentCatalogue, CatalogueEntry, deploymentName: the schema
+src/domain/routing/render.ts         apiKeyEnvFor, renderLiteLlmConfig: a catalogue -> LiteLLM YAML
+src/app/render-config.ts             the `pnpm gateway:config` entrypoint: renderCatalogueConfig()
+src/index.ts                         the public API
+litellm.config.yaml                  GENERATED. Compose bind-mounts this exact path; do not move it.
 ```
 
-`ROUTES`, `RouteSpec` and `RoutingFile` — the zod schema itself — live in `@harness/config-api`,
-not here: `routes` is a section of the client document, so `@harness/gateway` and
-`@harness/core-tools` both import the schema from there rather than from each other.
+`ROUTES`, `RouteSpec` and `RoutingFile` — what a _document_ may say — live in
+`@harness/config-api`, not here: `routes` is a section of the client document, and a route names a
+deployment by name and says nothing about what it is.
+
+## A catalogue entry
+
+```yaml
+deployments:
+  - model: gemini/gemini-3-flash-preview # provider-prefixed; the deployment name defaults to it
+    daily_budget_usd: 2
+    fallbacks: [groq/openai/gpt-oss-120b] # names of other deployments in this file
+defaults:
+  daily_budget_usd: 1
+  num_retries: 2
+  request_timeout_s: 120
+```
+
+`name` is optional and defaults to `model`, which is the usual case: a document then names the
+deployment by its model string. Names are unique, every fallback must name another entry in the
+same file, and the schema is strict — an inline `api_key:` fails the render rather than being
+dropped, because the rendered config carries only `os.environ/NAME` references and is therefore
+safe to commit.
+
+On a **pooled** host the platform registers a tenant's own deployments through LiteLLM's
+`POST /model/new`, under `<clientId>/<vendor>/<model>`, and this file answers the same question for
+the deployments the host shares.
 
 ## Public API
 
-`@harness/gateway` exports `parseRouting`, `apiKeyEnvFor` and `renderLiteLlmConfig`. `ROUTES`,
-`type Route`, `RouteSpec` and `RoutingFile` come from `@harness/config-api`, which
-`@harness/core-tools` also imports, so the harness and the proxy can never disagree about which
-routes exist.
-
-The rendered config never contains a key — only `os.environ/NAME` references — which is why it
-is safe to commit. `RouteSpec` is `.strict()` so that an inline `api_key:` in a routing file
-fails loudly instead of being dropped.
+`@harness/gateway` exports `renderLiteLlmConfig`, `apiKeyEnvFor`, `DeploymentCatalogue`,
+`CatalogueEntry` and `deploymentName`. `apiKeyEnvFor` maps a provider prefix to the environment
+variable holding that provider's key, and it applies to a catalogue entry only — never to a
+document's model string, which is a deployment name the gateway resolves.
 
 ## Testing
 
@@ -43,6 +61,5 @@ fails loudly instead of being dropped.
 pnpm --filter @harness/gateway test
 ```
 
-No database, no network. `pnpm gateway:config` regenerates `litellm.config.yaml`; if
-`git status` is dirty afterwards, either the renderer or the client's routing table changed,
-and the diff says which.
+No database, no network. `pnpm gateway:config` regenerates `litellm.config.yaml`; if `git status`
+is dirty afterwards, either the renderer or the catalogue changed, and the diff says which.

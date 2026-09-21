@@ -185,6 +185,10 @@ export function parseUpdateBaselineFlag(argv: readonly string[]): UpdateBaseline
  *                        the command line.
  *   --update-baseline   After scoring, write the report to the --baseline path (default
  *                        evals/baseline.json). `=true` is accepted too; `=false` is a no-op.
+ *
+ * `EVALS_SERVING_MODEL` is this run's routing table: a JSON object naming one deployment per
+ * route, all five of them, since the runner loads no client document. A missing route is a usage
+ * error, exit 2, with nothing run.
  */
 // Guarded, not bare: `cli.test.ts` imports the two flag parsers above, and an
 // unguarded entrypoint would run a whole eval the moment that import resolved.

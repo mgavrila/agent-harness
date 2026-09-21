@@ -8,7 +8,7 @@ tarballs and the two architecture snapshots; the host and files images are pushe
 ## 0.3.0 — unreleased
 
 The release the platform pins: a tenant with no Slack, secrets that are not environment variables,
-and two lists a dashboard can hold.
+a document that names its own deployments, and two lists a dashboard can hold.
 
 ### Added
 
@@ -19,28 +19,57 @@ and two lists a dashboard can hold.
   carries that tenant's own bearer. See "The web surface" in `docs/runbook.md`.
 - **Secrets from a store.** `SecretSource` beside `ConfigSource`, with `env` and `postgres`
   implementations and a conformance kit at `@harness/config-api/testing`.
-  `HARNESS_SECRET_SOURCE=env|postgres`, **required, no default**. A document's `{ ref: name }`
-  resolves from `client_secrets` — one new table — through the AES-256-GCM envelope
-  `@harness/db` already ships. A tenant added by writing rows answers on a pooled host with no
-  restart.
+  `HARNESS_SECRET_SOURCE=env|postgres`, **required, no default**, and required by the stdio
+  server as well as the host. A document's `{ ref: name }` resolves from `client_secrets` —
+  migration 0015 — through the AES-256-GCM envelope `@harness/db` already ships, whose test
+  vector is now asserted in both directions. A tenant added by writing rows answers on a pooled
+  host with no restart.
 - **A per-tenant gateway key.** `routing.gateway.key` is a `SecretRef`, resolved at tenant open
-  and sent as the bearer for that tenant's model calls. Route names are unchanged; absent, the
-  process key stands.
+  and sent as the bearer for that tenant's model calls. Absent, the process key stands.
+- **`surfaces.slack.approvalsChannel`**, required when a document declares a Slack surface: the
+  channel that tenant's approval cards go to, carried to the adapter the way a web inbox is.
 - **`GET /v1/approvals` and `GET /v1/memory`**, cursor-paged, tenant-scoped, authenticated exactly
   like `/v1/usage`. The column lists are in the runbook and are the whole of the guarantee: no
   approval payload, encrypted or not.
+- **Per-surface health on `GET /v1/status`.** `surfaces` is now `[{ name, live, detail? }]`, fed
+  by an optional `SurfaceSession.health()`. A surface that offers none is live; `detail` is a
+  fixed sentence its adapter owns. The route makes no outbound call: Slack reports the identity
+  it has already fetched.
 - **A streaming seam.** `SurfaceHttpResponse.body` is now `string | AsyncIterable<string>`, and
   `SurfaceHttpRequest` carries `clientId` and `signal`. The host writes the head, pipes each chunk
-  as it is yielded and aborts the signal when the caller hangs up.
+  as it is yielded and aborts the signal when the caller hangs up. `MemorySurface` in
+  `@harness/surface-api/testing` grows the matching door, a `health()` and `bodyText`.
+- **`SurfaceDeps.defaultConversation` and `SurfaceSettings.defaultConversation`**: where a surface
+  posts when nobody names a conversation, as that tenant's document names it. `surfaceConversationsOf`
+  in `@harness/config-api` is what reads it out of the typed sections.
+- **A deployment catalogue.** `harness/gateway/catalogue.yaml` lists the deployments a dedicated
+  host serves — upstream model, endpoint, budget, fallbacks — and `pnpm gateway:config` renders it
+  with no client, no config source and no database.
 - **The client store as a stable write contract**: `client_documents`, `client_document_versions`
   and `client_secrets`, at the columns they have today, with the envelope and a test vector.
 
 ### Changed
 
+- **A route names a deployment, and the kernel sends that name.** `routing.routes.<route>.model`
+  is the name of a deployment the gateway serves, and it is what travels as `model:` on every call
+  path and what `model_calls.model` records. `RouteSpec` is `{ model }` and nothing else:
+  `fallbacks`, `api_base`, `daily_budget_usd` and the whole `routing.defaults` object are removed,
+  and a document that still carries one is **refused at load**. What a deployment is belongs to the
+  gateway — to `harness/gateway/catalogue.yaml` on a dedicated host, and to the platform's
+  registrations (`<clientId>/<vendor>/<model>`) on a pooled one, where a route name on the wire
+  would have made every tenant's `chat` the same deployment.
+- **No Slack variable anywhere.** `slackConfig` reads its bot token, its signing secret and its
+  approvals channel from what the host resolved for that tenant, with no `requiredEnv` fallback of
+  any kind. `SLACK_BOT_TOKEN`, `SLACK_SIGNING_SECRET` and `SLACK_APPROVALS_CHANNEL` are gone from
+  `.env.example`, from the Compose host service and from the docs.
+- **`STORE_MODEL_IN_DB: 'True'`** on the Compose `litellm` service, so the platform can register a
+  tenant's deployments through `POST /model/new`.
+- **Playbooks are scheduled in UTC.** `playbooks[].timezone` is removed — migration 0016 drops the
+  column — and a document that still names one fails to parse. The `playbooks_list` tool's output
+  loses the field with it, which is the one change to the tool surface in this release.
 - **`SurfaceDeps.secrets` is now `SurfaceDeps.secretValues`, and carries resolved values rather
   than environment variable names.** A `{ ref }` has no variable name, so the bag could not carry
-  one; the rename is what forces every adapter's read to be looked at. An adapter still falls back
-  to its conventional variable for a field the document did not name.
+  one; the rename is what forces every adapter's read to be looked at.
 - **`routing:` is strict.** An unknown key there used to be stripped, so a mistyped `gatway:`
   would leave a tenant on the process key in silence.
 - **A rewritten version is refused.** Writing `(client_id, version)` again with different content
@@ -48,10 +77,14 @@ and two lists a dashboard can hold.
   you will never see it.
 - **`.env.example` is a deployment's file now.** A tenant's credentials are rows in
   `client_secrets`, named by its document as `{ ref }` and written from the platform's own
-  interface. `SLACK_BOT_TOKEN`, `SLACK_SIGNING_SECRET` and `SLACK_APPROVALS_CHANNEL` are still
-  read — they are what the Slack adapter falls back to for a dedicated host whose document names
-  nothing — and are still passed by Compose, but they are commented out in the example file
-  because they are that host's business rather than a default anybody should fill in.
+  interface, or `{ env: SOME_NAME }` refs on a dedicated host, which names them itself.
+- **Two `gatewayError` sentences.** A 401 or 403 no longer says "check `LITELLM_MASTER_KEY`",
+  which is not the credential a tenant with its own key was rejected on, and a budget refusal no
+  longer points at the client document: a budget is the virtual key's or the deployment's, and
+  both live in the gateway.
+- **An unknown `actionId` is answered.** The press is still delivered and still `202`, and the
+  person who made it now gets a private notice, which is what the web surface's API reference has
+  always said happens.
 - `defaults.web` is allowed in the identity section and **may not name `lead` or `admin`**: one
   shared bearer mints every principal such a default describes, and none of them may decide an
   approval.
@@ -59,12 +92,33 @@ and two lists a dashboard can hold.
 
 ### Upgrading
 
-1. Set `HARNESS_SECRET_SOURCE` in every deployment's `.env`. `env` keeps today's behaviour exactly.
-2. Run the migration: one new table, `client_secrets`.
-3. If you build a surface adapter, rename `deps.secrets` to `deps.secretValues` and read values
-   rather than looking names up.
-4. Nothing else changes: no route moved, no tool moved, and the tool surface snapshot is
-   byte-identical to `0.2.0`'s.
+1. Set `HARNESS_SECRET_SOURCE` in every deployment's `.env` — the host's and the stdio server's
+   alike. `env` keeps today's behaviour exactly.
+2. Run the migrations: 0015 creates `client_secrets`, 0016 drops `playbooks.timezone`. Remove
+   `timezone:` from every playbook in every document first; a document that still has one will not
+   parse, and its schedules are read in UTC from now on.
+3. **Rewrite each document's `routing` section.** Keep `routes.<route>.model` and delete
+   `fallbacks`, `api_base`, `daily_budget_usd` and `defaults` — a document carrying any of them is
+   refused. Then put what they configured where it now belongs: on a dedicated host, in
+   `harness/gateway/catalogue.yaml`, which is the input `pnpm gateway:config` renders (it no
+   longer reads `HARNESS_CLIENT` or a config source); on a pooled host, in the deployments the
+   platform registers and in that tenant's virtual key. Re-render and restart the proxy:
+   `pnpm gateway:config && pnpm gateway:up`. The rendered `model_list` now names each deployment
+   by its model string rather than by a route, which is what the documents' `model:` values
+   resolve against.
+4. **Add `approvalsChannel` to every document that declares `surfaces.slack`**, and stop setting
+   `SLACK_BOT_TOKEN`, `SLACK_SIGNING_SECRET` and `SLACK_APPROVALS_CHANNEL`: the channel and both
+   secrets come from the document now. On the platform, they are entered in its interface and
+   stored as rows; on a dedicated host, the document names them as `{ env: SOME_NAME }` and the
+   operator sets `SOME_NAME` in `.env` and adds it to the host service's `environment` in
+   `harness/compose/docker-compose.yml`.
+5. If you build a surface adapter, rename `deps.secrets` to `deps.secretValues` and read values
+   rather than looking names up; `health()` is optional and a surface without one is reported live.
+6. If you poll `GET /v1/status`, read `surfaces` as objects rather than as names.
+7. The tool surface moved once: `playbooks_list` no longer reports `timezone`. Nothing else in
+   `docs/architecture/tool-surface.json` changed, and no route moved.
+   `docs/architecture/compose-surface.yaml` moved twice, for `HARNESS_SECRET_SOURCE` and for this
+   release's `litellm` and host-service changes.
 
 ## 0.2.0 — unreleased
 
