@@ -138,15 +138,23 @@ export async function readApprovals(db: Db, opts: ReadApprovalsOptions): Promise
         eq(approvals.client, opts.client),
         opts.statuses && opts.statuses.length > 0 ? inArray(approvals.status, [...opts.statuses]) : undefined,
         // A row comparison, so the pair is compared as one key rather than as two predicates —
-        // which is what makes a page stable when two rows share a timestamp. The right side is a
-        // subquery on the anchor's own id, not `after.at` directly: `created_at` came back through
+        // which is what makes a page stable when two rows share a timestamp. The right side reads
+        // the anchor's own stored value, not `after.at` directly: `created_at` came back through
         // this driver's timestamp parser, which only keeps millisecond precision, while `now()`
         // (what the column defaults to) carries microseconds. Comparing against the row's own
         // stored value sidesteps that loss; comparing against the floored `after.at` instead can
         // both hand back the anchor row again and drop a genuinely older row that shares its
-        // floored millisecond.
+        // floored millisecond. `client` is repeated in the subquery so an id from another tenant
+        // can't be used to probe this one's timestamps, even though the outer query is already
+        // scoped. The `COALESCE` is for a row a retention job deleted between two reads: with
+        // nothing left to look up, this falls back to the cursor's own (still usable) values
+        // rather than an empty subquery result, which would otherwise make every later row vanish
+        // along with the anchor and the page look finished when it is not.
         after
-          ? sql`(${approvals.createdAt}, ${approvals.id}) < (SELECT created_at, id FROM approvals WHERE id = ${after.id})`
+          ? sql`(${approvals.createdAt}, ${approvals.id}) < (
+              COALESCE((SELECT created_at FROM approvals WHERE id = ${after.id} AND client = ${opts.client}), ${after.at}),
+              COALESCE((SELECT id FROM approvals WHERE id = ${after.id} AND client = ${opts.client}), ${after.id})
+            )`
           : undefined,
       ),
     )
@@ -201,9 +209,14 @@ export async function readMemory(db: Db, opts: ReadMemoryOptions): Promise<Page<
         opts.principal ? eq(memoryEntries.principalId, opts.principal) : undefined,
         // See `readApprovals`: the subquery compares against the anchor's own stored value rather
         // than the millisecond-floored `after.at`, so a row that shares the anchor's floored
-        // millisecond is neither handed back a second time nor skipped.
+        // millisecond is neither handed back a second time nor skipped; `client` keeps the lookup
+        // inside this tenant; `COALESCE` falls back to the cursor's own values when the anchor row
+        // is gone, so a deleted anchor never makes the rest of the page vanish with it.
         after
-          ? sql`(${memoryEntries.createdAt}, ${memoryEntries.id}) > (SELECT created_at, id FROM memory_entries WHERE id = ${after.id})`
+          ? sql`(${memoryEntries.createdAt}, ${memoryEntries.id}) > (
+              COALESCE((SELECT created_at FROM memory_entries WHERE id = ${after.id} AND client = ${opts.client}), ${after.at}),
+              COALESCE((SELECT id FROM memory_entries WHERE id = ${after.id} AND client = ${opts.client}), ${after.id})
+            )`
           : undefined,
       ),
     )

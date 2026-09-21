@@ -1,3 +1,4 @@
+import { eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { approvals, memoryEntries } from '@harness/db';
 import { useTestDb } from '../../testing.js';
@@ -122,6 +123,22 @@ describe('readApprovals', () => {
     await approval('beta', '2026-09-10T09:00:00Z');
     expect(await readApprovals(db, { client: 'alpha', limit: 100 })).toEqual({ rows: [], next_cursor: null });
   });
+
+  it('keeps paging past a deleted anchor, rather than looking done', async () => {
+    await approval('alpha', '2026-09-10T09:00:00Z');
+    await approval('alpha', '2026-09-11T09:00:00Z');
+    const anchor = await approval('alpha', '2026-09-12T09:00:00Z');
+    const first = await readApprovals(db, { client: 'alpha', limit: 1 });
+    expect(first.rows).toHaveLength(1);
+    expect(first.rows[0].id).toBe(anchor);
+    // A retention job removing the anchor between two reads must not make the page look
+    // finished: the rows behind it are still owed, and `next_cursor: null` here would be a
+    // paged export that silently dropped everything past the deleted row.
+    await db.delete(approvals).where(eq(approvals.id, anchor));
+    const second = await readApprovals(db, { client: 'alpha', limit: 100, cursor: first.next_cursor });
+    expect(second.rows.map((row) => row.created_at)).toEqual(['2026-09-11T09:00:00.000Z', '2026-09-10T09:00:00.000Z']);
+    expect(second.next_cursor).toBeNull();
+  });
 });
 
 describe('readMemory', () => {
@@ -167,5 +184,18 @@ describe('readMemory', () => {
   it('returns no entry of another tenant, whatever the filters say', async () => {
     await memory('beta', '2026-09-10T09:00:00Z', { scope: 'principal', principalId: 'u-member' });
     expect((await readMemory(db, { client: 'alpha', principal: 'u-member', limit: 100 })).rows).toEqual([]);
+  });
+
+  it('keeps paging past a deleted anchor, rather than looking done', async () => {
+    const anchor = await memory('alpha', '2026-09-10T09:00:00Z');
+    await memory('alpha', '2026-09-11T09:00:00Z');
+    await memory('alpha', '2026-09-12T09:00:00Z');
+    const first = await readMemory(db, { client: 'alpha', limit: 1 });
+    expect(first.rows).toHaveLength(1);
+    expect(first.rows[0].id).toBe(anchor);
+    await db.delete(memoryEntries).where(eq(memoryEntries.id, anchor));
+    const second = await readMemory(db, { client: 'alpha', limit: 100, cursor: first.next_cursor });
+    expect(second.rows.map((row) => row.created_at)).toEqual(['2026-09-11T09:00:00.000Z', '2026-09-12T09:00:00.000Z']);
+    expect(second.next_cursor).toBeNull();
   });
 });
