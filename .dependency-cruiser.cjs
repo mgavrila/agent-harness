@@ -456,10 +456,10 @@ const PLATFORM_BOUNDARY_RULES = [
   {
     name: 'kernel-never-imports-the-platform',
     comment:
-      "The kernel knows nothing about the platform built on top of it. An edge from the kernel into catalog/, control-plane/ or apps/ would invert this repository's one boundary that survived the merge.",
+      "The kernel knows nothing about the platform built on top of it. An edge from the kernel into catalog/, control-plane/, apps/ or deploy/ would invert this repository's one boundary that survived the merge. All four, because decision 1b names four: `deploy/` holds compose profiles, the Helm chart and the SandboxTemplates, and a kernel package that read one would be a kernel package that knew how it was deployed.",
     severity: 'error',
     from: { path: '^(harness|packs|surfaces|identities|runtimes|evals|scripts)/' },
-    to: { path: '^(catalog|control-plane|apps)/' },
+    to: { path: '^(catalog|control-plane|apps|deploy)/' },
   },
   {
     name: 'catalog-imports-kernel-contracts-only',

@@ -10,6 +10,7 @@ import {
   readComposeSurface,
   readEnvNames,
   readToolSurface,
+  SOURCE_ROOTS,
   type ToolSurfaceEntry,
 } from './record-surface.js';
 
@@ -47,6 +48,13 @@ describe('public surface', () => {
     for (const anchor of SCAN_ANCHORS) expect(read).toContain(anchor);
     const documented = await envNamesFromExample(path.join(repoRoot, '.env.example'));
     expect(read.filter((name) => !documented.includes(name))).toEqual([]);
+  });
+
+  it('scans the kernel’s own source roots, and none of the platform’s', () => {
+    expect(SOURCE_ROOTS).toEqual(['harness', 'packs', 'surfaces', 'identities', 'runtimes', 'evals', 'scripts']);
+    for (const dir of ['catalog', 'control-plane', 'apps', 'deploy']) {
+      expect(SOURCE_ROOTS, dir).not.toContain(dir);
+    }
   });
 
   it('renders the Compose config the repository recorded, with no secret in it', async () => {
