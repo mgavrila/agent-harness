@@ -67,6 +67,24 @@ interface EventOutcome {
   delivery?: () => Promise<void>;
 }
 
+/**
+ * A body parsed as the object it claims to be, or null for anything a field cannot be read off.
+ *
+ * `null`, a number and a string are all valid JSON, and a holder of the signing secret can send
+ * any of them; reading a field off one is a throw, which the host answers with the 500 that is the
+ * one status Slack retries. So they are refused here as the unreadable bodies they are, on the
+ * same path as text that is not JSON at all.
+ */
+function objectBody<T>(text: string): T | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  return typeof parsed === 'object' && parsed !== null ? (parsed as T) : null;
+}
+
 /** The two event types the classifier has rules for, and only when they carry what it reads. */
 function inboundOf(envelope: EventEnvelope): RawMessage | null {
   const event = envelope.event;
@@ -216,12 +234,8 @@ export function eventsTransport(
   };
 
   const handleEvent = (body: string): EventOutcome => {
-    let envelope: EventEnvelope;
-    try {
-      envelope = JSON.parse(body) as EventEnvelope;
-    } catch {
-      return { response: BAD_REQUEST };
-    }
+    const envelope = objectBody<EventEnvelope>(body);
+    if (!envelope) return { response: BAD_REQUEST };
     // The one-time handshake when a request URL is saved in an app's configuration. It is signed
     // like everything else, so this answers only a URL whose secret is already right.
     if (envelope.type === 'url_verification') {
@@ -264,12 +278,8 @@ export function eventsTransport(
   const handleInteractive = (body: string): SurfaceHttpResponse => {
     const raw = new URLSearchParams(body).get('payload');
     if (raw === null) return BAD_REQUEST;
-    let payload: InteractivePayload;
-    try {
-      payload = JSON.parse(raw) as InteractivePayload;
-    } catch {
-      return BAD_REQUEST;
-    }
+    const payload = objectBody<InteractivePayload>(raw);
+    if (!payload) return BAD_REQUEST;
     if (payload.type === 'block_actions') {
       const action = payload.actions?.[0];
       if (!action) return ACK;

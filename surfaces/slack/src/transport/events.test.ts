@@ -209,6 +209,18 @@ describe('the Slack transport as an HTTP door', () => {
   it('refuses a body that is not the JSON it was told it would be', async () => {
     expect((await transport().t.http!.handle(signed('not json'))).refusal).toEqual({ reason: 'bad_request' });
   });
+
+  it('refuses JSON that is not an envelope at all, rather than reading a field off it', async () => {
+    // `null`, a number and a string all parse, and a holder of the signing secret can send any of
+    // them. Reading `type` off them is a throw the host answers 500 to — and a 500 is the one
+    // answer Slack retries, so a body nobody can act on would come back and back.
+    const { t } = transport();
+    for (const body of ['null', '42', '"a string"']) {
+      const response = await t.http!.handle(signed(body));
+      expect(response.status, body).toBe(400);
+      expect(response.refusal, body).toEqual({ reason: 'bad_request' });
+    }
+  });
 });
 
 describe('the Slack transport and an interaction', () => {
@@ -270,10 +282,12 @@ describe('the Slack transport and an interaction', () => {
 
   it('refuses a form body with no payload, and one whose payload is not JSON', async () => {
     const { t } = transport();
-    for (const body of ['', 'nothing=here', 'payload=not-json']) {
-      expect((await t.http!.handle(signed(body, 'application/x-www-form-urlencoded'))).refusal, body).toEqual({
-        reason: 'bad_request',
-      });
+    // The last three parse and are not a payload: reading `type` off them is a throw, and the
+    // host answers a throw with the 500 that Slack alone retries.
+    for (const body of ['', 'nothing=here', 'payload=not-json', 'payload=null', 'payload=42', 'payload=%22str%22']) {
+      const response = await t.http!.handle(signed(body, 'application/x-www-form-urlencoded'));
+      expect(response.status, body).toBe(400);
+      expect(response.refusal, body).toEqual({ reason: 'bad_request' });
     }
   });
 
