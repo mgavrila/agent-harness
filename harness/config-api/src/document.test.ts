@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { ConfigError } from '@harness/shared';
 import {
   CLIENT_DOCUMENT_VERSION,
+  SecretRefShape,
   migrate,
   parseClientDocument,
   surfaceNamesOf,
@@ -9,6 +10,20 @@ import {
   tenantKeysOf,
 } from './document.js';
 import { fixtureDocument } from './testing.js';
+
+describe('SecretRefShape', () => {
+  it('accepts an environment variable reference and a secret store reference', () => {
+    expect(SecretRefShape.safeParse({ env: 'SLACK_BOT_TOKEN' }).success).toBe(true);
+    expect(SecretRefShape.safeParse({ ref: 'web-token' }).success).toBe(true);
+  });
+
+  it('refuses neither key, both keys, an upper-case ref and a lower-case env', () => {
+    expect(SecretRefShape.safeParse({}).success).toBe(false);
+    expect(SecretRefShape.safeParse({ env: 'SLACK_BOT_TOKEN', ref: 'web-token' }).success).toBe(false);
+    expect(SecretRefShape.safeParse({ ref: 'Web-Token' }).success).toBe(false);
+    expect(SecretRefShape.safeParse({ env: 'slack_bot_token' }).success).toBe(false);
+  });
+});
 
 describe('parseClientDocument', () => {
   it('accepts the fixture document and returns it parsed', () => {
@@ -43,6 +58,17 @@ describe('parseClientDocument', () => {
     );
     // Declaration order in the file does not decide it; SURFACE_ORDER does.
     expect(surfaceNamesOf(withSlack)).toEqual(['slack', 'http']);
+  });
+
+  it('declares a web surface, primary by SURFACE_ORDER when present, with a store-backed token', () => {
+    const withWeb = parseClientDocument(
+      fixtureDocument({ surfaces: { web: { token: { ref: 'web-token' } }, memory: {}, http: {} } }),
+    );
+    expect(surfaceNamesOf(withWeb)).toEqual(['web', 'memory', 'http']);
+  });
+
+  it('refuses a web surface with no token', () => {
+    expect(() => parseClientDocument(fixtureDocument({ surfaces: { web: {}, memory: {} } }))).toThrow(ConfigError);
   });
 
   it('refuses a document whose only surface is the run API, which cannot post an approval card', () => {
@@ -130,6 +156,13 @@ describe('parseClientDocument', () => {
     ]);
     // A surface with no transport refers to no secret, so a document of them needs none set.
     expect(surfaceSecretsOf(parseClientDocument(fixtureDocument()))).toEqual([]);
+  });
+
+  it("names a web surface's token, as a store reference distinguishable from an environment one", () => {
+    const withWeb = parseClientDocument(
+      fixtureDocument({ surfaces: { web: { token: { ref: 'web-token' } }, memory: {}, http: {} } }),
+    );
+    expect(surfaceSecretsOf(withWeb)).toEqual([{ surface: 'web', field: 'token', ref: 'web-token' }]);
   });
 
   it("names a memory surface's workspace as a tenant key too, which is what a pooled test routes on", () => {

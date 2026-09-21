@@ -28,28 +28,60 @@ const PLUGIN_NAME = /^[a-z][a-z0-9-]*$/;
 /** A skill's directory name, which `readSkillCatalogue` requires the frontmatter `name` to match. */
 const SKILL_NAME = /^[a-z][a-z0-9-]*$/;
 
-/** An environment variable name, which is what a `SecretRef` names. */
+/** An environment variable name, which is what a `SecretRef`'s `env` member names. */
 const ENV_NAME = /^[A-Z][A-Z0-9_]*$/;
 
-export const SecretRefShape = z
-  .object({ env: z.string().regex(ENV_NAME, 'a secret reference names an environment variable (A-Z, digits, _)') })
-  .strict();
+/** A secret store name, which is what a `SecretRef`'s `ref` member names. */
+const SECRET_NAME = /^[a-z][a-z0-9-]*$/;
+
+/**
+ * A reference to a secret, never the secret.
+ *
+ * `{ env }` names an environment variable the host resolves from its own process environment.
+ * `{ ref }` names a secret in the deployment's secret store; until a deployment has one, a
+ * document that carries a `{ ref }` parses but is refused when a tenant opens (see
+ * `assertSecretsPresent` in the host). Exactly one of the two, never both and never neither: a
+ * document that carried a literal value would be a document that got copied into a ticket, so
+ * the schema admits no such shape at all.
+ */
+export const SecretRefShape = z.union([
+  z
+    .object({ env: z.string().regex(ENV_NAME, 'a secret reference names an environment variable (A-Z, digits, _)') })
+    .strict(),
+  z
+    .object({
+      ref: z
+        .string()
+        .regex(SECRET_NAME, "a secret reference names a secret in the deployment's secret store (a-z, digits, -)"),
+    })
+    .strict(),
+]);
+
+export type SecretRef = z.infer<typeof SecretRefShape>;
 
 /**
  * The surfaces a client may declare, in the order the host loads them.
  *
  * **The order is the schema's, not the file's.** The first loaded surface is the primary — where
  * approval cards go — and a file's key order is not something a YAML writer or a JSON column
- * should be able to change by accident. `http` is last because it cannot post a card, which is
- * a rule the schema states by ordering rather than one a deployment has to remember.
+ * should be able to change by accident. `web` is first because it is the surface the platform's
+ * own workspace talks to; `http` is last because it cannot post a card, which is a rule the
+ * schema states by ordering rather than one a deployment has to remember.
  */
-export const SURFACE_ORDER = ['slack', 'memory', 'http'] as const;
+export const SURFACE_ORDER = ['web', 'slack', 'memory', 'http'] as const;
 
 /** The one surface that may never be a client's primary. */
 const CANNOT_BE_PRIMARY = 'http';
 
 const SurfacesShape = z
   .object({
+    web: z
+      .object({
+        /** The bearer every request to this surface carries; only the platform's control plane holds it. */
+        token: SecretRefShape,
+      })
+      .strict()
+      .optional(),
     slack: z
       .object({
         /** The workspace this client is; the host matches an inbound event's tenant hint against it. */
@@ -141,26 +173,34 @@ export function tenantKeysOf(document: ClientDocument): { surface: string; key: 
   return keys;
 }
 
+/** One `SecretRef` a document's surfaces named, with the surface and field it was named under. */
+export type SurfaceSecretRef = { surface: string; field: string } & SecretRef;
+
 /**
- * Every environment variable this document's surfaces refer to, with the surface that named it
- * and the field it was named under.
+ * Every `SecretRef` this document's surfaces refer to, with the surface that named it and the
+ * field it was named under.
  *
  * The same reason `tenantKeysOf` exists: the typed surface sections are read here, so the host
  * never is. A host that checked a `signingSecret` by name would have a vendor's field in the one
  * process every client runs, which `kernel-vocabulary.test.ts` forbids `harness/host/src`. `field`
  * travels as an opaque string: the host copies it into the bag the adapter is handed, and the
  * adapter — which is allowed to know what its own fields are called — looks its variable up. The
- * value itself never appears: a `SecretRef` names a variable and the deployment's environment
- * holds what it is worth.
+ * value itself never appears: a `SecretRef` names an environment variable or a secret store entry
+ * and never the secret itself. An entry named by `{ ref }` rather than `{ env }` travels the same
+ * way; it is `assertSecretsPresent`'s job, not this one's, to refuse it while no deployment has a
+ * secret store.
  */
-export function surfaceSecretsOf(document: ClientDocument): { surface: string; field: string; env: string }[] {
-  const secrets: { surface: string; field: string; env: string }[] = [];
+export function surfaceSecretsOf(document: ClientDocument): SurfaceSecretRef[] {
+  const secrets: SurfaceSecretRef[] = [];
+  const secret = (surface: string, field: string, ref: SecretRef): void => {
+    secrets.push({ surface, field, ...ref });
+  };
+  const web = document.surfaces.web;
+  if (web) secret('web', 'token', web.token);
   const slack = document.surfaces.slack;
   if (slack) {
-    secrets.push(
-      { surface: 'slack', field: 'signingSecret', env: slack.signingSecret.env },
-      { surface: 'slack', field: 'botToken', env: slack.botToken.env },
-    );
+    secret('slack', 'signingSecret', slack.signingSecret);
+    secret('slack', 'botToken', slack.botToken);
   }
   return secrets;
 }
