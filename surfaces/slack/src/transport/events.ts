@@ -187,29 +187,43 @@ export function eventsTransport(
     });
   };
 
-  const handleEvent = (body: string): SurfaceHttpResponse => {
+  /**
+   * What to answer an Events API delivery, and the work it admits to.
+   *
+   * `delivery` is set only for a message, which is the one thing here that is read against this
+   * app's own ids. Everything else this function answers — the handshake, an event with no rule,
+   * a body that is not JSON — is decided from the request alone, so the caller can answer it
+   * without knowing who this app is.
+   */
+  interface EventOutcome {
+    response: SurfaceHttpResponse;
+    delivery?: () => Promise<void>;
+  }
+
+  const handleEvent = (body: string): EventOutcome => {
     let envelope: EventEnvelope;
     try {
       envelope = JSON.parse(body) as EventEnvelope;
     } catch {
-      return { status: 400, refusal: { reason: 'bad_request' } };
+      return { response: { status: 400, refusal: { reason: 'bad_request' } } };
     }
     // The one-time handshake when a request URL is saved in an app's configuration. It is signed
     // like everything else, so this answers only a URL whose secret is already right.
     if (envelope.type === 'url_verification') {
-      if (typeof envelope.challenge !== 'string') return { status: 400, refusal: { reason: 'bad_request' } };
+      if (typeof envelope.challenge !== 'string')
+        return { response: { status: 400, refusal: { reason: 'bad_request' } } };
       return {
-        status: 200,
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ challenge: envelope.challenge }),
+        response: {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ challenge: envelope.challenge }),
+        },
       };
     }
     const raw = envelope.type === 'event_callback' ? inboundOf(envelope) : null;
-    if (raw) {
-      const teamId = envelope.team_id;
-      later('a Slack delivery', () => deliver(raw, teamId));
-    }
-    return ACK;
+    if (!raw) return { response: ACK };
+    const teamId = envelope.team_id;
+    return { response: ACK, delivery: () => deliver(raw, teamId) };
   };
 
   const handleInteractive = (body: string): SurfaceHttpResponse => {
@@ -291,31 +305,33 @@ export function eventsTransport(
   };
 
   /**
-   * The answer to a screened request, which nothing here waits for.
+   * Answer one screened request, and start what the answer admits to.
    *
-   * Deliberately synchronous: every branch either refuses or acknowledges, and the work an
-   * acknowledgement admits to is handed to `later`. Making this a plain function is what says so —
-   * an `async` here would leave room for someone to await a turn before answering Slack.
+   * The content type is what says which of the two Slack sends this is; it is lower-cased because
+   * a media type is case-insensitive, and Slack sends lowercase, so a peer that did not would be
+   * refused for nothing.
+   *
+   * Only a message delivery waits for this app's identity. A handshake, an interaction and a
+   * refusal are all decided from the request alone, and gating them too would mean a bad bot token
+   * left an operator unable to re-verify the Request URL and every approval card in the workspace
+   * unanswerable — neither of which reads the bot's ids at all.
    */
-  const dispatch = (request: SurfaceHttpRequest): SurfaceHttpResponse => {
-    // Lower-cased because a media type is case-insensitive and only the value's own case is ours
-    // to normalise; Slack sends lowercase, and a peer that did not would be refused for nothing.
-    const contentType = (request.headers['content-type'] ?? '').split(';')[0].trim().toLowerCase();
-    if (contentType === 'application/json') return handleEvent(request.body);
-    if (contentType === 'application/x-www-form-urlencoded') return handleInteractive(request.body);
-    return { status: 415, refusal: { reason: 'unsupported_media_type' } };
-  };
-
   const handle = async (request: SurfaceHttpRequest): Promise<SurfaceHttpResponse> => {
     const refused = screen(request);
     if (refused) return refused;
-    // Before anything is classified, and after the signature, so an unsigned request can neither
-    // wait on this nor learn anything from it. Once the answer is in hand this is a microtask; in
-    // the window before it, a delivery waits rather than being read against an empty identity.
+    const contentType = (request.headers['content-type'] ?? '').split(';')[0].trim().toLowerCase();
+    if (contentType === 'application/x-www-form-urlencoded') return handleInteractive(request.body);
+    if (contentType !== 'application/json') return { status: 415, refusal: { reason: 'unsupported_media_type' } };
+    const { response, delivery } = handleEvent(request.body);
+    if (!delivery) return response;
+    // After the signature, so an unsigned request can neither wait on this nor learn anything from
+    // it. Once the answer is in hand this is a microtask; in the window before it, a message waits
+    // rather than being classified against an identity that is still empty.
     if (!(await hasIdentity())) {
       return { status: 503, refusal: { reason: 'identity_unavailable' } };
     }
-    return dispatch(request);
+    later('a Slack delivery', delivery);
+    return response;
   };
 
   const events: SlackEvents = {

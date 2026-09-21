@@ -340,10 +340,15 @@ describe("the Slack transport and the app's own identity", () => {
     expect(seen[0].text).toBe('hello there');
   });
 
-  it('refuses a delivery when it could not learn who this app is', async () => {
+  /** A transport whose `auth.test` never answers: a bad bot token beside a good signing secret. */
+  function unidentified(): SlackTransport {
     const api = new FakeSlack();
     api.auth = { test: () => Promise.reject(new Error('invalid_auth')) };
-    const t = eventsTransport(slackConfig(env), log, '/nonexistent/storage', api);
+    return eventsTransport(slackConfig(env), log, '/nonexistent/storage', api);
+  }
+
+  it('refuses a delivery when it could not learn who this app is', async () => {
+    const t = unidentified();
     const seen: SlackInbound[] = [];
     t.events.onMessage(async (message) => {
       seen.push(message);
@@ -356,6 +361,44 @@ describe("the Slack transport and the app's own identity", () => {
     await settle();
     // Refused, not classified: an empty identity is not a fallback.
     expect(seen).toEqual([]);
+  });
+
+  it('still answers the handshake when it could not learn who this app is', async () => {
+    // The identity is what a message is *classified* against; a handshake is not classified. An
+    // operator diagnosing a bad bot token has to be able to re-verify the Request URL, and that
+    // only proves the signing secret — which is fine here.
+    const response = await unidentified().http!.handle(
+      signed(JSON.stringify({ type: 'url_verification', challenge: 'c-123' })),
+    );
+    expect(response.status).toBe(200);
+    expect(JSON.parse(response.body ?? '{}')).toEqual({ challenge: 'c-123' });
+    expect(response.refusal).toBeUndefined();
+  });
+
+  it('still delivers a button press when it could not learn who this app is', async () => {
+    // An interaction names its own user and its own message, so nothing about it is read against
+    // the bot's ids. Coupling a decision on an approval card to a fetch it never needed would
+    // strand every card in the channel.
+    const t = unidentified();
+    const session = createSlackSession(t, slackConfig(env));
+    const seen: ActionEvent[] = [];
+    session.onAction(async (event) => {
+      seen.push(event);
+    });
+    const body = `payload=${encodeURIComponent(
+      JSON.stringify({
+        type: 'block_actions',
+        user: { id: 'U0LEAD' },
+        channel: { id: 'C0DEMO' },
+        actions: [{ action_id: 'approve', value: 'a-uuid' }],
+      }),
+    )}`;
+    const response = await t.http!.handle(signed(body, 'application/x-www-form-urlencoded'));
+    expect(response.status).toBe(200);
+    expect(response.refusal).toBeUndefined();
+    await settle();
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toMatchObject({ userId: 'U0LEAD', actionId: 'approve', value: 'a-uuid' });
   });
 
   it('asks Slack who this app is once, however the first request for it arrives', async () => {

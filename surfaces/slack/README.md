@@ -64,9 +64,14 @@ delivery wait on it, because the host publishes a tenant into its map before it 
 tenant's sessions: a request can arrive while the answer is still in flight. Classifying then
 would leave the mention token in the text, stop the channel copy of an `app_mention` being
 recognised as a duplicate, and cache a thread as somebody else's for the life of the process, so a
-delivery waits for the identity instead. A wrong token fails the tenant's open through the same
-promise, and a request that arrives after that failure is refused `identity_unavailable` rather
+message waits for the identity instead. A wrong token fails the tenant's open through the same
+promise, and a message that arrives after that failure is refused `identity_unavailable` rather
 than classified against an empty identity.
+
+**Only a message waits.** The handshake, an interaction and every refusal are decided from the
+request alone and never read the bot's ids, so none of them is gated: a bad bot token beside a good
+signing secret still lets an operator re-verify the Request URL while they diagnose it, and still
+lets a decision on an approval card through.
 
 ## Inbound: messages, mentions and attachments
 
