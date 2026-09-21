@@ -65,13 +65,18 @@ describe('approval handlers', () => {
     expect(after).toMatchObject({ status: 'declined', decisionNote: null });
   });
 
-  it('ignores an action that belongs to some other card', async () => {
+  it('answers an action that belongs to some other card, rather than dropping it in silence', async () => {
     const row = await seed();
     const { surface, core } = wire();
     await surface.press('someone_elses_button', row.id, 'U012');
     expect(core.executed).toEqual([]);
     const [after] = await db.select().from(approvals).where(eq(approvals.id, row.id));
     expect(after.status).toBe('pending');
+    // The press is delivered and acknowledged, and the person who made it hears back: a
+    // workspace coded against the surface's API reference was waiting for this frame.
+    expect(surface.privates).toEqual([
+      { conversation: 'memory', userId: 'U012', text: 'That button is not one this assistant posted.' },
+    ]);
   });
 
   it('opens the note form on Edit and changes nothing yet', async () => {
