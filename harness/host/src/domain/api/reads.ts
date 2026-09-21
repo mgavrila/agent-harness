@@ -83,14 +83,30 @@ export function encodeCursor(at: Date, id: string): string {
   return Buffer.from(`${at.toISOString()}|${id}`, 'utf8').toString('base64url');
 }
 
-/** The other direction, or null for anything that is not one of ours. */
+/**
+ * A uuid, checked before it reaches Postgres: an id of any other shape is "no such thing", not an
+ * error. The run API's own routes check path ids against this too.
+ */
+export const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * The other direction, or null for anything that is not one of ours.
+ *
+ * Both halves are checked against what `encodeCursor` writes rather than against what a parser
+ * will tolerate: the timestamp has to be the ISO instant it round-trips as, and the id has to be
+ * a uuid, because both tables key on one. A forged id used to reach the driver as `WHERE id = $2`
+ * against a `uuid` column, which answered `22P02` — a 500 whose message carried the caller's own
+ * string into this deployment's error log. It is a 400 here, and nothing of the cursor is
+ * written down (spec section 4.12).
+ */
 export function decodeCursor(raw: string): { at: Date; id: string } | null {
   const decoded = Buffer.from(raw, 'base64url').toString('utf8');
   const separator = decoded.indexOf('|');
   if (separator === -1) return null;
-  const at = new Date(decoded.slice(0, separator));
+  const stamp = decoded.slice(0, separator);
+  const at = new Date(stamp);
   const id = decoded.slice(separator + 1);
-  if (Number.isNaN(at.getTime()) || id === '') return null;
+  if (Number.isNaN(at.getTime()) || at.toISOString() !== stamp || !UUID.test(id)) return null;
   return { at, id };
 }
 

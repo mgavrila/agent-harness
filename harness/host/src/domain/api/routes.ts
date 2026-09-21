@@ -18,6 +18,7 @@ import {
   MEMORY_SCOPES,
   READ_DEFAULT_LIMIT,
   READ_MAX_LIMIT,
+  UUID,
   decodeCursor,
   readApprovals,
   readMemory,
@@ -27,9 +28,6 @@ import { handleSurfaceRequest } from './surfaces.js';
 import { sseStream } from './sse.js';
 import { USAGE_DEFAULT_DAYS, USAGE_MAX_DAYS, endOfUtcDay, readUsage, startOfUtcDay } from './usage.js';
 import { API_MAX_ATTACHMENTS, API_MAX_TEXT_CHARS, CLIENT_HEADER, TENANT_PREFIX, type RunApiOptions } from './types.js';
-
-/** A uuid, checked before it reaches Postgres: an id of any other shape is "no such thing", not an error. */
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** One day, for the usage window's default and its bound. */
 const DAY_MS = 24 * 60 * 60 * 1000;

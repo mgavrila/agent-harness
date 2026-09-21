@@ -53,6 +53,14 @@ describe('the cursor', () => {
       'nonsense',
       Buffer.from('no-separator').toString('base64url'),
       Buffer.from('notadate|x').toString('base64url'),
+      // An id of any other shape is refused here rather than by Postgres: both tables key on
+      // `uuid`, so a forged one used to reach the driver, come back as a 22P02, and put the
+      // caller's own string in this deployment's error log.
+      Buffer.from(`${at.toISOString()}|not-a-uuid`).toString('base64url'),
+      Buffer.from(`${at.toISOString()}|`).toString('base64url'),
+      Buffer.from(`${at.toISOString()}|11111111-2222-3333-4444-555555555555 OR 1=1`).toString('base64url'),
+      // And a timestamp that is a date `new Date` happens to parse but this never wrote.
+      Buffer.from(`10 September 2026|${id}`).toString('base64url'),
     ]) {
       expect(decodeCursor(raw), raw).toBeNull();
     }

@@ -458,6 +458,15 @@ describe('the read routes', () => {
     const a = await api([]);
     expect((await a.get('/v1/memory?scope=everything')).status).toBe(400);
     expect((await a.get('/v1/approvals?cursor=nonsense')).status).toBe(400);
+    // A forged cursor, well-formed apart from an id no `uuid` column could hold. Both read
+    // routes answer 400 with the same body; before this it reached the driver, came back a
+    // 22P02, and the 500 it became carried the caller's string into the deployment's log.
+    const forged = Buffer.from(`2026-09-10T09:00:00.000Z|'; drop table approvals; --`).toString('base64url');
+    for (const route of ['/v1/approvals', '/v1/memory']) {
+      const response = await a.get(`${route}?cursor=${encodeURIComponent(forged)}`);
+      expect(response.status, route).toBe(400);
+      expect(await response.json()).toEqual({ error: 'cursor is not one of ours' });
+    }
     for (const limit of ['0', '-1', '1.5', 'many', '501']) {
       expect((await a.get(`/v1/approvals?limit=${limit}`)).status, limit).toBe(400);
     }
