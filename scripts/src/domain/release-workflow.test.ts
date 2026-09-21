@@ -1,11 +1,8 @@
-import { existsSync } from 'node:fs';
-import { readFile, readdir } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { parse as parseYaml } from 'yaml';
-
-const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
+import { publicPackageNames, repoRoot } from './workspace.test-helpers.js';
 
 interface Workflow {
   on?: { push?: { tags?: string[] } };
@@ -20,44 +17,6 @@ const steps = async (): Promise<{ name?: string; uses?: string; run?: string }[]
   Object.values((await workflow()).jobs ?? {}).flatMap((job) => job.steps ?? []);
 
 const scripts = async (): Promise<string> => (await steps()).map((step) => step.run ?? '').join('\n');
-
-/**
- * Every directory `pnpm-workspace.yaml` calls a package.
- *
- * Read from the workspace file rather than from a list written here, so a package added under a
- * new top-level parent — or the two single-directory packages, `evals` and `scripts` — is covered
- * without anyone remembering to edit this test.
- */
-async function workspaceDirs(): Promise<string[]> {
-  const workspace = parseYaml(await readFile(path.join(repoRoot, 'pnpm-workspace.yaml'), 'utf8')) as {
-    packages?: string[];
-  };
-  const dirs: string[] = [];
-  for (const glob of workspace.packages ?? []) {
-    if (!glob.includes('*')) {
-      dirs.push(glob);
-      continue;
-    }
-    if (!glob.endsWith('/*')) throw new Error(`pnpm-workspace.yaml has a glob this test cannot expand: ${glob}`);
-    const parent = glob.slice(0, -2);
-    for (const entry of await readdir(path.join(repoRoot, parent), { withFileTypes: true })) {
-      if (entry.isDirectory()) dirs.push(`${parent}/${entry.name}`);
-    }
-  }
-  return dirs;
-}
-
-/** Every workspace package that is not private: what a release is expected to carry. */
-async function publicPackages(): Promise<string[]> {
-  const names: string[] = [];
-  for (const dir of await workspaceDirs()) {
-    const manifest = path.join(repoRoot, dir, 'package.json');
-    if (!existsSync(manifest)) continue;
-    const parsed = JSON.parse(await readFile(manifest, 'utf8')) as { name: string; private?: boolean };
-    if (parsed.private !== true) names.push(parsed.name);
-  }
-  return names;
-}
 
 describe('the release workflow', () => {
   it('runs on a version tag and on nothing else', async () => {
@@ -83,7 +42,7 @@ describe('the release workflow', () => {
   it('packs exactly the packages this repository declares public', async () => {
     const text = await scripts();
     const packed = [...text.matchAll(/@harness\/[a-z-]+/g)].map((match) => match[0]);
-    expect([...new Set(packed)].sort()).toEqual((await publicPackages()).sort());
+    expect([...new Set(packed)].sort()).toEqual((await publicPackageNames()).sort());
   });
 
   it('pushes both images the Compose stack pulls, at the tag s own version', async () => {

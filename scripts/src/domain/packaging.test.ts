@@ -1,14 +1,13 @@
 import { execFile } from 'node:child_process';
-import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
+import { mkdtemp, readdir, rm } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { beforeAll, describe, expect, it } from 'vitest';
+import { repoRoot, workspaceManifests, type Manifest } from './workspace.test-helpers.js';
 
 const run = promisify(execFile);
-const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 
 /**
  * The packages the platform consumes, in dependency order.
@@ -26,40 +25,9 @@ const PUBLISHED = [
   '@harness/sandbox-api',
 ];
 
-/** Where the workspace's packages live, as pnpm-workspace.yaml lists them. */
-const WORKSPACE_PARENTS = ['harness', 'packs', 'surfaces', 'identities', 'runtimes'];
-const WORKSPACE_SINGLES = ['evals', 'scripts'];
-
-interface Manifest {
-  name: string;
-  version: string;
-  private?: boolean;
-  files?: string[];
-  exports?: Record<string, unknown>;
-  publishConfig?: { exports?: Record<string, { types?: string; default?: string }> };
-  scripts?: Record<string, string>;
-}
-
-async function manifests(): Promise<{ dir: string; manifest: Manifest }[]> {
-  const dirs: string[] = [...WORKSPACE_SINGLES];
-  for (const parent of WORKSPACE_PARENTS) {
-    for (const entry of await readdir(path.join(repoRoot, parent), { withFileTypes: true })) {
-      if (entry.isDirectory() && existsSync(path.join(repoRoot, parent, entry.name, 'package.json'))) {
-        dirs.push(`${parent}/${entry.name}`);
-      }
-    }
-  }
-  return Promise.all(
-    dirs.map(async (dir) => ({
-      dir,
-      manifest: JSON.parse(await readFile(path.join(repoRoot, dir, 'package.json'), 'utf8')) as Manifest,
-    })),
-  );
-}
-
 describe('what this repository publishes', () => {
   it('declares exactly the published set as public, and everything else as private', async () => {
-    const all = await manifests();
+    const all = await workspaceManifests();
     const publishable = all.filter(({ manifest }) => manifest.private !== true).map(({ manifest }) => manifest.name);
     expect(publishable.sort()).toEqual([...PUBLISHED].sort());
   });
@@ -67,13 +35,13 @@ describe('what this repository publishes', () => {
   it('gives every published package one version, so a consumer can resolve the whole set', async () => {
     // pnpm rewrites `workspace:*` to the exact version at pack time, so two packages at two
     // versions is a tarball that cannot resolve its own dependency.
-    const all = await manifests();
+    const all = await workspaceManifests();
     const versions = new Set(all.map(({ manifest }) => manifest.version));
     expect([...versions]).toHaveLength(1);
   });
 
   it('gives every published package a build, a files list and a publishConfig that points at dist', async () => {
-    for (const { dir, manifest } of (await manifests()).filter((m) => PUBLISHED.includes(m.manifest.name))) {
+    for (const { dir, manifest } of (await workspaceManifests()).filter((m) => PUBLISHED.includes(m.manifest.name))) {
       expect(manifest.scripts?.build, dir).toBe('tsc -p tsconfig.build.json');
       expect(manifest.files, dir).toEqual(['dist', 'README.md']);
       expect(existsSync(path.join(repoRoot, dir, 'tsconfig.build.json')), dir).toBe(true);
