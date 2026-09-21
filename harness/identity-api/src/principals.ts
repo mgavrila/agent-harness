@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import * as z from 'zod/v4';
 import { ConfigError, LEVELS, SURFACE_NAME_PATTERN, USER_LEVELS } from '@harness/shared';
+import { levelAtLeast } from './identity.js';
 import type { IdentityFile, Principal, UserLevel } from './types.js';
 
 export type { IdentityFile, UserLevel };
@@ -70,6 +71,19 @@ export const IdentityFileShape = z.object({
  */
 export const UNDEFAULTABLE_SURFACE = 'http';
 
+/**
+ * The surface whose default may not mint an approver, and the highest level it may mint.
+ *
+ * `web` authenticates with one shared bearer and takes the surface user id from the request body,
+ * exactly as the run API does — the difference is that the platform's workspace authenticates the
+ * person before it calls, which is a difference in intent and not in mechanism. A Slack-less
+ * tenant with no default has no way to let a new person speak at all, so a ban is not available;
+ * a ceiling is. A leaked web token can therefore mint principals, and none of them can decide an
+ * approval, which needs `lead` (invariant 24, spec section 13.6).
+ */
+export const CEILED_DEFAULT_SURFACE = 'web';
+export const CEILED_DEFAULT_CEILING: UserLevel = 'practitioner';
+
 /** The digest appended to a derived id, in hex characters. */
 const DIGEST_LENGTH = 8;
 
@@ -113,6 +127,12 @@ export function parseIdentityFileWithDefaults(raw: unknown): IdentityFile {
   if (parsed.data.defaults[UNDEFAULTABLE_SURFACE] !== undefined) {
     throw new ConfigError(
       `identity section: "${UNDEFAULTABLE_SURFACE}" may not have a default; the run API's bearer is one shared secret, so every ${UNDEFAULTABLE_SURFACE} user must be declared`,
+    );
+  }
+  const ceiled = parsed.data.defaults[CEILED_DEFAULT_SURFACE];
+  if (ceiled !== undefined && !levelAtLeast(CEILED_DEFAULT_CEILING, ceiled)) {
+    throw new ConfigError(
+      `identity section: "${CEILED_DEFAULT_SURFACE}" may not default to "${ceiled}"; one shared bearer mints every principal this default describes, so it may not reach "${ceiled}" — "${CEILED_DEFAULT_CEILING}" is the highest it may name`,
     );
   }
   const seen = new Set<string>();

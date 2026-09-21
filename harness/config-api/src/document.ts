@@ -1,6 +1,6 @@
 import * as z from 'zod/v4';
 import { IdentityFileShape, parseIdentityFileWithDefaults } from '@harness/identity-api';
-import { ConfigError } from '@harness/shared';
+import { ConfigError, CONVERSATION_ID_PATTERN } from '@harness/shared';
 import { PlaybooksFileShape, parsePlaybooksFile } from './playbooks.js';
 import { ClientPolicyShape } from './policy.js';
 import { RoutingFile } from './routing.js';
@@ -79,6 +79,12 @@ const SurfacesShape = z
       .object({
         /** The bearer every request to this surface carries; only the platform's control plane holds it. */
         token: SecretRefShape,
+        /**
+         * The conversation this surface posts approval cards and notices to, and the one the
+         * workspace opens a stream on first. A conversation is created by writing to it, so this
+         * names one rather than declaring it.
+         */
+        inbox: z.string().regex(CONVERSATION_ID_PATTERN, 'an inbox is a conversation id').default('inbox'),
       })
       .strict()
       .optional(),
@@ -177,6 +183,20 @@ export function tenantKeysOf(document: ClientDocument): { surface: string; key: 
     keys.push({ surface: 'memory', key: document.surfaces.memory.workspace });
   }
   return keys;
+}
+
+/**
+ * The conversation each surface that has one posts to, by that surface's name.
+ *
+ * The third of the three readers of the typed surface sections, and it exists for the same reason
+ * as the other two: the host copies an opaque `{ surface, conversation }` pair into the bag an
+ * adapter is handed and never learns that a web surface has an inbox. A surface whose default
+ * conversation is a deployment-wide setting — Slack's approvals channel is an environment
+ * variable — contributes nothing here.
+ */
+export function surfaceConversationsOf(document: ClientDocument): { surface: string; conversation: string }[] {
+  const web = document.surfaces.web;
+  return web ? [{ surface: 'web', conversation: web.inbox }] : [];
 }
 
 /** One `SecretRef` a document's surfaces named, with the surface and field it was named under. */

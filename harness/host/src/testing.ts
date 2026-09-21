@@ -231,7 +231,11 @@ const FIXTURE_DRAIN_MS = 10_000;
 async function settleDeliveries(pool: HostPool): Promise<void> {
   for (const tenant of pool.tenants.values()) {
     for (const session of tenant.host.surfaces.all) {
-      if (session instanceof MemorySurface) await session.settled();
+      // Duck-typed rather than `instanceof`: two adapters acknowledge before they deliver now,
+      // and a third would be a third import in a file that may not import an adapter at all.
+      // What the fixture needs is the promise, not the class.
+      const settled = (session as { settled?: () => Promise<void> }).settled;
+      if (typeof settled === 'function') await settled.call(session);
     }
   }
 }

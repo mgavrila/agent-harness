@@ -7,7 +7,13 @@ import {
   surfaceSinks,
   type SurfaceSettings,
 } from '@harness/approvals';
-import { parsePlaybooksFile, resolveSecrets, surfaceNamesOf, tenantKeysOf } from '@harness/config-api';
+import {
+  parsePlaybooksFile,
+  resolveSecrets,
+  surfaceConversationsOf,
+  surfaceNamesOf,
+  tenantKeysOf,
+} from '@harness/config-api';
 import { buildKernelConfig, loadIdentity, reconcile, type GatewayConfig } from '@harness/core-tools';
 import { outRoot } from '@harness/core-tools/storage';
 import { parseIdentityFileWithDefaults } from '@harness/identity-api';
@@ -149,6 +155,9 @@ async function buildTenant(pool: HostPool, loaded: LoadedDocument, opened: Stopp
   }
   for (const [surface, secretValues] of Object.entries(secrets.surfaces)) {
     settings[surface] = { ...settings[surface], secretValues };
+  }
+  for (const { surface, conversation } of surfaceConversationsOf(document)) {
+    settings[surface] = { ...settings[surface], defaultConversation: conversation };
   }
   const surfaces = await loadSurfaces(
     surfaceNamesOf(document).map(surfaceSpecifier),

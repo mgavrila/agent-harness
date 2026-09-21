@@ -16,6 +16,7 @@ export {
   SecretRefShape,
   migrate,
   parseClientDocument,
+  surfaceConversationsOf,
   surfaceNamesOf,
   surfaceSecretsOf,
   tenantKeysOf,

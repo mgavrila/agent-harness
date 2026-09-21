@@ -218,6 +218,9 @@ importers:
       '@harness/surface-slack':
         specifier: workspace:*
         version: link:../../surfaces/slack
+      '@harness/surface-web':
+        specifier: workspace:*
+        version: link:../../surfaces/web
       '@modelcontextprotocol/client':
         specifier: ^2.0.0
         version: 2.0.0
@@ -532,6 +535,9 @@ importers:
       '@harness/surface-slack':
         specifier: workspace:*
         version: link:../../surfaces/slack
+      '@harness/surface-web':
+        specifier: workspace:*
+        version: link:../../surfaces/web
       '@modelcontextprotocol/client':
         specifier: ^2.0.0
         version: 2.0.0
@@ -925,6 +931,25 @@ importers:
       '@slack/web-api':
         specifier: ^8.1.1
         version: 8.1.1
+    devDependencies:
+      '@types/node':
+        specifier: ^26.5.1
+        version: 26.5.1
+      typescript:
+        specifier: ^7.0.2
+        version: 7.0.2
+      vitest:
+        specifier: ^5.0.0
+        version: 5.0.0(@types/node@26.5.1)(vite@8.3.0(@types/node@26.5.1)(esbuild@0.28.2)(tsx@4.23.13)(yaml@2.9.1))
+
+  surfaces/web:
+    dependencies:
+      '@harness/shared':
+        specifier: workspace:*
+        version: link:../../harness/shared
+      '@harness/surface-api':
+        specifier: workspace:*
+        version: link:../../harness/surface-api
     devDependencies:
       '@types/node':
         specifier: ^26.5.1

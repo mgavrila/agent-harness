@@ -56,6 +56,8 @@ function surfaceFailed(specifier: string, err: unknown, stage: 'initialise' | 'c
  */
 export interface SurfaceSettings {
   readonly tenantKey?: string;
+  /** Where this surface posts when nobody names a conversation, when the document names one. */
+  readonly defaultConversation?: string;
   /** This client's credentials for this surface, resolved to their values. Nothing here reads them. */
   readonly secretValues?: Readonly<Record<string, string>>;
 }

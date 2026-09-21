@@ -5,6 +5,7 @@ import {
   SecretRefShape,
   migrate,
   parseClientDocument,
+  surfaceConversationsOf,
   surfaceNamesOf,
   surfaceSecretsOf,
   tenantKeysOf,
@@ -166,6 +167,15 @@ describe('parseClientDocument', () => {
     // Its own id is its tenant key: a web tenant's workspace is itself, and the host routes a
     // request to it by the client id in the mount path.
     expect(tenantKeysOf(withWeb)).toEqual([{ surface: 'web', key: 'fixture' }]);
+    // The inbox the schema defaults, and the one a document names instead. It travels to the
+    // adapter the way the tenant key does: opaquely, through the host.
+    expect(surfaceConversationsOf(withWeb)).toEqual([{ surface: 'web', conversation: 'inbox' }]);
+    const named = parseClientDocument(
+      fixtureDocument({ surfaces: { web: { token: { ref: 'web-token' }, inbox: 'reception' }, http: {} } }),
+    );
+    expect(surfaceConversationsOf(named)).toEqual([{ surface: 'web', conversation: 'reception' }]);
+    // A document that declares no web surface names no conversation at all.
+    expect(surfaceConversationsOf(parseClientDocument(fixtureDocument()))).toEqual([]);
   });
 
   it("names a memory surface's workspace as a tenant key too, which is what a pooled test routes on", () => {
