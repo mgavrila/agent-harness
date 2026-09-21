@@ -9,11 +9,10 @@ describe('RoutingFile', () => {
     expect([...ROUTES]).toEqual(['chat', 'extract', 'reason', 'judge', 'embed']);
   });
 
-  it('names the five routes and supplies every default when `defaults` is absent', () => {
+  it('names the five routes, each of them one deployment name and nothing else', () => {
     const parsed = RoutingFile.parse({ routes });
     expect(Object.keys(parsed.routes).sort()).toEqual([...ROUTES].sort());
-    expect(parsed.defaults).toEqual({ daily_budget_usd: 1, num_retries: 2, request_timeout_s: 120 });
-    expect(parsed.routes.chat.fallbacks).toEqual([]);
+    expect(parsed.routes.chat).toEqual({ model: 'gemini/gemini-3-flash-preview' });
   });
 
   it('refuses a route that is not one of the five, and a missing one', () => {
@@ -28,13 +27,24 @@ describe('RoutingFile', () => {
     );
   });
 
-  it('bounds the fallbacks and the budget', () => {
-    expect(
-      RoutingFile.safeParse({ routes: { ...routes, chat: { ...route, fallbacks: ['a', 'b', 'c', 'd'] } } }).success,
-    ).toBe(false);
-    expect(RoutingFile.safeParse({ routes: { ...routes, chat: { ...route, daily_budget_usd: 0 } } }).success).toBe(
-      false,
-    );
+  it('refuses the LiteLLM fields a route used to carry, rather than ignoring them', () => {
+    // A route names a deployment; what that deployment is — its fallbacks, its endpoint, its
+    // daily budget — is the deployment's own configuration, in the catalogue on a dedicated host
+    // and in the platform's registration on a pooled one. A document that still sets one of them
+    // is refused at load, because a field that changes nothing is the silent fallback class.
+    for (const dead of [
+      { fallbacks: ['groq/openai/gpt-oss-120b'] },
+      { daily_budget_usd: 2 },
+      { api_base: 'http://vllm:8000/v1' },
+    ]) {
+      expect(RoutingFile.safeParse({ routes: { ...routes, chat: { ...route, ...dead } } }).success).toBe(false);
+    }
+    expect(RoutingFile.safeParse({ routes, defaults: { daily_budget_usd: 1 } }).success).toBe(false);
+  });
+
+  it('refuses a model that is empty or carries a space', () => {
+    expect(RoutingFile.safeParse({ routes: { ...routes, chat: { model: '' } } }).success).toBe(false);
+    expect(RoutingFile.safeParse({ routes: { ...routes, chat: { model: 'gemini/one two' } } }).success).toBe(false);
   });
 });
 
@@ -52,7 +62,7 @@ describe('the routing section', () => {
     expect(parsed.gateway).toEqual({ key: { ref: 'gateway-key' } });
     expect(RoutingFile.parse({ routes }).gateway).toBeUndefined();
     // A literal key is the one thing this section may never carry, which is what `SecretRefShape`
-    // is for — the same rule `RouteSpec.api_key` has had since the gateway renderer existed.
+    // is for — the same rule a route's own strict shape has had since the gateway renderer existed.
     expect(() => RoutingFile.parse({ routes, gateway: { key: 'sk-live-whatever' } })).toThrow();
   });
 
@@ -62,6 +72,6 @@ describe('the routing section', () => {
     // section is strict now, so a typo is a refusal at load (spec section 12, constraint 21).
     expect(() => RoutingFile.parse({ routes, gatway: { key: { ref: 'gateway-key' } } })).toThrow();
     expect(() => RoutingFile.parse({ routes, gateway: { keys: { ref: 'gateway-key' } } })).toThrow();
-    expect(() => RoutingFile.parse({ routes, defaults: { daily_budget_usd: 2 }, extra: true })).toThrow();
+    expect(() => RoutingFile.parse({ routes, extra: true })).toThrow();
   });
 });

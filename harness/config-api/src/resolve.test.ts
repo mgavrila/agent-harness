@@ -10,17 +10,6 @@ function blueprint(lockset: string[], overrides: Record<string, unknown> = {}): 
   return { document: document as Blueprint['document'], lockset, version: 'bp-1' };
 }
 
-/** `routing` with `chat` carrying one fallback, so an overlay has an array element to replace. */
-const routingWithFallback = {
-  routes: {
-    chat: { model: 'gemini/gemini-3-flash-preview', fallbacks: ['groq/openai/gpt-oss-120b'] },
-    extract: { model: 'gemini/gemini-3-flash-preview' },
-    reason: { model: 'gemini/gemini-3-flash-preview' },
-    judge: { model: 'groq/openai/gpt-oss-120b' },
-    embed: { model: 'gemini/gemini-embedding-001' },
-  },
-};
-
 const names: Overlay = {
   version: 'ov-1',
   patch: [
@@ -138,7 +127,7 @@ describe('resolve', () => {
   });
 
   it('inserts, appends, replaces and removes by array index (RFC 6902 §4.1)', () => {
-    const bp = blueprint([], { policy: { tools: { hide: ['knowledge_search'] } }, routing: routingWithFallback });
+    const bp = blueprint([], { policy: { tools: { hide: ['knowledge_search'] } } });
     const document = resolve(bp, {
       version: 'ov-1',
       patch: [
@@ -147,14 +136,14 @@ describe('resolve', () => {
         { op: 'add', path: '/packs/-', value: '@harness/pack-stories' },
         // A numeric index inserts before that position.
         { op: 'add', path: '/policy/tools/hide/0', value: 'records_search' },
-        { op: 'replace', path: '/routing/routes/chat/fallbacks/0', value: 'groq/openai/gpt-oss-20b' },
+        { op: 'replace', path: '/routing/routes/chat/model', value: 'groq/openai/gpt-oss-20b' },
         // Removes what the insert above put at index 1.
         { op: 'remove', path: '/policy/tools/hide/1' },
       ],
     });
     expect(document.packs).toEqual(['@harness/pack-healthcare', '@harness/pack-stories']);
     expect(document.policy.tools.hide).toEqual(['records_search']);
-    expect(document.routing.routes.chat.fallbacks).toEqual(['groq/openai/gpt-oss-20b']);
+    expect(document.routing.routes.chat.model).toBe('groq/openai/gpt-oss-20b');
   });
 
   it('refuses an add whose index is past the end of the array', () => {

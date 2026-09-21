@@ -459,18 +459,6 @@ importers:
 
   harness/gateway:
     dependencies:
-      '@harness/config-api':
-        specifier: workspace:*
-        version: link:../config-api
-      '@harness/core-tools':
-        specifier: workspace:*
-        version: link:../core-tools
-      '@harness/db':
-        specifier: workspace:*
-        version: link:../db
-      '@harness/shared':
-        specifier: workspace:*
-        version: link:../shared
       yaml:
         specifier: ^2.9.1
         version: 2.9.1

@@ -34,21 +34,12 @@ export function fixtureDocument(): Record<string, unknown> {
     },
     routing: {
       routes: {
-        chat: {
-          model: 'gemini/gemini-3-flash-preview',
-          fallbacks: ['groq/openai/gpt-oss-120b'],
-          daily_budget_usd: 2,
-        },
-        extract: { model: 'gemini/gemini-3-flash-preview', daily_budget_usd: 5 },
-        reason: {
-          model: 'gemini/gemini-3-flash-preview',
-          fallbacks: ['groq/openai/gpt-oss-120b'],
-          daily_budget_usd: 2,
-        },
-        judge: { model: 'groq/openai/gpt-oss-120b', daily_budget_usd: 1 },
-        embed: { model: 'gemini/gemini-embedding-001', daily_budget_usd: 1 },
+        chat: { model: 'gemini/gemini-3-flash-preview' },
+        extract: { model: 'gemini/gemini-3-flash-preview' },
+        reason: { model: 'gemini/gemini-3-flash-preview' },
+        judge: { model: 'groq/openai/gpt-oss-120b' },
+        embed: { model: 'gemini/gemini-embedding-001' },
       },
-      defaults: { daily_budget_usd: 1, num_retries: 2, request_timeout_s: 120 },
     },
     playbooks: {
       playbooks: [

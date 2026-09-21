@@ -1,5 +1,5 @@
 import { stringify as stringifyYaml } from 'yaml';
-import { ROUTES, type RoutingFile } from '@harness/config-api';
+import { deploymentName, type DeploymentCatalogue } from './catalogue.js';
 
 /**
  * Which environment variable holds the credential for a provider prefix. The
@@ -16,6 +16,11 @@ const PROVIDER_KEY_ENV: Record<string, string> = {
   ollama: 'OLLAMA_API_KEY',
 };
 
+/**
+ * Which environment variable holds a catalogue entry's credential. Catalogue entries only: a
+ * document's model string is a deployment name, which the gateway resolves, and never a provider
+ * prefix this renderer would read.
+ */
 export function apiKeyEnvFor(model: string): string {
   const slash = model.indexOf('/');
   if (slash <= 0) {
@@ -48,33 +53,32 @@ function deployment(name: string, model: string, budget: number, apiBase?: strin
 }
 
 const HEADER = `# GENERATED FILE - do not edit by hand.
-# Rendered from a client document's routing section by harness/gateway/src/app/render-config.ts.
+# Rendered from harness/gateway/catalogue.yaml by harness/gateway/src/app/render-config.ts.
 # Regenerate with: pnpm gateway:config
 `;
 
-export function renderLiteLlmConfig(routing: RoutingFile): string {
-  const defaultBudget = routing.defaults.daily_budget_usd;
-  const modelList: Deployment[] = [];
-  const fallbacks: Record<string, string[]>[] = [];
-
-  for (const route of ROUTES) {
-    const spec = routing.routes[route];
-    const budget = spec.daily_budget_usd ?? defaultBudget;
-    modelList.push(deployment(route, spec.model, budget, spec.api_base));
-    if (spec.fallbacks.length === 0) continue;
-    const names = spec.fallbacks.map((model, i) => {
-      const name = `${route}-fallback-${i + 1}`;
-      modelList.push(deployment(name, model, budget));
-      return name;
-    });
-    fallbacks.push({ [route]: names });
-  }
+/**
+ * The deployment catalogue as LiteLLM's own config: one `model_list` entry per deployment, under
+ * the name a client document names it by.
+ *
+ * No client is read here and none could be: a rendered deployment is the deployment's, and which
+ * job a tenant puts it to is that tenant's document. That is what lets one rendered file serve
+ * every tenant on the host.
+ */
+export function renderLiteLlmConfig(catalogue: DeploymentCatalogue): string {
+  const defaultBudget = catalogue.defaults.daily_budget_usd;
+  const modelList: Deployment[] = catalogue.deployments.map((entry) =>
+    deployment(deploymentName(entry), entry.model, entry.daily_budget_usd ?? defaultBudget, entry.api_base),
+  );
+  const fallbacks: Record<string, string[]>[] = catalogue.deployments
+    .filter((entry) => entry.fallbacks.length > 0)
+    .map((entry) => ({ [deploymentName(entry)]: entry.fallbacks }));
 
   const config = {
     model_list: modelList,
     router_settings: {
       fallbacks,
-      num_retries: routing.defaults.num_retries,
+      num_retries: catalogue.defaults.num_retries,
       allowed_fails: 3,
       cooldown_time: 30,
     },
@@ -92,7 +96,7 @@ export function renderLiteLlmConfig(routing: RoutingFile): string {
       // `request_timeout` under router_settings is not a valid Router.__init__()
       // argument in the current LiteLLM image (it logs a warning and ignores
       // it); litellm_settings.request_timeout is the key this image honours.
-      request_timeout: routing.defaults.request_timeout_s,
+      request_timeout: catalogue.defaults.request_timeout_s,
     },
   };
 

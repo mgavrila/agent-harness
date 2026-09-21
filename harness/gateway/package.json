@@ -12,10 +12,6 @@
     "render": "tsx src/app/render-config.ts"
   },
   "dependencies": {
-    "@harness/config-api": "workspace:*",
-    "@harness/core-tools": "workspace:*",
-    "@harness/db": "workspace:*",
-    "@harness/shared": "workspace:*",
     "yaml": "^2.9.1",
     "zod": "^4.6.5"
   },
