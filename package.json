@@ -19,6 +19,7 @@
     "typecheck": "pnpm -r --if-present typecheck",
     "build": "pnpm -r --if-present build",
     "release:version": "pnpm -r exec npm version --no-git-tag-version --allow-same-version",
+    "release:notes": "pnpm --filter @harness/scripts exec tsx src/app/changelog-cli.ts",
     "db:up": "docker compose --env-file .env -f harness/compose/docker-compose.yml up -d postgres",
     "db:down": "docker compose --env-file .env -f harness/compose/docker-compose.yml down",
     "db:migrate": "pnpm --filter @harness/db migrate",
