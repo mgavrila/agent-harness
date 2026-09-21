@@ -111,9 +111,10 @@ function inboundOf(envelope: EventEnvelope): RawMessage | null {
  * answered once and slowly is the thing being bought, and a lost turn in a crash is the price.
  *
  * Both interaction registrations are catch-alls: the contract takes one action handler and one
- * view handler and dispatches on the id itself, so there is nothing to route here. An interaction this host did not post is acknowledged and dropped by the handler
- * above rather than ignored here — acknowledging something unknown costs nothing, and leaving it
- * unacknowledged shows a person an error for a message this host has no opinion about.
+ * view handler and dispatches on the id itself, so there is nothing to route here. An interaction
+ * this host did not post is acknowledged and dropped by the handler above rather than ignored
+ * here — acknowledging something unknown costs nothing, and leaving it unacknowledged shows a
+ * person an error for a message this host has no opinion about.
  *
  * `api` is a parameter with a default rather than a construction, for one reason: `start()` calls
  * `auth.test`, and every other Web API call this transport makes goes through the same slice, so

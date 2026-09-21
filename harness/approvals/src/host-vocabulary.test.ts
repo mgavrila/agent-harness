@@ -77,7 +77,7 @@ describe('the approvals host names no messaging surface', () => {
       'a Slack channel id',
       // All four ways the transport's name is written: a space, a hyphen, an underscore and
       // nothing at all. The hyphen is the npm package's own spelling and the likeliest re-entry,
-      // and none of these three lines carries another forbidden word to pass on.
+      // and none of these four lines carries another forbidden word to pass on.
       '// opened in Socket Mode',
       '// the old socket-mode client',
       'const socket_mode = false;',

@@ -253,11 +253,13 @@ describe('a surface mounted on the host', () => {
     expect(await refusals()).toEqual([]);
   });
 
-  it('gives every miss below the prefix one answer, so the kind of miss stays in the audit log', async () => {
+  it('gives every miss below the prefix one answer, whether or not anything was written down', async () => {
     const s = await serve({ documents: [documentFor('alpha')] });
     // A tenant this host really serves, at a path no surface claims, and a client that does not
     // exist at all. Byte-identical in status and in body, so an unauthenticated caller cannot
-    // read a wrong id apart from a right id at a wrong path.
+    // read a wrong id apart from a right id at a wrong path. Neither writes an audit row: the
+    // only miss below this prefix that does is a dedicated host asked for a foreign client
+    // (invariant 19), and the case above this one pins that a pooled miss records nothing.
     //
     // What this does not claim: that a tenant's existence is hidden. Mount paths are public
     // constants, so a caller who guesses `/tenants/alpha/messages` gets that surface's own answer

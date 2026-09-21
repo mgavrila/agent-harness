@@ -699,8 +699,10 @@ about what the host checks.
 API's bearer — it has to be, because a signed Slack request carries no bearer — so it answers
 before anything has authenticated the caller. What is uniform: every unknown or malformed client
 id, and every path below `/tenants/` that no surface claims, answers the same `404 {"error":"no
-such route"}`. Which kind of miss it was goes to `audit_log` and is not readable from outside. What
-is **not** hidden: a path that is mounted answers as its surface does, so a caller who guesses a
+such route"}`. Which kind of miss it was is not readable from outside, and mostly it is not
+recorded either: a malformed id and a pooled host's unknown client write nothing at all. The one
+miss that reaches `audit_log` is a **dedicated** host being asked for a client it does not serve,
+which is a tenant boundary somebody tried to cross. What is **not** hidden: a path that is mounted answers as its surface does, so a caller who guesses a
 tenant id and appends `slack/events` learns the tenant exists — `405` to a `GET`, `401` to an
 unsigned `POST`, `413` to a body over 1 MiB, where an id nobody has answers `404` to all three.
 **Treat tenant ids as public.** Nor does the host bound the cost of guessing: each unsigned `POST`
