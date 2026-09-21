@@ -163,21 +163,24 @@ function send(res: ServerResponse, response: SurfaceHttpResponse): void {
  *
  * **Every miss below this prefix answers the same thing**: `404 {"error":"no such route"}`,
  * whether the client does not exist, this host does not serve it, or it serves it and no surface
- * of it claims that path. This prefix is in front of the bearer by design, so a body that said
- * "no such client" would let anyone who can reach the port enumerate which tenants this process
- * holds — the property the run API keeps with a bearer in front of it, and which this path has to
- * keep with nothing in front of it. The distinction still exists where it is useful: a dedicated
- * host's refusal is a tenant boundary somebody tried to cross and is written to the audit log,
- * and a pooled host asked for a client nobody has writes nothing, because nobody was refused —
- * there is nobody there.
+ * of it claims that path. This prefix is in front of the bearer, so a body that said "no such
+ * client" would tell an unauthenticated caller which kind of miss it had hit, and the kind is the
+ * useful part: it is the difference between a wrong id and a right id at a wrong path. The
+ * distinction still exists where it is worth keeping — a dedicated host's refusal is a tenant
+ * boundary somebody tried to cross and is written to the audit log, and a pooled host asked for a
+ * client nobody has writes nothing, because nobody was refused — but it is in the audit log, not
+ * in the answer.
  *
- * **Two limits of that uniformity, written down rather than fixed here.** The bodies are
- * identical and the timings are not: on a pooled host, a client that exists but is not open
- * costs a config-source load, three plug-in loads, a playbook sync and a scheduler start, and a
- * client nobody has costs one source lookup. And that open happens before anything has
- * authenticated the caller, so a guessed client id is a way to make this process hold a tenant.
- * Both are bounded today by the shape check below and by there being no publicly reachable
- * deployment of this prefix; a rate on opens per interval is the real answer if there is one.
+ * **What this does not hide, stated plainly: that a tenant exists.** Every surface's mount path
+ * is a public constant, so a caller who knows one and guesses the id gets an answer from the
+ * surface rather than the 404 an unmounted path gets — a `GET` is 405, an unsigned `POST` is
+ * whatever the adapter refuses with, a body over the cap is 413. Uniformity buys the kind of the
+ * miss; it does not buy tenant secrecy, and nothing below this line is trying to. Nor is the cost
+ * of a probe bounded here: an unsigned `POST` is one `audit_log` insert, a pooled miss for a
+ * client that exists but is not open costs a config-source load, three plug-in loads, a playbook
+ * sync and a scheduler start against one source lookup for a client nobody has, and that open
+ * happens before anything has authenticated the caller. A rate limit and an ingress in front of
+ * this port are the answer to all three, and they are the platform's (P2), not this function's.
  */
 export async function handleSurfaceRequest(
   pool: HostPool,

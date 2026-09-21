@@ -695,6 +695,20 @@ whatever `HARNESS_HOST_BIND` says, and trusts nothing about the connection: the 
 authenticates a request, so a reverse proxy, an ingress or a tunnel in front of it changes nothing
 about what the host checks.
 
+**What an unauthenticated caller can learn from `/tenants/`.** This prefix is in front of the run
+API's bearer — it has to be, because a signed Slack request carries no bearer — so it answers
+before anything has authenticated the caller. What is uniform: every unknown or malformed client
+id, and every path below `/tenants/` that no surface claims, answers the same `404 {"error":"no
+such route"}`. Which kind of miss it was goes to `audit_log` and is not readable from outside. What
+is **not** hidden: a path that is mounted answers as its surface does, so a caller who guesses a
+tenant id and appends `slack/events` learns the tenant exists — `405` to a `GET`, `401` to an
+unsigned `POST`, `413` to a body over 1 MiB, where an id nobody has answers `404` to all three.
+**Treat tenant ids as public.** Nor does the host bound the cost of guessing: each unsigned `POST`
+writes one `audit_log` row, and an id naming a real but unopened tenant makes a pooled host open
+it. A rate limit and an ingress in front of the port are the bound for all of this, and they are
+the platform's job (P2 follow-up), not the host's — which is the other reason not to publish
+`8788` straight at the internet.
+
 Compose's `host` service has no `env_file`: it gets an explicit `environment:` allowlist
 interpolated from `.env`, so nothing outside that list reaches the container. Who may decide an
 approval is gated by the identity plug-in — level `lead` or above, resolved on the surface the

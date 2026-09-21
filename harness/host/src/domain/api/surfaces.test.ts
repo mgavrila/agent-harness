@@ -253,11 +253,16 @@ describe('a surface mounted on the host', () => {
     expect(await refusals()).toEqual([]);
   });
 
-  it('tells nobody which clients it serves, because this path has no bearer in front of it', async () => {
+  it('gives every miss below the prefix one answer, so the kind of miss stays in the audit log', async () => {
     const s = await serve({ documents: [documentFor('alpha')] });
     // A tenant this host really serves, at a path no surface claims, and a client that does not
-    // exist at all. Byte-identical in status and in body: anything else and an unauthenticated
-    // caller can enumerate this process's tenants one guess at a time.
+    // exist at all. Byte-identical in status and in body, so an unauthenticated caller cannot
+    // read a wrong id apart from a right id at a wrong path.
+    //
+    // What this does not claim: that a tenant's existence is hidden. Mount paths are public
+    // constants, so a caller who guesses `/tenants/alpha/messages` gets that surface's own answer
+    // rather than this 404. Bounding those probes is a rate limit and an ingress in front of the
+    // port, not a status code here.
     const known = await s.post('/tenants/alpha/nope', message('hello'));
     const unknown = await s.post('/tenants/nobody/nope', message('hello'));
     expect(known.status).toBe(unknown.status);
