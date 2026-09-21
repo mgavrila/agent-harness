@@ -209,10 +209,21 @@ describe('the Compose stack names no client and mounts no socket', () => {
 
   it('runs the host, not an approvals process, and names no plug-in the document names', async () => {
     const { services } = parseYaml(await rendered()) as {
-      services: Record<string, { environment?: Record<string, string>; image?: string }>;
+      services: Record<string, { environment?: Record<string, string>; image?: string; build?: unknown }>;
     };
     expect(services.approvals).toBeUndefined();
-    expect(services.host.image).toBe('harness-host');
+    // A published image, pulled by tag. Nothing in this stack is built from a checkout any more:
+    // a deployment runs a version somebody released, not whatever the working tree happened to
+    // hold (spec section 7).
+    expect(services.host.image).toBe(
+      'ghcr.io/mgavrila/agent-harness-host:${HARNESS_IMAGE_TAG:?set HARNESS_IMAGE_TAG in .env}',
+    );
+    expect(services.files.image).toBe(
+      'ghcr.io/mgavrila/agent-harness-files:${HARNESS_IMAGE_TAG:?set HARNESS_IMAGE_TAG in .env}',
+    );
+    for (const [name, service] of Object.entries(services)) {
+      expect(service.build, name).toBeUndefined();
+    }
     // What is still this deployment's: which client it serves, and who it serves as.
     for (const name of ['HARNESS_CLIENT', 'HARNESS_HOST_PRINCIPAL']) {
       expect(services.host.environment?.[name], name).toBeDefined();
@@ -231,18 +242,22 @@ describe('the Compose stack names no client and mounts no socket', () => {
     expect(services.host.environment?.SLACK_ALLOWED_USERS).toBeUndefined();
   });
 
-  it('runs exactly the five services of the kernel design, and no Hermes', async () => {
+  it('runs exactly the four services a deployment needs, and no Hermes', async () => {
     const { services } = parseYaml(await rendered()) as { services: Record<string, unknown> };
-    expect(Object.keys(services).sort()).toEqual(['core-tools', 'files', 'host', 'litellm', 'postgres']);
+    // `core-tools` is gone with the build: it was never started, and the only thing it proved was
+    // that an image still builds — which is a CI job's business, not a deployment's.
+    expect(Object.keys(services).sort()).toEqual(['files', 'host', 'litellm', 'postgres']);
     expect(await rendered()).not.toMatch(/hermes/i);
   });
 
-  it('gives the host the one Slack app and no second one', async () => {
+  it('gives the host the one Slack app: a token to post with and a secret to verify with', async () => {
     const { services } = parseYaml(await rendered()) as {
       services: Record<string, { environment?: Record<string, string> }>;
     };
     expect(services.host.environment?.SLACK_BOT_TOKEN).toBeDefined();
-    expect(services.host.environment?.SLACK_APP_TOKEN).toBeDefined();
+    expect(services.host.environment?.SLACK_SIGNING_SECRET).toBeDefined();
+    // Socket mode is gone, and so is the app-level token it needed.
+    expect(services.host.environment?.SLACK_APP_TOKEN).toBeUndefined();
     expect(Object.keys(services.host.environment ?? {}).filter((k) => k.startsWith('APPROVALS_SLACK'))).toEqual([]);
   });
 });

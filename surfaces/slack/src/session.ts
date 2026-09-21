@@ -52,6 +52,10 @@ export function createSlackSession(transport: SlackTransport, config: SlackConfi
     // Built once per session and cached inside, so this tenant's identity plug-in shares one set
     // of workspace requests across every caller that asks.
     directory: slackDirectory(api, { now: () => new Date() }),
+    // The host mounts this and hands over what arrives; the transport verifies it. Spread rather
+    // than assigned, because a session over the fake transport has no door and the contract's
+    // `http` is optional rather than nullable.
+    ...(transport.http ? { http: transport.http } : {}),
 
     mention: (userId) => `<@${userId}>`,
 

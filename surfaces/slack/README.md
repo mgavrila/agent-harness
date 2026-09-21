@@ -1,7 +1,7 @@
 # @harness/surface-slack
 
-Slack as one messaging surface. Block Kit, Bolt in Socket Mode, and the slice of the Web API the
-host needs, all behind `@harness/surface-api`.
+Slack as one messaging surface. Block Kit, the Events API over HTTPS, and the slice of the Web API
+the host needs, all behind `@harness/surface-api`.
 
 ```text
 src/config.ts            the three variables this adapter reads, from deps.env only
@@ -10,18 +10,26 @@ src/stream.ts            startStream: a reply as one message edited at a bounded
 src/format.ts            toMrkdwn: the model's Markdown as Slack mrkdwn, escaped for the API
 src/render/blocks.ts     a Card as Block Kit. Byte-pinned against what the app produced before Plan 6
 src/render/modal.ts      a Form as a Slack modal view, and reading a submission back
-src/transport/           the SlackApi slice, the WebClient adapter, the Bolt listener, the file
-                         downloader, the fakes
+src/transport/classify.ts   narrows a raw Slack event and decides mentioned
+src/transport/events.ts     the HTTP door: signature check, url_verification, acknowledge-then-run
+src/transport/signature.ts  the HMAC-SHA256 check over v0:<timestamp>:<body>
+src/transport/files.ts      downloads an attachment with the bot token
+src/transport/types.ts      SlackApi, SlackConfig and the shapes the transport passes around
+src/transport/web-client.ts the WebClient adapter behind SlackApi
+src/transport/fake.ts       FakeSlack and FakeSlackEvents
 src/testing.ts           ./testing: FakeSlack, FakeSlackEvents, fakeSlackSession
 ```
 
 ## One Slack app
 
-This adapter reads `SLACK_BOT_TOKEN` and `SLACK_APP_TOKEN` (Socket Mode) and
-`SLACK_APPROVALS_CHANNEL` (where approval cards and released files go). One app carries chat and
-approvals, because one process — the host — holds both connections; two apps were needed only
-while the chat runtime and the approvals process were separate, and that reasoning is gone with
-the second process. The app needs Interactivity on (for the approval buttons and the note modal)
+This adapter reads `SLACK_BOT_TOKEN`, `SLACK_SIGNING_SECRET` (what every inbound request is
+verified against) and `SLACK_APPROVALS_CHANNEL` (where approval cards and released files go). One
+app carries chat and approvals, because one process — the host — serves both; two apps were needed
+only while the chat runtime and the approvals process were separate, and that reasoning is gone
+with the second process. There is no app-level token: nothing here opens a socket. A client
+document may name its own variables for the two credentials, which is how one process serves two
+workspaces; a deployment that names none reads the conventional names above.
+The app needs Interactivity on (for the approval buttons and the note modal)
 and is subscribed to `message.channels`, `message.groups`, `message.im`, `message.mpim` and
 `app_mention`; its bot scopes are `chat:write`, `app_mentions:read`, `channels:history`,
 `groups:history`, `im:history`, `im:read`, `im:write`, `mpim:history`, `users:read`,
@@ -29,13 +37,51 @@ and is subscribed to `message.channels`, `message.groups`, `message.im`, `messag
 plug-in's answer now — a principal of `kind: 'user'` at level `lead` or above, resolved from the
 Slack user id on this surface — not a variable this adapter reads.
 
-`Surface.secrets` names this app's two tokens, so an operator wiring a container that should
+`Surface.secrets` names this app's two credentials, so an operator wiring a container that should
 never hold a Slack credential knows to leave both out of it.
+
+## The one URL
+
+Slack delivers to `/tenants/<clientId>/slack/events`, which the host mounts from
+`SurfaceSession.http`; both request URLs in the app's configuration — the Events API's and
+Interactivity's — point there, since the two payloads differ only in their content type.
+
+Every request is verified before a byte of it is parsed: HMAC-SHA256 over
+`v0:<timestamp>:<raw body>` with the signing secret, compared against `X-Slack-Signature` in
+constant time, with the timestamp checked first against a five-minute window so that a replay is
+reported as the replay it is rather than as a bad secret. The three refusals are
+`missing_signature`, `bad_signature` and `stale_timestamp`; nothing of a refused request reaches
+the answer or the audit row the host writes for it. The `url_verification` handshake is answered
+only after the same check passes.
+
+**Acknowledge, then run.** Slack retries a delivery it has not heard about within three seconds
+and a turn takes seconds to minutes, so an accepted request is answered before the work starts and
+a failure in that work is a log line. A delivery carrying `X-Slack-Retry-Num` is answered 200 with
+`X-Slack-No-Retry: 1` and dropped: the first copy is already in flight or finished, and a second
+turn on one message is worse than a message answered once and slowly. The price of that rule,
+stated plainly: an event acknowledged and not yet run is lost if the process dies, and the retry
+that would have rescued it is refused by the same rule.
+
+`auth.test` is asked once per process for the bot's own user and bot ids — what a socket's
+connection context used to carry, and what the mention stripper and the thread rule compare
+against. The asking is memoised as a promise rather than the answer, and both `start()` and every
+delivery wait on it, because the host publishes a tenant into its map before it starts that
+tenant's sessions: a request can arrive while the answer is still in flight. Classifying then
+would leave the mention token in the text, stop the channel copy of an `app_mention` being
+recognised as a duplicate, and cache a thread as somebody else's for the life of the process, so a
+message waits for the identity instead. A wrong token fails the tenant's open through the same
+promise, and a message that arrives after that failure is refused `identity_unavailable` rather
+than classified against an empty identity.
+
+**Only a message waits.** The handshake, an interaction and every refusal are decided from the
+request alone and never read the bot's ids, so none of them is gated: a bad bot token beside a good
+signing secret still lets an operator re-verify the Request URL while they diagnose it, and still
+lets a decision on an approval card through.
 
 ## Inbound: messages, mentions and attachments
 
-Bolt's `message` and `app_mention` listeners narrow every payload to a `SlackInbound` and hand it
-to the one handler `SurfaceSession.onMessage` registered. `mentioned` is true for a direct
+The `message` and `app_mention` deliveries are narrowed to a `SlackInbound` and handed to the one
+handler `SurfaceSession.onMessage` registered. `mentioned` is true for a direct
 message, for a mention, and for a reply inside a thread this assistant has posted in; a plain
 channel message is `mentioned: false` and the host still receives it but does not answer. A **channel** `message` that carries the mention token is dropped,
 because `app_mention` already delivered it — Slack sends both when the bot is a channel member. A
@@ -69,7 +115,7 @@ with another refusal for every line they wrote there.
 
 Both sets are empty after a restart, so a key in neither is resolved by reading the thread once
 (`conversations.replies`, 50 messages, covered by the `*:history` scopes already listed): a
-message written by the bot user, or carrying this app's own `bot_id` (Bolt's `context.botId`),
+message written by the bot user, or carrying this app's own `bot_id` (both from `auth.test`),
 means the thread is the assistant's. Another workspace bot's message does not — a GitHub or
 PagerDuty thread is not a thread this assistant joined. Either answer is cached, so a busy thread
 costs one call; a failed lookup is cached as nothing, treated as not addressed, and logged at most

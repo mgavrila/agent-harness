@@ -2,8 +2,8 @@
 #
 # The gates job is `pnpm -r typecheck`, `pnpm lint`, `pnpm arch`, `pnpm format:check` and
 # `pnpm test`, exactly as CONTRIBUTING.md's "Before you push" lists them, against a Postgres
-# service with the same three extra databases the Compose stack's init.sql creates. The image
-# job builds every service Compose defines, with placeholder values from .env.ci.
+# service with the same three extra databases the Compose stack's init.sql creates. The image job
+# builds both images the release workflow publishes, and pushes neither.
 name: ci
 
 on:
@@ -65,5 +65,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Build every image the Compose stack defines
-        run: docker compose --env-file .env.ci -f harness/compose/docker-compose.yml --profile demo --profile build-only build
+      # Compose pulls published images now, so there is nothing for it to build. These are the two
+      # builds release.yml pushes on a tag; here they only prove the Dockerfiles still build, and
+      # nothing is pushed or tagged for a registry.
+      - name: Build the host image
+        run: docker build -f harness/compose/node.Dockerfile -t agent-harness-host:ci .
+      - name: Build the files worker image
+        run: docker build -f harness/compose/files.Dockerfile -t agent-harness-files:ci .

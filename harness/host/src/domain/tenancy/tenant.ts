@@ -5,6 +5,7 @@ import {
   registerApprovalHandlers,
   startRunner,
   surfaceSinks,
+  type SurfaceSettings,
 } from '@harness/approvals';
 import {
   parsePlaybooksFile,
@@ -25,6 +26,7 @@ import {
   type EnvSource,
   type Logger,
 } from '@harness/shared';
+import { assertMounts } from '../api/surfaces.js';
 import { TIMEOUT_MARGIN_MS } from '../conversation.js';
 import type { Host, HostBudget } from '../host.js';
 import { syncPlaybooks } from '../playbooks/repository.js';
@@ -156,14 +158,26 @@ async function buildTenant(pool: HostPool, loaded: LoadedDocument, opened: Stopp
     parsePlaybooksFile(document.playbooks),
   );
 
+  // What the document says about each surface it declares: the key an inbound event's hint is
+  // matched against, and the variable it named for each of that surface's secrets. Both come out
+  // of `@harness/config-api`, which is where the typed surface sections are read, so this file
+  // names no surface's own field — `field` is as opaque here as `env` already was.
+  const settings: Record<string, SurfaceSettings> = {};
+  for (const { surface, key } of tenantKeysOf(document)) {
+    settings[surface] = { ...settings[surface], tenantKey: key };
+  }
+  for (const { surface, field, env } of surfaceSecretsOf(document)) {
+    settings[surface] = { ...settings[surface], secrets: { ...settings[surface]?.secrets, [field]: env } };
+  }
   const surfaces = await loadSurfaces(
     surfaceNamesOf(document).map(surfaceSpecifier),
     { env: pool.env, log, storageDir: config.storageDir },
-    // The keys this client claims, per surface, for an adapter that has no transport to read the
-    // workspace off an event. `tenantKeysOf` is what reads the typed surface sections, so this
-    // file names no surface's own field, exactly as `assertSecretsPresent` does not.
-    Object.fromEntries(tenantKeysOf(document).map(({ surface, key }) => [surface, key])),
+    settings,
   );
+  // Before anything is started: a mount path that could climb out of its tenant prefix, or two
+  // surfaces claiming one path, is this client's configuration being wrong, and a tenant that
+  // failed at its first request instead would fail it for whoever sent it.
+  assertMounts(config.client, surfaces.all);
   for (const session of surfaces.all) opened.push({ what: `surface "${session.name}"`, stop: () => session.stop() });
 
   // Identity comes after the surfaces, and that is a deliberate change of startup order: a

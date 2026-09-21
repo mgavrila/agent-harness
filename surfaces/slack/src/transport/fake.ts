@@ -1,6 +1,7 @@
 import type {
   SlackAction,
   SlackApi,
+  SlackAuthTestResult,
   SlackEphemeralArgs,
   SlackEvents,
   SlackInbound,
@@ -41,6 +42,10 @@ export class FakeSlack implements SlackApi {
   userProfiles: Record<string, { real_name?: string; profile?: { display_name?: string } }> = {};
   /** How many times the group list was actually fetched, so a test can prove the cache works. */
   usergroupsListCalls = 0;
+  /** What `auth.test` answers: the ids this app posts under. */
+  authTest: SlackAuthTestResult = { user_id: 'U0BOTUSER', bot_id: 'B0BOTID' };
+  /** How many times the identity was fetched, so a test can prove it happens once. */
+  authTestCalls = 0;
   /** When set, every call rejects with this message. */
   failWith?: string;
   /**
@@ -121,6 +126,14 @@ export class FakeSlack implements SlackApi {
     info: async (args: { user: string }): Promise<SlackUserInfoResult> => {
       this.guard();
       return { user: this.userProfiles[args.user] };
+    },
+  };
+
+  auth = {
+    test: async (): Promise<SlackAuthTestResult> => {
+      this.guard();
+      this.authTestCalls += 1;
+      return this.authTest;
     },
   };
 }

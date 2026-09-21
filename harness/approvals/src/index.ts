@@ -1,5 +1,5 @@
 export { surfaceSinks } from './domain/sinks.js';
-export { loadSurfaces, surfacesOf, type LoadedSurfaces } from './domain/surfaces/registry.js';
+export { loadSurfaces, surfacesOf, type LoadedSurfaces, type SurfaceSettings } from './domain/surfaces/registry.js';
 export { postPendingApprovals, type PollDeps, type PollResult } from './domain/poller.js';
 export {
   APPROVE_ACTION_ID,

@@ -593,7 +593,7 @@ A surface delivers a `MessageEvent` with `mentioned` set: true for a direct mess
 channel message addressed to the assistant, false for every other channel message. The host's
 whole rule is to return without running when `mentioned` is false; what counts as addressed is the
 surface's own question, and Slack answers it with a mention or a reply inside one of the
-assistant's threads (see "Slack credentials" below). Each turn still runs as the principal of
+assistant's threads (see "Slack over HTTPS" below). Each turn still runs as the principal of
 whoever wrote it, never the principal who started the thread.
 
 A file attached to the message has already been downloaded, by the surface, into
@@ -607,31 +607,57 @@ running beside it: the runtime keeps its own state per thread, and two turns wri
 lose one of them. Different conversations still run at the same time, so a slow turn holds up
 that conversation and no other.
 
-### Slack credentials: one app
+### Slack over HTTPS
 
-One Slack app carries chat and approvals, because the host is the only process that holds a
-Socket Mode connection now. Two apps used to be required — Slack delivers each Socket Mode event
-to exactly one of an app's open connections, so a second connected process would only ever see
-about half of every `block_actions` and `view_submission` payload — and that reasoning is gone
-with the second process.
+One Slack app per tenant, delivering to a URL. The host holds no connection to Slack at all:
+every event and every button press arrives as a signed POST, which is what lets a host be paused,
+resumed, pooled behind an ingress, or run as one of many in a process.
 
 | App | Variables | Bot scopes | Other settings |
 |---|---|---|---|
-| The host's Slack app | `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`, `SLACK_SIGNING_SECRET` | `chat:write`, `app_mentions:read`, `channels:history`, `groups:history`, `im:history`, `im:read`, `im:write`, `mpim:history`, `users:read`, `files:read`, `files:write` | Socket Mode on, Interactivity on |
+| The host's Slack app | `SLACK_BOT_TOKEN`, `SLACK_SIGNING_SECRET` | `chat:write`, `app_mentions:read`, `channels:history`, `groups:history`, `im:history`, `im:read`, `im:write`, `mpim:history`, `users:read`, `usergroups:read`, `files:read`, `files:write` | Socket Mode **off**, Interactivity on, both request URLs set |
 
-Subscribe the app to the `message.channels`, `message.groups`, `message.im`, `message.mpim` and
-`app_mention` events, listed in `.env.example`. Invite the bot to `SLACK_APPROVALS_CHANNEL` and
-to every channel it should answer messages in. `SLACK_SIGNING_SECRET` is the app's signing
-secret, under Basic Information -> App Credentials: a client document's
-`surfaces.slack.signingSecret` names it, and a tenant that names a variable the deployment does
-not set refuses to open.
+**Both request URLs are the same URL**, and it carries the tenant:
 
-**The document's `surfaces.slack.teamId` must be the workspace the app is installed in.** It is
-what the host matches an inbound event's workspace against, so every event whose team id differs
-from it is refused and written to the audit log as `unauthorised` — on a dedicated host too, which
-is the one client that used to accept whatever arrived on its own socket. Find the id in the `T…`
-segment of any workspace URL (`https://app.slack.com/client/T0123456789/…`), or by calling
-`auth.test` with the bot token, which answers with `team_id`.
+```
+https://<this deployment>/tenants/<clientId>/slack/events
+```
+
+Set it under **Event Subscriptions → Request URL** and under **Interactivity & Shortcuts →
+Request URL**. Slack sends a one-time `url_verification` challenge when each is saved; the host
+answers it, over the same verification as everything else, so a URL that saves is a URL whose
+signing secret is already right. Subscribe the app to `message.channels`, `message.groups`,
+`message.im`, `message.mpim` and `app_mention`, and invite the bot to `SLACK_APPROVALS_CHANNEL`
+and to every channel it should answer in.
+
+**There is no app-level token.** `SLACK_APP_TOKEN` is gone, and a deployment that still sets it is
+setting nothing.
+
+**Every request is verified before it is read.** HMAC-SHA256 over `v0:<timestamp>:<the raw body>`
+with the signing secret, compared in constant time, with a five-minute window. A request that is
+unsigned, badly signed or stale is refused before the body is parsed and written to `audit_log`
+exactly once, as `surface_request` / `refused`, carrying the reason —
+`missing_signature`, `bad_signature`, `stale_timestamp` — and nothing of the body. A repeated
+`stale_timestamp` with everything else healthy is a clock: check the container's.
+
+**A retried delivery is dropped.** Slack retries anything it has not heard about within three
+seconds; the host answers immediately and runs the turn afterwards, so a retry means the first
+copy is already in flight. Those are answered `200` with `X-Slack-No-Retry: 1` and one log line.
+The cost of that, stated plainly: when the first copy's turn **fails** before it posts anything,
+the retry was the only second chance and it has been discarded, so the message is never answered
+and the whole record of it is one `error` line naming the delivery. Watch the host's log for those;
+there is no dedupe table and no redelivery to fall back on.
+
+**A pooled host serves many live Slack tenants.** One Slack app per tenant, or one multi-workspace
+app whose single signing secret every tenant document names — either shape works, because each
+tenant's document names its own variables for the bot token and the signing secret
+(`surfaces.slack.botToken` and `surfaces.slack.signingSecret`), and a tenant that names a variable
+the deployment does not set refuses to open. **The document's `surfaces.slack.teamId` must be the
+workspace the app is installed in.** It is what the host matches an inbound event's workspace
+against, so every event whose team id differs from it is refused and written to the audit log as
+`unauthorised` — on a dedicated host too. Find the id in the `T…` segment of any workspace URL
+(`https://app.slack.com/client/T0123456789/…`), or by calling `auth.test` with the bot token, which
+answers with `team_id`.
 
 **A reply inside a thread the bot has already posted in needs no mention**: the thread is the
 conversation, so a follow-up written there is answered as it stands. It is the bot's *own* posts
@@ -641,6 +667,49 @@ claims no thread either, so refusing somebody once does not refuse them for ever
 Mentioning the bot is still what starts a new thread or gets an answer at a channel's top level,
 and a direct message needs no mention anywhere; the `channels:history`, `groups:history` and
 `mpim:history` scopes above are what let the bot recognise its own threads again after a restart.
+
+### Local development with a tunnel
+
+Slack has to reach the host, and the host publishes `8788` on `127.0.0.1`. A tunnel gives that
+port a public HTTPS URL for as long as it runs. Nothing in this repository knows about it: it is a
+process beside the host, and the only thing that changes is the request URL in the Slack app.
+
+```bash
+# Cloudflare, no account needed for a quick tunnel:
+cloudflared tunnel --url http://127.0.0.1:8788
+
+# or ngrok:
+ngrok http 8788
+```
+
+Both print a URL. Put `<that URL>/tenants/<clientId>/slack/events` in both request URLs of the
+Slack app and save; Slack's `url_verification` challenge is answered by the host, so a URL that
+saves is a tunnel that works.
+
+A quick tunnel's URL changes every time it restarts, and the Slack app has to be re-pointed when
+it does. That is the whole of the friction, and it is the reason a shared deployment gets a real
+hostname instead.
+
+**In production, something terminates TLS in front of the host.** The host speaks HTTP, binds
+whatever `HARNESS_HOST_BIND` says, and trusts nothing about the connection: the signature is what
+authenticates a request, so a reverse proxy, an ingress or a tunnel in front of it changes nothing
+about what the host checks.
+
+**What an unauthenticated caller can learn from `/tenants/`.** This prefix is in front of the run
+API's bearer — it has to be, because a signed Slack request carries no bearer — so it answers
+before anything has authenticated the caller. What is uniform: every unknown or malformed client
+id, and every path below `/tenants/` that no surface claims, answers the same `404 {"error":"no
+such route"}`. Which kind of miss it was is not readable from outside, and mostly it is not
+recorded either: a malformed id and a pooled host's unknown client write nothing at all. The one
+miss that reaches `audit_log` is a **dedicated** host being asked for a client it does not serve,
+which is a tenant boundary somebody tried to cross. What is **not** hidden: a path that is mounted answers as its surface does, so a caller who guesses a
+tenant id and appends `slack/events` learns the tenant exists — `405` to a `GET`, `401` to an
+unsigned `POST`, `413` to a body over 1 MiB, where an id nobody has answers `404` to all three.
+**Treat tenant ids as public.** Nor does the host bound the cost of guessing: each unsigned `POST`
+writes one `audit_log` row, and an id naming a real but unopened tenant makes a pooled host open
+it. A rate limit and an ingress in front of the port are the bound for all of this, and they are
+the platform's job (P2 follow-up), not the host's — which is the other reason not to publish
+`8788` straight at the internet.
 
 Compose's `host` service has no `env_file`: it gets an explicit `environment:` allowlist
 interpolated from `.env`, so nothing outside that list reaches the container. Who may decide an
@@ -715,7 +784,7 @@ client must not go is this repository.
    listing every person, or an `identityPlugin.kind: slack-groups` section instead of declaring
    people at all (see "Directory-backed identity" below). A tenant whose principal is missing from
    the document refuses to open.
-3. Add a `surfaces.slack` section (see "Slack credentials" above) and create one Slack app,
+3. Add a `surfaces.slack` section (see "Slack over HTTPS" above) and create one Slack app,
    pasting its tokens, its signing secret and the approvals channel id into `.env`. The section's
    `teamId` is the id of the workspace that app is installed in, and an event from any other
    workspace is refused. **Every
@@ -731,7 +800,7 @@ client must not go is this repository.
    other route, and check its width once with the `curl` under "Knowledge" before the first sync.
 6. Start it under its own Compose project so it does not collide with another client's
    containers and volumes:
-   `COMPOSE_PROJECT_NAME=<slug> docker compose --env-file .env -f harness/compose/docker-compose.yml --profile demo up -d --build`.
+   `COMPOSE_PROJECT_NAME=<slug> docker compose --env-file .env -f harness/compose/docker-compose.yml --profile demo up -d`.
 
 `pnpm demo:up` is the same command under the default project name; with `HARNESS_CLIENT` set
 in `.env` it starts that client dedicated, and with it unset a pooled host opens every client its
@@ -766,7 +835,7 @@ identityPlugin:
 
 The order is exceptions, then groups, then the document's own `identity.defaults` for everyone
 else; someone in no group on a surface with no default is refused. The Slack app needs two scopes
-this plug-in reads through, beyond the ones under "Slack credentials": `usergroups:read` (the
+this plug-in reads through, beyond the ones under "Slack over HTTPS": `usergroups:read` (the
 group list and membership) and `users:read` (a display name). Grant both before pointing a
 document at `slack-groups`, or every lookup fails and every caller is refused.
 
@@ -888,15 +957,14 @@ and start the host last.
    with the `curl` under "Knowledge" before the first sync.
 5. **New environment variables**, all optional, and these five are the whole list:
    `HARNESS_EMBED_DIMS` (default 1024, read by the kernel's configuration, and it must match the
-   column), `HARNESS_HOST_TOKEN` (**unset means no run API**), `HARNESS_HOST_BIND` (default
+   column), `HARNESS_HOST_TOKEN` (**unset means the run API answers 401**; the listener runs
+   either way, for the surface mounts), `HARNESS_HOST_BIND` (default
    `127.0.0.1`, `0.0.0.0` inside Compose), `HARNESS_HOST_PORT` (default 8788) — the last three read
    by the host's `app/main.ts` — and `HARNESS_HOST_PUBLISHED_PORT` (default 8788), which Compose
    reads to map the published port and no TypeScript reads at all.
 6. **Optional: turn the run API on.** Set `HARNESS_HOST_TOKEN`, add `@harness/surface-http` to
    `HARNESS_SURFACES` after your primary surface, and add an `http:` entry to each principal in
-   `identity.yaml` who may call it. With the token set and the surface left out of
-   `HARNESS_SURFACES` the listener still starts, and a request naming it is refused `400`,
-   `surface "http" is not loaded`.
+   `identity.yaml` who may call it.
 7. **Optional: add a knowledge folder.** Put markdown in `clients/<name>/knowledge/` and either
    call `knowledge_sync` once as a practitioner or above, or add the `knowledge-sync` playbook to
    `playbooks.yaml`, which the demo's file now shows. A client with no folder syncs nothing and
@@ -905,7 +973,7 @@ and start the host last.
    read before the packs' so none of them can shadow it. The published tool count is 30 in the
    default deployment and 35 with both packs loaded. `claimDuePlaybooks` no longer takes a `limit`;
    the batch is the `CLAIM_BATCH` constant, at the same value of 10. And the host's `listening` line
-   gained one more field, `runApi=on` or `runApi=off (set HARNESS_HOST_TOKEN)`.
+   gained one more field, `runApi=open` or `runApi=closed (set HARNESS_HOST_TOKEN)`.
 
 ## Upgrading to Plan 11a
 
@@ -929,6 +997,75 @@ section of the document. `HARNESS_CONFIG_SOURCE` and `HARNESS_CLIENTS_DIR` are n
 check and this runbook read the same fields as before. A pooled host (`HARNESS_CLIENT` unset) has
 no single client to report, so it answers `{ ok, tenants: { <id>: <the old shape>, … } }`, with
 `ok` false when any tenant's is.
+
+## Upgrading to Plan 11b
+
+No migration and no data change. Four things move, and three of them are in a Slack app's
+configuration.
+
+1. **Release, or pick, an image tag**, and set `HARNESS_IMAGE_TAG` in `.env`. Compose no longer
+   builds anything: `pnpm demo:up` pulls. A deployment that wants to run its working tree builds
+   its own image with `docker build -f harness/compose/node.Dockerfile` and tags it itself.
+2. **Turn Socket Mode off** in the Slack app, set both request URLs to
+   `https://<host>/tenants/<clientId>/slack/events`, and delete the app-level token. Delete
+   `SLACK_APP_TOKEN` from `.env` and from anything that sets it: nothing reads it.
+3. **Put the host somewhere Slack can reach.** A reverse proxy, an ingress, or a tunnel for a
+   developer's machine — see "Local development with a tunnel".
+4. **Nothing else.** The host's ports, its health check, its database, its documents and its
+   identity are unchanged, and a turn taken over HTTPS is the same turn.
+
+## Releasing
+
+A release is a tag. Everything else follows from it.
+
+```bash
+pnpm release:version 0.2.0        # every workspace package to one version
+# write the 0.2.0 section of CHANGELOG.md, if it is not written
+git commit -am "chore: release 0.2.0"
+git tag v0.2.0
+git push && git push --tags
+```
+
+The `release` workflow then, in this order: runs the five gates against a real Postgres, refuses
+the tag if the packages are not at that version or the changelog does not describe it, builds and
+pushes `ghcr.io/mgavrila/agent-harness-host:0.2.0` and `…/agent-harness-files:0.2.0`, builds and
+packs the seven published packages, and creates the GitHub Release with the tarballs,
+`tool-surface.json` and `compose-surface.yaml` attached and the changelog section as its body. A
+tag that fails a gate publishes nothing.
+
+**After a tag ships**, rename the changelog's "— unreleased" heading to the date, as the first step
+of the next section: the released section keeps the version it shipped under, and the new
+"unreleased" heading starts collecting whatever lands next.
+
+**What a deployment consumes.** Set `HARNESS_IMAGE_TAG=0.2.0` in `.env`; Compose pulls both images
+and builds nothing.
+
+**What the platform repository consumes.** The seven packages are attached to the release as
+tarballs, because GitHub Packages requires an npm scope equal to the repository owner and
+`@harness/*` is not one. Pin them by URL, and override the transitive names too — the tarballs
+depend on one another by exact version:
+
+```json
+{
+  "dependencies": {
+    "@harness/config-api": "https://github.com/mgavrila/agent-harness/releases/download/v0.2.0/harness-config-api-0.2.0.tgz"
+  },
+  "pnpm": {
+    "overrides": {
+      "@harness/shared": "https://github.com/mgavrila/agent-harness/releases/download/v0.2.0/harness-shared-0.2.0.tgz",
+      "@harness/pack-api": "https://github.com/mgavrila/agent-harness/releases/download/v0.2.0/harness-pack-api-0.2.0.tgz",
+      "@harness/identity-api": "https://github.com/mgavrila/agent-harness/releases/download/v0.2.0/harness-identity-api-0.2.0.tgz"
+    }
+  }
+}
+```
+
+The published packages are the contracts and their testing kits: `@harness/shared`,
+`@harness/pack-api`, `@harness/config-api`, `@harness/surface-api`, `@harness/identity-api`,
+`@harness/runtime-api`, `@harness/sandbox-api`. Everything else — the kernel, the host, the
+adapters, the packs — is private and is consumed as the image. `@harness/runtime-api/testing`
+needs `vitest` and `@modelcontextprotocol/server` installed as its optional peers; nothing else
+published needs one.
 
 ## Memory
 
@@ -1078,8 +1215,10 @@ where d.client = '<client-id>' group by d.id order by d.path;
 
 Five routes in the host, on `HARNESS_HOST_BIND:HARNESS_HOST_PORT` (default `127.0.0.1:8788`),
 behind `Authorization: Bearer $HARNESS_HOST_TOKEN`, compared in constant time. **With no token
-there is no listener**: nothing is bound, and the host's `listening` line says so with
-`runApi=off (set HARNESS_HOST_TOKEN)`.
+these five routes answer 401** — the listener itself always runs, because it also carries every
+tenant's surface mounts under `/tenants/<clientId>/…`, which have their own verification and must
+answer whether or not this deployment uses the run API. The host's `listening` line says which it
+is: `runApi=open` or `runApi=closed (set HARNESS_HOST_TOKEN)`.
 
 Who a run acts as is the identity plug-in's answer, never the caller's: every route names a loaded
 `surface` and that surface's own user id, which is resolved exactly as an adapter's message is, so

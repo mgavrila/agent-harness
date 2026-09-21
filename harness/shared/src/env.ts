@@ -73,9 +73,9 @@ export function booleanFromEnv(name: string, env: EnvSource = process.env): bool
  * counts as unset, or a half-filled `.env` starts a process that fails later and further from
  * the cause.
  *
- * `env` is a parameter because `coreToolsChildEnv` in @harness/approvals reads an environment
- * it is handed rather than its own, its tests pass a fixture, and a pack reads the map on
- * `deps.env`.
+ * `env` is a parameter because a plug-in reads the map on `deps.env` rather than the ambient
+ * environment: whoever builds the bag decides what the plug-in can see, which is what stops a
+ * suite from reaching a real workspace because the machine running it has a filled-in `.env`.
  */
 export function requiredEnv(name: string, hint = '', env: EnvSource = process.env): string {
   const value = env[name];

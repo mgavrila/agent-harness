@@ -1,13 +1,10 @@
 /**
- * A surface that exists only to make a union of two adapters' credentials a real union.
+ * A third surface, so that "the primary only" is proved against more than a pair.
  *
- * The memory adapter declares no secrets, so a test that loads it beside Slack proves nothing
- * about combining two lists: the answer is Slack's list unchanged, and a host that kept only the
- * first adapter's credentials would pass. This one declares a name no real adapter reads, so
- * that host fails.
- *
- * Not shipped, and not a second memory adapter: it has no configuration and no allowlist of its
- * own, and nothing but `secrets` and `name` is asserted against it.
+ * The memory adapter and the Slack adapter are the two a deployment really loads; a host that
+ * posted to the first two of three would pass a suite that only had two. Not shipped, and not a
+ * second memory adapter: it has no configuration of its own, and nothing but `name` is asserted
+ * against it.
  */
 import { defineSurface, type Surface } from '@harness/surface-api';
 import { MemorySurface } from '@harness/surface-api/testing';

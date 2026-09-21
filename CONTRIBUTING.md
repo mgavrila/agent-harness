@@ -294,7 +294,7 @@ complete one; read it alongside this, and read `surfaces/slack` for the real thi
    for a `MessageEvent`, whose `mentioned` flag is your adapter's answer to the group-chat rule:
    true for a direct message and for a channel message that addresses the bot by name, false for
    every other channel message — the host's whole rule is to return without running when it is
-   false. `surfaces/slack`'s `classifyMessage` (`src/transport/bolt.ts`) is the worked example: it
+   false. `surfaces/slack`'s `classifyMessage` (`src/transport/classify.ts`) is the worked example: it
    takes Slack's `message` and `app_mention` events, drops the one that double-reports a mention
    the bot already saw as `app_mention`, and sets `mentioned` true for a direct message.
 
@@ -305,6 +305,15 @@ complete one; read it alongside this, and read `surfaces/slack` for the real thi
    worked example for a transport with no native streaming call: it posts the first delta as a
    message, folds every later delta into an edit of that message no sooner than
    `STREAM_EDIT_INTERVAL_MS` apart, and edits once more with the whole text when the run ends.
+
+   A surface that is reached by a request rather than by a connection it opens returns
+   `http: { path, handle }` from `connect`, and the host mounts it at
+   `/tenants/<clientId>/<path>`. Verify whatever your transport signs with, in the adapter: the
+   host will not, because it would have to know your transport to try. Answer
+   `{ status, refusal: { reason } }` for anything you turn away and the host writes the single
+   audit row; `reason` is a short token, never a sentence, because it goes in a column somebody
+   groups by.
+
    Declare honestly what you cannot do:
 
    | Surface            | forms                  | privateReply                    | update | streaming | inlineConfirm |

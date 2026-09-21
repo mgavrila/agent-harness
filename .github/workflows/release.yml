@@ -1,0 +1,120 @@
+# Everything a version tag publishes: the five gates, two images to the container registry, and a
+# GitHub Release carrying the package tarballs and the two architecture snapshots.
+#
+# Packages are attached to the release rather than pushed to a registry. GitHub Packages requires
+# an npm scope equal to the repository owner, and `@harness/*` cannot be published there without
+# renaming every package and every import; that rename waits for the organisation that will own
+# the scope. A consumer pins a tarball URL, and moving to a registry later is a change to the last
+# two steps of this file and to nothing else.
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        # The same pinned pgvector Compose and ci.yml run: the suite the gates below run is the
+        # suite CI runs, against the same database or it proves nothing.
+        image: pgvector/pgvector:0.8.1-pg16
+        env:
+          POSTGRES_USER: harness
+          POSTGRES_PASSWORD: harness
+          POSTGRES_DB: harness
+        ports:
+          - 15432:5432
+        options: >-
+          --health-cmd "pg_isready -U harness -d harness"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://harness:harness@localhost:15432/harness
+      TEST_DATABASE_URL: postgres://harness:harness@localhost:15432/harness_test
+      EVALS_DATABASE_URL: postgres://harness:harness@localhost:15432/harness_evals
+      # A gateway key the spawned core-tools servers refuse to start without; no model is
+      # ever called in the suite.
+      LITELLM_MASTER_KEY: sk-ci-placeholder
+      REGISTRY: ghcr.io
+      IMAGE_OWNER: mgavrila
+    steps:
+      - uses: actions/checkout@v4
+      # No `version` input: the root package.json pins `packageManager: pnpm@11.4.0`, which is
+      # what the action reads, and v4 refuses to be told the version twice.
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Read the version off the tag
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+      - name: Install the parsing binaries and psql
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-eng poppler-utils postgresql-client
+      - run: pnpm install --frozen-lockfile
+      - name: Refuse a tag the packages were not versioned for
+        run: |
+          declared=$(node -p "require('./harness/shared/package.json').version")
+          if [ "$declared" != "$VERSION" ]; then
+            echo "tag $GITHUB_REF_NAME does not match the workspace version $declared; run: pnpm release:version $VERSION" >&2
+            exit 1
+          fi
+      - name: Refuse a version the changelog does not describe
+        run: pnpm release:notes "$VERSION" > /dev/null
+      - name: Create the test and evals databases, with the init.sql Compose uses
+        run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f harness/compose/postgres/init.sql
+      - run: pnpm db:migrate
+      - run: pnpm -r typecheck
+      - run: pnpm lint
+      - run: pnpm arch
+      - run: pnpm format:check
+      - run: pnpm test
+      - name: Log in to the container registry
+        # Both values reach the script through the environment rather than through `${{ }}`, so
+        # the token is never written into the generated step script on the runner's disk.
+        env:
+          REGISTRY_USER: ${{ github.actor }}
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: echo "$REGISTRY_TOKEN" | docker login "$REGISTRY" -u "$REGISTRY_USER" --password-stdin
+      - name: Build and push the host image
+        run: |
+          docker build -f harness/compose/node.Dockerfile -t "$REGISTRY/$IMAGE_OWNER/agent-harness-host:$VERSION" .
+          docker push "$REGISTRY/$IMAGE_OWNER/agent-harness-host:$VERSION"
+      - name: Build and push the files worker image
+        run: |
+          docker build -f harness/compose/files.Dockerfile -t "$REGISTRY/$IMAGE_OWNER/agent-harness-files:$VERSION" .
+          docker push "$REGISTRY/$IMAGE_OWNER/agent-harness-files:$VERSION"
+      - name: Build every published package
+        run: pnpm build
+      - name: Pack every published package
+        run: |
+          mkdir -p release
+          for package in @harness/shared @harness/pack-api @harness/config-api @harness/surface-api @harness/identity-api @harness/runtime-api @harness/sandbox-api; do
+            pnpm --filter "$package" exec pnpm pack --pack-destination "$PWD/release"
+          done
+      - name: Write the release notes from the changelog
+        run: pnpm release:notes "$VERSION" > release/notes.md
+      - name: Create the release
+        # Idempotent, because the images above push happily on a re-run and it would be poor to
+        # then die on the last step: the release is created or its body brought up to date, and
+        # every asset is uploaded with --clobber. Re-running the same tag ends in the same place.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release edit "$GITHUB_REF_NAME" --notes-file release/notes.md
+          else
+            gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-file release/notes.md
+          fi
+          gh release upload "$GITHUB_REF_NAME" --clobber \
+            release/*.tgz \
+            docs/architecture/tool-surface.json \
+            docs/architecture/compose-surface.yaml

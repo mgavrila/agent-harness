@@ -43,10 +43,11 @@ with an error the human sees, and LiteLLM's own daily budget is the other half o
 `HARNESS_HISTORY_MAX_MESSAGES` (40), how many prior turns of a thread the runtime is handed
 (also capped at 24,000 characters; the runtime's own checkpoint carries the rest).
 
-The run API's own variables are `HARNESS_HOST_TOKEN` (no default; unset means no listener),
-`HARNESS_HOST_BIND` (`127.0.0.1`) and `HARNESS_HOST_PORT` (8788); one listener serves every open
-tenant and resolves which one a request belongs to per request. Before any of that, `main.ts`
-calls `assertEmbedDims`, which compares `HARNESS_EMBED_DIMS` against the width
+The run API's own variables are `HARNESS_HOST_TOKEN` (no default; unset means `/v1/*` answers
+401), `HARNESS_HOST_BIND` (`127.0.0.1`) and `HARNESS_HOST_PORT` (8788); one listener serves every
+open tenant and resolves which one a request belongs to per request — and it always runs, because
+it also carries every tenant's surface mounts under `/tenants/<clientId>/…`. Before any of that,
+`main.ts` calls `assertEmbedDims`, which compares `HARNESS_EMBED_DIMS` against the width
 `knowledge_chunks.embedding` was created at and refuses to start when they disagree — better than
 failing halfway through the first knowledge sync.
 
@@ -109,6 +110,12 @@ An HTTP way in, in `src/domain/api/`, for a caller with no messaging surface (sp
 host's, not a surface's: the request says which loaded surface a run belongs to, so one listener
 drives a run on any of them.
 
+The listener always runs: it serves the run API's five routes under `/v1` behind the bearer, and
+every tenant's surface mounts under `/tenants/<clientId>/…` in front of it, because a tenant's
+surface has to answer whether or not this deployment uses the run API at all. An empty
+`HARNESS_HOST_TOKEN` closes `/v1` — every route there answers `401` — rather than closing the
+socket.
+
 | Route                                       | What it answers                                                                                                                |
 | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
 | `POST /v1/runs`                             | `202` and a Server-Sent Events stream: `run` with the run id, the runtime's own events, then `result`                          |
@@ -117,11 +124,12 @@ drives a run on any of them.
 | `GET /v1/status`                            | the client, the loaded surfaces, the primary one, the runs in flight, whether the host is draining, and the scheduler's status |
 
 Every route is behind `Authorization: Bearer $HARNESS_HOST_TOKEN`, compared in constant time, the
-status route included. **No token, no listener at all**: `app/main.ts` starts nothing and the
-`listening` line ends `runApi=off (set HARNESS_HOST_TOKEN)`. The bearer secret says the caller may
-use the API; it never says who they are acting as. That stays the identity plug-in's answer, from
-the `surface` and `userId` the request names, resolved exactly as an adapter's message is. A run or
-a thread belonging to another principal answers `404`, the same as one that does not exist.
+status route included. **An empty token answers 401 on all five**, and the `listening` line ends
+`runApi=closed (set HARNESS_HOST_TOKEN)` rather than `runApi=open`. The bearer secret says the
+caller may use the API; it never says who they are acting as. That stays the identity plug-in's
+answer, from the `surface` and `userId` the request names, resolved exactly as an adapter's message
+is. A run or a thread belonging to another principal answers `404`, the same as one that does not
+exist.
 
 The turn runs with `deliver: 'none'` — the stream is the reply, and nothing is posted to the named
 surface — and the listener is closed before the drain at shutdown, so an open stream does not hold

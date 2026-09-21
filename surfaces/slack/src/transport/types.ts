@@ -1,3 +1,5 @@
+import type { SurfaceHttp } from '@harness/surface-api';
+
 export interface SlackPostMessageArgs {
   channel: string;
   text: string;
@@ -71,6 +73,12 @@ export interface SlackUserInfoResult {
   user?: { real_name?: string; profile?: { display_name?: string; real_name?: string } };
 }
 
+/** What `auth.test` says about the app a token belongs to. Two ids; nothing else is read. */
+export interface SlackAuthTestResult {
+  user_id?: string;
+  bot_id?: string;
+}
+
 /**
  * The slice of Slack's Web API this app uses. Declaring it ourselves keeps the
  * tests free of a Slack client: `FakeSlack` implements this and nothing else,
@@ -91,6 +99,16 @@ export interface SlackApi {
   conversations: {
     replies(args: SlackRepliesArgs): Promise<SlackRepliesResult>;
   };
+  /**
+   * Who this app is.
+   *
+   * The mention stripper and the thread rule both compare against the bot's own ids, and this is
+   * the only call that carries them: no delivery names the app it was sent to. Called once, at
+   * `start()`, so a token that is wrong fails the tenant's open rather than every message.
+   */
+  auth: {
+    test(): Promise<SlackAuthTestResult>;
+  };
   /** User groups, which is how a workspace says who is a lead and who is not. */
   usergroups: {
     list(): Promise<SlackUsergroupsListResult>;
@@ -102,9 +120,9 @@ export interface SlackApi {
 }
 
 /**
- * One block action, narrowed off Bolt's payload. Everything Bolt-specific is in `bolt.ts`, so
- * the session and its tests never touch a Bolt type — the same seam the approvals app already
- * had, moved into the adapter that owns it.
+ * One block action, narrowed off the interaction payload. Everything transport-shaped is in
+ * `events.ts`, so the session and its tests never touch a payload type — the same seam the
+ * approvals app already had, moved into the adapter that owns it.
  */
 export interface SlackAction {
   userId: string;
@@ -124,7 +142,7 @@ export interface SlackView {
   state: Record<string, Record<string, { value?: string | null }>>;
 }
 
-/** One inbound message, narrowed off Bolt's payload. `files` is already downloaded. */
+/** One inbound message, narrowed off the delivery. `files` is already downloaded. */
 export interface SlackInbound {
   userId: string;
   channel: string;
@@ -139,8 +157,8 @@ export interface SlackInbound {
   /** `path` is relative to `<storageDir>/incoming`. */
   files: { name: string; path: string }[];
   /**
-   * The workspace this event arrived from — Slack's team id — or null where the payload and the
-   * connection's own context both left it out.
+   * The workspace this event arrived from — Slack's team id — or null where neither the event nor
+   * the delivery's envelope carried one.
    *
    * It travels because the host routes on it: a pooled host matches it against the key each
    * client's document claims, and a dedicated one refuses an event from a workspace that is not
@@ -149,7 +167,7 @@ export interface SlackInbound {
   teamId: string | null;
 }
 
-/** The fields of a Bolt `message` or `app_mention` payload the classifier reads. */
+/** The fields of a `message` or `app_mention` delivery the classifier reads. */
 export interface RawMessage {
   type: 'message' | 'app_mention';
   subtype?: string;
@@ -161,7 +179,7 @@ export interface RawMessage {
   ts: string;
   thread_ts?: string;
   files?: { name?: string; url_private_download?: string }[];
-  /** The workspace the event belongs to. Absent on some payloads; the connection's context has it. */
+  /** The workspace the event belongs to. Absent on some events; the delivery's envelope has it. */
   team?: string;
 }
 
@@ -189,4 +207,11 @@ export interface SlackTransport {
    * transport's job, since it is what saw the message arrive.
    */
   notePostedIn(channel: string, messageId: string): void;
+  /**
+   * Where this transport is reached, when it is reached by a request at all.
+   *
+   * The real transport offers one and the fake does not: a test drives `FakeSlackEvents` where
+   * Slack would, which is the seam the session's own suites were written against.
+   */
+  http?: SurfaceHttp;
 }

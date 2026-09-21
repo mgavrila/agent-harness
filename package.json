@@ -17,6 +17,9 @@
     "surface:record": "pnpm --filter @harness/core-tools surface",
     "test": "pnpm lint && pnpm -r --if-present test",
     "typecheck": "pnpm -r --if-present typecheck",
+    "build": "pnpm -r --if-present build",
+    "release:version": "pnpm -r exec npm version --no-git-tag-version --allow-same-version",
+    "release:notes": "pnpm --filter @harness/scripts exec tsx src/app/changelog-cli.ts",
     "db:up": "docker compose --env-file .env -f harness/compose/docker-compose.yml up -d postgres",
     "db:down": "docker compose --env-file .env -f harness/compose/docker-compose.yml down",
     "db:migrate": "pnpm --filter @harness/db migrate",
@@ -31,7 +34,7 @@
     "evals:baseline": "pnpm --filter @harness/evals start -- --update-baseline=true",
     "host": "pnpm --filter @harness/host start",
     "new-client": "pnpm --filter @harness/scripts exec tsx src/app/cli.ts",
-    "demo:up": "docker compose --env-file .env -f harness/compose/docker-compose.yml --profile demo up -d --build",
+    "demo:up": "docker compose --env-file .env -f harness/compose/docker-compose.yml --profile demo up -d",
     "demo:down": "docker compose --env-file .env -f harness/compose/docker-compose.yml --profile demo down",
     "demo:logs": "docker compose --env-file .env -f harness/compose/docker-compose.yml --profile demo logs -f host"
   },

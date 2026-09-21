@@ -190,11 +190,50 @@ export interface PoolFixture {
   source: MemoryConfigSource;
   tenant(clientId: string): Tenant;
   surface(clientId: string): MemorySurface;
+  /**
+   * Stop this pool and leave nothing of it running: no delivery, no turn, no query.
+   *
+   * See `settleDeliveries` for why the deliveries are awaited before anything stops, and why a
+   * case that does not do this makes the *next* case fail.
+   */
   close(): Promise<void>;
 }
 
 /** A 32-byte key, base64, which is what `loadKey` requires of every deployment. */
 const TEST_ENCRYPTION_KEY = Buffer.alloc(32, 7).toString('base64');
+
+/** How long this fixture gives the turns still in flight, once the deliveries have been awaited. */
+const FIXTURE_DRAIN_MS = 10_000;
+
+/**
+ * Wait for every delivery this pool's mounted doors have acknowledged, to the end of its turn.
+ *
+ * **A door answers before it delivers.** `MemorySurface.handleHttp` acknowledges the request and
+ * hands the message to `say` on its own promise, exactly as a real transport must, so the 200 a
+ * case asserts on is sent while the turn it started is still resolving an identity, opening a
+ * thread and writing its `messages` row. Nothing in `pool.close` waits for that: `quiesce` stops
+ * the scheduler, the runner's loops and the sessions, each of which does drain its own work, and
+ * `drainActive` waits only for turns that have already reached `host.active` — which a delivery
+ * has not until `runTurn` opens its kernel.
+ *
+ * So a case that returned on the acknowledgement left a transaction running on another connection
+ * of a pool it shares with every other case in the file, and the next case's `resetDatabase`
+ * did not merely race it: `TRUNCATE` takes an `AccessExclusiveLock` on `runs` while the turn's
+ * `INSERT INTO messages` holds `messages` and needs a `RowShareLock` on `runs` for its foreign
+ * key, and Postgres ends that with `40P01 deadlock detected` on whichever of the two it picks.
+ *
+ * This is the fixture's job rather than `MemorySurface.stop`'s: `quiesce` stops the sessions
+ * *before* `invalidate` drains the tenant, so a `stop` that awaited a whole turn would make a
+ * document edit wait out that turn unbounded, where the drain that follows it is bounded on
+ * purpose.
+ */
+async function settleDeliveries(pool: HostPool): Promise<void> {
+  for (const tenant of pool.tenants.values()) {
+    for (const session of tenant.host.surfaces.all) {
+      if (session instanceof MemorySurface) await session.settled();
+    }
+  }
+}
 
 /**
  * A whole pooled host over the real kernel and Postgres, with N tenants.
@@ -255,6 +294,10 @@ export async function poolFixture(
     tenant,
     surface: (clientId) => tenant(clientId).host.surfaces.find('memory') as MemorySurface,
     close: async () => {
+      // The order a deployment shuts down in (`main.ts`), with the deliveries first: the doors'
+      // acknowledged work, then the turns anything else started, then the pool itself.
+      await settleDeliveries(pool);
+      await pool.drain(FIXTURE_DRAIN_MS);
       await pool.close();
       // So one case's script cannot reach the next case's tenant.
       scriptedTrajectories.clear();

@@ -4,7 +4,11 @@ import { handleApiRequest } from './routes.js';
 import { DEFAULT_HOST_BIND, DEFAULT_HOST_PORT, type RunApiOptions, type RunApiServer } from './types.js';
 
 /**
- * The run API's listener (spec 5.8).
+ * The host's HTTP server: the run API (spec 5.8) and every tenant's surface mounts (section 4.6).
+ *
+ * One listener, because they are one deployment's front door on one port, and a second server
+ * would be a second port to publish, a second bind to configure and a second thing to shut down.
+ * The name is the run API's because that is what it was; what it serves is in `handleApiRequest`.
  *
  * Shaped like `startHealthServer`, and for the same reasons: `ready` resolves on `'listening'` so a
  * test can bind port 0 and read back what it got, and a bind failure still surfaces as the

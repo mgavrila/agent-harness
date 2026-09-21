@@ -8,8 +8,19 @@ import { RoutingFile } from './routing.js';
 /** Bumped when a document's shape changes in a way `migrate` has to answer for. */
 export const CLIENT_DOCUMENT_VERSION = 1;
 
-/** A client id: a safe path segment, a safe Postgres `client` value, and a safe URL segment. */
-const CLIENT_ID = /^[a-z0-9][a-z0-9-]{1,63}$/;
+/**
+ * A client id: lowercase letters, digits and hyphens, 2 to 64 characters.
+ *
+ * A safe path segment, a safe Postgres `client` value and a safe URL segment, which is what the
+ * shape is for.
+ *
+ * Exported because more than one caller has to agree on it and a second copy is a second answer.
+ * The schema below validates what a document declares itself to be; `@harness/config-files` turns
+ * one into a path segment and refuses a string it cannot spell; and the host checks the segment a
+ * *request* puts in `/tenants/<clientId>/…` before it hands it to either, because that route has
+ * no bearer in front of it and a source is entitled to throw on a string that is not an id.
+ */
+export const CLIENT_ID_PATTERN = /^[a-z0-9][a-z0-9-]{1,63}$/;
 
 /** A plug-in name: the same rule `defineSurface`, the identity plug-in definer and `definePack` apply. */
 const PLUGIN_NAME = /^[a-z][a-z0-9-]*$/;
@@ -52,10 +63,9 @@ const SurfacesShape = z
       .object({
         /**
          * An optional workspace name for the memory surface, with exactly the role `teamId` has
-         * for Slack: it is what an inbound event's tenant hint is matched against. It exists
-         * because a pooled host cannot serve two live Slack tenants in this plan (decision 6),
-         * and pooled routing still has to be provable end to end — the memory surface is the one
-         * spec §9 asks the isolation work to be proved with.
+         * for Slack: it is what an inbound event's tenant hint is matched against. It exists so
+         * spec §9's pooled-tenant isolation work, which the memory surface proves because it
+         * needs no network to run in a suite, has a hint to match tenants against.
          */
         workspace: z.string().min(1).max(64).optional(),
       })
@@ -68,7 +78,7 @@ const SurfacesShape = z
 export const ClientDocumentShape = z
   .object({
     schemaVersion: z.number().int().min(1),
-    id: z.string().regex(CLIENT_ID, 'a client id is lowercase letters, digits and hyphens, 2 to 64 characters'),
+    id: z.string().regex(CLIENT_ID_PATTERN, 'a client id is lowercase letters, digits and hyphens, 2 to 64 characters'),
     displayName: z.string().trim().min(1).max(120),
     /** The persona, verbatim: what a runtime puts at the top of what the model reads. */
     persona: z.string().min(1),
@@ -132,19 +142,25 @@ export function tenantKeysOf(document: ClientDocument): { surface: string; key: 
 }
 
 /**
- * Every environment variable this document's surfaces refer to, with the surface that named it.
+ * Every environment variable this document's surfaces refer to, with the surface that named it
+ * and the field it was named under.
  *
  * The same reason `tenantKeysOf` exists: the typed surface sections are read here, so the host
  * never is. A host that checked a `signingSecret` by name would have a vendor's field in the one
- * process every client runs, which `kernel-vocabulary.test.ts` forbids `harness/host/src`. The
- * value itself never appears — a `SecretRef` names a variable and the deployment's environment
+ * process every client runs, which `kernel-vocabulary.test.ts` forbids `harness/host/src`. `field`
+ * travels as an opaque string: the host copies it into the bag the adapter is handed, and the
+ * adapter — which is allowed to know what its own fields are called — looks its variable up. The
+ * value itself never appears: a `SecretRef` names a variable and the deployment's environment
  * holds what it is worth.
  */
-export function surfaceSecretsOf(document: ClientDocument): { surface: string; env: string }[] {
-  const secrets: { surface: string; env: string }[] = [];
+export function surfaceSecretsOf(document: ClientDocument): { surface: string; field: string; env: string }[] {
+  const secrets: { surface: string; field: string; env: string }[] = [];
   const slack = document.surfaces.slack;
   if (slack) {
-    secrets.push({ surface: 'slack', env: slack.signingSecret.env }, { surface: 'slack', env: slack.botToken.env });
+    secrets.push(
+      { surface: 'slack', field: 'signingSecret', env: slack.signingSecret.env },
+      { surface: 'slack', field: 'botToken', env: slack.botToken.env },
+    );
   }
   return secrets;
 }

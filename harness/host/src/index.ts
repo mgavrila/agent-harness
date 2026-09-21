@@ -67,6 +67,7 @@ export {
   DEFAULT_HOST_BIND,
   DEFAULT_HOST_PORT,
   SSE_KEEPALIVE_MS,
+  TENANT_PREFIX,
   type RunApiOptions,
   type RunApiServer,
 } from './domain/api/types.js';

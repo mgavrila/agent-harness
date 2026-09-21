@@ -18,19 +18,16 @@ const NO_SURFACES_MESSAGE = 'this client declares no surface; at least one is re
 export interface LoadedSurfaces {
   readonly all: readonly SurfaceSession[];
   readonly primary: SurfaceSession;
-  /** The union of every loaded adapter's declared credentials, for the child-process allowlist. */
-  readonly secrets: readonly string[];
   /** `undefined` when no loaded surface has that name; the caller decides whether that is an error. */
   find(name: string): SurfaceSession | undefined;
 }
 
 /** A set over sessions that are already in hand. Every test uses it; `loadSurfaces` builds one. */
-export function surfacesOf(sessions: SurfaceSession[], secrets: readonly string[] = []): LoadedSurfaces {
+export function surfacesOf(sessions: SurfaceSession[]): LoadedSurfaces {
   if (sessions.length === 0) throw new ConfigError(NO_SURFACES_MESSAGE);
   return {
     all: sessions,
     primary: sessions[0],
-    secrets,
     find: (name) => sessions.find((s) => s.name === name),
   };
 }
@@ -50,6 +47,19 @@ function surfaceFailed(specifier: string, err: unknown, stage: 'initialise' | 'c
 }
 
 /**
+ * What one client's document says about one of its surfaces, beyond declaring it.
+ *
+ * Two opaque things, neither of which this package reads: the key an inbound event's tenant hint
+ * is matched against, and the environment variable the document named for each of that surface's
+ * credentials. Both are built in the host from `@harness/config-api`, which is the one place a
+ * typed surface section is read.
+ */
+export interface SurfaceSettings {
+  readonly tenantKey?: string;
+  readonly secrets?: Readonly<Record<string, string>>;
+}
+
+/**
  * Load and connect the surfaces the caller names — the client document's, in the order its
  * schema fixes.
  *
@@ -66,14 +76,13 @@ function surfaceFailed(specifier: string, err: unknown, stage: 'initialise' | 'c
  * reached is a startup failure naming the adapter rather than an approval nobody sees. Each entry
  * keeps the specifier it was named by, so that is the string every message here quotes.
  *
- * `tenantKeys` is the client's declared key per surface name — `tenantKeysOf(document)`, which is
- * where the typed surface sections are read — handed to each adapter as its own `tenantKey`. A
- * surface whose transport reports the workspace an event came from has no use for it.
+ * `settings` is what this client's document says about each surface it declares, folded into the
+ * bag that surface's `connect` is handed. Nothing here reads either field.
  */
 export async function loadSurfaces(
   names: string[],
   deps: SurfaceDeps,
-  tenantKeys: Readonly<Record<string, string>> = {},
+  settings: Readonly<Record<string, SurfaceSettings>> = {},
 ): Promise<LoadedSurfaces> {
   if (names.length === 0) throw new ConfigError(NO_SURFACES_MESSAGE);
   const declared: { specifier: string; surface: Surface }[] = [];
@@ -110,16 +119,14 @@ export async function loadSurfaces(
   const sessions: SurfaceSession[] = [];
   for (const { specifier, surface } of declared) {
     try {
-      sessions.push(
-        await surface.connect(
-          // Own keys only: `in` would hand an adapter that called itself `constructor` whatever
-          // `Object.prototype` has under that name.
-          Object.hasOwn(tenantKeys, surface.name) ? { ...deps, tenantKey: tenantKeys[surface.name] } : deps,
-        ),
-      );
+      // Own keys only: `in` would hand an adapter that called itself `constructor` whatever
+      // `Object.prototype` has under that name. Absent rather than undefined for a surface the
+      // document said nothing about, so an adapter's own default applies.
+      const own = Object.hasOwn(settings, surface.name) ? settings[surface.name] : undefined;
+      sessions.push(await surface.connect(own ? { ...deps, ...own } : deps));
     } catch (err) {
       surfaceFailed(specifier, err, 'connect');
     }
   }
-  return surfacesOf(sessions, [...new Set(declared.flatMap((d) => [...d.surface.secrets]))]);
+  return surfacesOf(sessions);
 }

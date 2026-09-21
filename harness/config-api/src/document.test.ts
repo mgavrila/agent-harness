@@ -125,8 +125,8 @@ describe('parseClientDocument', () => {
       }),
     );
     expect(surfaceSecretsOf(withSlack)).toEqual([
-      { surface: 'slack', env: 'SLACK_SIGNING_SECRET' },
-      { surface: 'slack', env: 'SLACK_BOT_TOKEN' },
+      { surface: 'slack', field: 'signingSecret', env: 'SLACK_SIGNING_SECRET' },
+      { surface: 'slack', field: 'botToken', env: 'SLACK_BOT_TOKEN' },
     ]);
     // A surface with no transport refers to no secret, so a document of them needs none set.
     expect(surfaceSecretsOf(parseClientDocument(fixtureDocument()))).toEqual([]);

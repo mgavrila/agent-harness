@@ -15,7 +15,6 @@ describe('loadSurfaces', () => {
     expect(surfaces.all).toHaveLength(1);
     expect(surfaces.primary.name).toBe('memory');
     expect(surfaces.find('memory')).toBe(surfaces.primary);
-    expect(surfaces.secrets).toEqual([]);
   });
 
   it('refuses an empty list rather than starting a host nobody can answer', async () => {
@@ -45,11 +44,16 @@ describe('loadSurfaces', () => {
   });
 
   it('loads slack and http together, in the documented order, with slack primary', async () => {
-    // Slack's `connect` only builds a transport from env; it opens no socket until `start()`,
-    // which loadSurfaces never calls, so a fake token is enough to prove the two load together.
+    // Slack's `connect` builds a transport from env and opens nothing: there is no socket to
+    // open any more, and `start()` — which `loadSurfaces` never calls — is the only thing that
+    // reaches Slack at all. A fake token is enough to prove the two load together.
     const slackDeps = {
       ...deps,
-      env: { SLACK_BOT_TOKEN: 'xoxb-test', SLACK_APP_TOKEN: 'xapp-test', SLACK_APPROVALS_CHANNEL: 'C0TEST' },
+      env: {
+        SLACK_BOT_TOKEN: 'xoxb-test',
+        SLACK_SIGNING_SECRET: 'a-signing-secret',
+        SLACK_APPROVALS_CHANNEL: 'C0TEST',
+      },
     };
     const surfaces = await loadSurfaces(['@harness/surface-slack', '@harness/surface-http'], slackDeps);
     expect(surfaces.all).toHaveLength(2);
@@ -62,11 +66,10 @@ describe('surfacesOf', () => {
   it('answers by name and reports an unknown one as undefined', () => {
     const memory = new MemorySurface();
     const other = new MemorySurface({ name: 'other', conversation: 'other' });
-    const surfaces = surfacesOf([memory, other], ['A_TOKEN']);
+    const surfaces = surfacesOf([memory, other]);
     expect(surfaces.primary).toBe(memory);
     expect(surfaces.find('other')).toBe(other);
     expect(surfaces.find('teams')).toBeUndefined();
-    expect(surfaces.secrets).toEqual(['A_TOKEN']);
   });
 
   it('refuses an empty list, because `primary` would be undefined and every caller assumes it', () => {

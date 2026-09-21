@@ -60,6 +60,10 @@ harness/runtime-api the Runtime contract and defineRuntime(): RunRequest, RunEve
                     RuntimeSession; the ScriptedRuntime, the fake OpenAI-wire gateway and the
                     conformance kit under its testing subpath. Depends on @harness/shared, zod
                     and the MCP client type.
+harness/sandbox-api the Sandbox contract, reserved: SandboxProvider, Sandbox, SandboxSession and
+                    ExecResult. Nothing implements it yet. MemorySandboxProvider and
+                    sandboxProviderConformance live under its testing subpath. Depends on
+                    @harness/shared only.
 harness/core-tools  the MCP server: the pack-agnostic kernel, every domain, every kernel tool.
 harness/approvals   a library the host composes: cards, decisions, the poller, the sinks, the
                     runner, health, the in-process core-tools client. Loads its messaging
@@ -67,7 +71,7 @@ harness/approvals   a library the host composes: cards, decisions, the poller, t
 harness/host        a pool of tenants: loads each client's runtime, surfaces and identity
                     plug-in by name from its document, runs one conversation turn per message,
                     and resumes a thread when an approval is decided.
-surfaces/slack      the Slack adapter: Block Kit, Bolt in Socket Mode, the Web API slice.
+surfaces/slack      the Slack adapter: Block Kit, signed requests over HTTPS, the Web API slice.
 surfaces/memory     the in-process adapter: no transport, used by the suite and for local runs.
 surfaces/http       the surface a headless caller speaks as; opens no socket, posts nothing, and
                     exists so a run driven over the run API has a thread key and an identity
@@ -359,6 +363,43 @@ stale sweep recovers the row instead. A plain `SurfaceError` from `postCard` mea
 nothing was sent — and does release the claim.
 
 `CONTRIBUTING.md`, "Adding a surface", is the worked how-to, with `surfaces/memory` as the example.
+
+## Reaching a surface
+
+A surface either opens its own connection or is reached by a request. One that is reached offers
+`http`: a mount path and a handler. The host mounts every tenant's at
+`/tenants/<clientId>/<path>` on the HTTP server it already runs for the run API — one rule for a
+dedicated deployment and a pooled one alike, because a path is the only place a transport that
+knows nothing about this deployment can be told to carry the tenant.
+
+The host resolves the client from that path through the same resolver a message goes through, so a
+dedicated host refuses another client's id and audits it, and a pooled host opens whichever tenant
+the path names. Then it hands the handler the method, the rest of the path, the lower-cased
+headers and the **raw** body, because a signature is computed over bytes.
+
+What authenticates the request is the surface's, not the host's: the host cannot check a
+transport's signature without knowing the transport, and knowing the transport is what this
+boundary exists to avoid. What the host does is audit. A handler that answers with a refusal gets
+exactly one `audit_log` row — `surface_request` / `refused` — carrying a short reason and nothing
+of the body, because a refused request is one nobody has authenticated.
+
+The Slack adapter is the worked example: one URL for events and interactions, HMAC-SHA256 over
+`v0:<timestamp>:<body>` with a five-minute window, `url_verification` answered, an acknowledgement
+inside three seconds and the turn run afterwards. `MemorySurface.mountHttp()` is the reference
+implementation, off until something calls it.
+
+## What this repository publishes
+
+Seven packages and two images, from one tag. The packages are the contracts and their testing
+kits — `@harness/shared`, `@harness/pack-api`, `@harness/config-api`, `@harness/surface-api`,
+`@harness/identity-api`, `@harness/runtime-api`, `@harness/sandbox-api` — built to `dist/` with
+declarations and attached to the GitHub Release as tarballs, with `tool-surface.json` and
+`compose-surface.yaml` beside them. The images are the host and the files worker, at
+`ghcr.io/mgavrila`, and Compose pulls them by `HARNESS_IMAGE_TAG`.
+
+Everything else is private: the kernel, the host, the adapters, the packs. A consumer runs those
+as the image and implements the contracts. That division is the boundary of decision 1b in one
+sentence — the platform depends on what this repository _promises_, not on what it _is_.
 
 ## Identity
 
@@ -847,11 +888,11 @@ library the test imports and the CLI `pnpm surface:record` runs.
 Two more suites guard the boundary the tool surface cannot see, because a kernel can keep every
 schema byte and still know about one area of the product:
 
-| Suite                                              | What it fails on                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| -------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `harness/core-tools/src/kernel-vocabulary.test.ts` | a credentialing word in `harness/core-tools/src` or `evals/src`, tests and `shared/redaction/` aside, and a messaging word (`slack`, `bolt`, `block kit`, `thread_ts`, `blocks`) in the kernel or in a pack, a framework or vendor word (`deepagents`, `langchain`, `langgraph`, `entra`, `teams`) and a deployment name (the client's, the runtime's) in the kernel, the identity contract, the identity plug-in, the files worker or the evals. The allowlist is empty, and one case asserts each regex still catches what it claims. |
-| `harness/approvals/src/host-vocabulary.test.ts`    | a Slack word in `harness/approvals/src`, tests aside. Its allowlist is empty too.                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| `harness/core-tools/src/app/dual-pack.test.ts`     | two packs loaded at once whose catalogues collide, whose documents route to the wrong target, or whose records reach each other's reads. It is the suite `packs/stories` exists for.                                                                                                                                                                                                                                                                                                                                                    |
+| Suite                                              | What it fails on                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `harness/core-tools/src/kernel-vocabulary.test.ts` | a credentialing word in `harness/core-tools/src` or `evals/src`, tests and `shared/redaction/` aside, and a messaging word (`slack`, `bolt`, `block kit`, `thread_ts`, `blocks`, `socket mode`) in the kernel or in a pack, a framework or vendor word (`deepagents`, `langchain`, `langgraph`, `entra`, `teams`) and a deployment name (the client's, the runtime's) in the kernel, the identity contract, the identity plug-in, the files worker or the evals. The allowlist is empty, and one case asserts each regex still catches what it claims. |
+| `harness/approvals/src/host-vocabulary.test.ts`    | a Slack word in `harness/approvals/src`, tests aside. Its allowlist is empty too.                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `harness/core-tools/src/app/dual-pack.test.ts`     | two packs loaded at once whose catalogues collide, whose documents route to the wrong target, or whose records reach each other's reads. It is the suite `packs/stories` exists for.                                                                                                                                                                                                                                                                                                                                                                   |
 
 And `harness/db/src/domain/migration-0008.test.ts` replays the shipped migration file over a
 fixture of the pre-0008 schema, so the one hand-written data section in the tree is checked
