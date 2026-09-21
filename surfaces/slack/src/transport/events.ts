@@ -28,6 +28,9 @@ export const SLACK_MOUNT_PATH = 'slack/events';
 /** An acknowledgement: 200 and nothing else, within the three seconds Slack allows. */
 const ACK: SurfaceHttpResponse = { status: 200 };
 
+/** A delivery this app cannot read at all: not JSON, or JSON without the field it claims to have. */
+const BAD_REQUEST: SurfaceHttpResponse = { status: 400, refusal: { reason: 'bad_request' } };
+
 /** The envelope of an Events API delivery, narrowed to what is read here. */
 interface EventEnvelope {
   type?: string;
@@ -49,6 +52,19 @@ interface InteractivePayload {
     private_metadata?: string;
     state?: { values?: Record<string, Record<string, { value?: string | null }>> };
   };
+}
+
+/**
+ * What to answer an Events API delivery, and the work it admits to.
+ *
+ * `delivery` is set only for a message, which is the one thing here that is read against this
+ * app's own ids. Everything else `handleEvent` answers — the handshake, an event with no rule, a
+ * body that is not JSON — is decided from the request alone, so the caller can answer it without
+ * knowing who this app is.
+ */
+interface EventOutcome {
+  response: SurfaceHttpResponse;
+  delivery?: () => Promise<void>;
 }
 
 /** The two event types the classifier has rules for, and only when they carry what it reads. */
@@ -187,31 +203,17 @@ export function eventsTransport(
     });
   };
 
-  /**
-   * What to answer an Events API delivery, and the work it admits to.
-   *
-   * `delivery` is set only for a message, which is the one thing here that is read against this
-   * app's own ids. Everything else this function answers — the handshake, an event with no rule,
-   * a body that is not JSON — is decided from the request alone, so the caller can answer it
-   * without knowing who this app is.
-   */
-  interface EventOutcome {
-    response: SurfaceHttpResponse;
-    delivery?: () => Promise<void>;
-  }
-
   const handleEvent = (body: string): EventOutcome => {
     let envelope: EventEnvelope;
     try {
       envelope = JSON.parse(body) as EventEnvelope;
     } catch {
-      return { response: { status: 400, refusal: { reason: 'bad_request' } } };
+      return { response: BAD_REQUEST };
     }
     // The one-time handshake when a request URL is saved in an app's configuration. It is signed
     // like everything else, so this answers only a URL whose secret is already right.
     if (envelope.type === 'url_verification') {
-      if (typeof envelope.challenge !== 'string')
-        return { response: { status: 400, refusal: { reason: 'bad_request' } } };
+      if (typeof envelope.challenge !== 'string') return { response: BAD_REQUEST };
       return {
         response: {
           status: 200,
@@ -226,24 +228,40 @@ export function eventsTransport(
     return { response: ACK, delivery: () => deliver(raw, teamId) };
   };
 
+  /**
+   * Acknowledge an interaction and start the handler it belongs to, if one is registered.
+   *
+   * Always a 200: an interaction that arrives before its handler does is acknowledged and dropped
+   * with a line, because leaving it unacknowledged shows a person an error for something this
+   * host has no opinion about. `what` names the interaction in both the warning and the log line
+   * a failed handler writes.
+   */
+  const acknowledge = <T>(
+    what: string,
+    handler: ((value: T) => Promise<void>) | null,
+    value: T,
+  ): SurfaceHttpResponse => {
+    if (!handler) {
+      log.warn(`a Slack ${what} arrived before a handler was registered`);
+      return ACK;
+    }
+    later(`a Slack ${what}`, () => handler(value));
+    return ACK;
+  };
+
   const handleInteractive = (body: string): SurfaceHttpResponse => {
     const raw = new URLSearchParams(body).get('payload');
-    if (raw === null) return { status: 400, refusal: { reason: 'bad_request' } };
+    if (raw === null) return BAD_REQUEST;
     let payload: InteractivePayload;
     try {
       payload = JSON.parse(raw) as InteractivePayload;
     } catch {
-      return { status: 400, refusal: { reason: 'bad_request' } };
+      return BAD_REQUEST;
     }
     if (payload.type === 'block_actions') {
       const action = payload.actions?.[0];
-      const handler = actionHandler;
       if (!action) return ACK;
-      if (!handler) {
-        log.warn('a Slack action arrived before a handler was registered');
-        return ACK;
-      }
-      const mapped: SlackAction = {
+      return acknowledge('action', actionHandler, {
         userId: payload.user?.id ?? 'unknown',
         // The channel the interactive message lives in.
         channel: payload.channel?.id ?? '',
@@ -251,27 +269,19 @@ export function eventsTransport(
         value: action.value ?? '',
         triggerId: payload.trigger_id ?? null,
         messageTs: payload.message?.ts ?? null,
-      };
-      later('a Slack action', () => handler(mapped));
-      return ACK;
+      });
     }
     if (payload.type === 'view_submission') {
       const view = payload.view;
-      const handler = viewHandler;
       if (!view) return ACK;
-      if (!handler) {
-        log.warn('a Slack view submission arrived before a handler was registered');
-        return ACK;
-      }
-      const mapped: SlackView = {
+      // The empty 200 `acknowledge` answers with closes the modal, which is what accepting a
+      // submission means.
+      return acknowledge('view submission', viewHandler, {
         userId: payload.user?.id ?? 'unknown',
         callbackId: view.callback_id ?? '',
         privateMetadata: view.private_metadata ?? '',
         state: view.state?.values ?? {},
-      };
-      later('a Slack view submission', () => handler(mapped));
-      // An empty 200 closes the modal, which is what accepting a submission means.
-      return ACK;
+      });
     }
     return ACK;
   };
