@@ -32,9 +32,10 @@ a document that names its own deployments, and two lists a dashboard can hold.
   like `/v1/usage`. The column lists are in the runbook and are the whole of the guarantee: no
   approval payload, encrypted or not.
 - **Per-surface health on `GET /v1/status`.** `surfaces` is now `[{ name, live, detail? }]`, fed
-  by an optional `SurfaceSession.health()`. A surface that offers none is live; `detail` is a
-  fixed sentence its adapter owns. The route makes no outbound call: Slack reports the identity
-  it has already fetched.
+  by an optional `SurfaceSession.health()` — synchronous, non-throwing, and answering from state
+  the adapter already holds. A surface that offers none is live; `detail` is a fixed sentence its
+  adapter owns. The route makes no outbound call: Slack reports the identity it fetched when the
+  tenant opened.
 - **A streaming seam.** `SurfaceHttpResponse.body` is now `string | AsyncIterable<string>`, and
   `SurfaceHttpRequest` carries `clientId` and `signal`. The host writes the head, pipes each chunk
   as it is yielded and aborts the signal when the caller hangs up. `MemorySurface` in

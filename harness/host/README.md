@@ -127,9 +127,10 @@ socket.
 | `GET /v1/memory?scope=&principal=&cursor=&limit=` | a cursor-paged, tenant-scoped page of this client's memory entries, oldest first                                                                                   |
 
 A surface reports whether it can be reached, and the status route asks it: a session's optional
-`health()` answers from what its adapter already knows, never from a call to the outside world,
-and a surface that offers none is reported live. `detail` is a fixed sentence the adapter owns,
-copied and never read.
+`health()` is synchronous, answers from what its adapter already knows, and never calls the
+outside world, so polling this route costs a tenant nothing and no adapter can hold it up. A
+surface that offers none is reported live; `detail` is a fixed sentence the adapter owns, copied
+and never read.
 
 A surface's own mount may answer a stream instead of a whole body — `SurfaceHttpResponse.body` as
 an async iterable of strings — and the host pipes each chunk as it is produced without reading or

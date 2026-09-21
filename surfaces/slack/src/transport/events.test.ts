@@ -203,16 +203,20 @@ describe('the Slack transport as an HTTP door', () => {
     const session = createSlackSession(t, config());
     // Before `start()`: nothing has been asked, so the workspace has not been reached and the
     // sentence says exactly that, in this adapter's own words.
-    expect(await session.health!()).toEqual({
+    expect(session.health!()).toEqual({
       live: false,
       detail: 'the Slack workspace has not been reached yet',
     });
+    // The hazard this shape was designed around, pinned: reporting health asks Slack nothing. A
+    // dashboard polls this route, and a poll that called `auth.test` would be one outbound call
+    // per tenant per tick — so the count is unmoved before `start()` has asked, and unmoved by
+    // every later report.
     expect(api.authTestCalls).toBe(0);
 
     await t.events.start();
-    expect(await session.health!()).toEqual({ live: true });
-    // The hazard this route was designed around: a dashboard polls it, and a poll that asked
-    // Slack would be one call per tenant per tick.
+    expect(api.authTestCalls).toBe(1);
+    expect(session.health!()).toEqual({ live: true });
+    expect(session.health!()).toEqual({ live: true });
     expect(api.authTestCalls).toBe(1);
 
     // A workspace that refuses gets the other fixed sentence, and never Slack's own error text.
@@ -220,7 +224,7 @@ describe('the Slack transport as an HTTP door', () => {
     refusing.failWith = 'invalid_auth';
     const t2 = eventsTransport(config(), log, '/nonexistent/storage', refusing);
     await expect(t2.events.start()).rejects.toThrow();
-    const health = await createSlackSession(t2, config()).health!();
+    const health = createSlackSession(t2, config()).health!();
     expect(health).toEqual({ live: false, detail: 'the Slack workspace refused this app' });
     expect(JSON.stringify(health)).not.toContain('invalid_auth');
   });

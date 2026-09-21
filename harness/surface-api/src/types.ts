@@ -340,12 +340,18 @@ export interface SurfaceSession {
   /**
    * Whether this surface can be reached, reported from what the adapter already knows.
    *
+   * **Synchronous and non-throwing**, and it answers from memoised state: it never calls the
+   * outside world, and it never starts the call that would fill that state. `GET /v1/status` is a
+   * dashboard's poll — one outbound call per tenant per tick would be a rate limit the host does
+   * not control, and an adapter that awaited one could hold the whole status route up. A
+   * transport asks at `start()`, which the host does when a tenant opens; a `start()` that failed
+   * reports `live: false` until the next delivery asks again, and the retry belongs there rather
+   * than in a status route.
+   *
    * Optional: a session with none is reported live, because the host has it open and its adapter
-   * has nothing to add. It answers from memoised state and **never calls the outside world** —
-   * `GET /v1/status` is a dashboard's poll, and a poll that made one outbound call per tenant per
-   * tick would be a rate limit the host does not control.
+   * has nothing to add.
    */
-  health?(): Promise<SurfaceHealth>;
+  health?(): SurfaceHealth;
   /**
    * Who this surface's users are and what groups they are in, when it can say.
    *

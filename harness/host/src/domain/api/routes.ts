@@ -222,17 +222,15 @@ async function threadRoute(host: Host, url: URL, res: ServerResponse, threadId: 
  * adapter has to add.
  *
  * A session that offers no `health` is live — the host has it open and its adapter has nothing to
- * say — and one whose `health` throws or rejects is not, with nothing said: a status route that
- * failed because one adapter's getter broke would hide every other surface's state. `detail` is
- * opaque text the host copies and never reads, which is what keeps a vendor's vocabulary out of
- * this file.
+ * say. The contract says the call is synchronous and does not throw, so the route cannot be held
+ * up by an adapter and cannot be brought down by one; the `try` is belt and braces, because a
+ * status that failed over one adapter's broken getter would hide every other surface's state.
+ * `detail` is opaque text the host copies and never reads, which is what keeps a vendor's
+ * vocabulary out of this file.
  */
-async function surfaceStatus(
-  session: SurfaceSession,
-  log: Logger,
-): Promise<{ name: string; live: boolean; detail?: string }> {
+function surfaceStatus(session: SurfaceSession, log: Logger): { name: string; live: boolean; detail?: string } {
   try {
-    const health = await session.health?.();
+    const health = session.health?.();
     if (!health) return { name: session.name, live: true };
     // The two fields the contract names, copied one at a time rather than spread: an adapter
     // that answered with more than it was asked would otherwise put whatever it added into a
@@ -254,10 +252,10 @@ async function surfaceStatus(
  * Counts and names only, never a conversation, a principal or a message — the same rule `/healthz`
  * follows, and for the same reason.
  */
-async function statusRoute(host: Host, res: ServerResponse, scheduler: { status(): SchedulerStatus }): Promise<void> {
+function statusRoute(host: Host, res: ServerResponse, scheduler: { status(): SchedulerStatus }): void {
   json(res, 200, {
     client: host.client,
-    surfaces: await Promise.all(host.surfaces.all.map((session) => surfaceStatus(session, host.log))),
+    surfaces: host.surfaces.all.map((session) => surfaceStatus(session, host.log)),
     primary_surface: host.surfaces.primary.name,
     runs_in_flight: host.active.size,
     draining: host.draining,

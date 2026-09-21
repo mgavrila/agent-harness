@@ -269,18 +269,21 @@ describe('the run API: a thread and the status', () => {
   it('reports a surface that cannot be reached, with the sentence its adapter owns and nothing else', async () => {
     const a = await api([]);
     const session = a.f.tenant(CLIENT).host.surfaces.primary as unknown as {
-      health: () => Promise<{ live: boolean; detail?: string }>;
+      health: () => { live: boolean; detail?: string };
     };
     const detail = 'the workspace has not been reached yet';
-    session.health = () => Promise.resolve({ live: false, detail, token: 'xoxb-never' } as never);
+    session.health = () => ({ live: false, detail, token: 'xoxb-never' }) as never;
     const body = (await (await a.get('/v1/status')).json()) as { surfaces: unknown[] };
     // The two fields the contract names, copied verbatim, and not one other thing off the
     // session: a status line carries a fixed sentence, never a token and never a conversation.
     expect(body.surfaces).toEqual([{ name: 'memory', live: false, detail }]);
 
-    // And an adapter whose own getter breaks costs its line, not the route: every other surface
-    // still reports, and nothing of the failure reaches the caller.
-    session.health = () => Promise.reject(new Error('xoxb-never in an adapter’s stack'));
+    // And an adapter whose own getter breaks costs its line, not the route: the contract says
+    // `health` does not throw, and this is what the host does when one does anyway — every other
+    // surface still reports, and nothing of the failure reaches the caller.
+    session.health = () => {
+      throw new Error('xoxb-never in an adapter’s stack');
+    };
     const broken = await a.get('/v1/status');
     expect(broken.status).toBe(200);
     expect(((await broken.json()) as { surfaces: unknown[] }).surfaces).toEqual([{ name: 'memory', live: false }]);

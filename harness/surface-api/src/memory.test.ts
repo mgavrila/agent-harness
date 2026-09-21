@@ -218,10 +218,11 @@ describe('MemorySurface', () => {
 
   it('reports itself live between start and stop, which is the shape a status route reads', async () => {
     const surface = new MemorySurface();
-    expect(await surface.health()).toEqual({ live: false, detail: 'this door is not open' });
+    // Synchronous, as the contract says: a status route reads it without awaiting anything.
+    expect(surface.health()).toEqual({ live: false, detail: 'this door is not open' });
     await surface.start();
-    expect(await surface.health()).toEqual({ live: true });
+    expect(surface.health()).toEqual({ live: true });
     await surface.stop();
-    expect(await surface.health()).toEqual({ live: false, detail: 'this door is not open' });
+    expect(surface.health()).toEqual({ live: false, detail: 'this door is not open' });
   });
 });

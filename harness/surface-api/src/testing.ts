@@ -387,14 +387,12 @@ export class MemorySurface implements SurfaceSession {
   }
 
   /**
-   * What this door already knows about itself, which is the two flags above. It reaches nothing,
-   * exactly as the contract says an adapter's must not, so a host test can drive the whole shape
-   * of `GET /v1/status` without a transport.
+   * What this door already knows about itself, which is the two flags above. Synchronous and
+   * reaching nothing, exactly as the contract says an adapter's must be, so a host test can drive
+   * the whole shape of `GET /v1/status` without a transport.
    */
-  health(): Promise<SurfaceHealth> {
-    return Promise.resolve(
-      this.started && !this.stopped ? { live: true } : { live: false, detail: 'this door is not open' },
-    );
+  health(): SurfaceHealth {
+    return this.started && !this.stopped ? { live: true } : { live: false, detail: 'this door is not open' };
   }
 
   /**
