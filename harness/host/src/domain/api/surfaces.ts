@@ -165,11 +165,11 @@ function send(res: ServerResponse, response: SurfaceHttpResponse): void {
  * whether the client does not exist, this host does not serve it, or it serves it and no surface
  * of it claims that path. This prefix is in front of the bearer, so a body that said "no such
  * client" would tell an unauthenticated caller which kind of miss it had hit, and the kind is the
- * useful part: it is the difference between a wrong id and a right id at a wrong path. The
- * distinction still exists where it is worth keeping — a dedicated host's refusal is a tenant
- * boundary somebody tried to cross and is written to the audit log, and a pooled host asked for a
- * client nobody has writes nothing, because nobody was refused — but it is in the audit log, not
- * in the answer.
+ * useful part: it is the difference between a wrong id and a right id at a wrong path. Only one
+ * of these misses is written down anywhere: a dedicated host asked for a client it does not serve,
+ * which is a tenant boundary somebody tried to cross and is audited as such (invariant 19). A
+ * malformed id, a client nobody has and a path no surface claims all write nothing, because
+ * nobody was refused — there is nobody there.
  *
  * **What this does not hide, stated plainly: that a tenant exists.** Every surface's mount path
  * is a public constant, so a caller who knows one and guesses the id gets an answer from the
