@@ -1,7 +1,8 @@
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { bearerOk, readBody } from './routes.js';
+import { readBody } from './http.js';
+import { bearerOk } from './routes.js';
 import { API_MAX_BODY_BYTES } from './types.js';
 
 describe('bearerOk', () => {

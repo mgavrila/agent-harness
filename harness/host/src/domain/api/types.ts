@@ -42,8 +42,25 @@ export const DEFAULT_HOST_PORT = 8788;
  */
 export const CLIENT_HEADER = 'x-harness-client';
 
+/**
+ * Where every tenant's surface mounts hang: `/tenants/<clientId>/<the surface's own path>`.
+ *
+ * One rule for a dedicated host and a pooled one alike (spec decision 4, which allows the tenant
+ * to be resolved from a workspace key the surface carries, an HTTP header, or a path). A path, not
+ * a header, because a path is the only one of the three a transport that knows nothing about this
+ * deployment can be told to use — an app's request URL is configured once, in the app, and it
+ * carries the tenant with it. Nothing below this prefix is behind the bearer: what protects it is
+ * the surface's own verification of its own transport's signature.
+ */
+export const TENANT_PREFIX = '/tenants/';
+
 export interface RunApiOptions {
-  /** `HARNESS_HOST_TOKEN`. Never empty: with no token there is no API (decision 13). */
+  /**
+   * `HARNESS_HOST_TOKEN`. **Empty closes `/v1/*`, it does not close the listener**: this server
+   * also carries every tenant's surface mounts, which have their own protection and must answer
+   * whether or not this deployment uses the run API. An empty token is refused explicitly rather
+   * than compared, because two empty buffers compare equal and `Bearer ` would otherwise pass.
+   */
   token: string;
   bind?: string;
   port?: number;

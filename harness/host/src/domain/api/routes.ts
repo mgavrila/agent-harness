@@ -11,7 +11,9 @@ import type { Host } from '../host.js';
 import type { SchedulerStatus } from '../playbooks/scheduler.js';
 import type { HostPool } from '../tenancy/types.js';
 import { WITHHELD, findOrCreateThread } from '../threads/repository.js';
+import { json, readBody } from './http.js';
 import { findRunFor, readThreadFor } from './repository.js';
+import { handleSurfaceRequest } from './surfaces.js';
 import { sseStream } from './sse.js';
 import { USAGE_DEFAULT_DAYS, USAGE_MAX_DAYS, endOfUtcDay, readUsage, startOfUtcDay } from './usage.js';
 import {
@@ -19,6 +21,7 @@ import {
   API_MAX_BODY_BYTES,
   API_MAX_TEXT_CHARS,
   CLIENT_HEADER,
+  TENANT_PREFIX,
   type RunApiOptions,
 } from './types.js';
 
@@ -43,12 +46,6 @@ const OpenRunShape = z
   })
   .strict();
 
-/** `then` runs once the body is on the wire: what the 413 path hangs the socket's teardown on. */
-function json(res: ServerResponse, status: number, body: unknown, then?: () => void): void {
-  res.writeHead(status, { 'content-type': 'application/json' });
-  res.end(JSON.stringify(body), then);
-}
-
 /**
  * Constant-time on the bytes, after a length check.
  *
@@ -61,38 +58,6 @@ export function bearerOk(header: string | undefined, token: string): boolean {
   const offered = Buffer.from(header.slice(prefix.length), 'utf8');
   const expected = Buffer.from(token, 'utf8');
   return offered.length === expected.length && timingSafeEqual(offered, expected);
-}
-
-/**
- * Read the body, refusing past the cap while it arrives rather than after.
- *
- * Past the cap this stops consuming: the `data` handler comes off and the request is paused, so
- * nothing further is read off the socket and what was already held is released. It does not
- * destroy the connection — a 413 cannot be written down a socket this function has torn up, and a
- * caller told nothing learns nothing. The caller answers, and hangs the teardown on the answer
- * being flushed, so the read stays bounded either way.
- */
-export async function readBody(req: IncomingMessage): Promise<{ ok: true; text: string } | { ok: false }> {
-  return new Promise((resolve) => {
-    let chunks: Buffer[] = [];
-    let size = 0;
-    const onData = (chunk: Buffer): void => {
-      size += chunk.length;
-      if (size > API_MAX_BODY_BYTES) {
-        // Both, because removing the last `data` listener does not by itself stop a flowing stream.
-        req.off('data', onData);
-        req.pause();
-        chunks = [];
-        resolve({ ok: false });
-        return;
-      }
-      chunks.push(chunk);
-    };
-    req.on('data', onData);
-    // Already settled if the cap tripped; a promise keeps its first answer.
-    req.on('end', () => resolve({ ok: true, text: Buffer.concat(chunks).toString('utf8') }));
-    req.on('error', () => resolve({ ok: false }));
-  });
 }
 
 type Caller = { ok: true; principal: Principal } | { ok: false; status: number; error: string };
@@ -315,13 +280,17 @@ async function usageRoute(host: Host, url: URL, res: ServerResponse): Promise<vo
 }
 
 /**
- * Route one request. Every route is behind the bearer check, and then behind the tenant check.
+ * Route one request: the run API below `/v1`, and every tenant's surface mounts below `/tenants`.
  *
- * `x-harness-client` names the client. On a dedicated host it may be absent, and a value that is
- * not that host's client is refused; on a pooled host it is required, because a pool that picked
- * a tenant for a caller who did not name one would pick the wrong one the day it had two. A
- * refusal is 404 with the same body a nonexistent route gets, so the API never confirms that a
- * client somebody guessed at exists.
+ * Every `/v1` route is behind the bearer check, and then behind the tenant check. `/tenants` is
+ * in front of both, for the reason in the body, and resolves its tenant from the path.
+ *
+ * `x-harness-client` names the client on the run API. On a dedicated host it may be absent, and a
+ * value that is not that host's client is refused; on a pooled host it is required, because a
+ * pool that picked a tenant for a caller who did not name one would pick the wrong one the day it
+ * had two. A refusal is 404 with the same body a nonexistent route gets, so the API never
+ * confirms that a client somebody guessed at exists — and `handleSurfaceRequest` keeps the same
+ * property below `/tenants`, where there is no bearer in front of it to keep it.
  */
 export async function handleApiRequest(
   pool: HostPool,
@@ -331,7 +300,21 @@ export async function handleApiRequest(
 ): Promise<void> {
   const url = new URL(req.url ?? '/', 'http://run-api.invalid');
   const route = url.pathname.replace(/\/+$/, '') || '/';
-  if (!bearerOk(req.headers.authorization, opts.token)) return json(res, 401, { error: 'unauthorised' });
+  // In front of the bearer, and deliberately: a tenant's surface is reached by a transport that
+  // knows nothing about this deployment's secrets and everything about its own signature, so the
+  // check that matters happens inside the surface. Spec section 4.6.
+  //
+  // The bare prefix is matched as well as everything below it, because the normalisation above
+  // strips the trailing slash: `/tenants/` and `/tenants` are both the string `/tenants` by the
+  // time this runs, and falling through would answer 401 for a request that names no tenant at
+  // all rather than the 404 it deserves. `handleSurfaceRequest` answers that case already — the
+  // slice is empty, so there is no client id.
+  if (route === '/tenants' || route.startsWith(TENANT_PREFIX)) return handleSurfaceRequest(pool, req, res, route);
+  // An empty configured token is refused before it is compared: `timingSafeEqual` on two empty
+  // buffers is true, so `Bearer ` would otherwise authenticate a deployment that set no secret.
+  if (opts.token === '' || !bearerOk(req.headers.authorization, opts.token)) {
+    return json(res, 401, { error: 'unauthorised' });
+  }
   const named = req.headers[CLIENT_HEADER];
   const clientId = typeof named === 'string' && named.trim() !== '' ? named.trim() : null;
   const resolved = pool.resolver.resolve({ from: 'api', clientId });

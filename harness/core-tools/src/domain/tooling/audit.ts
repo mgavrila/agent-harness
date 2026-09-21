@@ -4,8 +4,13 @@ import type { ActionClass } from './policy.js';
 
 export { hashArgs };
 
-/** `unauthorised` is the host's own decision (spec 3.2): a message from nobody the identity plug-in knows. */
-export type Decision = 'auto' | 'approval' | 'blocked' | 'error' | 'unauthorised';
+/**
+ * `unauthorised` is the host's own decision (spec 3.2): a message from nobody the identity plug-in
+ * knows. `refused` is the other one: a request a surface turned away at the door — an unsigned
+ * one, a stale one, one naming another tenant — where nobody was identified at all, so nobody was
+ * refused authorisation. Two words because an operator reading the audit log has two questions.
+ */
+export type Decision = 'auto' | 'approval' | 'blocked' | 'error' | 'unauthorised' | 'refused';
 
 export interface AuditEntry {
   client: string;

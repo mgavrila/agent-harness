@@ -59,22 +59,21 @@ const health = startHealthServer({
   },
 });
 
-// The run API (spec 5.8). No bearer secret, no listener: a control plane that opened a socket
-// with no bearer secret because a variable was missing is the failure this avoids. One listener
-// per process, whatever the tenancy: it resolves the tenant a request belongs to per request.
+// The host's HTTP server: the run API (spec 5.8) below `/v1`, and every tenant's surface mounts
+// below `/tenants` (spec section 4.6). It always listens, because a surface reached by a request
+// has to be reachable whether or not this deployment uses the run API — and an empty
+// HARNESS_HOST_TOKEN closes `/v1` rather than closing the socket. One listener per process,
+// whatever the tenancy: it resolves the tenant a request belongs to per request.
 const hostToken = (optionalEnv('HARNESS_HOST_TOKEN') ?? '').trim();
-const runApi =
-  hostToken === ''
-    ? null
-    : startRunApi(pool, {
-        token: hostToken,
-        bind: envOrDefault('HARNESS_HOST_BIND', DEFAULT_HOST_BIND),
-        port: port('HARNESS_HOST_PORT', DEFAULT_HOST_PORT),
-      });
-if (runApi) await runApi.ready;
+const runApi = startRunApi(pool, {
+  token: hostToken,
+  bind: envOrDefault('HARNESS_HOST_BIND', DEFAULT_HOST_BIND),
+  port: port('HARNESS_HOST_PORT', DEFAULT_HOST_PORT),
+});
+await runApi.ready;
 
 log.info(
-  `listening (mode=${pool.resolver.mode}, tenants=${[...pool.tenants.keys()].join(',') || 'none'}, runApi=${runApi ? 'on' : 'off (set HARNESS_HOST_TOKEN)'})`,
+  `listening (mode=${pool.resolver.mode}, tenants=${[...pool.tenants.keys()].join(',') || 'none'}, runApi=${hostToken === '' ? 'closed (set HARNESS_HOST_TOKEN)' : 'open'})`,
 );
 
 async function shutdown(signal: string): Promise<void> {
@@ -82,7 +81,7 @@ async function shutdown(signal: string): Promise<void> {
   try {
     // Before the drain: nothing new is accepted while the turns in flight unwind, and the open
     // event streams are closed rather than holding the shutdown for as long as a caller listens.
-    await runApi?.close();
+    await runApi.close();
     // Abort every tenant's turns and wait for them, bounded, before anything they are still
     // using goes away: each tenant's `close` ends its runtime and `closeDb` the pool they share,
     // and a turn that loses that race leaves its `runs` row `running` with nothing to sweep it.

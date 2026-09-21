@@ -25,6 +25,7 @@ import {
   type EnvSource,
   type Logger,
 } from '@harness/shared';
+import { assertMounts } from '../api/surfaces.js';
 import { TIMEOUT_MARGIN_MS } from '../conversation.js';
 import type { Host, HostBudget } from '../host.js';
 import { syncPlaybooks } from '../playbooks/repository.js';
@@ -164,6 +165,10 @@ async function buildTenant(pool: HostPool, loaded: LoadedDocument, opened: Stopp
     // file names no surface's own field, exactly as `assertSecretsPresent` does not.
     Object.fromEntries(tenantKeysOf(document).map(({ surface, key }) => [surface, key])),
   );
+  // Before anything is started: a mount path that could climb out of its tenant prefix, or two
+  // surfaces claiming one path, is this client's configuration being wrong, and a tenant that
+  // failed at its first request instead would fail it for whoever sent it.
+  assertMounts(config.client, surfaces.all);
   for (const session of surfaces.all) opened.push({ what: `surface "${session.name}"`, stop: () => session.stop() });
 
   // Identity comes after the surfaces, and that is a deliberate change of startup order: a
