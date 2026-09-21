@@ -372,6 +372,42 @@ describe("the Slack transport and the app's own identity", () => {
     expect(seen).toEqual([]);
   });
 
+  it('asks again after a failed identity, so one unreachable moment does not close the door', async () => {
+    // What is memoised is the asking, not a failure to ask: a workspace that is briefly
+    // unreachable would otherwise leave this transport answering 503 for the life of the
+    // process, because the host keeps a tenant whose `start()` rejected. The request that saw
+    // the failure is still refused; the next one re-asks.
+    const api = new FakeSlack();
+    let attempts = 0;
+    api.auth = {
+      test: () => {
+        attempts += 1;
+        return attempts === 1
+          ? Promise.reject(new Error('service_unavailable'))
+          : Promise.resolve({ user_id: 'U0BOTUSER', bot_id: 'B0BOTID' });
+      },
+    };
+    const t = eventsTransport(slackConfig(env), log, '/nonexistent/storage', api);
+    const seen: SlackInbound[] = [];
+    t.events.onMessage(async (message) => {
+      seen.push(message);
+    });
+    const body = eventCallback({ ...channelMention, text: '<@U0BOTUSER> hello there' });
+    const refused = await t.http!.handle(signed(body));
+    expect(refused.status).toBe(503);
+    expect(refused.refusal).toEqual({ reason: 'identity_unavailable' });
+    await settle();
+    expect(seen).toEqual([]);
+    // The second delivery is answered and run, against the identity the retry learned.
+    const delivered = await t.http!.handle(signed(body));
+    expect(delivered.status).toBe(200);
+    expect(delivered.refusal).toBeUndefined();
+    await settle();
+    expect(seen).toHaveLength(1);
+    expect(seen[0].text).toBe('hello there');
+    expect(attempts).toBe(2);
+  });
+
   it('still answers the handshake when it could not learn who this app is', async () => {
     // The identity is what a message is *classified* against; a handshake is not classified. An
     // operator diagnosing a bad bot token has to be able to re-verify the Request URL, and that

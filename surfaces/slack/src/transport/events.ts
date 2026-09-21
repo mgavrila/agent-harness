@@ -132,11 +132,23 @@ export function eventsTransport(
    *
    * Not begun when the transport is built: `connect` reaches nothing, which is what lets a client
    * document be loaded and its surfaces built without a workspace answering.
+   *
+   * What is memoised is the asking, and a rejection is not an answer: the memo is dropped when the
+   * fetch fails, so the next caller asks again. The request that saw the failure is still refused
+   * and `start()` still fails loudly — but a workspace unreachable for a moment would otherwise
+   * leave this transport refusing every delivery for the life of the process, because the host
+   * keeps a tenant whose `start()` rejected.
    */
   const identified = (): Promise<void> => {
-    identity ??= api.auth.test().then((result) => {
-      bot = { userId: result.user_id, botId: result.bot_id };
-    });
+    identity ??= api.auth
+      .test()
+      .then((result) => {
+        bot = { userId: result.user_id, botId: result.bot_id };
+      })
+      .catch((err: unknown) => {
+        identity = null;
+        throw err;
+      });
     return identity;
   };
 
