@@ -11,7 +11,7 @@ import type { Host } from '../host.js';
 import type { SchedulerStatus } from '../playbooks/scheduler.js';
 import type { HostPool } from '../tenancy/types.js';
 import { WITHHELD, findOrCreateThread } from '../threads/repository.js';
-import { json, readBody } from './http.js';
+import { json, readBody, tooLarge } from './http.js';
 import {
   APPROVAL_STATUSES,
   MEMORY_SCOPES,
@@ -25,14 +25,7 @@ import { findRunFor, readThreadFor } from './repository.js';
 import { handleSurfaceRequest } from './surfaces.js';
 import { sseStream } from './sse.js';
 import { USAGE_DEFAULT_DAYS, USAGE_MAX_DAYS, endOfUtcDay, readUsage, startOfUtcDay } from './usage.js';
-import {
-  API_MAX_ATTACHMENTS,
-  API_MAX_BODY_BYTES,
-  API_MAX_TEXT_CHARS,
-  CLIENT_HEADER,
-  TENANT_PREFIX,
-  type RunApiOptions,
-} from './types.js';
+import { API_MAX_ATTACHMENTS, API_MAX_TEXT_CHARS, CLIENT_HEADER, TENANT_PREFIX, type RunApiOptions } from './types.js';
 
 /** A uuid, checked before it reaches Postgres: an id of any other shape is "no such thing", not an error. */
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -123,13 +116,7 @@ async function openRunRoute(host: Host, req: IncomingMessage, res: ServerRespons
   // The caller went away before the body ended. There is nothing to answer it with and nobody to
   // answer: writing a status into a dead socket would be a refusal nobody was given.
   if (body.kind === 'gone') return;
-  // The 413 goes out first and the socket is torn up after it, so the caller is told why and a
-  // caller that keeps sending anyway is cut off rather than read and discarded for as long as it
-  // likes. Destroying before the flush would answer nothing; not destroying at all would let one
-  // authenticated connection stream gigabytes past a cap that had already refused it.
-  if (body.kind === 'too_large') {
-    return json(res, 413, { error: `a request body may be at most ${API_MAX_BODY_BYTES} bytes` }, () => req.destroy());
-  }
+  if (body.kind === 'too_large') return tooLarge(req, res);
   let raw: unknown;
   try {
     raw = JSON.parse(body.text);

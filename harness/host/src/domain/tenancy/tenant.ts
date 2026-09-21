@@ -145,19 +145,18 @@ async function buildTenant(pool: HostPool, loaded: LoadedDocument, opened: Stopp
   );
 
   // What the document says about each surface it declares: the key an inbound event's hint is
-  // matched against, and the value behind each of that surface's secrets. Both come out of
-  // `@harness/config-api`, which is where the typed surface sections are read, so this file names
-  // no surface's own field — `field` is as opaque here as `env` ever was, and the value it keys
-  // is never logged, never audited and never put in a message.
+  // matched against, the value behind each of that surface's secrets, and where its cards go.
+  // All three come out of `@harness/config-api`, which is where the typed surface sections are
+  // read, so this file names no surface's own field — `field` is as opaque here as `env` ever
+  // was, and the value it keys is never logged, never audited and never put in a message.
   const settings: Record<string, SurfaceSettings> = {};
-  for (const { surface, key } of tenantKeysOf(document)) {
-    settings[surface] = { ...settings[surface], tenantKey: key };
-  }
-  for (const [surface, secretValues] of Object.entries(secrets.surfaces)) {
-    settings[surface] = { ...settings[surface], secretValues };
-  }
+  const set = (surface: string, part: Partial<SurfaceSettings>): void => {
+    settings[surface] = { ...settings[surface], ...part };
+  };
+  for (const { surface, key } of tenantKeysOf(document)) set(surface, { tenantKey: key });
+  for (const [surface, secretValues] of Object.entries(secrets.surfaces)) set(surface, { secretValues });
   for (const { surface, conversation } of surfaceConversationsOf(document)) {
-    settings[surface] = { ...settings[surface], defaultConversation: conversation };
+    set(surface, { defaultConversation: conversation });
   }
   const surfaces = await loadSurfaces(
     surfaceNamesOf(document).map(surfaceSpecifier),

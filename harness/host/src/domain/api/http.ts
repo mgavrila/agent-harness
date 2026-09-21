@@ -17,6 +17,18 @@ export function json(res: ServerResponse, status: number, body: unknown, then?: 
 }
 
 /**
+ * The 413 every body-reading route gives: the cap in a sentence, then the socket.
+ *
+ * Answered first and torn up once the answer is flushed, so the caller is told why and a caller
+ * that keeps sending anyway is cut off rather than read and discarded for as long as it likes.
+ * Destroying before the flush would answer nothing; not destroying at all would let one
+ * authenticated connection stream gigabytes past a cap that had already refused it.
+ */
+export function tooLarge(req: IncomingMessage, res: ServerResponse): void {
+  json(res, 413, { error: `a request body may be at most ${API_MAX_BODY_BYTES} bytes` }, () => req.destroy());
+}
+
+/**
  * What reading a request body came to.
  *
  * Three outcomes rather than two, because **a caller that went away is not a caller that was

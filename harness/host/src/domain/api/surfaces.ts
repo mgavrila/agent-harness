@@ -11,8 +11,8 @@ import {
   type SurfaceSession,
 } from '@harness/surface-api';
 import type { HostPool } from '../tenancy/types.js';
-import { json, readBody } from './http.js';
-import { API_MAX_BODY_BYTES, TENANT_PREFIX } from './types.js';
+import { json, readBody, tooLarge } from './http.js';
+import { TENANT_PREFIX } from './types.js';
 
 /**
  * Serving a surface that is reached by a request (spec section 4.6).
@@ -294,12 +294,7 @@ export async function handleSurfaceRequest(
     hungUp.abort();
     return;
   }
-  // Answered, then the socket torn up, for the reason `openRunRoute` gives: a caller told nothing
-  // learns nothing, and a caller that keeps sending anyway is cut off rather than read for as
-  // long as it likes.
-  if (body.kind === 'too_large') {
-    return json(res, 413, { error: `a request body may be at most ${API_MAX_BODY_BYTES} bytes` }, () => req.destroy());
-  }
+  if (body.kind === 'too_large') return tooLarge(req, res);
   let response: SurfaceHttpResponse;
   try {
     response = await mount.http.handle({

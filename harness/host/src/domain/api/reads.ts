@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, sql, type Column, type SQL, type Table } from 'drizzle-orm';
 import { approvals, memoryEntries, type Db } from '@harness/db';
 
 /**
@@ -104,6 +104,41 @@ function pageOf<T>(rows: T[], limit: number, keyOf: (row: T) => { at: Date; id: 
   return { rows: page, next_cursor: encodeCursor(last.at, last.id) };
 }
 
+/**
+ * "Past the cursor", as one row comparison against the anchor row's **own stored key**.
+ *
+ * A row comparison, so the pair is compared as one key rather than as two predicates — which is
+ * what makes a page stable when two rows share a timestamp. The right side looks the anchor's
+ * stored values up rather than using `after.at` directly: `created_at` came back through this
+ * driver's timestamp parser, which only keeps millisecond precision, while `now()` (what the
+ * column defaults to) carries microseconds. Comparing against the row's own stored value sidesteps
+ * that loss; comparing against the floored `after.at` instead can both hand back the anchor row
+ * again and drop a genuinely older row that shares its floored millisecond. `client` is repeated
+ * in the subquery so an id from another tenant can't be used to probe this one's timestamps, even
+ * though the outer query is already scoped. The `COALESCE` is for a row a retention job deleted
+ * between two reads: with nothing left to look up, this falls back to the cursor's own (still
+ * usable) values rather than an empty subquery result, which would otherwise make every later row
+ * vanish along with the anchor and the page look finished when it is not.
+ *
+ * Written once for both routes: the two differ only in which table they read and which way their
+ * page runs, and the anchor trick is the part that must not drift.
+ */
+function pastCursor(opts: {
+  table: Table;
+  createdAt: Column;
+  id: Column;
+  client: string;
+  after: { at: Date; id: string };
+  /** The route's own order: true for a page that descends, false for one that climbs. */
+  newestFirst: boolean;
+}): SQL {
+  const anchor = (column: 'created_at' | 'id', fallback: Date | string): SQL =>
+    sql`COALESCE((SELECT ${sql.identifier(column)} FROM ${opts.table} WHERE id = ${opts.after.id} AND client = ${opts.client}), ${fallback})`;
+  const key = sql`(${opts.createdAt}, ${opts.id})`;
+  const anchorKey = sql`(${anchor('created_at', opts.after.at)}, ${anchor('id', opts.after.id)})`;
+  return opts.newestFirst ? sql`${key} < ${anchorKey}` : sql`${key} > ${anchorKey}`;
+}
+
 export interface ReadApprovalsOptions {
   client: string;
   statuses?: readonly string[];
@@ -137,24 +172,15 @@ export async function readApprovals(db: Db, opts: ReadApprovalsOptions): Promise
         // resolved to, never one the caller asked for.
         eq(approvals.client, opts.client),
         opts.statuses && opts.statuses.length > 0 ? inArray(approvals.status, [...opts.statuses]) : undefined,
-        // A row comparison, so the pair is compared as one key rather than as two predicates —
-        // which is what makes a page stable when two rows share a timestamp. The right side reads
-        // the anchor's own stored value, not `after.at` directly: `created_at` came back through
-        // this driver's timestamp parser, which only keeps millisecond precision, while `now()`
-        // (what the column defaults to) carries microseconds. Comparing against the row's own
-        // stored value sidesteps that loss; comparing against the floored `after.at` instead can
-        // both hand back the anchor row again and drop a genuinely older row that shares its
-        // floored millisecond. `client` is repeated in the subquery so an id from another tenant
-        // can't be used to probe this one's timestamps, even though the outer query is already
-        // scoped. The `COALESCE` is for a row a retention job deleted between two reads: with
-        // nothing left to look up, this falls back to the cursor's own (still usable) values
-        // rather than an empty subquery result, which would otherwise make every later row vanish
-        // along with the anchor and the page look finished when it is not.
         after
-          ? sql`(${approvals.createdAt}, ${approvals.id}) < (
-              COALESCE((SELECT created_at FROM approvals WHERE id = ${after.id} AND client = ${opts.client}), ${after.at}),
-              COALESCE((SELECT id FROM approvals WHERE id = ${after.id} AND client = ${opts.client}), ${after.id})
-            )`
+          ? pastCursor({
+              table: approvals,
+              createdAt: approvals.createdAt,
+              id: approvals.id,
+              client: opts.client,
+              after,
+              newestFirst: true,
+            })
           : undefined,
       ),
     )
@@ -207,16 +233,15 @@ export async function readMemory(db: Db, opts: ReadMemoryOptions): Promise<Page<
         eq(memoryEntries.client, opts.client),
         opts.scope ? eq(memoryEntries.scope, opts.scope) : undefined,
         opts.principal ? eq(memoryEntries.principalId, opts.principal) : undefined,
-        // See `readApprovals`: the subquery compares against the anchor's own stored value rather
-        // than the millisecond-floored `after.at`, so a row that shares the anchor's floored
-        // millisecond is neither handed back a second time nor skipped; `client` keeps the lookup
-        // inside this tenant; `COALESCE` falls back to the cursor's own values when the anchor row
-        // is gone, so a deleted anchor never makes the rest of the page vanish with it.
         after
-          ? sql`(${memoryEntries.createdAt}, ${memoryEntries.id}) > (
-              COALESCE((SELECT created_at FROM memory_entries WHERE id = ${after.id} AND client = ${opts.client}), ${after.at}),
-              COALESCE((SELECT id FROM memory_entries WHERE id = ${after.id} AND client = ${opts.client}), ${after.id})
-            )`
+          ? pastCursor({
+              table: memoryEntries,
+              createdAt: memoryEntries.createdAt,
+              id: memoryEntries.id,
+              client: opts.client,
+              after,
+              newestFirst: false,
+            })
           : undefined,
       ),
     )
