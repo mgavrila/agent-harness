@@ -277,10 +277,12 @@ export class MemorySurface implements SurfaceSession {
   }
 
   /**
-   * Make the next pull of every open stream throw, the way a producer that failed does.
+   * Make the next pull of an open stream throw, the way a producer that failed does.
    *
-   * The host's side of that is what this exists to drive: a throw mid-stream is logged and closes
-   * the response, and there is no frame for it.
+   * **One stream, not every one**: the first to observe the failure clears it, so with two open
+   * the second carries on. That is enough for what this exists to drive — the host's side of a
+   * throw mid-stream, which is logged and closes the response, with no frame for it — and a door
+   * that failed every stream at once would be inventing a fan-out a real adapter does not have.
    */
   breakStreams(message: string): void {
     this.streamFailure = message;

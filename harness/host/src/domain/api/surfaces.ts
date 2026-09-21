@@ -254,6 +254,18 @@ export async function handleSurfaceRequest(
   if (asked === '' || path === '' || !CLIENT_ID_PATTERN.test(asked)) {
     return noRoute(res);
   }
+  // Before the first `await`, and that is the point of its being here rather than beside the call
+  // it serves. Opening a tenant on demand is a real wait — a config load, a secret decrypt, a
+  // runtime connect — and so is reading a body off a socket, and a caller that gives up inside
+  // either has already made `res` emit `close`. A listener registered after that never fires, so a
+  // streaming handler would be handed a signal nobody will ever abort and park on it forever.
+  //
+  // It fires for an ordinary answer too, once that answer has been sent, which costs a handler
+  // that has already returned nothing.
+  const hungUp = new AbortController();
+  res.on('close', () => hungUp.abort());
+  // And the close may already have happened, in which case there is no event left to hear.
+  if (res.closed || res.destroyed) hungUp.abort();
   const method = req.method ?? '';
   if (pool.resolver.resolve({ from: 'api', clientId: asked }) !== asked) {
     if (pool.dedicatedClient !== null) {
@@ -280,11 +292,6 @@ export async function handleSurfaceRequest(
   if (!body.ok) {
     return json(res, 413, { error: `a request body may be at most ${API_MAX_BODY_BYTES} bytes` }, () => req.destroy());
   }
-  // The caller going away is the one thing a streaming handler has to be able to hear, and the
-  // response's own `close` is where the host hears it. It fires for an ordinary answer too, after
-  // that answer has been sent, which costs a handler that has already returned nothing.
-  const hungUp = new AbortController();
-  res.on('close', () => hungUp.abort());
   let response: SurfaceHttpResponse;
   try {
     response = await mount.http.handle({
