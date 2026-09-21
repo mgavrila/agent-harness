@@ -134,6 +134,18 @@ async function auditRefusal(
   });
 }
 
+/**
+ * The one answer every miss below this prefix gets, whatever the miss was.
+ *
+ * Named rather than repeated, because the uniformity is the point: the four ways a request can
+ * fail to reach a surface — a shape that is not a client id, a client this host does not serve, a
+ * client nobody has, a path no surface claims — are told apart by the audit log and by nothing a
+ * caller can see. See `handleSurfaceRequest`.
+ */
+function noRoute(res: ServerResponse): void {
+  json(res, 404, { error: 'no such route' });
+}
+
 function send(res: ServerResponse, response: SurfaceHttpResponse): void {
   // The surface's own headers win: it knows what it is answering. Plain text is the default
   // because an acknowledgement is usually empty and a body typed `application/json` that is not
@@ -184,7 +196,7 @@ export async function handleSurfaceRequest(
   // on a route with no bearer in front of it. The shape is `@harness/config-api`'s own, so what
   // is accepted here and what a document may call itself cannot drift apart.
   if (asked === '' || path === '' || !CLIENT_ID_PATTERN.test(asked)) {
-    return json(res, 404, { error: 'no such route' });
+    return noRoute(res);
   }
   const method = req.method ?? '';
   if (pool.resolver.resolve({ from: 'api', clientId: asked }) !== asked) {
@@ -199,12 +211,12 @@ export async function handleSurfaceRequest(
       });
       pool.log.warn(`a request named a client this host does not serve; refused`);
     }
-    return json(res, 404, { error: 'no such route' });
+    return noRoute(res);
   }
   const tenant = await pool.tenantFor(asked);
-  if (!tenant) return json(res, 404, { error: 'no such route' });
+  if (!tenant) return noRoute(res);
   const mount = mountFor(tenant.host.surfaces.all, path);
-  if (!mount) return json(res, 404, { error: 'no such route' });
+  if (!mount) return noRoute(res);
   const body = await readBody(req);
   // Answered, then the socket torn up, for the reason `openRunRoute` gives: a caller told nothing
   // learns nothing, and a caller that keeps sending anyway is cut off rather than read for as
