@@ -59,6 +59,20 @@ const PACKAGES = [
   { name: 'scripts', src: 'scripts/src', severity: 'error' },
 ];
 
+/**
+ * The platform packages built on top of the kernel: `catalog` and `control-plane`. They do not
+ * share the kernel's four layers — there is no `tools/` folder, since neither package registers
+ * MCP tools, and each has a `testing/` folder instead, for fixtures only a *.test.ts may import.
+ * `platformLayerRules` below is a second factory for exactly that shape; `layerRules` above stays
+ * untouched because editing it to serve two different layer sets would be the kernel rule this
+ * file promises to keep byte-identical.
+ */
+/** @type {{ name: string, src: string, severity: 'warn' | 'error' }[]} */
+const PLATFORM_PACKAGES = [
+  { name: 'catalog', src: 'catalog/src', severity: 'error' },
+  { name: 'control-plane', src: 'control-plane/src', severity: 'error' },
+];
+
 /** Escape a path so it can sit inside a regular expression. */
 const re = (p) => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
@@ -104,6 +118,45 @@ function layerRules({ name, src, severity }) {
   ];
 }
 
+/**
+ * The four platform-layer rules for one package: `shared -> domain -> app`, with a `testing/`
+ * layer only a *.test.ts may reach, and `index.ts` / `client.ts` as the public entry (`client.ts`
+ * may import the `app` TYPE, since hono/client needs it, and nothing else).
+ */
+function platformLayerRules({ name, src, severity }) {
+  const at = (folder) => `^${re(src)}/${folder}/`;
+  return [
+    {
+      name: `${name}-shared-imports-only-libraries`,
+      comment: `${src}/shared holds pure helpers. It may import node built-ins and third-party packages, and nothing else from this package.`,
+      severity,
+      from: { path: at('shared') },
+      to: { path: `^${re(src)}/(domain|app|testing)/` },
+    },
+    {
+      name: `${name}-domain-does-not-import-app-or-testing`,
+      comment: `A domain is called by app/; it never calls back into it, and testing/ fixtures are for tests only. Its own tests are the one exception.`,
+      severity,
+      from: { path: at('domain'), pathNot: '\\.test\\.ts$' },
+      to: { path: `^${re(src)}/(app|testing)/` },
+    },
+    {
+      name: `${name}-nothing-imports-testing-but-tests`,
+      comment: `testing/ holds fixtures for tests. Only a *.test.ts file may import it.`,
+      severity,
+      from: { path: `^${re(src)}/`, pathNot: [at('testing'), '\\.test\\.ts$'] },
+      to: { path: at('testing') },
+    },
+    {
+      name: `${name}-public-api-does-not-import-app`,
+      comment: `index.ts and client.ts are what other packages import. A runtime edge into app/ would drag the composition root into every consumer; client.ts may import the app TYPE only (hono/client needs it).`,
+      severity,
+      from: { path: `^${re(src)}/(index|client)\\.ts$` },
+      to: { path: at('app'), dependencyTypesNot: ['type-only'] },
+    },
+  ];
+}
+
 /** Every workspace package directory, in the order pnpm-workspace.yaml lists them. */
 const WORKSPACE_DIRS = [
   'harness/shared',
@@ -132,6 +185,8 @@ const WORKSPACE_DIRS = [
   'runtimes/deepagents',
   'runtimes/scripted',
   'scripts',
+  'catalog',
+  'control-plane',
 ];
 
 /**
@@ -251,6 +306,7 @@ const GLOBAL_RULES = [
         '(^|/)(vitest|drizzle|eslint)\\.config\\.(js|cjs|mjs|ts)$',
         '(^|/)test-global-setup\\.ts$',
         '(^|/)(main|cli|migrate|record-surface|generate-templates|render-config)\\.ts$',
+        '^apps/workspace/app/',
       ],
     },
     to: {},
@@ -384,8 +440,67 @@ const GLOBAL_RULES = [
   ...WORKSPACE_DIRS.map(crossPackageRule),
 ];
 
+/**
+ * The platform's four boundaries (rulings of 2026-09-21, "one repository, four enforced
+ * boundaries"): the kernel never imports the platform built on top of it; `catalog/` and
+ * `control-plane/` each reach the kernel only through its five published contracts
+ * (`config-api`, `identity-api`, `pack-api`, `surface-api`, `shared`), never another kernel
+ * package; and the workspace app's one compile-time edge into this repository is the control
+ * plane's typed client.
+ */
+const KERNEL_CONTRACT_SRC = '^harness/(config-api|identity-api|pack-api|surface-api|shared)/src/';
+
+const PLATFORM_BOUNDARY_RULES = [
+  {
+    name: 'kernel-never-imports-the-platform',
+    comment:
+      "The kernel knows nothing about the platform built on top of it. An edge from the kernel into catalog/, control-plane/ or apps/ would invert this repository's one boundary that survived the merge.",
+    severity: 'error',
+    from: { path: '^(harness|packs|surfaces|identities|runtimes|evals|scripts)/' },
+    to: { path: '^(catalog|control-plane|apps)/' },
+  },
+  {
+    name: 'catalog-imports-kernel-contracts-only',
+    comment:
+      'catalog/ is the hf1 Agents band: it implements kernel contracts and knows no tenant, no database, no HTTP, and no other platform package.',
+    severity: 'error',
+    from: { path: '^catalog/src/' },
+    to: {
+      path: '^(harness|packs|surfaces|identities|runtimes|evals|scripts|control-plane|apps)/',
+      pathNot: [KERNEL_CONTRACT_SRC],
+    },
+  },
+  {
+    name: 'control-plane-imports-catalog-and-contracts-only',
+    comment:
+      'control-plane/ is a client of catalog/ and the same five kernel contracts, and nothing else in the kernel or the workspace app.',
+    severity: 'error',
+    from: { path: '^control-plane/src/' },
+    to: {
+      path: '^(harness|packs|surfaces|identities|runtimes|evals|scripts|apps)/',
+      pathNot: [KERNEL_CONTRACT_SRC],
+    },
+  },
+  {
+    name: 'workspace-imports-only-the-control-plane-client',
+    comment:
+      'The workspace is a client of the control plane over HTTP. Its one compile-time edge into this repository is the typed client entry, and it never reaches the kernel directly.',
+    severity: 'error',
+    from: { path: '^apps/workspace/' },
+    to: {
+      path: '^(harness|packs|surfaces|identities|runtimes|evals|scripts|catalog|control-plane)/',
+      pathNot: ['^control-plane/src/client\\.ts$'],
+    },
+  },
+];
+
 module.exports = {
-  forbidden: [...PACKAGES.flatMap(layerRules), ...GLOBAL_RULES],
+  forbidden: [
+    ...PACKAGES.flatMap(layerRules),
+    ...PLATFORM_PACKAGES.flatMap(platformLayerRules),
+    ...GLOBAL_RULES,
+    ...PLATFORM_BOUNDARY_RULES,
+  ],
   options: {
     doNotFollow: { path: 'node_modules' },
     exclude: { path: '(^|/)node_modules/|(^|/)drizzle/|(^|/)out/|(^|/)results/' },
@@ -395,7 +510,7 @@ module.exports = {
     // workspace manifest here declares `exports` and no `main`, so without it a
     // bare specifier such as `@harness/shared` is "unresolvable" and the
     // cross-package rules never fire. With it, they resolve to the source entry.
-    enhancedResolveOptions: { extensions: ['.ts', '.js', '.json'], exportsFields: ['exports'] },
+    enhancedResolveOptions: { extensions: ['.ts', '.tsx', '.js', '.json'], exportsFields: ['exports'] },
     reporterOptions: {
       dot: {
         // One node per package layer, not per file: the graph answers "may this package import

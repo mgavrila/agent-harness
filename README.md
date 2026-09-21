@@ -179,3 +179,26 @@ The host serves `/healthz` on `127.0.0.1:8787`, and the run API answers only whe
 `docs/demo.md` is the five-minute script. `docs/runbook.md` covers the
 operational side: effects outbox, the host and its surfaces, memory, playbooks, knowledge, the
 run API, and storage.
+
+## Platform
+
+`catalog/`, `control-plane/` and `apps/workspace/` (not built yet) are the hf1 platform, built on
+top of this kernel in the same repository:
+
+- `catalog/` (`@hf1/catalog`) — the hf1 Agents band: loads and validates blueprints, knows no
+  tenant, database or HTTP.
+- `control-plane/` (`@hf1/control-plane`) — tenants, identity and storage; the one HTTP surface
+  the workspace talks to.
+- `apps/workspace` — the product people use to configure and watch agents work.
+
+**Boundary rule**, enforced by `pnpm arch`: the kernel (`harness/`, `packs/`, `surfaces/`,
+`identities/`, `runtimes/`, `evals/`, `scripts/`) never imports the platform; `catalog/` and
+`control-plane/` reach the kernel only through its five published contracts (`config-api`,
+`identity-api`, `pack-api`, `surface-api`, `shared`); the workspace reaches this repository only
+through `control-plane/src/client.ts`.
+
+```bash
+pnpm platform:up      # bring up the platform's own Compose stack (deploy/compose/, Task 23)
+pnpm platform:down
+pnpm platform:logs
+```

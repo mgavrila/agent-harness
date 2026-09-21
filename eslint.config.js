@@ -105,6 +105,13 @@ const PROCESS_ENV_IS_FINE = [
   '**/*.test.ts',
   'harness/db/src/**/*.ts',
   '**/drizzle.config.ts',
+  // The platform packages: `catalog` and `control-plane` read theirs the same way the kernel
+  // does (env.ts, app/, tests), plus the two more places the platform's own convention allows —
+  // testing/ fixtures, the migration entrypoint, and the workspace app's two server-only files.
+  '**/src/testing/**',
+  '**/src/domain/db/migrate.ts',
+  'apps/workspace/next.config.ts',
+  'apps/workspace/lib/env.ts',
 ];
 
 export default tseslint.config(
