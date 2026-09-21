@@ -63,6 +63,7 @@ export async function buildKernelConfig(
   const packs = await loadPacks(document.packs);
   // One root for the whole file store, required and with no default (see storageRoot).
   const storageDir = storageRoot(env);
+  const gateway = gatewayFromEnv(env);
 
   return {
     client: document.id,
@@ -76,8 +77,7 @@ export async function buildKernelConfig(
     // `GatewayConfig.apiKey` is already per tenant and is already the bearer `httpGateway` sends
     // on every call, so the key is the whole of the change: the route names, the wire shape and
     // `model_calls`' own `client` column are untouched (spec section 4.11).
-    gateway:
-      secrets.gatewayKey === undefined ? gatewayFromEnv(env) : { ...gatewayFromEnv(env), apiKey: secrets.gatewayKey },
+    gateway: secrets.gatewayKey === undefined ? gateway : { ...gateway, apiKey: secrets.gatewayKey },
     storageDir,
     knowledgeDir: document.knowledge.source === 'dir' ? document.knowledge.path : null,
     // 1,024 is what migration 0013 created the column at; `assertEmbedDims` is what proves a
