@@ -5,6 +5,67 @@ semantic and every package in a release carries the same one. A release attaches
 tarballs and the two architecture snapshots; the host and files images are pushed to
 `ghcr.io/mgavrila` under the same tag.
 
+## 0.3.0 — unreleased
+
+The release the platform pins: a tenant with no Slack, secrets that are not environment variables,
+and two lists a dashboard can hold.
+
+### Added
+
+- **A web surface.** `surfaces.web: { token: SecretRef; inbox?: string }` declares it, and it is
+  first in the surface order, so a tenant that has one has it as its primary surface and its
+  approval cards go to its inbox. Four routes under `/tenants/<clientId>/web/`: post a message,
+  open a conversation's Server-Sent Events stream, post an action, post a form. Every request
+  carries that tenant's own bearer. See "The web surface" in `docs/runbook.md`.
+- **Secrets from a store.** `SecretSource` beside `ConfigSource`, with `env` and `postgres`
+  implementations and a conformance kit at `@harness/config-api/testing`.
+  `HARNESS_SECRET_SOURCE=env|postgres`, **required, no default**. A document's `{ ref: name }`
+  resolves from `client_secrets` — one new table — through the AES-256-GCM envelope
+  `@harness/db` already ships. A tenant added by writing rows answers on a pooled host with no
+  restart.
+- **A per-tenant gateway key.** `routing.gateway.key` is a `SecretRef`, resolved at tenant open
+  and sent as the bearer for that tenant's model calls. Route names are unchanged; absent, the
+  process key stands.
+- **`GET /v1/approvals` and `GET /v1/memory`**, cursor-paged, tenant-scoped, authenticated exactly
+  like `/v1/usage`. The column lists are in the runbook and are the whole of the guarantee: no
+  approval payload, encrypted or not.
+- **A streaming seam.** `SurfaceHttpResponse.body` is now `string | AsyncIterable<string>`, and
+  `SurfaceHttpRequest` carries `clientId` and `signal`. The host writes the head, pipes each chunk
+  as it is yielded and aborts the signal when the caller hangs up.
+- **The client store as a stable write contract**: `client_documents`, `client_document_versions`
+  and `client_secrets`, at the columns they have today, with the envelope and a test vector.
+
+### Changed
+
+- **`SurfaceDeps.secrets` is now `SurfaceDeps.secretValues`, and carries resolved values rather
+  than environment variable names.** A `{ ref }` has no variable name, so the bag could not carry
+  one; the rename is what forces every adapter's read to be looked at. An adapter still falls back
+  to its conventional variable for a field the document did not name.
+- **`routing:` is strict.** An unknown key there used to be stripped, so a mistyped `gatway:`
+  would leave a tenant on the process key in silence.
+- **A rewritten version is refused.** Writing `(client_id, version)` again with different content
+  raises a `ConfigError`; an identical rewrite is still a no-op. Write content-hash versions and
+  you will never see it.
+- **`.env.example` is a deployment's file now.** A tenant's credentials are rows in
+  `client_secrets`, named by its document as `{ ref }` and written from the platform's own
+  interface. `SLACK_BOT_TOKEN`, `SLACK_SIGNING_SECRET` and `SLACK_APPROVALS_CHANNEL` are still
+  read — they are what the Slack adapter falls back to for a dedicated host whose document names
+  nothing — and are still passed by Compose, but they are commented out in the example file
+  because they are that host's business rather than a default anybody should fill in.
+- `defaults.web` is allowed in the identity section and **may not name `lead` or `admin`**: one
+  shared bearer mints every principal such a default describes, and none of them may decide an
+  approval.
+- `tenantKeysOf` reports a web tenant's own id as its key, so a pooled host routes its messages.
+
+### Upgrading
+
+1. Set `HARNESS_SECRET_SOURCE` in every deployment's `.env`. `env` keeps today's behaviour exactly.
+2. Run the migration: one new table, `client_secrets`.
+3. If you build a surface adapter, rename `deps.secrets` to `deps.secretValues` and read values
+   rather than looking names up.
+4. Nothing else changes: no route moved, no tool moved, and the tool surface snapshot is
+   byte-identical to `0.2.0`'s.
+
 ## 0.2.0 — unreleased
 
 The release that makes this repository something to depend on rather than something to check out.

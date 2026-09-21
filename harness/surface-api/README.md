@@ -15,6 +15,13 @@ the host load an adapter by name at runtime instead of importing it at build tim
 | `src/models.ts`  | the zod shapes of the two outbox payloads, and the two id patterns                           |
 | `src/testing.ts` | `MemorySurface`, reached as `@harness/surface-api/testing`                                   |
 
+`SurfaceDeps` is what an adapter is handed when it connects: `env`, `log`, `storageDir`, an
+optional `tenantKey`, and two more optional fields the host resolves before an adapter ever sees
+them and never itself reads — `secretValues`, this tenant's credentials for this surface already
+resolved to their values, keyed by the document's own field name, and `defaultConversation`, the
+conversation the client's document named as this surface's default when nobody names one. Both are
+opaque to the host: it copies them from the document into the bag and moves on.
+
 `MemorySurface` is both the fake every host test drives and the whole of `@harness/surface-memory`,
 so the thing the suite proves the host against is the thing that runs. It is also the first
 _inbound_ surface: `say(userId, text, over?)` drives whatever handler `onMessage` registered, the

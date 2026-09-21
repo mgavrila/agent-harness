@@ -438,6 +438,77 @@ blob_hex   03030303030303030303030338da626a160e623fe0c27fbca31a81945d91db61775c3
 `writeClientSecret` in `@harness/config-postgres` is the kernel's own writer for that table, and
 what a test and an operator use; a control plane writes the row itself, to the same shape.
 
+## Secrets from a store
+
+`HARNESS_SECRET_SOURCE` says where a document's `SecretRef`s resolve. It is required and has no
+default, for the reason `HARNESS_CONFIG_SOURCE` has none: a host — or the stdio server,
+`harness/core-tools`, which requires it too — that guessed would come up and refuse every tenant
+whose document named a stored secret, with a message saying this deployment had no secret store —
+which it would have had.
+
+- `env` — `{ env: NAME }` reads the process environment, and `{ ref: name }` is refused when the
+  tenant opens. This is every deployment before Plan 11c and every dedicated one after it.
+- `postgres` — `{ ref: name }` selects `client_secrets` by `(client_id, name)` and decrypts with
+  `HARNESS_ENCRYPTION_KEY`. `{ env: NAME }` **still means the environment**, so a document may mix
+  the two: a stored bot token and a deployment-wide gateway URL is the ordinary case.
+
+Secrets resolve **once, when the tenant opens**, before anything else is built — which is what
+makes "add a tenant with no restart" true on a pooled host: write the document and the rows, and
+the tenant opens on its first request. It is also why a rotation needs one more write.
+
+### A tenant's secrets are not a deployment's settings
+
+This is the rule the rest of this section exists to serve, so it is worth stating on its own.
+
+**`.env.example` and a host's environment are a deployment's**: the database URLs,
+`HARNESS_ENCRYPTION_KEY`, `LITELLM_MASTER_KEY`, `HARNESS_HOST_TOKEN`, `HARNESS_SECRET_SOURCE`, the
+config source, the ports and the image tag. A **tenant's** credentials — a bot token, a signing
+secret, a web bearer, a gateway key — are named by that tenant's document as `{ ref: <name> }` and
+stored as rows in `client_secrets`. The control plane writes them from the platform's own
+interface; nobody edits a file on a host to onboard a client, and nothing restarts.
+
+A **dedicated** host is the one place `{ env: NAME }` still earns its keep: one tenant, one
+process, and an operator who owns both. That tenant's document names its own variables and the
+operator sets them in that host's environment. Two tenants in one process would name two different
+variables, which is the thing a pooled host cannot do and the reason the store exists.
+
+The Compose stack still passes `SLACK_BOT_TOKEN`, `SLACK_SIGNING_SECRET` and
+`SLACK_APPROVALS_CHANNEL` through to the host, for exactly that dedicated case — they are the
+conventional names the Slack adapter falls back to when a document names nothing — and they are
+commented out in `.env.example` because they are a dedicated host's business rather than a
+deployment default. A pooled host leaves all three unset. The request URLs, the bot scopes, the event subscriptions
+and the one-app-per-tenant-versus-one-multi-workspace-app choice are "Slack over HTTPS" above,
+whichever secret source a deployment runs — only where `SLACK_BOT_TOKEN` and
+`SLACK_SIGNING_SECRET` end up differs.
+
+### Rotating a secret
+
+`postgresConfigSource.watch` polls `client_documents.version` and nothing else, so a
+`client_secrets` row changing is invisible to a running host. **Pair every rotation with a version
+bump on that tenant's document**, in the same transaction the control plane is already opening:
+
+1. write the new `client_secrets` row;
+2. write the document again under a new version string;
+3. the host notices the version within thirty seconds, drains that tenant's turns and reopens it
+   with the new secret.
+
+Rotating without the bump leaves the old value in use until something else reopens the tenant.
+
+### Diagnosing a tenant that will not open
+
+The refusals name the client, the surface, the field and the secret's *name*, and never its value:
+
+```
+client "acme" names the secret "web-token" for web.token, and this deployment's secret store holds no such secret for that client
+client "acme" declares the "slack" surface, which needs SLACK_BOT_TOKEN; this deployment does not set it
+client "acme" names the secret "web-token" for web.token, and this deployment has no secret source
+```
+
+The third one means `HARNESS_SECRET_SOURCE=env` and a document that names a stored secret. There
+is no `list` on the secret source, deliberately — a host resolves what a document names and never
+enumerates — so "what does the store hold for this tenant" is a question you answer with SQL
+against `client_secrets`, which is the platform's own table.
+
 ## Model calls
 
 Every gateway call inserts a `model_calls` row: run id, client, route, model,
@@ -450,6 +521,30 @@ from model_calls
 where created_at > now() - interval '1 day'
 group by 1, 2 order by 4 desc;
 ```
+
+### A tenant's own gateway key
+
+`routing.gateway.key` is a `SecretRef`, resolved at tenant open like every other, and sent as the
+bearer for that tenant's model calls in place of `LITELLM_MASTER_KEY`:
+
+```yaml
+routing:
+  gateway:
+    key: { ref: gateway-key }
+  routes: { … }
+```
+
+The route names do not change and neither does the wire shape: the tenant travels in the
+credential, because a LiteLLM virtual key already carries its own aliases, its own model
+allow-list and its own `max_budget`. The platform creates that virtual key — its aliases, its
+model allow-list, its `max_budget` — and stores its value under the `ref` the document names,
+before the tenant is released; a tenant whose key the gateway does not recognise fails at its
+first model call, not at open. A tenant that names no key uses the process key, which is what
+every deployment does today — and `LITELLM_MASTER_KEY` stays required either way, because it is
+the key for those tenants, for the eval runner and for the stdio server.
+
+`routing:` is strict now: a mistyped `gatway:` is refused when the document loads rather than
+leaving a tenant on the process key in silence.
 
 **This table is not the budget authority.** Two things make it undercount:
 
@@ -791,6 +886,92 @@ card was posted on — not by which token is present; see "The host and its surf
 Slack, click the "More" (•••) menu, and choose "Copy member ID"; it is a string starting with
 `U`. Paste it into that principal's `surfaces.slack` field.
 
+### The web surface
+
+A tenant with no Slack declares `surfaces.web` and talks to its agent from the platform's
+workspace instead. `surfaces/web/README.md` is the API reference — the four routes, every
+refusal, the caps and the event stream, byte for byte; this is the operator's view of the same
+surface. Its document:
+
+```yaml
+surfaces:
+  web:
+    token: { ref: web-token }   # or { env: WEB_TOKEN }
+    inbox: inbox                # optional; this is the default
+  http: {}
+identity:
+  defaults:
+    web: member                 # optional; may not name lead or admin
+  principals:
+    - { id: u-coordinator, kind: user, level: lead, displayName: Coordinator, surfaces: { web: U012 } }
+```
+
+`web` is first in the surface order, so it is the primary surface and approval cards go to
+`inbox` — a conversation named by the document rather than one this surface creates; a
+conversation exists the moment something is written to it. The host mounts its door at
+`https://<host>/tenants/<clientId>/web/...`, behind whatever terminates TLS in front of the
+deployment. **The bearer is that tenant's own**, resolved from `web.token` at tenant open exactly
+like any other secret, and it lives in `client_secrets` on a pooled deployment — see "Secrets
+from a store" below. It authenticates the platform's workspace, not the person at the keyboard:
+`userId` comes from the request body as given, so the workspace must authenticate the person
+before it calls.
+
+Four routes, each carrying `Authorization: Bearer <the tenant's token>`:
+
+| Method and path | Body | Answers |
+| --- | --- | --- |
+| `POST …/web/messages` | `{ userId, conversation, text, attachments?: [{ name, path }] }` | `202 {"message": MessageRef}` |
+| `GET …/web/conversations/<id>/events` | — | `202`, `text/event-stream` |
+| `POST …/web/actions` | `{ userId, actionId, value, messageRef }` | `202 {}` |
+| `POST …/web/forms` | `{ userId, formId, values, messageRef }` | `202 {}` |
+
+A conversation is created by writing to it, so there is no route that makes one and none that
+lists them. The tenant's identity plug-in resolves `userId`; a user it does not know is answered
+`202` and the refusal arrives on the conversation's stream as a `notice`, because identity is
+resolved after the door has answered.
+
+The stream is Server-Sent Events:
+
+```
+id: 12
+event: message
+data: {"message":{"surface":"web","conversation":"inbox","id":"w7"},"text":"Hello back.","replyTo":null}
+```
+
+Five event names, and two of them carry more than one payload — discriminate on a key, not on the
+name:
+
+| Event | Payload |
+| --- | --- |
+| `delta` | `{ message, delta }` — a reply being written |
+| `message` | `{ message, text, replyTo }`, plus `file: { filename }` when a file was released |
+| `card` | `{ message, card }` for a posted card, or `{ form }` for a dialogue opened from one |
+| `card_update` | `{ message, card }` — the same card, edited in place |
+| `notice` | `{ message, text, replyTo }` about a message, `{ text, userId }` for one person, or `{ text, dropped: true, reason }` after a resume past the window |
+
+Reconnect with `Last-Event-ID` and the stream resumes after that id. A resume the host can no
+longer cover opens with the `dropped` notice, which carries **no id** so a client's resume point
+does not move to an apology — the window is two hundred frames per conversation, in memory, per
+host, so a workspace behind an ingress with more than one host should expect that notice and
+reload the conversation from the run API rather than trust the gap. **A tenant's document being
+edited closes every open stream on it**, the same as a restart: the tenant reopens with a fresh
+window, and a client that was streaming reconnects into a `dropped` notice with `reason: unknown`
+and then whatever the new window holds.
+
+What a caller gets wrong, and what it is told:
+
+| Condition | Answer |
+| --- | --- |
+| body over 1 MiB | `413`, from the host, before the adapter sees it |
+| missing, malformed or wrong bearer | `401 {"error":"unauthorised"}`, one audit row |
+| body is not JSON, or fails the route's shape | `400 {"error":"<what was wrong>"}` |
+| attachment path outside `<storage>/incoming` | `400`, and no run opens |
+| wrong method on a known path | `405` with `allow` |
+| sub-path no route claims | `404` |
+| an `actionId` nobody knows | `202`; delivered, and the handler says on the stream that it does not recognise it |
+| a `formId` nobody knows, or one already submitted | `400 {"error":"that form is not open on this surface"}` |
+| a conversation nobody knows | not a refusal; a conversation is created by being written to |
+
 ### Health
 
 Health is on `http://127.0.0.1:${APPROVALS_HEALTH_HOST_PORT:-8787}/healthz` on the host (container port 8787, `APPROVALS_HEALTH_PORT`). It returns counts
@@ -1111,10 +1292,12 @@ of the next section: the released section keeps the version it shipped under, an
 **What a deployment consumes.** Set `HARNESS_IMAGE_TAG=0.2.0` in `.env`; Compose pulls both images
 and builds nothing.
 
-**What the platform repository consumes.** The seven packages are attached to the release as
-tarballs, because GitHub Packages requires an npm scope equal to the repository owner and
-`@harness/*` is not one. Pin them by URL, and override the transitive names too — the tarballs
-depend on one another by exact version:
+**What a project outside this repository consumes.** `catalog/` and `control-plane/` need none of
+this — they sit in this same workspace and resolve `@harness/*` directly, under the boundary
+`ARCHITECTURE.md`, "The client document" describes. A project that is not in this repository pins
+the seven published packages as tarballs attached to the release, because GitHub Packages requires
+an npm scope equal to the repository owner and `@harness/*` is not one. Pin them by URL, and
+override the transitive names too — the tarballs depend on one another by exact version:
 
 ```json
 {
@@ -1359,6 +1542,31 @@ the last 30 days; the widest a request may ask for is 366 days, and `to` must be
 the `usage_runs` view it reads selects no text column at all, so there is nothing to withhold and
 nothing a caller could learn about what was said. This is what a billing or usage-reporting system
 reads; it never reaches the kernel's own tables, and the kernel never knows a customer paid.
+
+### Approvals and memory
+
+Two cursor-paged reads for a dashboard and a memory page, authenticated and tenant-resolved
+exactly like `/v1/usage` — the bearer, then `x-harness-client`:
+
+```
+GET /v1/approvals?status=pending&cursor=<opaque>&limit=100
+GET /v1/memory?scope=client&principal=u-member&cursor=<opaque>&limit=100
+```
+
+Both answer `{ "client": "<id>", "rows": [ … ], "next_cursor": "<opaque>" | null }`. Approvals come
+newest first; memory entries come oldest first, the order the model is shown them in. `status` is
+the column's own vocabulary — `pending`, `approved`, `declined`, `expired`, comma-separated for
+several — and anything else is a `400` naming the four. `limit` defaults to 100, may be 1 to 500,
+and is refused rather than clamped outside that.
+
+An approval row carries `id, action, summary, requested_by, status, decided_by, decided_at,
+decision_note, executed_at, expires_at, surface, conversation_id, created_at` and nothing else:
+the payload is the tool's own arguments and is excluded, encrypted or not. A memory row carries
+`id, scope, principal_id, text, created_by, created_at`.
+
+Neither route resolves a principal. The caller is the control plane acting for the tenant, not a
+person acting as themselves, so these two are tenant-scoped and nothing narrower — which is why
+the column lists are the whole of the guarantee.
 
 ## Playbooks
 

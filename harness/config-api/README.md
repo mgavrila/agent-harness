@@ -29,8 +29,10 @@ refuses every `{ ref }`, because a deployment with no store cannot serve a docum
 entry in one; `postgresSecretSource` in `@harness/config-postgres` reads `client_secrets`.
 `resolveSecrets(document, { source, log })` turns every reference a document's surfaces name into
 its **value**, keyed by surface and by the document's own field name, which is what the host hands
-each adapter. Every implementation runs `secretSourceConformance` from
-`@harness/config-api/testing`.
+each adapter. It runs **once, when a tenant opens**, before anything else about that tenant is
+built, which is what makes "add a tenant with no restart" true on a pooled host and why rotating a
+stored secret needs one more write — a document version bump — to reach an already-open tenant.
+Every implementation runs `secretSourceConformance` from `@harness/config-api/testing`.
 
 A **blueprint** is a complete document with placeholders and a **lock set** of JSON pointers. An
 **overlay** is a tenant's edits as a small JSON Patch. `resolve(blueprint, overlay)` applies the

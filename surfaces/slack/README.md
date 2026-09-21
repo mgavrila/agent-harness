@@ -22,13 +22,20 @@ src/testing.ts           ./testing: FakeSlack, FakeSlackEvents, fakeSlackSession
 
 ## One Slack app
 
-This adapter reads `SLACK_BOT_TOKEN`, `SLACK_SIGNING_SECRET` (what every inbound request is
-verified against) and `SLACK_APPROVALS_CHANNEL` (where approval cards and released files go). One
-app carries chat and approvals, because one process — the host — serves both; two apps were needed
-only while the chat runtime and the approvals process were separate, and that reasoning is gone
-with the second process. There is no app-level token: nothing here opens a socket. A client
-document may name its own variables for the two credentials, which is how one process serves two
-workspaces; a deployment that names none reads the conventional names above.
+This adapter is handed its bot token and its signing secret already resolved, on
+`deps.secretValues`, keyed by the field name the client document used —
+`surfaces.slack.botToken` and `surfaces.slack.signingSecret`, each a `SecretRef`. Where those
+values came from is not this package's business: a store, on a pooled deployment, or the process
+environment on a dedicated one. `SLACK_BOT_TOKEN` and `SLACK_SIGNING_SECRET` are the conventional
+names this adapter falls back to for a field the document did not name — every deployment before
+Plan 11c, and a dedicated one after it — and a pooled deployment names its own pair per tenant in
+`client_secrets` instead. `SLACK_APPROVALS_CHANNEL` (where approval cards and released files go)
+is different: it is a deployment's own setting, always read from the environment, because the
+document schema names no field for it — an approvals channel is a property of the app's
+installation, not a per-tenant credential. One app carries chat and approvals, because one
+process — the host — serves both; two apps were needed only while the chat runtime and the
+approvals process were separate, and that reasoning is gone with the second process. There is no
+app-level token: nothing here opens a socket.
 The app needs Interactivity on (for the approval buttons and the note modal)
 and is subscribed to `message.channels`, `message.groups`, `message.im`, `message.mpim` and
 `app_mention`; its bot scopes are `chat:write`, `app_mentions:read`, `channels:history`,
