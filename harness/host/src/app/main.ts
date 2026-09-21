@@ -3,7 +3,13 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { config as loadEnv } from 'dotenv';
 import { DEFAULT_HEALTH_BIND, collectHealth, startHealthServer, type HealthPayload } from '@harness/approvals';
-import { assertEmbedDims, configSourceNameFrom, loadConfigSource } from '@harness/core-tools';
+import {
+  assertEmbedDims,
+  configSourceNameFrom,
+  loadConfigSource,
+  loadSecretSource,
+  secretSourceNameFrom,
+} from '@harness/core-tools';
 import { outRoot, storageRoot } from '@harness/core-tools/storage';
 import { createDb } from '@harness/db';
 import { createLogger, envOrDefault, numberFromEnv, optionalEnv } from '@harness/shared';
@@ -34,10 +40,13 @@ await mkdir(outRoot(storageDir), { recursive: true });
 await assertEmbedDims(db, numberFromEnv('HARNESS_EMBED_DIMS', 1_024, { min: 8, max: 2_000, integer: true }));
 
 const source = await loadConfigSource(configSourceNameFrom(process.env), { env: process.env, log, db });
+// Where a tenant's secrets come from: `env` reads this process's environment, `postgres` reads
+// `client_secrets`. Required, with no default, for the reason `HARNESS_CONFIG_SOURCE` is.
+const secrets = await loadSecretSource(secretSourceNameFrom(process.env), { env: process.env, log, db });
 // Set: a dedicated host, serving one client and refusing every other. Unset: a pooled host,
 // resolving the client per event.
 const dedicatedClient = (optionalEnv('HARNESS_CLIENT') ?? '').trim() || null;
-const pool = await createHost({ db, env: process.env, log, now, source, dedicatedClient });
+const pool = await createHost({ db, env: process.env, log, now, source, secrets, dedicatedClient });
 
 const health = startHealthServer({
   port: port('APPROVALS_HEALTH_PORT', 8787),

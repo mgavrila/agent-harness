@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { parseClientDocument } from './document.js';
-import { MemoryConfigSource, configSourceConformance, fixtureDocument } from './testing.js';
+import {
+  MemoryConfigSource,
+  MemorySecretSource,
+  configSourceConformance,
+  fixtureDocument,
+  secretSourceConformance,
+} from './testing.js';
 
 configSourceConformance(async () => {
   const source = new MemoryConfigSource();
@@ -10,6 +16,19 @@ configSourceConformance(async () => {
       source.put(parseClientDocument(document), version);
       // This source serves the version it was handed, so that is what it assigned.
       return version;
+    },
+    close: async () => {
+      await source.close();
+    },
+  };
+});
+
+secretSourceConformance(async () => {
+  const source = new MemorySecretSource();
+  return {
+    source,
+    put: async (clientId, name, value) => {
+      source.put(clientId, name, value);
     },
     close: async () => {
       await source.close();

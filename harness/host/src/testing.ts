@@ -2,7 +2,7 @@ import { mkdtempSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import type { ClientDocument } from '@harness/config-api';
+import { envSecretSource, type ClientDocument, type SecretSource } from '@harness/config-api';
 import { MemoryConfigSource } from '@harness/config-api/testing';
 import type { KernelConfig, PackRegistry } from '@harness/core-tools';
 import { makeTestDeps, type TestDepsOverrides } from '@harness/core-tools/testing';
@@ -257,6 +257,17 @@ export async function poolFixture(
     dedicated?: string;
     env?: Record<string, string | undefined>;
     /**
+     * Where this pool resolves its tenants' secrets from.
+     *
+     * **The environment source by default**, which is what every deployment has today and what
+     * every existing case in this package was written against: a document naming an `{ env }`
+     * secret this fixture's environment does not set fails with the sentence it has always
+     * failed with, and a `{ ref }` is refused with "this deployment has no secret source". A case
+     * that wants a store — the web surface's bearer, the gateway key — builds a
+     * `MemorySecretSource`, fills it and passes it.
+     */
+    secrets?: SecretSource;
+    /**
      * Where this pool's log lines go. Silent by default, which is what a suite wants; a case that
      * asserts on a line — a surface that failed mid-stream, a refusal nothing else records —
      * passes a collector.
@@ -286,6 +297,10 @@ export async function poolFixture(
     // under one and a decision taken under the other agree on whether it has expired.
     now: () => new Date('2026-09-15T12:00:00Z'),
     source,
+    // Over **this fixture's own `env`**, not the ambient one, for the reason every other value in
+    // that bag is: a developer's filled-in `.env` must not reach a tenant and change what a case
+    // proves.
+    secrets: opts.secrets ?? envSecretSource(env),
     dedicatedClient: opts.dedicated ?? null,
   });
   const tenant = (clientId: string): Tenant => {

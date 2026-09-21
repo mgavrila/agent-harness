@@ -38,9 +38,9 @@ const SECRET_NAME = /^[a-z][a-z0-9-]*$/;
  * A reference to a secret, never the secret.
  *
  * `{ env }` names an environment variable the host resolves from its own process environment.
- * `{ ref }` names a secret in the deployment's secret store; until a deployment has one, a
- * document that carries a `{ ref }` parses but is refused when a tenant opens (see
- * `assertSecretsPresent` in the host). Exactly one of the two, never both and never neither: a
+ * `{ ref }` names a secret in the deployment's secret store; a deployment whose
+ * `HARNESS_SECRET_SOURCE` has no store refuses such a document when a tenant opens (see
+ * `resolveSecrets` in `./secrets.ts`). Exactly one of the two, never both and never neither: a
  * document that carried a literal value would be a document that got copied into a ticket, so
  * the schema admits no such shape at all.
  */
@@ -193,8 +193,8 @@ export type SurfaceSecretRef = { surface: string; field: string } & SecretRef;
  * adapter — which is allowed to know what its own fields are called — looks its variable up. The
  * value itself never appears: a `SecretRef` names an environment variable or a secret store entry
  * and never the secret itself. An entry named by `{ ref }` rather than `{ env }` travels the same
- * way; it is `assertSecretsPresent`'s job, not this one's, to refuse it while no deployment has a
- * secret store.
+ * way; it is `resolveSecrets`'s job, not this one's, to turn either shape into a value through
+ * whatever secret source the deployment configured.
  */
 export function surfaceSecretsOf(document: ClientDocument): SurfaceSecretRef[] {
   const secrets: SurfaceSecretRef[] = [];

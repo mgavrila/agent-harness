@@ -49,7 +49,7 @@ describe('the two per-run model-call limits', () => {
   });
 });
 
-describe('assertSecretsPresent', () => {
+describe('resolving a tenant’s secrets', () => {
   it('refuses a client whose document names a secret this deployment has no secret source for', async () => {
     const withRef = parseClientDocument(
       fixtureDocument({

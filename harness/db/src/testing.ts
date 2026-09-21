@@ -18,7 +18,7 @@ export async function resetDatabase(db: Db): Promise<void> {
   await db.execute(sql`ALTER TABLE audit_log DISABLE TRIGGER USER`);
   try {
     await db.execute(sql`
-      TRUNCATE TABLE client_document_versions, client_documents,
+      TRUNCATE TABLE client_secrets, client_document_versions, client_documents,
         audit_log, tool_effects, model_calls, playbook_runs, playbooks, memory_entries,
         knowledge_chunks, knowledge_documents, knowledge_sources, runs, messages,
         threads, approvals, deadlines, attachments, fields, documents, records CASCADE

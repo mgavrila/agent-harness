@@ -128,6 +128,10 @@ services:
       HARNESS_STORAGE_DIR: '/srv/harness-storage'
       # Where a client comes from. `files` reads the volume below; `postgres` reads the database.
       HARNESS_CONFIG_SOURCE: '${HARNESS_CONFIG_SOURCE:-files}'
+      # Where a tenant's secrets come from. NO `:-` default, unlike the line above: the no-default
+      # rule is the point of this variable, and a Compose default would defeat it exactly where it
+      # matters most — a stack that came up reading the wrong secrets and said nothing.
+      HARNESS_SECRET_SOURCE: '${HARNESS_SECRET_SOURCE:?set HARNESS_SECRET_SOURCE in .env (env or postgres)}'
       HARNESS_CLIENTS_DIR: '/srv/tenants'
       # Which surfaces this client serves and which runtime owns its loop are its document's
       # `surfaces` and `runtime`, not this service's environment.
@@ -152,13 +156,11 @@ services:
       HARNESS_HOST_PORT: '8788'
       # The width knowledge_chunks.embedding was created at. Changing it means a new database.
       HARNESS_EMBED_DIMS: '${HARNESS_EMBED_DIMS:-1024}'
-      # The one Slack app: the token the host posts as, and the signing secret every inbound
-      # request is verified against. Slack delivers to a URL now — there is no app-level token
-      # and nothing here holds a connection.
+      # Passed through for a DEDICATED host whose tenant document names these conventional
+      # variables. A pooled host names nothing here: each tenant's credentials are rows in
+      # `client_secrets`, resolved when that tenant opens. `surface.test.ts` asserts that this
+      # allowlist still carries the first two.
       SLACK_BOT_TOKEN: '${SLACK_BOT_TOKEN:-}'
-      # Named by a document's `surfaces.slack.signingSecret`. The host refuses to open a tenant
-      # whose named variable is unset, so every SecretRef a document names must be on this list —
-      # a document is data and cannot add a line here.
       SLACK_SIGNING_SECRET: '${SLACK_SIGNING_SECRET:-}'
       SLACK_APPROVALS_CHANNEL: '${SLACK_APPROVALS_CHANNEL:-}'
       APPROVALS_POLL_SECONDS: '${APPROVALS_POLL_SECONDS:-5}'

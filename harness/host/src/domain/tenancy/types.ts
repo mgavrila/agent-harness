@@ -1,4 +1,4 @@
-import type { ClientDocument, ConfigSource, LoadedDocument } from '@harness/config-api';
+import type { ClientDocument, ConfigSource, LoadedDocument, SecretSource } from '@harness/config-api';
 import type { startRunner } from '@harness/approvals';
 import type { Db } from '@harness/db';
 import type { EnvSource, Logger } from '@harness/shared';
@@ -50,6 +50,13 @@ export interface HostDeps {
   log: Logger;
   now: () => Date;
   source: ConfigSource;
+  /**
+   * Where this process resolves a tenant's secrets from: `HARNESS_SECRET_SOURCE`.
+   *
+   * One per process, like the config source, and closed with it. Which secrets a tenant *has* is
+   * its document's business; this is only the place they come from.
+   */
+  secrets: SecretSource;
   /** `HARNESS_CLIENT` when it is set: this host serves that client and refuses every other. */
   dedicatedClient: string | null;
 }

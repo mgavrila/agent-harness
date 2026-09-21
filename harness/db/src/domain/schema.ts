@@ -13,6 +13,7 @@ import {
   customType,
   uniqueIndex,
   index,
+  primaryKey,
   pgView,
   vector,
 } from 'drizzle-orm/pg-core';
@@ -619,6 +620,29 @@ export const clientDocumentVersions = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [uniqueIndex('client_document_versions_client_version_uq').on(t.clientId, t.version)],
+);
+
+/**
+ * One tenant's secrets, encrypted with the deployment's own key (spec section 6).
+ *
+ * Written by the platform's control plane and read by the host, which is why the columns are a
+ * contract rather than an implementation detail: `ciphertext` holds the raw AES-256-GCM envelope
+ * — `iv(12) || tag(16) || ciphertext`, exactly what `encrypt` in `shared/crypto.ts` produces —
+ * and not base64 and not text. `name` is a secret name, the `[a-z][a-z0-9-]*` shape a document's
+ * `{ ref }` already enforces.
+ *
+ * **The primary key is the isolation.** A reference resolved for one tenant selects on
+ * `client_id` and can reach no other tenant's row of the same name (invariant 21).
+ */
+export const clientSecrets = pgTable(
+  'client_secrets',
+  {
+    clientId: text('client_id').notNull(),
+    name: text('name').notNull(),
+    ciphertext: bytea('ciphertext').notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.clientId, t.name] })],
 );
 
 /**

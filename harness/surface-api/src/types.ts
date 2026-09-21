@@ -400,15 +400,20 @@ export interface SurfaceDeps {
    */
   tenantKey?: string;
   /**
-   * The environment variable this client's document named for each of this surface's credentials,
-   * keyed by the document's own field name — `{ botToken: 'SLACK_BOT_TOKEN' }`.
+   * This client's credentials for this surface, resolved to their values, keyed by the document's
+   * own field name — `{ botToken: 'xoxb-…' }`.
    *
-   * The counterpart of `Surface.secrets`, which says what an adapter reads: this says what *this
-   * tenant* calls it. An adapter falls back to the conventional name for a field the document did
-   * not name, so a single-tenant deployment configures nothing; two tenants in one process name
-   * two pairs, and neither adapter can read the other's.
+   * The counterpart of `Surface.secrets`, which says which *variables* an adapter reads when it
+   * is given nothing: this is what **this tenant** actually holds, resolved by the host from its
+   * document's `SecretRef`s through whatever secret source the deployment configured. An adapter
+   * falls back to the conventional variable for a field the document did not name, so a
+   * single-tenant deployment configures nothing; two tenants in one process each get their own,
+   * and neither adapter can read the other's.
+   *
+   * **Values, never names, and never logged.** A resolved secret does not appear in a log line,
+   * an error message, an audit row, a refusal or a run API response (invariant 21).
    */
-  secrets?: Readonly<Record<string, string>>;
+  secretValues?: Readonly<Record<string, string>>;
 }
 
 /** What a `@harness/surface-*` package exports as `surface`. */

@@ -19,12 +19,18 @@ host loads them in: the first one present is the primary, where an approval card
 | `http`   | none                                                        | none; and it may never be the primary |
 
 A **SecretRef** is `{ env: string }` or `{ ref: string }`, never both keys and never neither. An
-`env` names an environment variable the host resolves from its own process environment, exactly
-as it does today. A `ref` names an entry in a deployment's secret store; the schema admits it so a
-document can be written before a deployment has one, but `assertSecretsPresent` refuses to open a
-tenant that names a `ref` until that deployment has a secret source to resolve it against — a
-literal secret value never belongs in the document, which is the whole reason `SecretRef` exists
-rather than a plain string.
+`env` names an environment variable, resolved from the process environment under every source. A
+`ref` names an entry in a deployment's secret store. A literal secret value never belongs in the
+document, which is the whole reason `SecretRef` exists rather than a plain string.
+
+A **SecretSource** is where those references are resolved from: `name`, `resolve(clientId, ref)`
+and an optional `close`, chosen by `HARNESS_SECRET_SOURCE`. `envSecretSource` ships here and
+refuses every `{ ref }`, because a deployment with no store cannot serve a document that names an
+entry in one; `postgresSecretSource` in `@harness/config-postgres` reads `client_secrets`.
+`resolveSecrets(document, { source, log })` turns every reference a document's surfaces name into
+its **value**, keyed by surface and by the document's own field name, which is what the host hands
+each adapter. Every implementation runs `secretSourceConformance` from
+`@harness/config-api/testing`.
 
 A **blueprint** is a complete document with placeholders and a **lock set** of JSON pointers. An
 **overlay** is a tenant's edits as a small JSON Patch. `resolve(blueprint, overlay)` applies the

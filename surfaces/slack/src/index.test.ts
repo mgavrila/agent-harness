@@ -8,29 +8,23 @@ describe('the Slack surface declaration', () => {
     expect([...surface.secrets].sort()).toEqual(['SLACK_BOT_TOKEN', 'SLACK_SIGNING_SECRET']);
   });
 
-  it("reads the variables this client's document named, not the conventional ones", async () => {
-    // Two tenants in one process hold two apps, so the variable an adapter reads is the one its
-    // own document named. `deps.secrets` is field name to variable name, built in the host from
-    // `surfaceSecretsOf`, and absent for a deployment that named nothing.
+  it("uses the values this client's document named, and falls back to the conventional variables", async () => {
+    // Two tenants in one process hold two apps, so what an adapter posts as is what its own
+    // document named — resolved by the host, from an environment variable or from a store, and
+    // handed over as a value.
     const deps = {
-      env: {
-        TENANT_A_BOT: 'xoxb-tenant-a',
-        TENANT_A_SIGNING: 'tenant-a-signing',
-        SLACK_APPROVALS_CHANNEL: 'C0TEST',
-      },
+      env: { SLACK_APPROVALS_CHANNEL: 'C0TEST' },
       log: createLogger('test'),
       storageDir: '/nonexistent',
-      secrets: { botToken: 'TENANT_A_BOT', signingSecret: 'TENANT_A_SIGNING' },
+      secretValues: { botToken: 'xoxb-tenant-a', signingSecret: 'tenant-a-signing' },
     };
-    // It connects on those two names alone: the conventional ones are not in this environment at
-    // all, so a `connect` that reached for them would throw a ConfigError naming them.
+    // Neither conventional variable is in this environment at all, so a `connect` that reached
+    // for one would throw a ConfigError naming it.
     await expect(surface.connect(deps)).resolves.toMatchObject({ name: 'slack' });
-    // And a document that named one variable this deployment does not set fails with that name.
+    // And a deployment that resolved nothing falls back to them, and says which one is missing.
     // Wrapped, because `connect` reads its configuration before it has anything to await and so
     // raises where it stands: the contract says a caller gets a promise, and this asserts what
     // that caller sees whichever way the failure arrives.
-    await expect(
-      (async () => surface.connect({ ...deps, secrets: { ...deps.secrets, signingSecret: 'TENANT_B_SIGNING' } }))(),
-    ).rejects.toThrow(/TENANT_B_SIGNING/);
+    await expect((async () => surface.connect({ ...deps, secretValues: {} }))()).rejects.toThrow(/SLACK_BOT_TOKEN/);
   });
 });

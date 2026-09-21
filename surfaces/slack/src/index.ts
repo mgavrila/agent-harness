@@ -22,7 +22,7 @@ export const surface: Surface = defineSurface({
   secrets: ['SLACK_BOT_TOKEN', 'SLACK_SIGNING_SECRET'],
   // Not `async`: building the transport opens nothing, so there is nothing here to await.
   connect: (deps) => {
-    const config = slackConfig(deps.env, deps.secrets ?? {});
+    const config = slackConfig(deps.env, deps.secretValues ?? {});
     return Promise.resolve(createSlackSession(eventsTransport(config, deps.log, deps.storageDir), config));
   },
 });

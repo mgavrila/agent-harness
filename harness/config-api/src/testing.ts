@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { ConfigError } from '@harness/shared';
 import { CLIENT_DOCUMENT_VERSION, parseClientDocument, type ClientDocument } from './document.js';
-import type { ConfigSource, LoadedDocument } from './types.js';
+import { envSecretValue } from './secrets.js';
+import type { ConfigSource, LoadedDocument, SecretSource } from './types.js';
 
 /**
  * A complete, valid client document, as a plain object, for a test or a conformance suite to
@@ -182,6 +183,141 @@ export function configSourceConformance(makeSource: () => Promise<ConfigSourceHa
             .put(fixtureDocument({ runtime: 'Not A Plug-in' }) as unknown as ClientDocument, 'v1')
             .then(() => source.load('fixture')),
         ).rejects.toThrow(ConfigError);
+      });
+    });
+  });
+}
+
+/**
+ * The variable every secret-source harness sets, so the suite can prove the `{ env }` path
+ * without guessing a name a particular implementation happens to know.
+ *
+ * A plain constant rather than a `requiredEnv` call, deliberately: the environment scan in
+ * `record-surface.ts` reads helper call sites, and a literal here would put a name in
+ * `.env.example` that no deployment sets.
+ */
+export const CONFORMANCE_SECRET_VARIABLE = 'HARNESS_CONFORMANCE_SECRET';
+export const CONFORMANCE_SECRET_VALUE = 'conformance-environment-value';
+
+/** A store over secrets already in hand: the one every kernel test drives. */
+export class MemorySecretSource implements SecretSource {
+  readonly name = 'memory';
+  closed = false;
+
+  private readonly values = new Map<string, string>();
+  private readonly env: Readonly<Record<string, string | undefined>>;
+
+  constructor(
+    env: Readonly<Record<string, string | undefined>> = { [CONFORMANCE_SECRET_VARIABLE]: CONFORMANCE_SECRET_VALUE },
+  ) {
+    this.env = env;
+  }
+
+  /** Store one tenant's secret. The key is the pair, which is the isolation. */
+  put(clientId: string, name: string, value: string): void {
+    this.values.set(`${clientId}:${name}`, value);
+  }
+
+  async resolve(clientId: string, ref: { env: string } | { ref: string }): Promise<string> {
+    if ('env' in ref) return envSecretValue(this.env, ref.env);
+    const value = this.values.get(`${clientId}:${ref.ref}`);
+    if (value === undefined) throw new ConfigError('this source holds no such secret for that client');
+    return value;
+  }
+
+  async close(): Promise<void> {
+    this.closed = true;
+  }
+}
+
+/** What a secret-source implementation hands the conformance suite so it can drive it. */
+export interface SecretSourceHarness {
+  source: SecretSource;
+  /**
+   * Store a secret, for a source that has a store.
+   *
+   * **Absent for a source that has only the environment**, which is how the suite tells the two
+   * apart: the same shape `configSourceConformance` uses for `list`. A source with no `put` is
+   * asserted to refuse every `{ ref }`; one with a `put` is asserted to resolve its own tenant's
+   * and no other's.
+   */
+  put?(clientId: string, name: string, value: string): Promise<void>;
+  close(): Promise<void>;
+}
+
+/**
+ * The suite every `SecretSource` runs, so that "a source" is one thing rather than two.
+ *
+ * `makeSource` is called fresh for each case and its `close` is awaited afterwards, so a case
+ * that fails does not leave a connection behind for the next one. The harness's source must
+ * resolve `CONFORMANCE_SECRET_VARIABLE` from whatever environment it was built over.
+ */
+export function secretSourceConformance(makeSource: () => Promise<SecretSourceHarness>): void {
+  const withSource = async (body: (harness: SecretSourceHarness) => Promise<void>): Promise<void> => {
+    const harness = await makeSource();
+    try {
+      await body(harness);
+    } finally {
+      await harness.close();
+    }
+  };
+
+  describe('SecretSource conformance', () => {
+    it('is named in lowercase, which is what HARNESS_SECRET_SOURCE matches', async () => {
+      await withSource(async ({ source }) => {
+        expect(source.name).toMatch(/^[a-z][a-z0-9-]*$/);
+      });
+    });
+
+    it('resolves an environment reference, whichever source it is', async () => {
+      await withSource(async ({ source }) => {
+        expect(await source.resolve('alpha', { env: CONFORMANCE_SECRET_VARIABLE })).toBe(CONFORMANCE_SECRET_VALUE);
+      });
+    });
+
+    it('refuses an environment reference this deployment does not set', async () => {
+      await withSource(async ({ source }) => {
+        await expect(source.resolve('alpha', { env: 'HARNESS_CONFORMANCE_UNSET' })).rejects.toThrow(ConfigError);
+      });
+    });
+
+    it('refuses a store reference it does not hold, without naming the row or the store', async () => {
+      await withSource(async ({ source }) => {
+        // Cast rather than `err as Error` inside the catch: `resolve` answers a value, so the
+        // union a bare catch produces is `string | Error` and the assertions below would not
+        // typecheck. A source that resolved here fails the `instanceof` on the next line.
+        const failure = (await source.resolve('alpha', { ref: 'nobody' }).catch((err: unknown) => err)) as Error;
+        expect(failure).toBeInstanceOf(ConfigError);
+        // The message is a clause about the reference. The client, the surface and the field are
+        // the caller's to add (`resolveSecrets`), and the value is nobody's to repeat.
+        expect(failure.message).not.toContain('alpha');
+      });
+    });
+
+    it('keeps two tenants apart under one secret name, when it has a store at all', async () => {
+      await withSource(async (harness) => {
+        if (!harness.put) {
+          // A source with only the environment refuses every store reference, which is the whole
+          // of its behaviour on this path and is asserted above.
+          return;
+        }
+        await harness.put('alpha', 'web-token', 'tok-alpha');
+        await harness.put('beta', 'web-token', 'tok-beta');
+        expect(await harness.source.resolve('alpha', { ref: 'web-token' })).toBe('tok-alpha');
+        expect(await harness.source.resolve('beta', { ref: 'web-token' })).toBe('tok-beta');
+        // And a tenant that stored nothing reaches neither (invariant 21).
+        await expect(harness.source.resolve('gamma', { ref: 'web-token' })).rejects.toThrow(ConfigError);
+      });
+    });
+
+    it('answers the value it was given back, byte for byte', async () => {
+      await withSource(async (harness) => {
+        if (!harness.put) return;
+        // A bot token, a bearer and a key are all opaque bytes; a source that trimmed or
+        // re-encoded one would break the secret it answers with, without failing anything.
+        const value = '  xoxb-with spaces and ünicode \n';
+        await harness.put('alpha', 'odd', value);
+        expect(await harness.source.resolve('alpha', { ref: 'odd' })).toBe(value);
       });
     });
   });
