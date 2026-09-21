@@ -10,6 +10,7 @@
  */
 export {
   CLIENT_DOCUMENT_VERSION,
+  CLIENT_ID_PATTERN,
   ClientDocumentShape,
   SURFACE_ORDER,
   SecretRefShape,

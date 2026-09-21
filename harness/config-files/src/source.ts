@@ -3,6 +3,7 @@ import { watch, type FSWatcher } from 'node:fs';
 import { access, readdir, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import {
+  CLIENT_ID_PATTERN,
   migrate,
   resolve as resolveOverlay,
   type Blueprint,
@@ -17,9 +18,6 @@ import { parseWithIncludes } from './include.js';
 
 /** How long a burst of filesystem events is allowed to settle before the document is re-read. */
 export const WATCH_DEBOUNCE_MS = 200;
-
-/** A client id is a path segment; this is the same shape the document schema enforces. */
-const CLIENT_ID = /^[a-z0-9][a-z0-9-]{1,63}$/;
 
 async function exists(target: string): Promise<boolean> {
   try {
@@ -116,7 +114,8 @@ export function filesConfigSource(opts: FilesConfigSourceOptions): ConfigSource 
   const debounceMs = opts.watchDebounceMs ?? WATCH_DEBOUNCE_MS;
 
   const dirFor = (clientId: string): string => {
-    if (!CLIENT_ID.test(clientId)) throw new ConfigError(`"${clientId}" is not a client id`);
+    // A client id is a path segment here, and the shape is the document schema's own.
+    if (!CLIENT_ID_PATTERN.test(clientId)) throw new ConfigError(`"${clientId}" is not a client id`);
     return path.join(root, clientId);
   };
 
@@ -203,7 +202,7 @@ export function filesConfigSource(opts: FilesConfigSourceOptions): ConfigSource 
         throw new ConfigError(`config-files: cannot list ${root}: ${describeError(err)}`);
       });
       return entries
-        .filter((entry) => entry.isDirectory() && CLIENT_ID.test(entry.name))
+        .filter((entry) => entry.isDirectory() && CLIENT_ID_PATTERN.test(entry.name))
         .map((entry) => entry.name)
         .sort();
     },

@@ -8,8 +8,19 @@ import { RoutingFile } from './routing.js';
 /** Bumped when a document's shape changes in a way `migrate` has to answer for. */
 export const CLIENT_DOCUMENT_VERSION = 1;
 
-/** A client id: a safe path segment, a safe Postgres `client` value, and a safe URL segment. */
-const CLIENT_ID = /^[a-z0-9][a-z0-9-]{1,63}$/;
+/**
+ * A client id: lowercase letters, digits and hyphens, 2 to 64 characters.
+ *
+ * A safe path segment, a safe Postgres `client` value and a safe URL segment, which is what the
+ * shape is for.
+ *
+ * Exported because more than one caller has to agree on it and a second copy is a second answer.
+ * The schema below validates what a document declares itself to be; `@harness/config-files` turns
+ * one into a path segment and refuses a string it cannot spell; and the host checks the segment a
+ * *request* puts in `/tenants/<clientId>/…` before it hands it to either, because that route has
+ * no bearer in front of it and a source is entitled to throw on a string that is not an id.
+ */
+export const CLIENT_ID_PATTERN = /^[a-z0-9][a-z0-9-]{1,63}$/;
 
 /** A plug-in name: the same rule `defineSurface`, the identity plug-in definer and `definePack` apply. */
 const PLUGIN_NAME = /^[a-z][a-z0-9-]*$/;
@@ -68,7 +79,7 @@ const SurfacesShape = z
 export const ClientDocumentShape = z
   .object({
     schemaVersion: z.number().int().min(1),
-    id: z.string().regex(CLIENT_ID, 'a client id is lowercase letters, digits and hyphens, 2 to 64 characters'),
+    id: z.string().regex(CLIENT_ID_PATTERN, 'a client id is lowercase letters, digits and hyphens, 2 to 64 characters'),
     displayName: z.string().trim().min(1).max(120),
     /** The persona, verbatim: what a runtime puts at the top of what the model reads. */
     persona: z.string().min(1),
