@@ -26,6 +26,15 @@ export const WEB_MOUNT_PATH = 'web';
 export const WEB_MAX_TEXT_CHARS = 10_000;
 /** How many attachments one message may name. The run API's own cap, for the same reason. */
 export const WEB_MAX_ATTACHMENTS = 10;
+/**
+ * How long one of the short fields may be: a user id, an action id, a form id, a button's value.
+ *
+ * Every one of them is an identifier somebody else minted, and each is handed on to somewhere a
+ * long string costs more than it is worth — a value reaches the approvals log line when the
+ * presser turns out not to be an approver, so an uncapped one would be a caller writing a page
+ * into a deployment's log.
+ */
+export const WEB_MAX_FIELD_CHARS = 200;
 
 /** A conversation's event stream: `GET web/conversations/<id>/events`. */
 const EVENTS_ROUTE = /^conversations\/([^/]+)\/events$/;
@@ -38,9 +47,12 @@ export interface WebInbound {
   /** The reference this message gets, which is what the caller is answered with. */
   inboundRef(conversation: string): MessageRef;
   /** An opaque handle this surface accepts back in `openForm`, minted per delivered action. */
-  triggerFor(conversation: string): string;
-  /** The metadata the form with this id was opened with in this conversation; empty for none. */
-  metadataFor(conversation: string, formId: string): string;
+  triggerFor(message: MessageRef): string;
+  /**
+   * The metadata the form with this id was opened with on this card, and forget it; null when
+   * this session opened no such form, or when that form has already been submitted.
+   */
+  takeForm(message: MessageRef, formId: string): string | null;
   deliver(what: string, run: () => Promise<void>): void;
   message(event: MessageEvent): Promise<void>;
   action(event: ActionEvent): Promise<void>;
@@ -63,6 +75,15 @@ const refused = (reason: string, error: string): SurfaceHttpResponse => ({
 });
 
 const badRequest = (what: string): SurfaceHttpResponse => json(400, { error: what });
+
+/**
+ * What a submission naming a dialogue this session has no record of is told.
+ *
+ * One fixed sentence for both ways it happens — a card this session never opened a form on, and a
+ * form already submitted — because they are the same thing from the workspace's side and telling
+ * the two apart would say whether a given card exists here.
+ */
+const NO_SUCH_FORM = 'that form is not open on this surface';
 
 /**
  * Constant-time on the bytes, after a length check.
@@ -103,8 +124,8 @@ function stringField(value: unknown, max: number): string | null {
 function messageRef(value: unknown): MessageRef | null {
   if (typeof value !== 'object' || value === null) return null;
   const ref = value as { surface?: unknown; conversation?: unknown; id?: unknown };
-  const conversation = stringField(ref.conversation, 200);
-  const id = stringField(ref.id, 200);
+  const conversation = stringField(ref.conversation, WEB_MAX_FIELD_CHARS);
+  const id = stringField(ref.id, WEB_MAX_FIELD_CHARS);
   if (ref.surface !== 'web' || conversation === null || id === null) return null;
   if (!CONVERSATION_ID_PATTERN.test(conversation)) return null;
   return { surface: 'web', conversation, id };
@@ -137,8 +158,8 @@ export function createDoor(inbound: WebInbound): SurfaceHttp {
   const handleMessage = async (request: SurfaceHttpRequest): Promise<SurfaceHttpResponse> => {
     const body = objectBody(request.body);
     if (!body) return badRequest('the request body is not JSON');
-    const userId = stringField(body.userId, 200);
-    const conversation = stringField(body.conversation, 200);
+    const userId = stringField(body.userId, WEB_MAX_FIELD_CHARS);
+    const conversation = stringField(body.conversation, WEB_MAX_FIELD_CHARS);
     const text = stringField(body.text, WEB_MAX_TEXT_CHARS);
     if (userId === null) return badRequest('userId is required');
     if (conversation === null || !CONVERSATION_ID_PATTERN.test(conversation)) {
@@ -151,7 +172,7 @@ export function createDoor(inbound: WebInbound): SurfaceHttp {
     // other adapter stages its own files and its paths are trustworthy by construction; these are
     // not, which is why the run API checks the same thing in the same way.
     const incoming = path.join(inbound.storageDir, 'incoming');
-    for (const file of files) {
+    for (const [index, file] of files.entries()) {
       try {
         await assertInsideRoot(
           file.path,
@@ -162,7 +183,10 @@ export function createDoor(inbound: WebInbound): SurfaceHttp {
           { allowRoot: false },
         );
       } catch {
-        return badRequest(`attachment "${file.name}" is not a path inside the incoming directory`);
+        // The position in the list the caller sent, which is this door's own number: naming the
+        // attachment would put a caller's string back in the answer, and every other refusal here
+        // repeats nothing of what was sent.
+        return badRequest(`attachment ${index + 1} is not a path inside the incoming directory`);
       }
     }
     const ref = inbound.inboundRef(conversation);
@@ -190,9 +214,9 @@ export function createDoor(inbound: WebInbound): SurfaceHttp {
   const handleAction = (request: SurfaceHttpRequest): SurfaceHttpResponse => {
     const body = objectBody(request.body);
     if (!body) return badRequest('the request body is not JSON');
-    const userId = stringField(body.userId, 200);
-    const actionId = stringField(body.actionId, 200);
-    const value = typeof body.value === 'string' ? body.value : null;
+    const userId = stringField(body.userId, WEB_MAX_FIELD_CHARS);
+    const actionId = stringField(body.actionId, WEB_MAX_FIELD_CHARS);
+    const value = stringField(body.value, WEB_MAX_FIELD_CHARS);
     const ref = messageRef(body.messageRef);
     if (userId === null) return badRequest('userId is required');
     if (actionId === null) return badRequest('actionId is required');
@@ -206,7 +230,7 @@ export function createDoor(inbound: WebInbound): SurfaceHttp {
         message: ref,
         actionId,
         value,
-        trigger: inbound.triggerFor(ref.conversation),
+        trigger: inbound.triggerFor(ref),
       }),
     );
     return json(202, {});
@@ -215,8 +239,8 @@ export function createDoor(inbound: WebInbound): SurfaceHttp {
   const handleForm = (request: SurfaceHttpRequest): SurfaceHttpResponse => {
     const body = objectBody(request.body);
     if (!body) return badRequest('the request body is not JSON');
-    const userId = stringField(body.userId, 200);
-    const formId = stringField(body.formId, 200);
+    const userId = stringField(body.userId, WEB_MAX_FIELD_CHARS);
+    const formId = stringField(body.formId, WEB_MAX_FIELD_CHARS);
     const ref = messageRef(body.messageRef);
     if (userId === null) return badRequest('userId is required');
     if (formId === null) return badRequest('formId is required');
@@ -225,19 +249,24 @@ export function createDoor(inbound: WebInbound): SurfaceHttp {
     const raw = body.values;
     if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return badRequest('values is an object');
     for (const [key, entry] of Object.entries(raw as Record<string, unknown>)) {
-      if (typeof entry !== 'string') return badRequest(`values.${key} is a string`);
+      if (typeof entry !== 'string') return badRequest('every value is a string');
       values[key] = entry;
     }
+    // The host's own string, handed back untouched: the adapter remembered it when it opened the
+    // form on this card and has never read it. Taken rather than read, and the answer decides
+    // whether this submission is delivered at all — a form this session did not open, or one that
+    // has already been submitted, is not a dialogue the host can answer. Delivering it with an
+    // empty string would be worse than refusing: the metadata is what names the approval, so an
+    // empty one reaches the decision path as a submission about nothing.
+    const metadata = inbound.takeForm(ref, formId);
+    if (metadata === null) return badRequest(NO_SUCH_FORM);
     inbound.deliver('a web form submission', () =>
       inbound.form({
         surface: 'web',
         userId,
         conversation: ref.conversation,
         formId,
-        // The host's own string, handed back untouched. The adapter remembered it when the form
-        // was opened and never read it; a form this host did not open carries an empty one, and
-        // the host's handler answers that the approval no longer exists.
-        metadata: inbound.metadataFor(ref.conversation, formId),
+        metadata,
         values,
       }),
     );

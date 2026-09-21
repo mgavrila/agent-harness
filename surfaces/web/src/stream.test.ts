@@ -45,9 +45,56 @@ describe('ConversationStreams', () => {
     // one. The workspace has to be able to tell a resumed stream from a complete one, and this is
     // that signal.
     expect(frames[0]).toBe(
-      `event: notice\ndata: {"text":"Some earlier messages are no longer available.","dropped":true}\n\n`,
+      `event: notice\ndata: {"text":"Some earlier messages are no longer available.","dropped":true,"reason":"window"}\n\n`,
     );
     expect(frames[1]).toBe(`id: 4\nevent: message\ndata: {"n":4}\n\n`);
+  });
+
+  it('tells a client resuming on a conversation this host has never written to, and holds nothing back', async () => {
+    const streams = new ConversationStreams();
+    // The reconnection after a restart, a tenant reload, or an ingress that chose another host:
+    // the client is holding an id from a history this instance does not have. Withholding every
+    // frame below it — which is what filtering on an unplaceable id does — leaves a workspace
+    // watching a live connection that never speaks again, with nothing to tell it why.
+    const stream = streams.open('inbox', new AbortController().signal, '7')[Symbol.asyncIterator]();
+    // Pulled before anything is written, because that is the case being named: this host has no
+    // such conversation at all. (A stream is lazy, so writing first would make the same resume
+    // land on the `ahead` reason below.)
+    expect((await stream.next()).value).toBe(
+      `event: notice\ndata: {"text":"Some earlier messages are no longer available.","dropped":true,"reason":"unknown"}\n\n`,
+    );
+    streams.emit('inbox', 'message', { text: 'after the restart' });
+    streams.emit('inbox', 'message', { text: 'and again' });
+    expect((await stream.next()).value).toBe('id: 1\nevent: message\ndata: {"text":"after the restart"}\n\n');
+    expect((await stream.next()).value).toBe('id: 2\nevent: message\ndata: {"text":"and again"}\n\n');
+  });
+
+  it('tells a client whose id is ahead of the conversation, then replays the whole window', async () => {
+    const streams = new ConversationStreams();
+    streams.emit('inbox', 'message', { n: 1 });
+    const frames = await drain(streams.open('inbox', new AbortController().signal, '50'), 2);
+    expect(frames[0]).toBe(
+      `event: notice\ndata: {"text":"Some earlier messages are no longer available.","dropped":true,"reason":"ahead"}\n\n`,
+    );
+    // Everything held, from the beginning: a fresh open's answer, which is the only honest one
+    // for a cursor that was minted somewhere this host cannot see.
+    expect(frames[1]).toBe('id: 1\nevent: message\ndata: {"n":1}\n\n');
+  });
+
+  it('ends every open stream when the session closes, and ends one opened afterwards at once', async () => {
+    const streams = new ConversationStreams();
+    const open = streams.open('inbox', new AbortController().signal, null)[Symbol.asyncIterator]();
+    const parked = open.next();
+    expect(streams.openCount).toBe(1);
+    streams.close();
+    expect((await parked).done).toBe(true);
+    expect(streams.openCount).toBe(0);
+    // And a request that arrives between the stop and the eviction is answered rather than
+    // parked: what is held goes out, and the stream ends.
+    streams.emit('inbox', 'message', { text: 'held' });
+    expect(await drain(streams.open('inbox', new AbortController().signal, null), 5)).toEqual([
+      'id: 1\nevent: message\ndata: {"text":"held"}\n\n',
+    ]);
   });
 
   it('sends no notice to a client that resumes inside the window', async () => {

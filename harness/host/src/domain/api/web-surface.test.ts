@@ -13,7 +13,7 @@ import { MemorySecretSource, fixtureDocument } from '@harness/config-api/testing
 import { hashArgs } from '@harness/core-tools';
 import { approvals, auditLog } from '@harness/db';
 import type { Trajectory } from '@harness/runtime-api/testing';
-import { poolFixture, useTestDb, type PoolFixture } from '../../testing.js';
+import { poolFixture, useTestDb, waitFor, type PoolFixture } from '../../testing.js';
 import { startRunApi } from './server.js';
 
 const db = useTestDb();
@@ -21,7 +21,7 @@ const db = useTestDb();
 const tokenFor = (clientId: string): string => `wt-${clientId}-0123456789`;
 
 /**
- * A tenant with a web surface and the run API, and nobody on Slack.
+ * A tenant with a web surface and the run API, and nobody on a chat transport.
  *
  * `surfaces.web` is first in `SURFACE_ORDER`, so it is the primary surface and its inbox is where
  * approval cards go. The principals are declared on `web` rather than on `memory`: this document
@@ -97,6 +97,23 @@ async function frameMatching(reader: ReadableStreamDefaultReader<Uint8Array>, wh
 }
 
 /**
+ * Everything a stream delivered up to and including the frame that carries `what`, joined.
+ *
+ * `frameMatching` throws away the reads before the match, which is exactly what a case asking
+ * "and nothing of the other tenant arrived" needs to see.
+ */
+async function framesUntil(reader: ReadableStreamDefaultReader<Uint8Array>, what: string): Promise<string> {
+  let seen = '';
+  for (let read = 0; read < 20; read += 1) {
+    const chunk = await frame(reader);
+    if (chunk === '') break;
+    seen += chunk;
+    if (chunk.includes(what)) return seen;
+  }
+  throw new Error(`no frame carrying "${what}" arrived`);
+}
+
+/**
  * The id of the frame in one read that carries `what`.
  *
  * One read is not one frame: the producer yields a turn's delta and its closing message back to
@@ -110,10 +127,53 @@ function idOfFrame(chunk: string, what: string): string {
   return id[1];
 }
 
+/**
+ * The frames carrying `what`, one entry each, once `count` of them have arrived.
+ *
+ * One read may hand over several frames, so this splits every read rather than counting reads —
+ * which is what a case watching for two cards in one inbox needs.
+ */
+async function framesCarrying(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  what: string,
+  count: number,
+): Promise<string[]> {
+  const found: string[] = [];
+  for (let read = 0; read < 40 && found.length < count; read += 1) {
+    const chunk = await frame(reader);
+    if (chunk === '') break;
+    for (const framed of chunk.split('\n\n')) if (framed.includes(what)) found.push(framed);
+  }
+  if (found.length < count) throw new Error(`only ${found.length} frames carrying "${what}" arrived`);
+  return found;
+}
+
 /** The reference a `card` frame carries, which is what a button press names back. */
 function messageRefOf(chunk: string): Record<string, string> {
   const frame = JSON.parse(chunk.slice(chunk.indexOf('data: ') + 6)) as { message: Record<string, string> };
   return frame.message;
+}
+
+/**
+ * One pending approval for alpha, as a tool that needed one would have staged it.
+ *
+ * `idempotencyKey` is the only thing that differs between them, and two rows in one case need two
+ * keys: the column is unique per client.
+ */
+async function pendingApproval(key: string): Promise<typeof approvals.$inferSelect> {
+  const [row] = await db
+    .insert(approvals)
+    .values({
+      client: 'alpha',
+      action: 'forms_release',
+      payload: { tool: 'forms_release', args: {} },
+      summary: `forms_release (external) requested by u-coordinator (${key})`,
+      requestedBy: 'u-coordinator',
+      idempotencyKey: key,
+      expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+    })
+    .returning();
+  return row;
 }
 
 const refusals = async (): Promise<(typeof auditLog.$inferSelect)[]> =>
@@ -135,7 +195,7 @@ async function decidedStatus(id: string): Promise<string> {
   }
 }
 
-describe('a tenant with no Slack, talking to its agent over the web surface', () => {
+describe('a tenant with no chat transport, talking to its agent over the web surface', () => {
   it('runs a turn from a posted message and puts the reply on the conversation’s stream', async () => {
     const s = await serve(['alpha'], { alpha: [{ say: 'Hello back.' }] });
     const stream = await s.events('alpha', 'inbox');
@@ -171,7 +231,8 @@ describe('a tenant with no Slack, talking to its agent over the web surface', ()
     const seen = await frameMatching(firstReader, '"text":"First."');
     const lastId = idOfFrame(seen, '"text":"First."');
     await firstReader.cancel();
-    // A second turn while nobody is listening: the frames are held, and the resume collects them.
+    // A second turn with the first reader gone. Whether its frames are held for the resume or
+    // arrive live on it, what the resumed stream must never carry is the first turn's.
     await s.post('alpha', 'messages', { userId: 'U012', conversation: 'inbox', text: 'two' });
     const resumed = await s.events('alpha', 'inbox', { 'last-event-id': lastId });
     const resumedReader = resumed.body!.getReader();
@@ -220,18 +281,7 @@ describe('a tenant with no Slack, talking to its agent over the web surface', ()
   it('decides an approval from a button press, and updates the card on the stream', async () => {
     const s = await serve(['alpha']);
     const tenant = s.f.tenant('alpha');
-    const [row] = await db
-      .insert(approvals)
-      .values({
-        client: 'alpha',
-        action: 'forms_release',
-        payload: { tool: 'forms_release', args: {} },
-        summary: 'forms_release (external) requested by u-coordinator',
-        requestedBy: 'u-coordinator',
-        idempotencyKey: 'k-web-1',
-        expiresAt: new Date(Date.now() + 60 * 60 * 1000),
-      })
-      .returning();
+    const row = await pendingApproval('k-web-1');
     const stream = await s.events('alpha', 'inbox');
     const reader = stream.body!.getReader();
     // The poller posts to the primary surface's `defaultConversation`, which for this tenant is
@@ -256,18 +306,7 @@ describe('a tenant with no Slack, talking to its agent over the web surface', ()
   it('declines through the edit form, carrying the note the workspace submitted', async () => {
     const s = await serve(['alpha']);
     const tenant = s.f.tenant('alpha');
-    const [row] = await db
-      .insert(approvals)
-      .values({
-        client: 'alpha',
-        action: 'forms_release',
-        payload: { tool: 'forms_release', args: {} },
-        summary: 'forms_release (external) requested by u-coordinator',
-        requestedBy: 'u-coordinator',
-        idempotencyKey: 'k-web-2',
-        expiresAt: new Date(Date.now() + 60 * 60 * 1000),
-      })
-      .returning();
+    const row = await pendingApproval('k-web-2');
     const stream = await s.events('alpha', 'inbox');
     const reader = stream.body!.getReader();
     await postPendingApprovals({ db, surface: tenant.host.surfaces.primary, client: 'alpha', now: () => new Date() });
@@ -288,6 +327,77 @@ describe('a tenant with no Slack, talking to its agent over the web surface', ()
     // remembered when the form was opened and handed back untouched.
     expect(decided.decisionNote).toBe('not this week');
     await reader.cancel();
+  });
+
+  it('keeps two edit dialogues in one inbox apart, so a note declines the approval it was written for', async () => {
+    const s = await serve(['alpha']);
+    const tenant = s.f.tenant('alpha');
+    // Two approvals waiting is the ordinary case, not an exotic one: both cards go to the one
+    // inbox and the host's edit dialogue has a single constant form id, so the two dialogues are
+    // told apart only by the card each was opened from.
+    const first = await pendingApproval('k-web-3');
+    const second = await pendingApproval('k-web-4');
+    const stream = await s.events('alpha', 'inbox');
+    const reader = stream.body!.getReader();
+    await postPendingApprovals({ db, surface: tenant.host.surfaces.primary, client: 'alpha', now: () => new Date() });
+    const cards = await framesCarrying(reader, 'event: card\n', 2);
+    const cardFor = (id: string): string => {
+      const found = cards.find((framed) => framed.includes(id));
+      if (found === undefined) throw new Error(`no card was posted for approval ${id}`);
+      return found;
+    };
+    const refFirst = messageRefOf(cardFor(first.id));
+    const refSecond = messageRefOf(cardFor(second.id));
+    // Edit on both, in order, before either is submitted: this is the state that used to lose the
+    // first dialogue's metadata to the second's.
+    await s.post('alpha', 'actions', {
+      userId: 'U012',
+      actionId: EDIT_ACTION_ID,
+      value: first.id,
+      messageRef: refFirst,
+    });
+    await s.post('alpha', 'actions', {
+      userId: 'U012',
+      actionId: EDIT_ACTION_ID,
+      value: second.id,
+      messageRef: refSecond,
+    });
+    await framesCarrying(reader, EDIT_FORM_ID, 2);
+    await s.post('alpha', 'forms', {
+      userId: 'U012',
+      formId: EDIT_FORM_ID,
+      values: { [EDIT_NOTE_FIELD_ID]: 'not this one' },
+      messageRef: refFirst,
+    });
+    expect(await decidedStatus(first.id)).toBe('declined');
+    const [declined] = await db.select().from(approvals).where(eq(approvals.id, first.id));
+    expect(declined.decisionNote).toBe('not this one');
+    // And the approval nobody answered is still waiting, with no note of somebody else's.
+    const [untouched] = await db.select().from(approvals).where(eq(approvals.id, second.id));
+    expect(untouched.status).toBe('pending');
+    expect(untouched.decisionNote).toBeNull();
+    await reader.cancel();
+  });
+
+  it('ends an open stream when the tenant is reloaded, and tells the client that reconnects', async () => {
+    const s = await serve(['alpha']);
+    const reader = (await s.events('alpha', 'inbox')).body!.getReader();
+    // A document edit quiesces this tenant and opens a new one, whose session holds a stream
+    // register of its own. A stream left parked on the old session would show the workspace a
+    // live connection that nothing will ever post to again.
+    s.f.source.put(parseClientDocument({ ...webTenant('alpha'), persona: 'Something else.' }), 'v2');
+    await waitFor(() => s.f.pool.tenants.get('alpha')?.version === 'v2');
+    expect((await reader.read()).done).toBe(true);
+    // The client reconnects with the id it last saw, which the new session has never minted: it
+    // is told so, and then given everything that session holds, rather than being filtered into
+    // silence.
+    const resumed = (await s.events('alpha', 'inbox', { 'last-event-id': '7' })).body!.getReader();
+    const notice = await frameMatching(resumed, 'event: notice');
+    expect(notice).toContain('"dropped":true');
+    expect(notice).toContain('"reason":"unknown"');
+    // No id on that frame, so the client's resume point does not move to an apology.
+    expect(notice).not.toMatch(/^id: /);
+    await resumed.cancel();
   });
 
   it('answers a caller the identity plug-in does not know with 202, and a notice on the stream', async () => {
@@ -322,10 +432,19 @@ describe('a tenant with no Slack, talking to its agent over the web surface', ()
     const alpha = (await s.events('alpha', 'inbox')).body!.getReader();
     const beta = (await s.events('beta', 'inbox')).body!.getReader();
     await s.post('beta', 'messages', { userId: 'U012', conversation: 'inbox', text: 'hello' });
-    expect(await frameMatching(beta, 'event: message')).toContain('Beta here.');
+    const betaReply = await frameMatching(beta, 'event: message');
+    expect(betaReply).toContain('Beta here.');
+    expect(betaReply).not.toContain('Alpha here.');
     // A message for one tenant is never refused for a missing hint — the adapter reports the
     // client id the host routed on — and it never reaches the other.
     expect(await refusals()).toEqual([]);
+    // And the other tenant's stream is **read**, not merely opened: beta's turn has finished, so
+    // anything of it that was going to reach alpha has been produced already. Alpha's own turn is
+    // what its stream carries, and nothing of beta's is in front of it.
+    await s.post('alpha', 'messages', { userId: 'U012', conversation: 'inbox', text: 'hello' });
+    const alphaFrames = await framesUntil(alpha, 'event: message');
+    expect(alphaFrames).toContain('Alpha here.');
+    expect(alphaFrames).not.toContain('Beta here.');
     // Alpha's bearer on beta's mount is one tenant reaching for another, and it is refused.
     const crossed = await s.post(
       'beta',

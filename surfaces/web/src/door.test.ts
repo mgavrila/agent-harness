@@ -1,6 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import { bodyText } from '@harness/surface-api/testing';
-import type { ActionEvent, FormEvent, MessageEvent, SurfaceHttpRequest, SurfaceSession } from '@harness/surface-api';
+import type {
+  ActionEvent,
+  Card,
+  Form,
+  FormEvent,
+  MessageEvent,
+  MessageRef,
+  SurfaceHttpRequest,
+  SurfaceHttpResponse,
+  SurfaceSession,
+} from '@harness/surface-api';
 import { createWebSession } from './session.js';
 
 const TOKEN = 'wt-0123456789abcdef';
@@ -54,6 +64,48 @@ const settle = async (): Promise<void> => {
   await new Promise((resolve) => setImmediate(resolve));
   await new Promise((resolve) => setImmediate(resolve));
 };
+
+/** A card with no body and no buttons: these cases are about what the door does with its reference. */
+const card = (title: string): Card => ({
+  id: 'harness_approval',
+  title,
+  notice: 'An approval is waiting.',
+  body: [],
+  actions: [],
+});
+
+/** A dialogue carrying one opaque string, which is what the host puts the approval's id in. */
+const form = (id: string, metadata: string): Form => ({
+  id,
+  title: 'Decline with a note',
+  submitLabel: 'Decline',
+  cancelLabel: 'Cancel',
+  fields: [{ id: 'note', label: 'Note', multiline: true, optional: true }],
+  metadata,
+});
+
+/**
+ * Press a button on this card and answer with the trigger the door minted for it.
+ *
+ * A trigger is how `openForm` names the card a dialogue belongs to, and the only way to get one is
+ * to have delivered an action — which is exactly how the host gets one. It takes the action
+ * handler over while it does so, which is why the cases that call it assert on forms rather than
+ * on the actions `open` was collecting.
+ */
+async function triggerOn(session: SurfaceSession, message: MessageRef): Promise<string> {
+  let pressed: ActionEvent | null = null;
+  session.onAction(async (event) => {
+    pressed = event;
+  });
+  await session.http!.handle(
+    post('actions', { userId: 'U012', actionId: 'harness_approval_edit', value: 'a-1', messageRef: message }),
+  );
+  await settle();
+  if (pressed === null) throw new Error('no action was delivered');
+  const trigger = (pressed as ActionEvent).trigger;
+  if (trigger === null) throw new Error('the delivered action carried no trigger');
+  return trigger;
+}
 
 describe('the web surface as a door', () => {
   it('is mounted at one path, under which every route hangs', () => {
@@ -299,23 +351,88 @@ describe('the web surface as a door', () => {
     });
   });
 
-  it('accepts an action and a form this host never posted, because a card it did not post is not an error', async () => {
-    const { session, actions, forms } = open();
+  it('accepts an action on a card this host never posted, because a card it did not post is not an error', async () => {
+    const { session, actions } = open();
     const ref = { surface: 'web', conversation: 'inbox', id: 'w99' };
     expect(
       (await session.http!.handle(post('actions', { userId: 'U012', actionId: 'nope', value: 'x', messageRef: ref })))
-        .status,
-    ).toBe(202);
-    expect(
-      (await session.http!.handle(post('forms', { userId: 'U012', formId: 'nope', values: {}, messageRef: ref })))
         .status,
     ).toBe(202);
     await settle();
     // Delivered, and the handlers ignore an id they do not know — which is where that decision
     // already lives, for every surface.
     expect(actions).toHaveLength(1);
+  });
+
+  it('refuses a submission naming a dialogue it never opened, and one it has already taken', async () => {
+    const { session, forms } = open();
+    const ref = await session.postCard('inbox', card('Approve?'));
+    const unopened = await session.http!.handle(
+      post('forms', { userId: 'U012', formId: 'nope', values: {}, messageRef: ref }),
+    );
+    // Not delivered with an empty metadata, which is what a host's decision path reads the
+    // approval id out of: a submission about nothing is worse than a refusal a client can see.
+    expect(unopened.status).toBe(400);
+    expect(unopened.refusal).toBeUndefined();
+    expect(JSON.parse(await bodyText(unopened))).toEqual({ error: 'that form is not open on this surface' });
+    await settle();
+    expect(forms).toEqual([]);
+    // And a dialogue is answered once. A second submission of the same form on the same card
+    // finds nothing, so a workspace that retried a request it had already sent cannot decide the
+    // same approval twice.
+    const submit = async (): Promise<number> =>
+      (
+        await session.http!.handle(
+          post('forms', { userId: 'U012', formId: 'f1', values: { note: 'no' }, messageRef: ref }),
+        )
+      ).status;
+    await session.openForm(await triggerOn(session, ref), form('f1', 'first'));
+    expect(await submit()).toBe(202);
+    expect(await submit()).toBe(400);
+    await settle();
     expect(forms).toHaveLength(1);
-    expect(forms[0].metadata).toBe('');
+  });
+
+  it('keeps two dialogues open on two cards in one conversation apart', async () => {
+    const { session, forms } = open();
+    // Every approval card a tenant raises goes to the one inbox and the host's edit dialogue has
+    // one constant id, so this is the ordinary case rather than an exotic one: two approvals
+    // waiting, somebody presses Edit on each. Keyed by conversation and form id, the second press
+    // would overwrite the first's metadata — and the metadata names the approval being decided,
+    // so submitting the first dialogue would decide the second approval.
+    const a = await session.postCard('inbox', card('Approve A?'));
+    const b = await session.postCard('inbox', card('Approve B?'));
+    await session.openForm(await triggerOn(session, a), form('harness_approval_edit_modal', 'approval-a'));
+    await session.openForm(await triggerOn(session, b), form('harness_approval_edit_modal', 'approval-b'));
+    const submit = (ref: MessageRef): Promise<SurfaceHttpResponse> =>
+      session.http!.handle(
+        post('forms', {
+          userId: 'U012',
+          formId: 'harness_approval_edit_modal',
+          values: { note: 'not this week' },
+          messageRef: ref,
+        }),
+      );
+    expect((await submit(a)).status).toBe(202);
+    await settle();
+    expect(forms).toHaveLength(1);
+    expect(forms[0].metadata).toBe('approval-a');
+    // B is untouched by A's submission: still open, and still its own.
+    expect((await submit(b)).status).toBe(202);
+    await settle();
+    expect(forms[1].metadata).toBe('approval-b');
+  });
+
+  it('ends every open stream when the session stops', async () => {
+    const { session } = open();
+    const response = await session.http!.handle(request({ method: 'GET', path: 'conversations/inbox/events' }));
+    const chunks = (response.body as AsyncIterable<string>)[Symbol.asyncIterator]();
+    const parked = chunks.next();
+    // A tenant whose document moved is stopped and reopened with a session of its own. A stream
+    // left parked on this one would show the workspace a live connection that nothing will ever
+    // post to again; ending it is what makes the client reconnect.
+    await session.stop();
+    expect((await parked).done).toBe(true);
   });
 
   it('refuses to connect at all when the document named a token that resolved to nothing', () => {

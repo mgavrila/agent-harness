@@ -25,6 +25,18 @@ const NAME = 'web';
  */
 const HANDLE_LIMIT = 200;
 
+/**
+ * Where one open form's metadata is remembered: the card it was opened from, and its id.
+ *
+ * **Not the conversation.** Every approval card a tenant raises goes to the one inbox and the
+ * host's edit dialogue has a single, constant form id, so a key of `(conversation, formId)` would
+ * let a second Edit press overwrite the first one's metadata — and the metadata is what names the
+ * approval being decided. Two people editing two approvals in one inbox would then decide the
+ * same one twice. A message reference is unique per posted card, which is exactly the grain a
+ * form instance has.
+ */
+const formKey = (message: MessageRef, formId: string): string => `${message.conversation}:${message.id}:${formId}`;
+
 /** A bounded map: the oldest entry goes when a new one would push it past the limit. */
 class Recent<T> {
   private readonly entries = new Map<string, T>();
@@ -40,6 +52,13 @@ class Recent<T> {
 
   get(key: string): T | undefined {
     return this.entries.get(key);
+  }
+
+  /** Read an entry and forget it, so a handle that is used once cannot be used twice. */
+  take(key: string): T | undefined {
+    const found = this.entries.get(key);
+    this.entries.delete(key);
+    return found;
   }
 }
 
@@ -65,7 +84,7 @@ export interface WebSession extends SurfaceSession {
 export function createWebSession(deps: SurfaceDeps): WebSession {
   const config = webConfig(deps);
   const streams = new ConversationStreams();
-  const triggers = new Recent<string>();
+  const triggers = new Recent<MessageRef>();
   const forms = new Recent<string>();
   /** The deliveries this door has acknowledged and not yet finished, so a caller can await them. */
   const delivering = new Set<Promise<void>>();
@@ -86,13 +105,15 @@ export function createWebSession(deps: SurfaceDeps): WebSession {
     storageDir: config.storageDir,
     streams,
     inboundRef: ref,
-    triggerFor(conversation) {
+    triggerFor(message) {
       handles += 1;
       const trigger = `t${handles}`;
-      triggers.set(trigger, conversation);
+      // The **message**, not its conversation: a form opened from this press belongs to the card
+      // it was pressed on, and every one of a tenant's cards is in the same inbox.
+      triggers.set(trigger, message);
       return trigger;
     },
-    metadataFor: (conversation, formId) => forms.get(`${conversation}:${formId}`) ?? '',
+    takeForm: (message, formId) => forms.take(formKey(message, formId)) ?? null,
     /**
      * Start work this request has already been acknowledged for; a failure is a log line.
      *
@@ -235,12 +256,14 @@ export function createWebSession(deps: SurfaceDeps): WebSession {
 
     openForm(trigger, form: Form) {
       return outbound(() => {
-        const conversation = triggers.get(trigger);
-        if (conversation === undefined) throw new SurfaceError(`${NAME}: that trigger is no longer open`);
-        // Remembered against the conversation it was opened in, and handed back untouched when
-        // the form comes in. The adapter never reads it: it is the host's own string.
-        forms.set(`${conversation}:${form.id}`, form.metadata);
-        emit(conversation, 'card', { form });
+        const message = triggers.take(trigger);
+        if (message === undefined) throw new SurfaceError(`${NAME}: that trigger is no longer open`);
+        // Remembered against the card it was opened from, and handed back untouched when the
+        // submission names that card. The adapter never reads it: it is the host's own string.
+        forms.set(formKey(message, form.id), form.metadata);
+        // The frame carries the card too, so the workspace knows which dialogue this is and what
+        // to send back as `messageRef`: a form has no message of its own.
+        emit(message.conversation, 'card', { message, form });
       });
     },
 
@@ -287,13 +310,22 @@ export function createWebSession(deps: SurfaceDeps): WebSession {
     start: () => Promise.resolve(),
     /**
      * Drop the handlers, so a tenant that is shutting down cannot be delivered into by a request
-     * that arrives while its surfaces are being stopped, and post nowhere afterwards.
+     * that arrives while its surfaces are being stopped, and post nowhere afterwards — and end
+     * every stream this session is holding open.
+     *
+     * The streams matter as much as the handlers. A document edit stops this session and opens a
+     * new one with a `ConversationStreams` of its own, so a stream left parked here would keep a
+     * socket open on a session nothing will ever post to again: a workspace would watch a live
+     * connection that had silently gone deaf. Ending the iterables ends the responses, the client
+     * reconnects, and its `Last-Event-ID` reaches a host that cannot place it — which `open`
+     * answers with the dropped notice and the whole window.
      */
     stop: () => {
       stopped = true;
       messageHandler = null;
       actionHandler = null;
       formHandler = null;
+      streams.close();
       return Promise.resolve();
     },
   };
