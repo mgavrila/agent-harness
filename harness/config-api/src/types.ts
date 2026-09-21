@@ -77,7 +77,8 @@ export interface ConfigSource {
  * constructor name and a `code` — written to the log, and its message deliberately dropped,
  * because a driver's message is where a connection string or a statement fragment turns up
  * (invariant 21). A source therefore never needs to redact one, and must never rely on the caller
- * to.
+ * to. That `code` is printed verbatim, so an implementation that sets one of its own keeps it a
+ * short fixed token — `ECONNREFUSED`, `28P01` — and never free text about what failed.
  *
  * `resolve` does **not** have to reject a value that is blank: `resolveSecrets` refuses one for
  * every source, with the clause an unset variable gets, so no adapter is handed an empty string.
