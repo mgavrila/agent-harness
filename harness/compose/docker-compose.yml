@@ -52,6 +52,9 @@ services:
     environment:
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?set LITELLM_MASTER_KEY in .env}
       DATABASE_URL: postgres://harness:harness@postgres:5432/litellm
+      # The platform registers a tenant's own deployments through POST /model/new, which writes
+      # to the model table; without this the proxy serves only what the mounted config renders.
+      STORE_MODEL_IN_DB: 'True'
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       GROQ_API_KEY: ${GROQ_API_KEY:-}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
@@ -156,13 +159,10 @@ services:
       HARNESS_HOST_PORT: '8788'
       # The width knowledge_chunks.embedding was created at. Changing it means a new database.
       HARNESS_EMBED_DIMS: '${HARNESS_EMBED_DIMS:-1024}'
-      # Passed through for a DEDICATED host whose tenant document names these conventional
-      # variables. A pooled host names nothing here: each tenant's credentials are rows in
-      # `client_secrets`, resolved when that tenant opens. `surface.test.ts` asserts that this
-      # allowlist still carries the first two.
-      SLACK_BOT_TOKEN: '${SLACK_BOT_TOKEN:-}'
-      SLACK_SIGNING_SECRET: '${SLACK_SIGNING_SECRET:-}'
-      SLACK_APPROVALS_CHANNEL: '${SLACK_APPROVALS_CHANNEL:-}'
+      # No surface credential is passed through here, and none may be: a tenant's secrets are
+      # whatever its document names — rows in `client_secrets` on a pooled host, `{ env: NAME }`
+      # refs on a dedicated one. A dedicated deployment adds the names its own document chose to
+      # this list; a variable nothing names would be one tenant's credential offered to all.
       APPROVALS_POLL_SECONDS: '${APPROVALS_POLL_SECONDS:-5}'
       EFFECTS_DISPATCH_SECONDS: '${EFFECTS_DISPATCH_SECONDS:-5}'
       RECONCILE_SECONDS: '${RECONCILE_SECONDS:-300}'
