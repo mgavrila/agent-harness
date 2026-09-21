@@ -221,9 +221,14 @@ export interface UploadRequest {
  * field widened, and that is a contract change rather than a workaround. `path` is what is left
  * of the URL below this surface's mount — empty for the mount itself — so an adapter never sees,
  * and never has to agree with, the tenant prefix the host put in front of it.
- * `headers` are lower-cased, and a header sent twice is the first value: a transport that signs
- * its requests does not send its signature twice, and a handler that had to decide which of two
- * values was real would be the wrong place to decide it.
+ * `headers` are lower-cased, and each value is the one the host's HTTP parser produced. **A
+ * header sent twice is the folded value, not the first one** — most names arrive joined with
+ * `", "`, `cookie` with `"; "` — because the parser folds them before the host sees them and the
+ * first value is not recoverable afterwards. A transport that signs its requests does not send
+ * its signature twice, so this is the safe direction: a signature computed over one value does
+ * not match the join, and the handler refuses a duplicated header instead of accepting whichever
+ * of the two an attacker appended. A handler that wants to be explicit about it can refuse a
+ * signature header containing a separator.
  */
 export interface SurfaceHttpRequest {
   method: string;

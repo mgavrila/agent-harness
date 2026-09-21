@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { CLIENT_ID_PATTERN } from '@harness/config-api';
 import { hashArgs, writeAudit } from '@harness/core-tools';
 import type { Db } from '@harness/db';
 import { ConfigError } from '@harness/shared';
@@ -30,16 +31,27 @@ interface Mounted {
   subPath: string;
 }
 
+/** True when `path` is `mount` itself or lies below it, counting whole segments only. */
+function below(mount: string, path: string): boolean {
+  return path === mount || path.startsWith(`${mount}/`);
+}
+
 /**
  * Refuse a tenant whose surfaces cannot be mounted, at open rather than at the first request.
  *
  * Two failures, both of them somebody's configuration: a path that is not a mount path — a
  * leading slash, an upper-case letter, a `..` segment that would climb out of the tenant prefix
- * into `/v1/runs` — and two of one tenant's surfaces claiming the same one, where whichever
- * loaded first would quietly take the other's traffic.
+ * into `/v1/runs` — and two of one tenant's surfaces whose paths overlap, where whichever loaded
+ * first would quietly take the other's traffic.
+ *
+ * Overlapping is wider than identical, because `mountFor` takes the first surface the path is
+ * below: `messages` and `messages/inbound` are two distinct paths that both pass a duplicate
+ * check, and a request to the longer one would go to whichever surface the document happened to
+ * declare first, with `inbound` as its sub-path. Segments, not characters — `messagesfoo` is not
+ * below `messages` and neither can take the other's traffic, so a pair like that is left alone.
  */
 export function assertMounts(client: string, sessions: readonly SurfaceSession[]): void {
-  const claimed = new Map<string, string>();
+  const claimed: { path: string; name: string }[] = [];
   for (const session of sessions) {
     const mount = session.http;
     if (!mount) continue;
@@ -48,39 +60,49 @@ export function assertMounts(client: string, sessions: readonly SurfaceSession[]
         `client "${client}": surface "${session.name}" asks for the mount path "${mount.path}", which is not one: lowercase letters, digits, hyphens and underscores in slash-separated segments, with no leading or trailing slash`,
       );
     }
-    const owner = claimed.get(mount.path);
-    if (owner !== undefined) {
+    // Either direction: the pair is unreachable whichever of the two was declared first, and
+    // saying which is longer is more use to whoever has to fix it than saying which came first.
+    const clash = claimed.find((other) => below(other.path, mount.path) || below(mount.path, other.path));
+    if (clash) {
       throw new ConfigError(
-        `client "${client}": surfaces "${owner}" and "${session.name}" both ask for the mount path "${mount.path}"`,
+        `client "${client}": surfaces "${clash.name}" and "${session.name}" ask for the mount paths "${clash.path}" and "${mount.path}", and one is below the other, so only the first would ever be reached`,
       );
     }
-    claimed.set(mount.path, session.name);
+    claimed.push({ path: mount.path, name: session.name });
   }
 }
 
-/** The first surface whose mount path is this path, or is a prefix of it. */
+/** The first surface whose mount path is this path, or is a whole-segment prefix of it. */
 function mountFor(sessions: readonly SurfaceSession[], path: string): Mounted | null {
   for (const session of sessions) {
     const http = session.http;
     if (!http) continue;
-    if (path === http.path) return { session, http, subPath: '' };
-    if (path.startsWith(`${http.path}/`)) return { session, http, subPath: path.slice(http.path.length + 1) };
+    if (!below(http.path, path)) continue;
+    return { session, http, subPath: path === http.path ? '' : path.slice(http.path.length + 1) };
   }
   return null;
 }
 
 /**
- * Lower-cased, and a header sent twice is its first value.
+ * Lower-cased names, and each value exactly as the parser presents it.
  *
- * Node hands a repeated header back as an array; a transport that signs its requests sends its
- * signature once, and a handler that had to choose between two would be the wrong place for that
- * decision to live.
+ * A header sent twice is **not** reduced to its first value, because the parser has already
+ * folded the two by the time this runs: every name but `set-cookie` arrives as one string with
+ * the values joined — `", "` for most of them, `"; "` for `cookie` — and the first value is no
+ * longer recoverable from `headers` at all. Passing the join through is the only honest option,
+ * and it is the safe one: a signature computed over one value does not match the join, so a
+ * transport that verifies its requests refuses a duplicated header rather than accepting an
+ * injected second one. `SurfaceHttpRequest.headers` says this, so an adapter can rely on it.
+ *
+ * `set-cookie` is the parser's one exception and arrives as an array. It has no meaning on an
+ * inbound request; it is joined the way the others already are rather than being dropped,
+ * because a seam typed `Record<string, string>` has nowhere to put a list.
  */
 function headersOf(req: IncomingMessage): Record<string, string> {
   const headers: Record<string, string> = {};
   for (const [name, value] of Object.entries(req.headers)) {
     if (value === undefined) continue;
-    headers[name.toLowerCase()] = Array.isArray(value) ? (value[0] ?? '') : value;
+    headers[name.toLowerCase()] = Array.isArray(value) ? value.join(', ') : value;
   }
   return headers;
 }
@@ -136,6 +158,14 @@ function send(res: ServerResponse, response: SurfaceHttpResponse): void {
  * host's refusal is a tenant boundary somebody tried to cross and is written to the audit log,
  * and a pooled host asked for a client nobody has writes nothing, because nobody was refused —
  * there is nobody there.
+ *
+ * **Two limits of that uniformity, written down rather than fixed here.** The bodies are
+ * identical and the timings are not: on a pooled host, a client that exists but is not open
+ * costs a config-source load, three plug-in loads, a playbook sync and a scheduler start, and a
+ * client nobody has costs one source lookup. And that open happens before anything has
+ * authenticated the caller, so a guessed client id is a way to make this process hold a tenant.
+ * Both are bounded today by the shape check below and by there being no publicly reachable
+ * deployment of this prefix; a rate on opens per interval is the real answer if there is one.
  */
 export async function handleSurfaceRequest(
   pool: HostPool,
@@ -147,7 +177,15 @@ export async function handleSurfaceRequest(
   const slash = rest.indexOf('/');
   const asked = slash === -1 ? rest : rest.slice(0, slash);
   const path = slash === -1 ? '' : rest.slice(slash + 1);
-  if (asked === '' || path === '') return json(res, 404, { error: 'no such route' });
+  // Before the resolver and before the pool, because neither is the place to bound a caller's
+  // string. A config source is entitled to throw on something that is not an id — the files one
+  // does — and a rejection from there would reach the listener's catch, answer 500 where every
+  // other miss answers 404, and write the caller's own string into this deployment's error log,
+  // on a route with no bearer in front of it. The shape is `@harness/config-api`'s own, so what
+  // is accepted here and what a document may call itself cannot drift apart.
+  if (asked === '' || path === '' || !CLIENT_ID_PATTERN.test(asked)) {
+    return json(res, 404, { error: 'no such route' });
+  }
   const method = req.method ?? '';
   if (pool.resolver.resolve({ from: 'api', clientId: asked }) !== asked) {
     if (pool.dedicatedClient !== null) {
@@ -174,14 +212,28 @@ export async function handleSurfaceRequest(
   if (!body.ok) {
     return json(res, 413, { error: `a request body may be at most ${API_MAX_BODY_BYTES} bytes` }, () => req.destroy());
   }
-  const response = await mount.http.handle({
-    method,
-    path: mount.subPath,
-    headers: headersOf(req),
-    // The bytes as they arrived, decoded as UTF-8 and not parsed: a surface that verifies a
-    // signature computes it over exactly this.
-    body: body.text,
-  });
+  let response: SurfaceHttpResponse;
+  try {
+    response = await mount.http.handle({
+      method,
+      path: mount.subPath,
+      headers: headersOf(req),
+      // The bytes as they arrived, decoded as UTF-8 and not parsed: a surface that verifies a
+      // signature computes it over exactly this.
+      body: body.text,
+    });
+  } catch (err) {
+    // A handler that threw refused nobody, so nothing is audited: invariant 15 is about a door
+    // that turned a request away, and a row saying `refused` for a door that broke would tell an
+    // operator counting tenant boundaries the wrong thing. One line, naming the tenant and the
+    // mount and nothing a caller sent; the error itself goes beside it, where `startRunApi`'s own
+    // catch puts one, because it is the surface's sentence rather than the request's.
+    pool.log.error(
+      `tenant ${tenant.clientId}: surface "${mount.session.name}" failed a request at "${mount.http.path}"`,
+      err,
+    );
+    return json(res, 500, { error: 'surface failure' });
+  }
   if (response.refusal) {
     await auditRefusal(pool.db, {
       client: tenant.clientId,

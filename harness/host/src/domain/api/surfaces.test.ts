@@ -1,4 +1,4 @@
-import type { AddressInfo } from 'node:net';
+import { connect, type AddressInfo } from 'node:net';
 import { eq } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { parseClientDocument, type ClientDocument } from '@harness/config-api';
@@ -6,7 +6,7 @@ import { fixtureDocument } from '@harness/config-api/testing';
 import { auditLog } from '@harness/db';
 import type { Trajectory } from '@harness/runtime-api/testing';
 import { MemorySurface } from '@harness/surface-api/testing';
-import { ConfigError } from '@harness/shared';
+import { ConfigError, type Logger } from '@harness/shared';
 import { poolFixture, useTestDb, waitFor, type PoolFixture } from '../../testing.js';
 import { assertMounts } from './surfaces.js';
 import { startRunApi } from './server.js';
@@ -79,6 +79,80 @@ async function serve(opts: {
 
 const refusals = async (): Promise<(typeof auditLog.$inferSelect)[]> =>
   db.select().from(auditLog).where(eq(auditLog.decision, 'refused'));
+
+/**
+ * One request written straight onto the socket, answered with its status line.
+ *
+ * `fetch` folds a header given twice into one value before it leaves, so a case about what a
+ * duplicated header becomes would be proving its HTTP client's behaviour rather than the host's.
+ * These bytes are what a transport that repeats a header actually puts on the wire.
+ */
+async function rawPost(base: string, path: string, headerLines: readonly string[], body: string): Promise<string> {
+  const target = new URL(base);
+  return new Promise<string>((resolve, reject) => {
+    const socket = connect(Number(target.port), target.hostname, () => {
+      socket.write(
+        [
+          `POST ${path} HTTP/1.1`,
+          `host: ${target.host}`,
+          ...headerLines,
+          `content-length: ${Buffer.byteLength(body, 'utf8')}`,
+          'connection: close',
+          '',
+          body,
+        ].join('\r\n'),
+      );
+    });
+    let received = '';
+    socket.on('data', (chunk: Buffer) => {
+      received += chunk.toString('utf8');
+    });
+    socket.on('end', () => resolve(received.split('\r\n')[0]));
+    socket.on('error', reject);
+  });
+}
+
+/** Every line this pool logged, per level, so a case can assert what a refusal did and did not say. */
+interface Captured {
+  info: string[];
+  warn: string[];
+  error: string[];
+}
+
+function capture(f: PoolFixture): Captured {
+  const lines: Captured = { info: [], warn: [], error: [] };
+  const log: Logger = {
+    info: (message) => lines.info.push(message),
+    warn: (message) => lines.warn.push(message),
+    error: (message) => lines.error.push(message),
+  };
+  f.pool.log = log;
+  return lines;
+}
+
+/**
+ * Record every client id this pool is *asked* about, through the two entry points a request has.
+ *
+ * The shape check on the path segment has to happen before either of them: a config source is
+ * entitled to throw on a string it cannot spell (the files source does), and a resolver is not
+ * the place to bound a caller's input. Asserting the status alone would pass either way, because
+ * the in-memory source a test runs on answers null rather than throwing.
+ */
+function watchLookups(f: PoolFixture): string[] {
+  const asked: string[] = [];
+  const realTenantFor = f.pool.tenantFor.bind(f.pool);
+  f.pool.tenantFor = async (clientId: string) => {
+    asked.push(clientId);
+    return realTenantFor(clientId);
+  };
+  const resolver = f.pool.resolver;
+  const realResolve = resolver.resolve.bind(resolver);
+  resolver.resolve = (ref) => {
+    if (ref.from === 'api' && ref.clientId !== null) asked.push(ref.clientId);
+    return realResolve(ref);
+  };
+  return asked;
+}
 
 describe('a surface mounted on the host', () => {
   it('runs a turn for the tenant the path names, and answers before the turn finishes', async () => {
@@ -197,6 +271,94 @@ describe('a surface mounted on the host', () => {
     expect(response.status).toBe(413);
     expect(s.f.surface('alpha').requests).toEqual([]);
   });
+
+  it('hands the surface the header values exactly as Node parsed them, under lower-cased names', async () => {
+    const s = await serve({ documents: [documentFor('alpha')] });
+    const status = await rawPost(
+      s.url,
+      '/tenants/alpha/messages',
+      ['content-type: application/json', 'X-Signature: aaa', 'X-Signature: bbb', 'X-Mixed-Case: Zed'],
+      message('hello'),
+    );
+    expect(status).toContain('200');
+    const { headers } = s.f.surface('alpha').requests[0];
+    // Node joins a repeated header with ", " for every name but `set-cookie`, and the host passes
+    // that value through unchanged. An adapter verifying a signature sees the join and refuses,
+    // which is the behaviour its contract now states rather than a first value it never gets.
+    expect(headers['x-signature']).toBe('aaa, bbb');
+    expect(headers['x-mixed-case']).toBe('Zed');
+    expect(Object.keys(headers)).toEqual(Object.keys(headers).map((name) => name.toLowerCase()));
+    expect(headers).not.toHaveProperty('X-Signature');
+  });
+
+  it('refuses a client id that is not one before it asks the pool anything', async () => {
+    const s = await serve({ documents: [documentFor('alpha')] });
+    const asked = watchLookups(s.f);
+    const logged = capture(s.f);
+    // An encoded slash and an encoded traversal, both of which survive `new URL`'s normalisation;
+    // then an upper-case letter, a colon, a NUL, one character, and a segment past the bound.
+    const malformed = ['a%2Fb', '%2e%2e%2f%2e%2e', 'Alpha', 'a:b', 'a%00b', 'x', 'a'.repeat(300)];
+    const bodies = new Set<string>();
+    for (const id of malformed) {
+      const response = await s.post(`/tenants/${id}/messages`, message('hello'));
+      expect(response.status, id).toBe(404);
+      bodies.add(await response.text());
+    }
+    expect([...bodies]).toEqual(['{"error":"no such route"}']);
+    // Neither the resolver nor the pool was handed any of them: a config source is entitled to
+    // throw on a string it cannot spell, and this route has no bearer in front of it.
+    expect(asked).toEqual([]);
+    // And nothing a caller sent reached the log, which is the other half of an open port.
+    for (const id of malformed) {
+      expect([...logged.info, ...logged.warn, ...logged.error].join('\n'), id).not.toContain(id);
+    }
+    expect(await refusals()).toEqual([]);
+    // A well-formed id nobody serves still reaches the pool, so the case above proves the guard
+    // rather than a route that never looks anything up.
+    expect((await s.post('/tenants/nobody/messages', message('hello'))).status).toBe(404);
+    expect(asked).toContain('nobody');
+  });
+
+  it('never sees a dot segment, because the URL parser resolves one above the prefix', async () => {
+    const s = await serve({ documents: [documentFor('alpha')] });
+    // `/tenants/../messages` and its encoded spelling both normalise to `/messages` before the
+    // router runs, so they are not requests below this prefix at all and the run API answers
+    // them — with the 401 every unauthenticated `/v1`-shaped miss gets. Pinned because it is
+    // surprising, not because the host does anything about it.
+    for (const path of ['/tenants/../messages', '/tenants/%2E%2E/messages']) {
+      expect((await s.post(path, message('hello'))).status, path).toBe(401);
+    }
+    expect(s.f.surface('alpha').requests).toEqual([]);
+  });
+
+  it('answers 500 for a handler that throws, logs it once, and audits nothing', async () => {
+    const s = await serve({ documents: [documentFor('alpha')] });
+    const logged = capture(s.f);
+    const surface = s.f.surface('alpha');
+    // Past `mountHttp`, because what is under test is a door whose handler fails rather than
+    // refuses: nobody was turned away, so there is nothing to audit as a refusal.
+    surface.http = {
+      path: 'messages',
+      handle: () => Promise.reject(new Error('the transport died holding U012 and hello')),
+    };
+    const response = await s.post('/tenants/alpha/messages', message('hello'));
+    expect(response.status).toBe(500);
+    expect(await response.text()).toBe('{"error":"surface failure"}');
+    expect(logged.error).toHaveLength(1);
+    expect(logged.error[0]).toContain('alpha');
+    expect(logged.error[0]).toContain('messages');
+    // The line names the tenant and the mount and nothing a caller sent.
+    expect(logged.error[0]).not.toContain('U012');
+    expect(logged.error[0]).not.toContain('hello');
+    expect(await refusals()).toEqual([]);
+  });
+
+  it('matches a mount by whole segments, so a longer name is not captured by a shorter mount', async () => {
+    const s = await serve({ documents: [documentFor('alpha')] });
+    const response = await s.post('/tenants/alpha/messagesfoo', message('hello'));
+    expect(response.status).toBe(404);
+    expect(s.f.surface('alpha').requests).toEqual([]);
+  });
 });
 
 describe('assertMounts', () => {
@@ -219,17 +381,41 @@ describe('assertMounts', () => {
     expect(() => assertMounts('alpha', [surface])).toThrow(/mount path/);
   });
 
+  /** The `ConfigError` a call threw, or null: `toThrow` cannot assert on two substrings at once. */
+  const thrownBy = (run: () => void): Error | null => {
+    try {
+      run();
+    } catch (caught: unknown) {
+      return caught as Error;
+    }
+    return null;
+  };
+
   it('refuses two surfaces of one tenant claiming one path, naming both', () => {
-    const err = (() => {
-      try {
-        assertMounts('alpha', [mounted('memory', 'messages'), mounted('other', 'messages')]);
-      } catch (caught: unknown) {
-        return caught as Error;
-      }
-      return null;
-    })();
+    const err = thrownBy(() => assertMounts('alpha', [mounted('memory', 'messages'), mounted('other', 'messages')]));
     expect(err).toBeInstanceOf(ConfigError);
     expect(err?.message).toContain('memory');
     expect(err?.message).toContain('other');
+  });
+
+  it('refuses a mount that shadows another, whichever of the two loaded first', () => {
+    // `messages` and `messages/inbound` both pass a duplicate check and neither is reachable
+    // past the other: the shorter one claims the longer one's traffic by load order alone.
+    for (const pair of [
+      [mounted('memory', 'messages'), mounted('other', 'messages/inbound')],
+      [mounted('other', 'messages/inbound'), mounted('memory', 'messages')],
+    ]) {
+      const err = thrownBy(() => assertMounts('alpha', pair));
+      expect(err).toBeInstanceOf(ConfigError);
+      expect(err?.message).toContain('memory');
+      expect(err?.message).toContain('other');
+      expect(err?.message).toContain('messages/inbound');
+    }
+  });
+
+  it('accepts two mounts that merely share a prefix of one segment', () => {
+    // `messagesfoo` is not below `messages`: the host matches whole segments, so neither can take
+    // the other's traffic and refusing this pair would refuse a tenant that is fine.
+    expect(() => assertMounts('alpha', [mounted('memory', 'messages'), mounted('other', 'messagesfoo')])).not.toThrow();
   });
 });
