@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { useTestDb } from '@harness/db/testing';
-import { clientDocuments, type Db } from '@harness/db';
+import { clientDocumentVersions, clientDocuments, type Db } from '@harness/db';
 import { parseClientDocument } from '@harness/config-api';
 import { configSourceConformance, fixtureDocument } from '@harness/config-api/testing';
+import { ConfigError } from '@harness/shared';
 import { postgresConfigSource, writeClientDocument } from './source.js';
 
 const db = useTestDb();
@@ -113,5 +114,45 @@ describe('postgresConfigSource', () => {
       'v1',
     );
     await expect(postgresConfigSource({ db, log }).load('fixture')).rejects.toThrow(/must be absolute/);
+  });
+});
+
+describe('a version is written once', () => {
+  it('refuses the same version with different content, naming the client and the version', async () => {
+    await writeClientDocument(db, parseClientDocument(fixtureDocument()), 'v1');
+    await expect(
+      writeClientDocument(db, parseClientDocument(fixtureDocument({ displayName: 'Renamed' })), 'v1'),
+    ).rejects.toThrow(ConfigError);
+    await expect(
+      writeClientDocument(db, parseClientDocument(fixtureDocument({ displayName: 'Renamed' })), 'v1'),
+    ).rejects.toThrow(/"fixture".*"v1"/);
+  });
+
+  it('leaves both tables exactly as they were when it refuses', async () => {
+    await writeClientDocument(db, parseClientDocument(fixtureDocument()), 'v1');
+    await writeClientDocument(db, parseClientDocument(fixtureDocument({ displayName: 'Second' })), 'v2');
+    await expect(
+      writeClientDocument(db, parseClientDocument(fixtureDocument({ displayName: 'Rewritten' })), 'v1'),
+    ).rejects.toThrow(ConfigError);
+    // The live row still says v2 and the history still holds two versions: a refusal rolls the
+    // whole transaction back, which is the difference between refusing and half-writing.
+    const live = await db.select().from(clientDocuments);
+    expect(live[0].version).toBe('v2');
+    expect((live[0].document as { displayName: string }).displayName).toBe('Second');
+    const history = await db.select().from(clientDocumentVersions);
+    expect(history).toHaveLength(2);
+    expect(history.map((row) => (row.document as { displayName: string }).displayName).sort()).toEqual([
+      'Fixture',
+      'Second',
+    ]);
+  });
+
+  it('stays a no-op for an identical rewrite, whatever order the keys arrive in', async () => {
+    const document = parseClientDocument(fixtureDocument());
+    await writeClientDocument(db, document, 'v1');
+    // The stored copy came back through `jsonb`, which does not keep key order, so the comparison
+    // has to be canonical rather than a string compare of two serialisations.
+    await expect(writeClientDocument(db, { ...document }, 'v1')).resolves.toBeUndefined();
+    expect(await db.select().from(clientDocumentVersions)).toHaveLength(1);
   });
 });

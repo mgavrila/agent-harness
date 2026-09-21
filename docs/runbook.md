@@ -367,6 +367,77 @@ row delivers exactly where it would have.
 
 There is no down migration. Recovery from a bad 0009 is a database restore, as for 0008.
 
+## The client store as a write contract
+
+Three tables are written by the platform's control plane and read by the kernel:
+`client_documents`, `client_document_versions` and `client_secrets`. `@harness/config-postgres` is
+**not published** — the platform must neither copy kernel code nor depend on an unpublished
+package — so the columns are the contract instead, and these are the columns as they stand:
+
+```
+client_documents
+  client_id      text        PRIMARY KEY
+  schema_version integer     NOT NULL
+  document       jsonb       NOT NULL     -- a whole resolved ClientDocument
+  version        text        NOT NULL     -- what a host caches by and what watch reports
+  blueprint_ref  text        NULL
+  overlay        jsonb       NULL
+  updated_at     timestamptz NOT NULL DEFAULT now()
+
+client_document_versions
+  id             uuid        PRIMARY KEY DEFAULT gen_random_uuid()
+  client_id      text        NOT NULL
+  version        text        NOT NULL
+  document       jsonb       NOT NULL
+  created_by     text        NULL
+  created_at     timestamptz NOT NULL DEFAULT now()
+  UNIQUE (client_id, version)
+
+client_secrets
+  client_id      text        NOT NULL
+  name           text        NOT NULL     -- [a-z][a-z0-9-]*, what a document's { ref } names
+  ciphertext     bytea       NOT NULL     -- the envelope below, raw
+  updated_at     timestamptz NOT NULL DEFAULT now()
+  PRIMARY KEY (client_id, name)
+```
+
+Four rules a writer keeps, and the kernel's own writer keeps them too:
+
+1. **Both document tables in one transaction.** A live row that moved without a history row is a
+   change nobody can review; a history row with no live row is a version nobody is serving.
+2. **The host's watch follows `client_documents.version`.** The `postgres` source polls that one
+   column every thirty seconds and reopens the tenant when it changes. A content change that does
+   not move `version` is a change the host will not notice, and there is no second signal — which
+   is also why rotating a secret is paired with a version bump.
+3. **A version string is written once.** Writing `(client_id, version)` again with *different*
+   content is refused by the kernel's writer and is forbidden to yours. Write content-hash
+   versions and you cannot hit it by accident.
+4. **The kernel validates on read regardless.** `migrate` and `parseClientDocument` run on every
+   load, the row's key must equal the document's `id`, and `knowledge.path` must be absolute. A
+   malformed row fails that tenant and no other.
+
+### The secret envelope
+
+`client_secrets.ciphertext` holds raw bytes, not base64 and not text:
+
+- AES-256-GCM.
+- Key: `HARNESS_ENCRYPTION_KEY`, base64, decoded to **exactly 32 raw bytes**.
+- IV: 12 random bytes. Tag: 16 bytes. No AAD. Plaintext UTF-8.
+- Blob: `iv(12) || tag(16) || ciphertext`.
+
+A vector to check an implementation against, verified in both directions by the kernel's own
+suite:
+
+```
+key_b64    BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=
+iv_hex     030303030303030303030303
+plaintext  xoxb-test-secret
+blob_hex   03030303030303030303030338da626a160e623fe0c27fbca31a81945d91db61775c3b310e6d303988259a78
+```
+
+`writeClientSecret` in `@harness/config-postgres` is the kernel's own writer for that table, and
+what a test and an operator use; a control plane writes the row itself, to the same shape.
+
 ## Model calls
 
 Every gateway call inserts a `model_calls` row: run id, client, route, model,

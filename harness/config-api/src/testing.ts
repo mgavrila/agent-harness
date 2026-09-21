@@ -52,6 +52,8 @@ export class MemoryConfigSource implements ConfigSource {
   readonly name = 'memory';
 
   private readonly documents = new Map<string, LoadedDocument>();
+  /** Every version this source has been handed, so a rewrite can be refused the way a store does. */
+  private readonly versions = new Map<string, ClientDocument>();
   private readonly watchers = new Map<string, Set<(version: string) => void>>();
   closed = false;
 
@@ -61,6 +63,17 @@ export class MemoryConfigSource implements ConfigSource {
 
   /** Make `document` the current version of its client, notifying every watcher of that client. */
   put(document: ClientDocument, version: string): void {
+    const key = `${document.id}:${version}`;
+    const stored = this.versions.get(key);
+    // The same rule the postgres writer enforces and the platform's control plane is bound by: a
+    // version string identifies one document (spec section 6, rule 3). It is here as well as
+    // there because the conformance suite is what makes "a source" one thing rather than two.
+    if (stored && JSON.stringify(stored) !== JSON.stringify(document)) {
+      throw new ConfigError(
+        `client "${document.id}": version "${version}" is already stored with different content; a version string identifies one document, so write a new version rather than rewriting this one`,
+      );
+    }
+    this.versions.set(key, document);
     this.documents.set(document.id, { document, version });
     for (const notify of this.watchers.get(document.id) ?? []) notify(version);
   }
@@ -183,6 +196,25 @@ export function configSourceConformance(makeSource: () => Promise<ConfigSourceHa
             .put(fixtureDocument({ runtime: 'Not A Plug-in' }) as unknown as ClientDocument, 'v1')
             .then(() => source.load('fixture')),
         ).rejects.toThrow(ConfigError);
+      });
+    });
+
+    it('refuses a version string written a second time with different content', async () => {
+      await withSource(async (harness) => {
+        const { source } = harness;
+        const assigned = await harness.put(parseClientDocument(fixtureDocument()), 'v1');
+        // A source that derives its own version from the content cannot express this case at all:
+        // different content *is* a different version there, so there is nothing to collide. Same
+        // shape as the `list` skip above.
+        if (assigned !== 'v1') return;
+        await expect(
+          harness.put(parseClientDocument(fixtureDocument({ displayName: 'Renamed' })), 'v1'),
+        ).rejects.toThrow(ConfigError);
+        // And the document it was serving is the one it still serves: a refused write changes
+        // nothing, which is what makes a history readable after one.
+        const loaded = await source.load('fixture');
+        expect(loaded?.document.displayName).toBe('Fixture');
+        expect(loaded?.version).toBe(assigned);
       });
     });
   });
