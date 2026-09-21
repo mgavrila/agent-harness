@@ -12,6 +12,15 @@ import type { SchedulerStatus } from '../playbooks/scheduler.js';
 import type { HostPool } from '../tenancy/types.js';
 import { WITHHELD, findOrCreateThread } from '../threads/repository.js';
 import { json, readBody } from './http.js';
+import {
+  APPROVAL_STATUSES,
+  MEMORY_SCOPES,
+  READ_DEFAULT_LIMIT,
+  READ_MAX_LIMIT,
+  decodeCursor,
+  readApprovals,
+  readMemory,
+} from './reads.js';
 import { findRunFor, readThreadFor } from './repository.js';
 import { handleSurfaceRequest } from './surfaces.js';
 import { sseStream } from './sse.js';
@@ -283,6 +292,63 @@ async function usageRoute(host: Host, url: URL, res: ServerResponse): Promise<vo
 }
 
 /**
+ * One page of this tenant's approvals (spec section 4.12).
+ *
+ * `status` is the column's own vocabulary and nothing else — `pending`, `approved`, `declined`,
+ * `expired`, comma-separated for several — so a dashboard can render what it filtered on. An
+ * unknown value is a 400 naming the four rather than an empty page, which is the failure a
+ * caller cannot tell from "there are none".
+ */
+async function approvalsRoute(host: Host, url: URL, res: ServerResponse): Promise<void> {
+  const limit = readLimit(url);
+  if (limit === null) return json(res, 400, { error: `limit is a whole number between 1 and ${READ_MAX_LIMIT}` });
+  const asked = url.searchParams.get('status');
+  const statuses = asked === null ? [] : asked.split(',').map((value) => value.trim());
+  const unknown = statuses.find((value) => !(APPROVAL_STATUSES as readonly string[]).includes(value));
+  if (unknown !== undefined) {
+    return json(res, 400, { error: `status is one of ${APPROVAL_STATUSES.join(', ')}, comma-separated for several` });
+  }
+  const cursor = url.searchParams.get('cursor');
+  if (cursor !== null && decodeCursor(cursor) === null) return json(res, 400, { error: 'cursor is not one of ours' });
+  const page = await readApprovals(host.db, { client: host.client, statuses, cursor, limit });
+  return json(res, 200, { client: host.client, ...page });
+}
+
+/** One page of this tenant's memory entries (spec section 4.12), oldest first. */
+async function memoryRoute(host: Host, url: URL, res: ServerResponse): Promise<void> {
+  const limit = readLimit(url);
+  if (limit === null) return json(res, 400, { error: `limit is a whole number between 1 and ${READ_MAX_LIMIT}` });
+  const scope = url.searchParams.get('scope');
+  if (scope !== null && !(MEMORY_SCOPES as readonly string[]).includes(scope)) {
+    return json(res, 400, { error: `scope is one of ${MEMORY_SCOPES.join(', ')}` });
+  }
+  const cursor = url.searchParams.get('cursor');
+  if (cursor !== null && decodeCursor(cursor) === null) return json(res, 400, { error: 'cursor is not one of ours' });
+  const principal = url.searchParams.get('principal');
+  const page = await readMemory(host.db, {
+    client: host.client,
+    ...(scope === null ? {} : { scope }),
+    ...(principal === null ? {} : { principal }),
+    cursor,
+    limit,
+  });
+  return json(res, 200, { client: host.client, ...page });
+}
+
+/**
+ * The page size, or null for one this API will not serve.
+ *
+ * A limit is refused rather than clamped: a caller handed a silently smaller page believes they
+ * have the whole of it, and the one thing a paged export must not do is look complete.
+ */
+function readLimit(url: URL): number | null {
+  const raw = url.searchParams.get('limit');
+  if (raw === null) return READ_DEFAULT_LIMIT;
+  const limit = Number(raw);
+  return Number.isInteger(limit) && limit >= 1 && limit <= READ_MAX_LIMIT ? limit : null;
+}
+
+/**
  * Route one request: the run API below `/v1`, and every tenant's surface mounts below `/tenants`.
  *
  * Every `/v1` route is behind the bearer check, and then behind the tenant check. `/tenants` is
@@ -326,6 +392,8 @@ export async function handleApiRequest(
   const host = tenant.host;
   if (req.method === 'GET' && route === '/v1/status') return statusRoute(host, res, tenant.scheduler);
   if (req.method === 'GET' && route === '/v1/usage') return usageRoute(host, url, res);
+  if (req.method === 'GET' && route === '/v1/approvals') return approvalsRoute(host, url, res);
+  if (req.method === 'GET' && route === '/v1/memory') return memoryRoute(host, url, res);
   if (req.method === 'POST' && route === '/v1/runs') return openRunRoute(host, req, res);
   const cancel = /^\/v1\/runs\/([^/]+)\/cancel$/.exec(route);
   if (req.method === 'POST' && cancel) return cancelRoute(host, url, res, cancel[1]);

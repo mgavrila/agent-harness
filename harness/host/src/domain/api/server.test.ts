@@ -3,7 +3,7 @@ import { eq } from 'drizzle-orm';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { parseClientDocument } from '@harness/config-api';
 import { fixtureDocument } from '@harness/config-api/testing';
-import { messages, runs, threads } from '@harness/db';
+import { approvals, memoryEntries, messages, runs, threads } from '@harness/db';
 import type { Trajectory } from '@harness/runtime-api/testing';
 import { COORDINATOR, MEMBER, poolFixture, useTestDb, type PoolFixture } from '../../testing.js';
 import { WITHHELD } from '../threads/repository.js';
@@ -370,5 +370,107 @@ describe('the run API: a thread and the status', () => {
     const a = await api([]);
     expect((await a.get('/v1/nothing')).status).toBe(404);
     expect((await a.get('/')).status).toBe(404);
+  });
+});
+
+describe('the read routes', () => {
+  /** One approval of the served client, and one of somebody else. */
+  async function seed(): Promise<void> {
+    for (const client of [CLIENT, 'other']) {
+      await db.insert(approvals).values({
+        client,
+        action: 'forms_release',
+        payload: { tool: 'forms_release', args: { file_id: 'roster/secret.csv' } },
+        summary: `forms_release (external) requested by u-coordinator`,
+        requestedBy: 'u-coordinator',
+        idempotencyKey: `k-${client}`,
+        expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+      });
+      await db.insert(memoryEntries).values({
+        client,
+        scope: 'client',
+        text: `a note belonging to ${client}`,
+        createdBy: 'u-coordinator',
+      });
+    }
+  }
+
+  it('answers both routes behind the bearer, and neither without it', async () => {
+    const a = await api([]);
+    for (const route of ['/v1/approvals', '/v1/memory']) {
+      expect((await a.get(route)).status, route).toBe(200);
+      expect((await a.get(route, 'wrong')).status, route).toBe(401);
+      expect((await fetch(`${a.url}${route}`)).status, route).toBe(401);
+    }
+  });
+
+  it('answers this tenant’s rows and none of another’s, in the envelope the platform pages on', async () => {
+    const a = await api([]);
+    await seed();
+    const body = (await (await a.get('/v1/approvals')).json()) as {
+      client: string;
+      rows: { summary: string }[];
+      next_cursor: string | null;
+    };
+    expect(body.client).toBe(CLIENT);
+    expect(body.rows).toHaveLength(1);
+    expect(body.next_cursor).toBeNull();
+    expect(JSON.stringify(body)).not.toContain('roster/secret.csv');
+    const memory = (await (await a.get('/v1/memory')).json()) as { rows: { text: string }[] };
+    expect(memory.rows.map((row) => row.text)).toEqual([`a note belonging to ${CLIENT}`]);
+  });
+
+  it('accepts the four status values, one or several, and refuses a fifth with a 400 naming them', async () => {
+    const a = await api([]);
+    for (const status of ['pending', 'approved', 'declined', 'expired', 'approved,declined']) {
+      expect((await a.get(`/v1/approvals?status=${status}`)).status, status).toBe(200);
+    }
+    // There is no `decided` alias: a filter vocabulary that differs from the column is a second
+    // spelling of one fact, and a platform engineer asking the obvious must not get a 400 for it.
+    const refused = await a.get('/v1/approvals?status=decided');
+    expect(refused.status).toBe(400);
+    expect(((await refused.json()) as { error: string }).error).toContain('pending');
+  });
+
+  it('refuses a scope that is not one, a cursor that does not decode and a limit out of bounds', async () => {
+    const a = await api([]);
+    expect((await a.get('/v1/memory?scope=everything')).status).toBe(400);
+    expect((await a.get('/v1/approvals?cursor=nonsense')).status).toBe(400);
+    for (const limit of ['0', '-1', '1.5', 'many', '501']) {
+      expect((await a.get(`/v1/approvals?limit=${limit}`)).status, limit).toBe(400);
+    }
+    expect((await a.get('/v1/approvals?limit=500')).status).toBe(200);
+  });
+
+  it('pages, and hands back a cursor that fetches the rest', async () => {
+    const a = await api([]);
+    for (const n of [1, 2, 3]) {
+      await db.insert(memoryEntries).values({
+        client: CLIENT,
+        scope: 'client',
+        text: `note ${n}`,
+        createdBy: 'u-coordinator',
+      });
+    }
+    const first = (await (await a.get('/v1/memory?limit=2')).json()) as {
+      rows: { text: string }[];
+      next_cursor: string;
+    };
+    expect(first.rows).toHaveLength(2);
+    const second = (await (
+      await a.get(`/v1/memory?limit=2&cursor=${encodeURIComponent(first.next_cursor)}`)
+    ).json()) as {
+      rows: { text: string }[];
+      next_cursor: string | null;
+    };
+    expect(second.rows).toHaveLength(1);
+    expect(second.next_cursor).toBeNull();
+  });
+
+  it('answers 404 for a client this host does not serve, the way every /v1 route does', async () => {
+    const a = await api([]);
+    const response = await a.get('/v1/approvals', undefined, { [CLIENT_HEADER]: 'somebody-else' });
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({ error: 'no such client' });
   });
 });
