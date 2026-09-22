@@ -1249,3 +1249,450 @@ the sandbox implementation (`@harness/sandbox-api` stays the reserved interface 
   scripts; package READMEs are written for the workspace rather than for a registry;
 - images are amd64 only; multi-arch is a platform ask;
 - `gh release edit` on a re-run overwrites a hand-edited release body.
+
+## 26. Plan 12a — skills as folders, memory the platform can write, two web repairs (addendum, 2026-09-22)
+
+Plan 12 is split into three. **12a is this one**: the skill folder shape, memory write routes on the
+run API, and the two web-surface follow-ups the platform filed after it built against `v0.3.0`. 12b is
+the MCP plug-in seam with an Activepieces MCP server as its reference client. 12c is the Jev typed
+model seam, `correlation` and the event feed, the `execute` action class, delegation caps and the MCP
+facade. The split exists because 12b and 12c each add a new outbound dependency and a new trust
+boundary, and 12a adds neither: every line of it is a shape the kernel already has, made large enough
+for what the platform is building on top.
+
+The baseline is `main` at `25ac653`, which is `v0.3.0`. The branch is
+`worktree-plan-12a-skills-and-memory`. Two user directions are the whole of the brief behind it:
+*"configure the skill, connect from open source things"* — a skill is a folder, not a string, so a
+skill can carry the templates and reference files an open-source skill ships with — and *"manipulate
+and see the memory from UI"* — the workspace can already read a tenant's memory and has no way to
+change it. The two web items come from the platform session's own list: it names each person's own
+conversation `u-<surface user id>`, and the kernel neither protects that naming nor accepts a
+percent-encoded conversation id.
+
+Everything below is a ruling. Where a ruling costs something, the cost is written beside it.
+
+## 27. Decisions taken in Plan 12a (extends section 15's table)
+
+Rows 28–38 continue the numbering of sections 2 and 15.
+
+| #  | Question | Decision | Why, and what it costs |
+| -- | -------- | -------- | ---------------------- |
+| 28 | What a skill is | **A folder.** `ClientDocument.skills` becomes `Record<name, SkillShape>` with `SkillShape = { markdown: string; resources: Record<path, string> }`, strict, carried in the document and versioned with it. There is **no new table**: the section 18 write contract is unchanged and the platform writes the document exactly as it does today. **No back-compat**: a document whose `skills.<name>` is a string is refused at load with a message naming the skill and the new shape. | An open-source skill is a directory — a `SKILL.md` and the templates, checklists and reference pages it tells the model to read. A string can carry only the first of those, so today a skill that needs a template has to inline it into its own prose or do without. The cost is that every document in a store has to be rewritten before this build serves it; the refusal is loud and names the skill, which is the cheapest possible migration and the only honest one under decision 2b. |
+| 29 | How big a skill may be, and where the bounds live | **Five constants in `@harness/shared`**, read by the schema, by the files source, by the materialiser and by the runtime: a resource path matches `/^[a-z0-9][a-z0-9._-]*(\/[a-z0-9][a-z0-9._-]*)*$/` and is at most 128 characters; a file is at most 64 KiB; a skill holds at most 32 resources; a skill is at most 512 KiB in total. A path may never be `SKILL.md` in any casing. | The document is a `jsonb` column and a YAML file, and a skill with a 50 MB attachment is a tenant that cannot be opened. `@harness/shared` because four packages in three bands need the same numbers and two of them may not import each other — the reason `CONVERSATION_ID_PATTERN` already lives there. The casing rule is not pedantry: macOS and the CI runner disagree about whether `skill.md` and `SKILL.md` are one file, so allowing the lowercase spelling would make a tenant's skill load on one machine and overwrite its own manifest on another. |
+| 30 | How a directory of skills reaches a document | **A second include tag, `!include-skills <dir>`**, in `@harness/config-files`. `skills: !include-skills skills` folds `skills/<name>/` beside `client.yaml` into the section: `SKILL.md` becomes `markdown`, every other file under that directory becomes a resource keyed by its path relative to it. Confined to the client's own directory by the same two checks `!include` uses, and it does not follow a symlink out. | The two alternatives were both worse. Overloading `!include` so that a path to a directory answers with a map makes one tag polymorphic in its return type, and the map it would have to answer with is skills-shaped rather than directory-shaped, so the tag would have to know about skills anyway. A convention the source applies when the `skills:` key is absent is magic on top of magic: a document would name none of its own content. A second tag costs one more thing to learn and says, in the document, where that document's skills come from. |
+| 31 | What the runtime seeds | **Every file under `skill.dir`, recursively, as `/skills/<name>/<path>`**, under the same bounds. `RunSkill` is unchanged: `dir` was already the contract and a second field listing the files would be a second answer to a question the directory answers. `skill_activated` is unchanged — the first `read_file` under `/skills/<name>/`, whichever file it names. | A skill folder the model cannot see is a folder that does not exist. Keeping `RunSkill` fixed keeps the host out of it: the host materialises a directory and hands over its path, and what a runtime does with the files in it is the runtime's business. The cost is that a runtime now walks a directory per skill per turn; it is a handful of small files, and they are already re-read every turn, which is what makes an edited skill current on the next one. |
+| 32 | `allowed-tools` in a skill's frontmatter | **Not in 12a.** | A field the runtime does not enforce is the silent-fallback class that section 23's constraint 21 was written against: a skill declaring `allowed-tools: [documents_read]` while every other tool stayed callable would read as a restriction and be none. Tools are governed by the policy matrix and by `policy.tools.hide`, both of which the kernel enforces. It goes in "not in 12a" rather than into the schema. |
+| 33 | How the workspace changes a memory entry | **Three write routes on the run API**: `POST /v1/memory`, `PUT /v1/memory/<id>`, `DELETE /v1/memory/<id>`, authenticated and tenant-resolved exactly as `GET /v1/memory` is — the bearer, then `x-harness-client`, and no principal resolution at all. | Decision 20 gave the workspace a memory page it can only read. A page that shows a wrong fact and cannot fix it sends the operator to `psql`. The routes are on the run API rather than on the web surface because a memory entry belongs to a tenant and not to a conversation: a tenant with Slack and no web surface has the same page. |
+| 34 | Who a platform memory write is made by, and what it may reach | **`created_by` is the tenant's service principal id**, and a write route reaches **every row of the tenant**, not only what one principal can see. The tool path is unchanged and still reaches what its caller can see. | The platform acts through the tenant, not as a person; its own actor is recorded in the platform's audit, which is a different log answering a different question. The reach follows `GET /v1/memory`, which already lists every entry of the tenant including one person's own notes: a page that lists a row it cannot delete is a page that lies about what it is. The cost is stated plainly — **the platform's bearer can delete any principal's private note** — and it is the same bearer that can already read every one of them. |
+| 35 | Whether an edited entry says so | **`memory_entries.updated_at timestamptz null`**, migration 0017. `PUT` sets it; `GET /v1/memory` and every write route's answer carry it; **`memory_list`'s output is unchanged**, so the tool surface stays byte-identical. | A memory page that cannot tell an entry written last year from one corrected this morning is a page an operator cannot trust. It is null rather than defaulted to `created_at`, so that "never edited" is a fact the column states rather than one a reader infers from two equal timestamps. It stays off the tool's output because the model has no use for it, and every field on a tool's output schema is a line in the snapshot and a token in every prompt. |
+| 36 | What a full scope answers a write route | **`409`, with a fixed sentence carrying the scope and its two caps and naming no entry**, never the tool's own refusal text. | `memory_add`'s refusal to the *model* deliberately carries every current entry with its id, so the model can consolidate in the same turn. Handing that text to an HTTP caller would put memory text in an error body and in whatever log the caller keeps, which invariant 27 forbids. The cap itself is not bypassed: the same check runs, and the difference is only what the caller is told. |
+| 37 | A conversation named after a person | **`u-` is reserved.** `surfaces.web.inbox` may not start with `u-` (a parse-time refusal), and the web door refuses a message, an action or a form whose conversation is `u-<x>` unless the request's `userId` is exactly `<x>` — `400`, a fixed sentence, and **audited once**, the way the bearer refusal is. **The stream is not covered**, because nothing identifies the reader on it (section 30, invariant 29). | The platform names each person's own conversation with an agent `u-<surface user id>`, so `u-` already means "this belongs to one person" in the only client this surface has. Without the door check, a workspace bug that sent the wrong `userId` would put one person's question into another person's conversation, and the tenant's bearer is the same for both. It is audited, unlike the door's other `400`s, because this one is somebody reaching into a conversation that is not theirs, which is a boundary an operator counts. |
+| 38 | A conversation id in a path | **The web surface decodes its own segment** with `decodeURIComponent` before the pattern test; a segment that does not decode is a `400`. The host stays byte-exact: it matches `/tenants/<clientId>/` on the raw path and hands the rest over untouched. | `CONVERSATION_ID_PATTERN` allows `:` and `@`, a correct client percent-encodes both, and the door tests the raw segment — so `team%3Aapprovals` is a `400` today and `team:approvals` is not, which is a difference no client can be written against. The host is left alone because a client id is `[a-z0-9-]` and never needs encoding, and a host that decoded would have to decide what `%2F` means in a tenant prefix. |
+
+## 28. Contracts added in Plan 12a (extends section 17)
+
+Three new subsections of section 4, in the numbering that section already uses.
+
+### 4.13 A skill is a folder
+
+**The shared bounds.** One new module, `harness/shared/src/skills.ts`, exported from
+`@harness/shared`. It holds no logic: it is the five numbers and the one pattern that four packages
+have to agree on, in the one package all four may import.
+
+```ts
+/** The manifest every skill folder has, and the one name a resource may never take. */
+export const SKILL_MANIFEST_FILE = 'SKILL.md';
+
+/**
+ * A resource's path inside its skill folder: slash-separated segments, each starting with a
+ * lowercase letter or a digit. `..` cannot be spelled, because a segment may not begin with a dot.
+ */
+export const SKILL_RESOURCE_PATH_PATTERN = /^[a-z0-9][a-z0-9._-]*(?:\/[a-z0-9][a-z0-9._-]*)*$/;
+export const SKILL_RESOURCE_PATH_MAX_CHARS = 128;
+
+/** One file — the manifest or a resource — measured in UTF-8 bytes. */
+export const SKILL_FILE_MAX_BYTES = 65_536;
+/** Resources beside one manifest. */
+export const SKILL_MAX_RESOURCES = 32;
+/** The whole folder, manifest included, in UTF-8 bytes. */
+export const SKILL_MAX_BYTES = 524_288;
+```
+
+**The document section.**
+
+```ts
+export interface SkillShape {
+  /** The whole SKILL.md, frontmatter included. */
+  markdown: string;
+  /** Every other file in the folder, by its path relative to the folder. Empty for a skill with none. */
+  resources: Record<string, string>;
+}
+
+// in ClientDocumentShape
+skills: z.record(z.string().regex(SKILL_NAME), SkillShape).default({});
+```
+
+Strict, at both levels. The refusals, each a `ConfigError` naming the skill and, where there is one,
+the path — **and never the content**:
+
+| What | Refusal |
+| ---- | ------- |
+| `skills.<name>` is a string | `skill "<name>" is a string, and a skill is a folder: write { markdown: "<the SKILL.md>", resources: { "<path>": "<text>" } }` — checked before the schema parse, so the message is this one rather than "expected object, received string" |
+| an empty `markdown` | the schema's own `min(1)` at that path |
+| a path that is not one | `skills.<name>.resources` key against `SKILL_RESOURCE_PATH_PATTERN` |
+| a path whose last segment lower-cases to `skill.md` | `skill "<name>": the resource path "<path>" is the manifest's own name` |
+| a file over `SKILL_FILE_MAX_BYTES` | at the offending path, naming the bound |
+| more than `SKILL_MAX_RESOURCES` resources, or a folder over `SKILL_MAX_BYTES` | at `skills.<name>`, naming the bound |
+| a NUL byte anywhere in a file | at the offending path; content is text, and a `jsonb` column cannot hold a NUL |
+
+`SkillShape` is exported from `@harness/config-api` with its inferred type, beside `SecretRef`.
+
+**The files source.** A second include tag, whose value is a directory relative to `client.yaml`:
+
+```yaml
+skills: !include-skills skills
+```
+
+It reads `<dir>/<name>/` for each immediate sub-directory, in name order, and answers
+`Record<name, SkillShape>` with `markdown` from `SKILL.md` and one resource per other file, walked
+recursively, keyed by its path relative to `<dir>/<name>/` with `/` separators and sorted. The rules:
+
+- The directory and every file under it are confined to the client's own directory by the two checks
+  `readIncluded` already makes — once on the literal path, once on the `realpath` — for the reason
+  that file's comment gives. A symlink is **not followed**: the walk takes regular files only, so a
+  link pointing anywhere, inside or out, contributes nothing.
+- A file sitting directly in `<dir>` rather than in a skill's folder is a `ConfigError` naming it: a
+  skill is a folder, and a stray `notes.md` beside the folders is somebody's mistake, not a skill.
+- A folder with no `SKILL.md` is a `ConfigError` naming the folder.
+- The bounds are **not** re-implemented here. The source reads and the schema refuses, so a document
+  from the `postgres` source and a document from a directory are bounded by one piece of code.
+- An empty `<dir>`, or a `<dir>` that is not there, is a `ConfigError`. A client with no skills omits
+  the key; `skills` defaults to `{}`.
+
+`!include` itself is untouched: it still takes one path to one file and answers that file's text.
+
+**On disk, for the runtime.** `materialiseSkills` writes `<storageDir>/skills/<clientId>/<name>/SKILL.md`
+and `<storageDir>/skills/<clientId>/<name>/<path>` for each resource, creating each parent, and it
+still rebuilds the whole tree from scratch on every tenant open. `readSkillCatalogue` is unchanged: it
+validates `SKILL.md`'s frontmatter and answers `RunSkill { name, version, description, dir }`. The
+kernel's own skills in `harness/host/skills/` and a pack's under its `skillsDir` may carry resources
+too, read by the same reader and bounded by the same constants — asserted by a test over every skill
+this repository ships, so a pack that adds a 5 MB reference PDF fails the suite rather than a tenant's
+turn.
+
+**In the model's files.** `seedFiles` walks `skill.dir` recursively, regular files only, and seeds
+each as `/skills/<name>/<path>` — `SKILL.md` among them, at `/skills/<name>/SKILL.md`, which is where
+it is today. The bounds are checked at seed and a breach throws, naming the skill and the path. The
+prompt's skills line says that a skill is a folder and that the files beside `SKILL.md` are read the
+same way. `skill_activated` still fires on the first `read_file` under `/skills/<name>/`, whichever
+file it names, which is what makes a skill activated by reading its checklist count as activated.
+
+### 4.14 Memory writes on the run API
+
+Three routes beside `GET /v1/memory`, with **identical authentication and tenant resolution**: the
+bearer, then `x-harness-client` through the pool's resolver, and no principal resolution at all. The
+caller is the control plane acting for the tenant.
+
+```
+POST   /v1/memory        { scope: 'client' | 'principal', principal_id?: string, text: string }  → 201 MemoryReadRow
+PUT    /v1/memory/<id>   { text: string }                                                        → 200 MemoryReadRow
+DELETE /v1/memory/<id>                                                                           → 204, no body
+```
+
+`principal_id` is **required** for `scope: 'principal'` and **refused** for `scope: 'client'`; a
+client-scope row has a null `principal_id` and a principal-scope row is somebody's, and a body that
+says otherwise is a caller who has not decided which it meant.
+
+`MemoryReadRow` is the shape `GET /v1/memory` already answers, plus one field:
+
+```ts
+export interface MemoryReadRow {
+  id: string;
+  scope: string;
+  principal_id: string | null;
+  text: string;
+  created_by: string;
+  created_at: string;
+  updated_at: string | null;   // new in 12a; null until the entry has been edited
+}
+```
+
+The refusals, each a fixed sentence that repeats nothing the caller sent:
+
+| Status | When |
+| ------ | ---- |
+| `400` | the body is not JSON, or does not parse against the shape (the shape's own prettified error, which names fields and not values) |
+| `400` | `text` is not 1 to `MEMORY_ENTRY_MAX_CHARS` characters — **the constant imported from `@harness/core-tools`, never re-typed** |
+| `400` | `text` trips the injection scan (an instruction-shaped phrase, an invisible Unicode character) or the restricted-pattern check; the scans' own sentences, which name the category and never echo the text |
+| `400` | the `<id>` segment is not a uuid |
+| `404` | no such entry **in this tenant** — indistinguishable from an entry of another tenant, because the query carries the tenant predicate rather than filtering a result |
+| `409` | the scope is full: `the "<scope>" memory scope is full: at most <n> characters across at most <m> entries; remove an entry first` — the numbers, never the entries |
+
+**Where the work lives.** The domain functions are in
+`harness/core-tools/src/domain/memory/repository.ts` and are shared by the tools and the routes, so
+there is no second copy of the cap arithmetic and no second `WHERE`:
+
+```ts
+/** Which rows a write may reach. */
+export type MemoryReach =
+  | { kind: 'tenant' }                            // every row of the tenant: the run API's reach
+  | { kind: 'visible-to'; principalId: string };  // that principal's own notes and the shared scope
+
+/** Who is writing, where they are writing from, and what they may reach. */
+export interface MemoryWriter {
+  db: Db;
+  client: string;
+  /** What lands in `created_by`. */
+  actor: string;
+  /** The `threads` row the write came from, or null when it came from no conversation. */
+  threadId: string | null;
+  reach: MemoryReach;
+}
+
+/** What a new entry is filed as. `principalId` is the entry's owner, which need not be the actor. */
+export type MemoryTarget = { scope: 'client' } | { scope: 'principal'; principalId: string };
+
+export function addMemory(w: MemoryWriter, args: { text: string; target: MemoryTarget }):
+  Promise<{ id: string; scope: MemoryScope; remaining_chars: number }>;
+export function editMemory(w: MemoryWriter, args: { id: string; text: string }):
+  Promise<{ id: string; scope: MemoryScope }>;
+export function removeMemory(w: MemoryWriter, id: string): Promise<{ removed: true; scope: MemoryScope }>;
+
+/** A scope that cannot hold the write, with the numbers and **no entry text** on the error object. */
+export class MemoryFullError extends ToolError {
+  readonly scope: MemoryScope;
+  readonly usage: ScopeUsage;
+  readonly needed: number;
+}
+```
+
+`MemoryFullError.message` is the sentence `memory_add` gives the model today, entries included and
+unchanged; the route reads the fields and writes its own sentence. `editMemory` runs the same three
+checks an add runs — length, injection, restricted pattern — and the same cap, measured with the
+entry's **own current text discounted**, so correcting a typo in a full scope is not a refusal.
+
+**The audit row.** Every write that reaches the table writes one `audit_log` row through the same
+`writeAudit` a tool's call does:
+
+| Column | Value |
+| ------ | ----- |
+| `client` | the tenant the request resolved to |
+| `caller` | the tenant's service principal id — the same string as `created_by` |
+| `tool` | `memory_add`, `memory_edit` or `memory_remove`. `memory_edit` is a name **no tool publishes**, which is the honest label: nothing a model can call edits an entry |
+| `action_class` | `write.internal` for a client-scope write, `write.self` for a principal-scope one — the classes `memory_add`'s own `actionClassFor` assigns, so an operator grouping by class counts the same act the same way whoever made it |
+| `args_hash` | `hashArgs({ scope })` for an add, `hashArgs({ id })` for an edit or a removal. **Never the text** |
+| `decision` | `auto` — the bearer is the authorisation and policy does not gate this path |
+| `run_id` | null: no run opened |
+| `error` | null on success; on a full scope, the fixed `409` sentence the caller was given, never the entry text |
+
+**A row is written exactly when the entry's scope is known**: on every write that reached the table,
+and on a full scope, which is the one refusal that carries its scope on the exception. A body that
+does not parse, a text the scans refused, a bad id and a `404` write **no** row. Two reasons, and
+they agree: a caller's mistake is not a door turning somebody away — the reason the web door's other
+`400`s cost nothing — and a row whose `action_class` had to be guessed because no entry was reached
+is a row an operator cannot group by. A `404` is a row that is not there rather than a boundary
+somebody crossed.
+
+### 4.15 The web surface's personal conversations, and its own path segment
+
+**`u-` is reserved for a person's own conversation.** Two rules, in two places:
+
+1. `surfaces.web.inbox` may not start with `u-`. A parse-time refusal:
+   `client "<id>": surfaces.web.inbox may not start with "u-", which names one person's own
+   conversation; the inbox belongs to the tenant`.
+2. `POST …/web/messages`, `POST …/web/actions` and `POST …/web/forms` refuse a conversation matching
+   `/^u-(.+)$/` whose capture is not exactly the request's `userId`. `400`, the fixed sentence
+   `that conversation belongs to another person`, and `refusal: { reason: 'foreign_user_conversation' }`
+   — so the host audits it exactly once, before the head is written, the way it audits the bearer
+   refusal. The action and form routes take the conversation from the `messageRef` they were handed,
+   which is the conversation the check reads.
+
+**The stream is not covered, and this is the residual.** `GET …/web/conversations/<id>/events` carries
+no `userId`: the host strips the query string before an adapter sees a request, and the door reads
+only `last-event-id` off the headers. So there is nothing on that request to compare `u-<x>` against,
+and inventing a header for it would be inventing a contract in the plan that is repairing one. **The
+bearer holder is the platform, and the platform enforces it**: one token opens every conversation of
+its tenant, which the surface's README already says in as many words. Section 34's open question 9 is
+where a per-reader credential would be decided; until then, a workspace that opens a `u-` stream for
+the wrong person has made the same class of mistake as one that renders the wrong page.
+
+**The door decodes its own segment.** `GET …/web/conversations/<id>/events` runs
+`decodeURIComponent` on the captured segment before testing it against `CONVERSATION_ID_PATTERN`; a
+segment that throws `URIError` is `400 {"error":"conversation is a conversation id"}`, the same
+answer a segment that decodes to something that is not one gets. So `team%3Aapprovals` and
+`team:approvals` are one conversation, and `a%40b` and `a@b` are one conversation. The host's own
+routing is untouched: `handleSurfaceRequest` still slices `/tenants/<clientId>/` off the raw
+`URL.pathname` and tests the client id against `CLIENT_ID_PATTERN`, which contains nothing that needs
+encoding.
+
+## 29. Data model additions (extends section 18)
+
+**One migration in Plan 12a**, by plain `drizzle-kit generate`: 0017 adds one nullable column.
+
+```sql
+ALTER TABLE memory_entries ADD COLUMN updated_at timestamptz;
+```
+
+Null means never edited. Nothing backfills it, and `created_at` is not copied into it: two equal
+timestamps would say "edited at the moment it was written", which is a different claim from "never
+edited" and is not true. No index: the column is read, never filtered on. `resetDatabase`'s truncation
+list is unchanged — this is a column on a table already on it.
+
+The section 18 write contract gains one line under `client_documents`: `document` holds a whole
+resolved `ClientDocument`, whose `skills` section is now `name → { markdown, resources }`. The columns
+themselves do not change, and neither does rule 1, 2, 3 or 4.
+
+## 30. Security invariants 25–29 (extends section 19)
+
+25. **A skill's resource cannot name a file outside its own folder.** No document can express a path
+    with a `..` segment, a leading `/`, a backslash or a NUL — `SKILL_RESOURCE_PATH_PATTERN` refuses
+    each at parse — and the files source follows no symlink out of the client's directory, checking
+    the literal path and the `realpath` as `!include` does. A resource named `SKILL.md`, in any
+    casing, is refused, so a skill cannot overwrite its own manifest on a case-insensitive
+    filesystem.
+26. **A run API memory write reaches its own tenant and no other.** The tenant predicate is in the
+    query, not applied to a result, on the add, the edit, the removal and the read-back; an id
+    belonging to another tenant and an id belonging to nobody are the same `404`, byte for byte.
+27. **No memory text leaves through an error or a log line.** A `409` for a full scope carries the
+    scope and the two caps and no entry; an injection or restricted-pattern refusal names the category
+    and never repeats the text; the `audit_log` row hashes `{ scope }` or `{ id }` and never the text;
+    and no line the three routes write to the log carries a caller's string.
+28. **A write route's audit row is written for every write that reached the table**, exactly once,
+    carrying the tenant's service principal as its caller, and it is the only record of a change the
+    platform made through the kernel.
+29. **A `u-<x>` conversation on the web surface accepts a message, an action and a form only from
+    `userId` `<x>`**; the refusal is audited exactly once, before a byte of the response is written,
+    and the audit row repeats nothing of the body. **This invariant does not cover the event stream**,
+    which carries no reader identity; the bearer is the bound there, and section 34's question 9 is
+    open on it.
+
+## 31. Testing additions (extends section 20)
+
+- **The skill shape.** A document with a string skill is refused, naming the skill. A resource path
+  with `..`, with a leading slash, at 129 characters, or spelled `Skill.md`, `SKILL.MD` and `skill.md`
+  is refused. A 64 KiB + 1 resource, a 33rd resource and a folder over 512 KiB are each refused at
+  their own path. A skill with no resources parses to `resources: {}`.
+- **The fold.** `!include-skills` over a fixture directory answers both skills in name order with
+  their resources in path order, including one in a sub-directory. A symlink inside the directory
+  pointing outside the client contributes nothing. A file directly in the directory, a folder without
+  a `SKILL.md`, and a directory that is not there are each a `ConfigError`. A document whose
+  `skills:` line is `!include-skills ../..` is refused as an escape, not reported as missing.
+- **Round trip, end to end.** `clients/fixture` ships a skill with a resource; the files source loads
+  it, `materialiseSkills` writes it, `readSkillCatalogue` reads the catalogue off it, and `seedFiles`
+  seeds both files. Two clients materialised under one root see only their own.
+- **Every shipped skill is within the bounds**: a test walks `harness/host/skills/` and every pack's
+  `skillsDir` and asserts the file count, each file's size and the total.
+- **`skill_activated` on a resource read**: a run whose first `read_file` under `/skills/<name>/` names
+  a resource rather than `SKILL.md` still reports the activation once, with the host's version.
+- **The memory write routes**, over a real pool and a real listener, beside the existing read-route
+  tests: a `POST` at 500 characters succeeds and at 501 is a `400`; a `POST` with `scope: 'client'`
+  and a `principal_id` is a `400`, and one with `scope: 'principal'` and none is a `400`; a `PUT`
+  against another tenant's id and against a uuid nobody has are the same `404` body; a forged
+  non-uuid id is a `400`; a text carrying a restricted pattern and one carrying an instruction-shaped
+  phrase are each a `400` whose body does not contain the text; a full scope is a `409` whose body
+  contains no entry; a `DELETE` is `204` and the row is gone; a `PUT` sets `updated_at` and a fresh
+  `POST` leaves it null.
+- **The audit rows counted, not merely found**: one row per successful write, `caller` equal to the
+  tenant's service principal, `tool` the three labels, `args_hash` not equal to `hashArgs({ text })`,
+  and **zero** rows for a body that did not parse and for a `404`.
+- **Tenant isolation on the writes**: two tenants in one pooled host, each with one entry; each
+  tenant's `PUT` and `DELETE` against the other's id answers `404` and leaves the other's row intact.
+- **`u-` conversations**: a document whose `surfaces.web.inbox` is `u-alice` is refused at parse; a
+  message, an action and a form on `u-alice` from `userId` `bob` are each a `400` with exactly one
+  `audit_log` row, and from `userId` `alice` each is accepted; a conversation `u-` with nothing after
+  it is an ordinary conversation, not a personal one.
+- **The decoded segment**: `GET web/conversations/team%3Aapprovals/events` and
+  `GET web/conversations/a%40b/events` each open a stream, on the same conversation their unencoded
+  spellings reach; `GET web/conversations/a%ZZ/events` is a `400`.
+- **Snapshots.** `docs/architecture/tool-surface.json` and `docs/architecture/compose-surface.yaml` are
+  byte-identical in every task: no tool is added, removed or re-described — `memory_list`'s output
+  keeps its five fields and gains no `updated_at` — and no environment variable and no Compose service
+  changes.
+
+## 32. Order and exit criterion (extends section 21)
+
+| Plan | Repository | Delivers | Exit criterion |
+| ---- | ---------- | -------- | -------------- |
+| 12a | agent-harness | skills as folders (schema, `!include-skills`, materialiser, runtime seed), `POST`/`PUT`/`DELETE /v1/memory` with migration 0017, the `u-` conversation rules and the decoded web path segment | an open-source skill folder dropped into a tenant's `skills/` directory reaches the model with its templates beside it; the workspace's memory page adds, corrects and deletes an entry of its tenant and of no other, and every change is one audit row; a workspace opening `team%3Aapprovals` and one opening `team:approvals` are on the same stream |
+
+12a is one pull request and a `v0.4.0` tag, between `v0.3.0` (Plan 11c) and 12b. Nothing in it is a
+seam 12b or 12c depends on, so the three may be reordered; they are in this order because 12a is the
+one the platform is waiting on.
+
+## 33. Constraints the plans inherit from the code, 25–33 (extends section 23)
+
+25. **`document.skills` has exactly one reader in the kernel**: `materialiseSkills` in
+    `harness/host/src/domain/tenancy/skills.ts`. Everything downstream — `readSkillCatalogue`,
+    `RunSkill`, `preflightPlaybook`, the scheduler — works off a directory and a catalogue and never
+    off the document, so the shape change stops at that one function.
+26. **`catalog/src/testing.ts` builds a document with `skills: {}`.** An empty record is valid under
+    the new shape, so the platform's own tree needs no edit — which it must not have, under the kernel
+    boundary. Nothing else under `catalog/`, `control-plane/`, `apps/` or `deploy/` names `skills`.
+27. **The fixture client is loaded by three suites** — `harness/config-files/src/source.test.ts`,
+    `harness/host/src/domain/playbooks/preflight.test.ts` and `scheduler.test.ts` — through the real
+    files source, and `pnpm new-client` reads it as the document every new client starts from. So
+    `clients/fixture/client.yaml` has to be valid after **every** task, not at the end of the plan.
+28. **`parseWithIncludes` is two passes**: `yaml`'s custom tags are synchronous and a file read is
+    not, so a tag's `resolve` leaves a marker and `expand` walks the tree awaiting each one. A second
+    tag follows the same shape, and its collection forms (`!include-skills [a, b]`) refuse, exactly as
+    `!include`'s do.
+29. **`addMemory` and `removeMemory` take the whole `ToolDeps` today** and use four fields of it:
+    `db`, `client`, `principal.id` and `context.threadId`. The run API has no `ToolDeps` and building
+    one for a memory write would mean a policy, an encryption key, a gateway and a storage root for a
+    single `INSERT`. Narrowing the parameter is the change, not adding a second entry point.
+30. **`visibleTo(client, principalId)` is the only predicate in the memory repository**, and every
+    read and the `DELETE` go through it — which is exactly what the run API must **not** do, because
+    a tenant-scoped page has to reach one principal's own notes. A second predicate beside it, chosen
+    by `MemoryReach`, is the smallest change that keeps "the filter is the query" true for both.
+31. **The run API answers `404` for another principal's run and thread already**, with the same body a
+    missing one gets (`cancelRoute`, `threadRoute`). The memory routes copy that exactly, one level up:
+    another **tenant's** id and a missing id are one answer.
+32. **`SURFACE_REFUSAL_REASON_PATTERN` is `/^[a-z][a-z0-9_]{0,63}$/`** and the host replaces anything
+    else with `unspecified`. A new reason is a token in that shape — `foreign_user_conversation` — and
+    never a sentence.
+33. **The lint ceiling is 25 warnings** and `main` at `25ac653` sits exactly at it. New code that adds
+    a warning has to remove one. `pnpm lint` reports; `pnpm lint:strict` is the zero-warning run.
+
+## 34. Open questions 9–11 (extends section 24)
+
+9. **A per-reader credential for the web stream.** Invariant 29 stops at the stream because nothing on
+   it says who is reading. The candidates: a short-lived per-conversation token the workspace fetches
+   and puts in the URL; a `userId` the platform sends as a header and the door compares, which is the
+   same trust the message route already extends and so buys less than it looks like; or leaving it
+   with the bearer, documented. Decide before the workspace serves a tenant with more than one person
+   in it — which is P2, not P1.
+10. **A skill that ships a script.** A resource is text the model reads. An open-source skill that
+    ships a `.py` or a `.sh` arrives as text the model can read and cannot run, which is the right
+    answer today because there is no sandbox; it becomes the wrong answer the moment
+    `@harness/sandbox-api` has an implementation and the `execute` class exists (12c). Decide then
+    whether a resource is mounted into a sandbox, and under what class.
+11. **Whether a memory edit keeps its history.** `updated_at` says an entry changed and says nothing
+    about what it was. A `memory_entry_versions` table is the obvious answer and is a write per edit;
+    the audit row is the cheaper one and carries only the hash of the id. Left at `updated_at`; revisit
+    if a tenant ever has to answer "what did it remember last week".
+
+## 35. Not in Plan 12a
+
+Listed so a reviewer can see each was considered and left out on purpose.
+
+- **`allowed-tools`, or any other frontmatter field the runtime does not enforce.** Decision 32.
+- **A skill store, a skill table, or skills outside the document.** Decision 28: a skill is versioned
+  with the document that declares it, because a tenant rolling back a document must roll back its
+  skills with it.
+- **Binary resources.** A resource is UTF-8 text with no NUL. An image a skill wants to show is a
+  document in the knowledge base or a file in `incoming/`, both of which already have a home.
+- **A `list` of a tenant's skills on the run API.** The document is the list, and the platform wrote it.
+- **Paging, filtering or bulk writes on the memory routes.** One entry per call. The read route pages;
+  a workspace that wants to delete twenty entries makes twenty calls, and each one is one audit row,
+  which is the property that makes the log worth keeping.
+- **A memory write from the web surface, or from any surface.** A memory entry belongs to a tenant,
+  not to a conversation, and the model already has `memory_add` and `memory_remove`.
+- **Editing an entry's scope or owner.** `PUT` takes `text` and nothing else. Moving a private note
+  into the shared scope is a delete and an add, which is two audit rows and is what actually happened.
+- **The event stream's reader identity.** Open question 9.
+- **Everything in 12b and 12c**: declared MCP and A2A plug-ins and the bridge, the `write.assign`
+  gate, Jev and typed model access, `correlation` on runs, `GET /v1/events` and its webhook sink, the
+  `execute` action class, delegation caps.
+- **The 11a, 11b and 11c follow-ups**, every one of them, as section 25 lists them: the pooled-host
+  drain gap, `auth.test` backoff, clock injection, `stop()` recall, the publishing polish list,
+  amd64-only images, `gh release edit`. None is a seam the platform is waiting on.
