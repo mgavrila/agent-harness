@@ -5,7 +5,7 @@ semantic and every package in a release carries the same one. A release attaches
 tarballs and the two architecture snapshots; the host and files images are pushed to
 `ghcr.io/mgavrila` under the same tag.
 
-## 0.4.0 — unreleased
+## 0.3.1 — 2026-09-22
 
 What the first live Slack session asked for: a reply where the question was asked, a person called
 by their name, and a sign within a second that the assistant heard them.
