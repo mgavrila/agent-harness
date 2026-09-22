@@ -5,7 +5,7 @@ semantic and every package in a release carries the same one. A release attaches
 tarballs and the two architecture snapshots; the host and files images are pushed to
 `ghcr.io/mgavrila` under the same tag.
 
-## 0.3.0 — unreleased
+## 0.3.0 — 2026-09-22
 
 The release the platform pins: a tenant with no Slack, secrets that are not environment variables,
 a document that names its own deployments, and two lists a dashboard can hold.
