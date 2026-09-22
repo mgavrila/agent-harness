@@ -5,6 +5,40 @@ semantic and every package in a release carries the same one. A release attaches
 tarballs and the two architecture snapshots; the host and files images are pushed to
 `ghcr.io/mgavrila` under the same tag.
 
+## 0.4.0 — unreleased
+
+What the first live Slack session asked for: a reply where the question was asked, a person called
+by their name, and a sign within a second that the assistant heard them.
+
+### Added
+
+- **An acknowledgement on Slack.** `SurfaceSession.typing` now takes the message being answered and
+  answers a disposer; the host calls it before the runtime starts and disposes it on every path out
+  of the turn. Slack adds an `eyes` reaction to the triggering message and removes it when the turn
+  ends. **New bot scope: `reactions:write`.** Neither call can fail a turn or hold one: the host
+  starts both and waits for neither, so a rate-limited workspace delays no answer.
+
+### Fixed
+
+- **A reply in a Slack thread named the wrong message.** A mention inside an existing thread was
+  answered with `thread_ts` set to that message's own timestamp rather than the thread's root,
+  which Slack documents as the wrong handle. The transport already knew the root; the session now
+  asks it.
+- **A direct message on Slack opened a thread for every answer.** A DM is already one person's
+  conversation, so a reply there is now flat. A channel reply is threaded exactly as before.
+- **A person the client document never declared was addressed by their Slack id.**
+  `identities/static` now reads the display name off the surface's directory, as
+  `identities/slack-groups` already did. A directory that refuses or has no name costs the caller
+  nothing: the level stands and the id is the fallback.
+- **The Slack display-name cache was unbounded**, one entry per distinct user for the life of the
+  process. It is bounded at 500 and held for an hour, split from the five-minute group window.
+
+### Upgrading
+
+1. **Add `reactions:write` to every host Slack app's bot token scopes** and reinstall the app.
+   Without it the acknowledgement is refused on every turn and logged; the turn itself still runs
+   and still answers.
+
 ## 0.3.0 — 2026-09-22
 
 The release the platform pins: a tenant with no Slack, secrets that are not environment variables,

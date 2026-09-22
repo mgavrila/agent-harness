@@ -398,8 +398,24 @@ export interface SurfaceSession {
    * is the user the reply is for, for a surface whose streaming API wants one.
    */
   startStream(conversation: string, opts?: { replyTo?: MessageRef; recipient?: string }): StreamHandle;
-  /** Show that a reply is coming, where the surface can. Optional. */
-  typing?(conversation: string): Promise<void>;
+  /**
+   * Show that a reply is coming, where the surface can, and answer with the way to stop showing it.
+   *
+   * Optional: a surface with no such signal does not implement it, and the host calls nothing.
+   * `replyTo` is the message being answered, because an acknowledgement a person can see is
+   * attached to what they wrote rather than posted beside it — a reaction on Slack, a spinner
+   * wherever a surface has one.
+   *
+   * The host calls this once, before the runtime starts, and calls the disposer exactly once on
+   * every path out of the turn: success, a runtime failure, a budget, a cancellation and an
+   * uncaught throw alike. **Neither call may fail a turn, and the host awaits neither**: it starts
+   * them, logs a throw from either, and does not wait, so a surface that is slow or rate-limited
+   * delays nothing. Two things follow for an adapter. The disposer is started once the reply has
+   * been sent but may still be in flight when the turn is over, so it must not assume the process
+   * is still interested in it; and it should be forgiving, because a signal that cannot be taken
+   * down is a smaller wrong than a turn that failed over one.
+   */
+  typing?(conversation: string, opts?: { replyTo?: MessageRef }): Promise<() => Promise<void>>;
   start(): Promise<void>;
   stop(): Promise<void>;
 }

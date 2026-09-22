@@ -117,6 +117,11 @@ export interface SlackApi {
   users: {
     info(args: { user: string }): Promise<SlackUserInfoResult>;
   };
+  /** How the assistant marks a message it is working on, and unmarks it when the turn ends. */
+  reactions: {
+    add(args: { channel: string; timestamp: string; name: string }): Promise<{ ok?: boolean }>;
+    remove(args: { channel: string; timestamp: string; name: string }): Promise<{ ok?: boolean }>;
+  };
 }
 
 /**
@@ -215,6 +220,12 @@ export interface SlackTransport {
    * transport's job, since it is what saw the message arrive.
    */
   notePostedIn(channel: string, messageId: string): void;
+  /**
+   * The root of the thread the message `ts` arrived in, or `ts` itself when this process never saw
+   * it arrive. The session asks before it posts, because Slack documents a reply's own timestamp
+   * as the wrong value for `thread_ts` and only the transport saw which thread the message was in.
+   */
+  rootOf(channel: string, ts: string): string;
   /**
    * Where this transport is reached, when it is reached by a request at all.
    *

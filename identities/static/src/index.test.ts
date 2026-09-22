@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { ConfigError, type Logger } from '@harness/shared';
+import { describe, expect, it, vi } from 'vitest';
+import { ConfigError, type Logger, type SurfaceDirectory } from '@harness/shared';
 import { parseIdentityFileWithDefaults, type IdentityFile } from '@harness/identity-api';
 import { identity } from './index.js';
 
@@ -14,8 +14,11 @@ function file(extra: Record<string, unknown> = {}): IdentityFile {
   return parseIdentityFileWithDefaults({ principals: PRINCIPALS, ...extra });
 }
 
-const connect = (identityFile: IdentityFile, logger = log) =>
-  identity.connect({ env: {}, log: logger, identity: identityFile, settings: {}, directories: {} });
+const connect = (
+  identityFile: IdentityFile,
+  logger = log,
+  directories: Readonly<Record<string, SurfaceDirectory>> = {},
+) => identity.connect({ env: {}, log: logger, identity: identityFile, settings: {}, directories });
 
 describe('the static identity plug-in', () => {
   it('declares itself the way every plug-in does, and reads no environment variable', () => {
@@ -118,5 +121,95 @@ describe('the static identity plug-in', () => {
 
   it('refuses a document that defaults a surface to the service level', () => {
     expect(() => file({ defaults: { memory: 'service' } })).toThrow(ConfigError);
+  });
+});
+
+describe('a name for somebody the document never declared', () => {
+  /** A directory that keeps every user id it was asked about, so a case can count the requests. */
+  const directory = (names: Record<string, string | null>, fail = false): SurfaceDirectory & { asked: string[] } => {
+    const asked: string[] = [];
+    return {
+      asked,
+      groupsOf: async () => [],
+      displayNameOf: async (userId: string) => {
+        asked.push(userId);
+        if (fail) throw new Error('missing_scope');
+        return names[userId] ?? null;
+      },
+    };
+  };
+
+  it('names a minted principal what the surface calls them', async () => {
+    const session = await connect(file({ defaults: { slack: 'member' } }), log, {
+      slack: directory({ U1: 'Ada Lovelace' }),
+    });
+    const principal = await session.resolve({ surface: 'slack', userId: 'U1' });
+    expect(principal).toMatchObject({ level: 'member', displayName: 'Ada Lovelace' });
+    // The id is still derived from the surface user id, so the same person is the same principal
+    // tomorrow and in the next process: a name is cosmetic and an id is not.
+    expect(principal?.surfaces).toEqual({ slack: 'U1' });
+  });
+
+  it('falls back to the surface user id when the directory will not say', async () => {
+    const session = await connect(file({ defaults: { slack: 'member' } }), log, { slack: directory({ U1: null }) });
+    expect((await session.resolve({ surface: 'slack', userId: 'U1' }))?.displayName).toBe('U1');
+  });
+
+  it('keeps the level when the directory refuses, and says so once', async () => {
+    const warn = vi.fn();
+    const session = await connect(
+      file({ defaults: { slack: 'member' } }),
+      { ...log, warn },
+      {
+        slack: directory({}, true),
+      },
+    );
+    const principal = await session.resolve({ surface: 'slack', userId: 'U1' });
+    // A workspace that will not say what somebody is called does not cost them the level the
+    // document already gave them — the same ruling `identities/slack-groups` follows.
+    expect(principal).toMatchObject({ level: 'member', displayName: 'U1' });
+    expect(warn).toHaveBeenCalledTimes(1);
+  });
+
+  it('mints without a directory at all, which is every surface that has none', async () => {
+    const session = await connect(file({ defaults: { memory: 'member' } }), log, {});
+    expect((await session.resolve({ surface: 'memory', userId: 'U9' }))?.displayName).toBe('U9');
+  });
+
+  it('asks the workspace once per principal, however many messages that person sends', async () => {
+    const slack = directory({ U1: 'Ada Lovelace' });
+    const session = await connect(file({ defaults: { slack: 'member' } }), log, { slack });
+    const first = await session.resolve({ surface: 'slack', userId: 'U1' });
+    expect(await session.resolve({ surface: 'slack', userId: 'U1' })).toEqual(first);
+    // The derived id comes from the surface and the user id alone, so the minted principal can be
+    // found again without a name: the lookup belongs behind that cache, not in front of it.
+    expect(slack.asked).toEqual(['U1']);
+  });
+
+  it('asks a refusing workspace once too, rather than once per message', async () => {
+    const warn = vi.fn();
+    const slack = directory({}, true);
+    const session = await connect(file({ defaults: { slack: 'member' } }), { ...log, warn }, { slack });
+    expect((await session.resolve({ surface: 'slack', userId: 'U1' }))?.displayName).toBe('U1');
+    expect((await session.resolve({ surface: 'slack', userId: 'U1' }))?.displayName).toBe('U1');
+    // A workspace missing `users:read` answers nothing, for every message, for the life of the
+    // process. The minted principal is the cached answer, and one line says so once.
+    expect(slack.asked).toEqual(['U1']);
+    expect(warn).toHaveBeenCalledTimes(1);
+  });
+
+  it('never asks about a caller whose derived id a declared principal already holds', async () => {
+    const memory = directory({ U9: 'Someone' });
+    const collides = file({
+      defaults: { memory: 'member' },
+      principals: [
+        ...PRINCIPALS,
+        { id: 'u-memory-u9-c5f6f2a2', kind: 'user', level: 'admin', displayName: 'Someone else' },
+      ],
+    });
+    const session = await connect(collides, { ...log, warn() {} }, { memory });
+    expect(await session.resolve({ surface: 'memory', userId: 'U9' })).toBeNull();
+    // A caller who is about to be refused is not worth a request to the workspace.
+    expect(memory.asked).toEqual([]);
   });
 });

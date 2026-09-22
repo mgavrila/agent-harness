@@ -200,7 +200,7 @@ describe('the Slack transport as an HTTP door', () => {
 
   it('reports its identity state without ever asking for one, which is what a status poll reads', async () => {
     const { t, api } = transport();
-    const session = createSlackSession(t, config());
+    const session = createSlackSession(t, config(), log);
     // Before `start()`: nothing has been asked, so the workspace has not been reached and the
     // sentence says exactly that, in this adapter's own words.
     expect(session.health!()).toEqual({
@@ -224,7 +224,7 @@ describe('the Slack transport as an HTTP door', () => {
     refusing.failWith = 'invalid_auth';
     const t2 = eventsTransport(config(), log, '/nonexistent/storage', refusing);
     await expect(t2.events.start()).rejects.toThrow();
-    const health = createSlackSession(t2, config()).health!();
+    const health = createSlackSession(t2, config(), log).health!();
     expect(health).toEqual({ live: false, detail: 'the Slack workspace refused this app' });
     expect(JSON.stringify(health)).not.toContain('invalid_auth');
   });
@@ -288,7 +288,7 @@ describe('the Slack transport and an interaction', () => {
 
   it('delivers a block action to the session s action handler, which is where approvals listen', async () => {
     const { t } = transport();
-    const session = createSlackSession(t, config());
+    const session = createSlackSession(t, config(), log);
     const seen: ActionEvent[] = [];
     session.onAction(async (event) => {
       seen.push(event);
@@ -317,7 +317,7 @@ describe('the Slack transport and an interaction', () => {
 
   it('delivers a view submission with its metadata and its values', async () => {
     const { t } = transport();
-    const session = createSlackSession(t, config());
+    const session = createSlackSession(t, config(), log);
     const seen: FormEvent[] = [];
     session.onFormSubmit(async (event) => {
       seen.push(event);
@@ -355,7 +355,7 @@ describe('the Slack transport and an interaction', () => {
     // `encodeURIComponent` only ever emits `%20`, so every other case here would pass against a
     // hand-rolled `decodeURIComponent(body.split('=')[1])` that loses every space Slack sends.
     const { t } = transport();
-    const session = createSlackSession(t, config());
+    const session = createSlackSession(t, config(), log);
     const seen: FormEvent[] = [];
     session.onFormSubmit(async (event) => {
       seen.push(event);
@@ -499,7 +499,7 @@ describe("the Slack transport and the app's own identity", () => {
     // the bot's ids. Coupling a decision on an approval card to a fetch it never needed would
     // strand every card in the channel.
     const t = unidentified();
-    const session = createSlackSession(t, config());
+    const session = createSlackSession(t, config(), log);
     const seen: ActionEvent[] = [];
     session.onAction(async (event) => {
       seen.push(event);
@@ -532,7 +532,7 @@ describe("the Slack transport and the app's own identity", () => {
 describe('the session over this transport', () => {
   it('offers the transport s door as its own, so the host can mount it', () => {
     const { t } = transport();
-    const session = createSlackSession(t, config());
+    const session = createSlackSession(t, config(), log);
     expect(session.http?.path).toBe(SLACK_MOUNT_PATH);
   });
 });

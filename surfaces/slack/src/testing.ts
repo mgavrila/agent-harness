@@ -1,10 +1,36 @@
 /** What a test of this adapter, or of the host, reaches for: the two fakes and a wired session. */
+import type { Logger } from '@harness/shared';
 import type { SurfaceSession } from '@harness/surface-api';
 import type { SlackConfig } from './config.js';
 import { createSlackSession } from './session.js';
 import { FakeSlack, FakeSlackEvents } from './transport/fake.js';
 
 export { FakeSlack, FakeSlackEvents } from './transport/fake.js';
+
+/** A logger that keeps the first argument of every warning, so a test can read what was said. */
+export interface RecordingLog extends Logger {
+  /** Every warned message, in order. Whatever was passed beside it is Slack's and is not kept. */
+  readonly warned: string[];
+}
+
+/** A logger that keeps what it was told, for a test that counts lines or reads one back. */
+export function recordingLog(): RecordingLog {
+  const warned: string[] = [];
+  return {
+    warned,
+    info: () => {},
+    warn: (message: string) => {
+      warned.push(message);
+    },
+    error: () => {},
+  };
+}
+
+/** What the fixture's transport lets a test do that the contract does not: seed a thread's root. */
+export interface FakeSlackTransport {
+  /** Record that the message `ts` arrived in the thread `threadTs` roots, as a delivery would. */
+  noteInbound(channel: string, ts: string, threadTs: string): void;
+}
 
 /**
  * A Slack session wired to the two fakes: the real `session.ts`, the real renderers, no socket.
@@ -20,6 +46,8 @@ export function fakeSlackSession(over: Partial<SlackConfig> = {}): {
   api: FakeSlack;
   events: FakeSlackEvents;
   noted: { channel: string; threadTs: string }[];
+  transport: FakeSlackTransport;
+  log: RecordingLog;
 } {
   const api = new FakeSlack();
   const events = new FakeSlackEvents();
@@ -33,6 +61,10 @@ export function fakeSlackSession(over: Partial<SlackConfig> = {}): {
   // it answers is tested against the real memory in `transport/classify.test.ts`. What is recorded
   // here is the other half: which posts claim a thread, which is the session's decision.
   const noted: { channel: string; threadTs: string }[] = [];
+  const log = recordingLog();
+  // The roots a real transport learns from the deliveries it saw. A test seeds one with
+  // `noteInbound` and the session reads it back through `rootOf`, which is the seam between them.
+  const roots = new Map<string, string>();
   const transport = {
     api,
     events,
@@ -42,6 +74,10 @@ export function fakeSlackSession(over: Partial<SlackConfig> = {}): {
     notePostedIn: (channel: string, threadTs: string) => {
       noted.push({ channel, threadTs });
     },
+    noteInbound: (channel: string, ts: string, threadTs: string) => {
+      roots.set(`${channel}:${ts}`, threadTs);
+    },
+    rootOf: (channel: string, ts: string) => roots.get(`${channel}:${ts}`) ?? ts,
   };
-  return { session: createSlackSession(transport, config), api, events, noted };
+  return { session: createSlackSession(transport, config, log), api, events, noted, transport, log };
 }

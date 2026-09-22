@@ -123,6 +123,15 @@ export interface ThreadMemory {
   noteInbound(channel: string, ts: string, threadTs: string): void;
   /** `messageId` is whatever the reply named: a thread root, or a message inside one. */
   notePostedIn(channel: string, messageId: string): void;
+  /**
+   * The root of the thread `ts` arrived in, or `ts` itself for a message this process never saw.
+   *
+   * `noteInbound` recorded it when the message was delivered. The fallback is not a guess: for a
+   * top-level message the root *is* its own timestamp, and for a reply this process has forgotten
+   * — a restart mid-turn, or an eviction from the bounded store — it is the handle the adapter
+   * had before this method existed, so nothing gets worse.
+   */
+  rootOf(channel: string, ts: string): string;
   hasPosted(channel: string, threadTs: string, bot: BotIdentity): Promise<boolean>;
 }
 
@@ -150,6 +159,9 @@ export function createThreadMemory(api: Pick<SlackApi, 'conversations'>, log: Lo
   return {
     noteInbound(channel, ts, threadTs) {
       roots.set(`${channel}:${ts}`, threadTs);
+    },
+    rootOf(channel, ts) {
+      return roots.get(`${channel}:${ts}`) ?? ts;
     },
     notePostedIn(channel, messageId) {
       // A reply is addressed by the message it answers, which inside an existing thread is not

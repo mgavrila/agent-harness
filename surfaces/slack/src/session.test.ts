@@ -354,3 +354,140 @@ describe('inbound messages', () => {
     expect(seen[0]).not.toHaveProperty('tenantHint');
   });
 });
+
+describe('which thread a reply lands in', () => {
+  const CHANNEL = 'C0GENERAL';
+  const DM = 'D0PRIVATE';
+
+  /** The staged file an upload case releases, written into this test's own temporary directory. */
+  const stagedFile = async (): Promise<string> => {
+    const file = path.join(dir, 'roster.csv');
+    await writeFile(file, 'payer_id\naetna\n');
+    return file;
+  };
+
+  it('answers a top-level mention in the thread that message roots', async () => {
+    const { session, api, transport } = fakeSlackSession();
+    // What the transport recorded when the message arrived: a top-level message is its own root.
+    transport.noteInbound(CHANNEL, '111.1', '111.1');
+    await session.postText(CHANNEL, 'here you are', {
+      replyTo: { surface: 'slack', conversation: CHANNEL, id: '111.1' },
+    });
+    expect(api.posts.at(-1)).toMatchObject({ channel: CHANNEL, thread_ts: '111.1' });
+  });
+
+  it('answers a mention inside a thread against that thread’s root, not the message’s own ts', async () => {
+    const { session, api, transport } = fakeSlackSession();
+    transport.noteInbound(CHANNEL, '222.2', '111.1');
+    await session.postText(CHANNEL, 'still here', {
+      replyTo: { surface: 'slack', conversation: CHANNEL, id: '222.2' },
+    });
+    // Slack documents a reply's own timestamp as the wrong handle for `thread_ts`; the root is
+    // the one the transport already recorded when the message came in.
+    expect(api.posts.at(-1)).toMatchObject({ thread_ts: '111.1' });
+  });
+
+  it('falls back to the message’s own ts for a thread it never saw arrive', async () => {
+    const { session, api } = fakeSlackSession();
+    // A process that restarted mid-turn, or a thread evicted from the bounded store. Today's
+    // behaviour, kept: it is right for a top-level message and no worse than nothing for a reply.
+    await session.postText(CHANNEL, 'hello', { replyTo: { surface: 'slack', conversation: CHANNEL, id: '333.3' } });
+    expect(api.posts.at(-1)).toMatchObject({ thread_ts: '333.3' });
+  });
+
+  it('keeps a direct message flat, streamed and unstreamed alike', async () => {
+    const { session, api, transport } = fakeSlackSession();
+    transport.noteInbound(DM, '444.4', '444.4');
+    const replyTo = { surface: 'slack' as const, conversation: DM, id: '444.4' };
+    await session.postText(DM, 'hello', { replyTo });
+    expect(api.posts.at(-1)?.thread_ts).toBeUndefined();
+    const stream = session.startStream(DM, { replyTo });
+    stream.append('hello');
+    await stream.end();
+    // A DM is already one person's conversation. Threading every answer inside it buries the
+    // conversation under one-reply threads, which is what the live test found.
+    expect(api.posts.at(-1)?.thread_ts).toBeUndefined();
+  });
+
+  it('threads a streamed reply in a channel, on the root', async () => {
+    const { session, api, transport } = fakeSlackSession();
+    transport.noteInbound(CHANNEL, '222.2', '111.1');
+    const stream = session.startStream(CHANNEL, {
+      replyTo: { surface: 'slack', conversation: CHANNEL, id: '222.2' },
+    });
+    stream.append('working');
+    await stream.end();
+    expect(api.posts.at(-1)).toMatchObject({ thread_ts: '111.1' });
+  });
+
+  it('follows the same rule for a released file', async () => {
+    const { session, api, transport } = fakeSlackSession();
+    const file = await stagedFile();
+    transport.noteInbound(CHANNEL, '222.2', '111.1');
+    await session.uploadFile(CHANNEL, {
+      path: file,
+      filename: 'roster.csv',
+      replyTo: { surface: 'slack', conversation: CHANNEL, id: '222.2' },
+    });
+    expect(api.uploads.at(-1)).toMatchObject({ thread_ts: '111.1' });
+    await session.uploadFile(DM, {
+      path: file,
+      filename: 'roster.csv',
+      replyTo: { surface: 'slack', conversation: DM, id: '444.4' },
+    });
+    expect(api.uploads.at(-1)?.thread_ts).toBeUndefined();
+  });
+});
+
+describe('acknowledging a message with a reaction', () => {
+  const answering = { surface: 'slack', conversation: 'C0GENERAL', id: '111.1' };
+
+  it('adds the reaction to the triggering message and removes it when the turn ends', async () => {
+    const { session, api } = fakeSlackSession();
+    const stop = await session.typing!('C0GENERAL', { replyTo: answering });
+    expect(api.reactionsAdded).toEqual([{ channel: 'C0GENERAL', timestamp: '111.1', name: 'eyes' }]);
+    expect(api.reactionsRemoved).toEqual([]);
+    await stop();
+    expect(api.reactionsRemoved).toEqual([{ channel: 'C0GENERAL', timestamp: '111.1', name: 'eyes' }]);
+  });
+
+  it('refuses a conversation that is not a Slack id before it reacts to anything', async () => {
+    const { session, api } = fakeSlackSession();
+    // The same check every other outbound method on this session makes, for the same reason: the
+    // kernel admits any conversation-shaped string and this is where the real format is known.
+    await expect(session.typing!('not a channel', { replyTo: answering })).rejects.toBeInstanceOf(SurfaceError);
+    expect(api.reactionsAdded).toEqual([]);
+  });
+
+  it('does nothing at all when there is no message to react to', async () => {
+    const { session, api } = fakeSlackSession();
+    const stop = await session.typing!('C0GENERAL');
+    await stop();
+    // A reaction has to go on something. A channel is not a message.
+    expect(api.reactionsAdded).toEqual([]);
+    expect(api.reactionsRemoved).toEqual([]);
+  });
+
+  it('leaves the reaction and says so once when it cannot be removed', async () => {
+    const { session, api, log } = fakeSlackSession();
+    const stop = await session.typing!('C0GENERAL', { replyTo: answering });
+    api.failWith = 'ratelimited';
+    // A stale reaction is a smaller wrong than a turn that failed over an emoji, so the disposer
+    // never throws: the host would log it, but the host would have had to stop the turn to find out.
+    await expect(stop()).resolves.toBeUndefined();
+    expect(log.warned).toContain('a Slack reaction could not be removed');
+  });
+
+  it('raises a reaction it could not add, so the turn it acknowledges removes nothing', async () => {
+    const { session, api } = fakeSlackSession();
+    api.failWith = 'missing_scope';
+    await expect(session.typing!('C0GENERAL', { replyTo: answering })).rejects.toThrow(
+      'slack: reactions.add failed: missing_scope',
+    );
+    api.failWith = undefined;
+    // The host's own wrapper catches this and leaves its `stopTyping` null, so nothing is removed:
+    // the disposer is not a blind undo, and nothing was added.
+    expect(api.reactionsAdded).toEqual([]);
+    expect(api.reactionsRemoved).toEqual([]);
+  });
+});

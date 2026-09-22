@@ -326,7 +326,9 @@ sends a private note, uploads a file, opens a form where it can, delivers action
 submissions back, and — as of Plan 8 — delivers an inbound human message: `onMessage` registers
 the one handler for a `MessageEvent`, `startStream` begins a streamed reply (throwing
 `SurfaceError` when the surface cannot stream), and `typing`, where the surface supports it, shows
-that a reply is coming. `SurfaceCapabilities` gained two flags for this: `streaming` and
+that a reply is coming and answers the way to stop showing it. The host starts that call before
+the runtime and its disposer once the turn is over, awaiting neither and logging a throw from
+either: an acknowledgement may not fail a turn, and may not hold one. `SurfaceCapabilities` gained two flags for this: `streaming` and
 `inlineConfirm` (a card's buttons in the conversation the question was asked in — unused until a
 surface has it). Everything a session takes is neutral: a `Card` is a title, a subtitle, body
 lines and actions; a `NotePart` is text, a code span, a timestamp, a mention or an outcome icon.
