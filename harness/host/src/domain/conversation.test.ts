@@ -946,7 +946,37 @@ describe('showing that a reply is coming', () => {
     expect(f.surface.typingOpened).toEqual([]);
   });
 
-  it('runs the turn when the indicator throws, and logs it once', async () => {
+  it('runs the whole turn without waiting for an indicator the surface never answers', async () => {
+    const f = await hostFixture(db, { trajectory: [{ say: 'here you are' }] });
+    onTestFinished(() => f.close());
+    // A workspace that is rate-limiting. The Slack client retries a 429 in-process for about
+    // half an hour with no request timeout, so anything the turn awaits here it waits that long
+    // for: the acknowledgement would delay the model rather than the courtesy.
+    f.surface.stallTyping('open');
+    const result = await turnOn(f, 'thread', { replyTo: ANSWERING });
+    expect(result.status).toBe('done');
+    expect(f.surface.typingOpened).toHaveLength(1);
+    const [run] = await db.select().from(runs).where(eq(runs.id, result.runId));
+    expect(run).toMatchObject({ status: 'done' });
+    expect(run.endedAt).not.toBeNull();
+    expect(f.host.active.size).toBe(0);
+  });
+
+  it('settles the run row when the indicator is never taken down', async () => {
+    const f = await hostFixture(db, { trajectory: [{ say: 'here you are' }] });
+    onTestFinished(() => f.close());
+    f.surface.stallTyping('close');
+    const result = await turnOn(f, 'thread', { replyTo: ANSWERING });
+    expect(result.status).toBe('done');
+    // The removal is started and left to finish on its own: it holds neither the timer, nor the
+    // active map, nor `kernel.close`, so the run row leaves `running` whatever Slack is doing.
+    const [run] = await db.select().from(runs).where(eq(runs.id, result.runId));
+    expect(run).toMatchObject({ status: 'done' });
+    expect(run.endedAt).not.toBeNull();
+    expect(f.host.active.size).toBe(0);
+  });
+
+  it('runs the turn when the indicator throws, and takes nothing down afterwards', async () => {
     const f = await hostFixture(db, { trajectory: [{ say: 'here you are' }] });
     onTestFinished(() => f.close());
     f.surface.breakTyping('the workspace refused');

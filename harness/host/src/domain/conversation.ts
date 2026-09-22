@@ -248,9 +248,11 @@ export async function runTurn(host: Host, turn: TurnInput): Promise<TurnResult> 
   let status: RunStatus = 'error';
   let error: string | null = RUNTIME_FAILED;
   let text = '';
-  // Opened inside the `try` below and closed in its `finally`, so it is declared beside the three
-  // above for the same reason: the `finally` has to be able to read it.
-  let stopTyping: (() => Promise<void>) | null = null;
+  // The acknowledgement, opened inside the `try` below and taken down in its `finally`, so it is
+  // declared beside the three above for the same reason: the `finally` has to be able to read it.
+  // **Never awaited on the turn's path** — see where it is opened — so what is held here is the
+  // promise of a disposer rather than a disposer, and it is one that cannot reject.
+  let acknowledged: Promise<(() => Promise<void>) | null> | null = null;
   try {
     // After `host.active.set`, deliberately. `cancelRun` looks the run up in `host.active` and
     // answers false when it is not there, so a watcher told the run id any earlier would be handed
@@ -264,14 +266,22 @@ export async function runTurn(host: Host, turn: TurnInput): Promise<TurnResult> 
     // conversation it came from and only when there is a message to attach it to — a playbook
     // has nobody waiting and a delivery elsewhere is not an answer to anything.
     //
-    // Wrapped, and the disposer below is wrapped too: an acknowledgement is a courtesy, and a
-    // turn that failed because a surface would not show one would be the worst possible trade.
+    // **Started, not awaited.** An acknowledgement is a courtesy, and a turn that waited on one
+    // would be the worst possible trade twice over: a surface that refuses must not fail the
+    // turn, and a surface that is slow must not hold it. A rate-limited workspace is the case
+    // that matters — a client retrying a 429 in-process answers in minutes, not milliseconds —
+    // and everything after this line is the work the person is actually waiting for. The
+    // rejection is caught here, so the promise this leaves behind settles to a disposer or to
+    // null and never rejects; the `finally` reads it without being able to inherit a throw.
     if (target?.ownThread && turn.replyTo) {
-      try {
-        stopTyping = (await target.session.typing?.(target.conversation, { replyTo: turn.replyTo })) ?? null;
-      } catch (err) {
-        host.log.warn(`run ${runId}: the surface could not show that a reply was coming`, err);
-      }
+      const session = target.session;
+      const conversation = target.conversation;
+      acknowledged = Promise.resolve(session.typing?.(conversation, { replyTo: turn.replyTo }))
+        .then((stop) => stop ?? null)
+        .catch((err: unknown) => {
+          host.log.warn(`run ${runId}: the surface could not show that a reply was coming`, err);
+          return null;
+        });
     }
     try {
       await appendMessage(host.db, {
@@ -465,12 +475,18 @@ export async function runTurn(host: Host, turn: TurnInput): Promise<TurnResult> 
       throw err;
     }
   } finally {
-    if (stopTyping) {
-      try {
-        await stopTyping();
-      } catch (err) {
-        host.log.warn(`run ${runId}: the surface could not stop showing that a reply was coming`, err);
-      }
+    // Taken down here, after the reply has been posted and recorded, and **started rather than
+    // awaited** for the same reason it was opened that way: a removal the surface is throttling
+    // would otherwise hold `clearTimeout`, `host.active.delete` and `kernel.close` behind it,
+    // leaving the run row at `running` and `drainActive` waiting out its bound. The chain
+    // begins on the open, so the removal cannot race ahead of the thing it removes, and a
+    // surface that never answered the open has nothing to take down.
+    if (acknowledged) {
+      void acknowledged
+        .then((stop) => stop?.())
+        .catch((err: unknown) => {
+          host.log.warn(`run ${runId}: the surface could not stop showing that a reply was coming`, err);
+        });
     }
     clearTimeout(timer);
     host.active.delete(runId);

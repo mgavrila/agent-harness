@@ -26,7 +26,6 @@ export const DIRECTORY_NAME_LIMIT = 500;
 export interface SlackDirectoryOptions {
   now: () => Date;
   cacheMs?: number;
-  nameCacheMs?: number;
 }
 
 /**
@@ -47,7 +46,6 @@ export interface SlackDirectoryOptions {
  */
 export function slackDirectory(api: SlackApi, opts: SlackDirectoryOptions): SurfaceDirectory {
   const cacheMs = opts.cacheMs ?? DIRECTORY_CACHE_MS;
-  const nameCacheMs = opts.nameCacheMs ?? DIRECTORY_NAME_CACHE_MS;
   let groups: Map<string, string[]> | null = null;
   let groupsAt = 0;
   const names = new Map<string, { value: string | null; at: number }>();
@@ -75,7 +73,9 @@ export function slackDirectory(api: SlackApi, opts: SlackDirectoryOptions): Surf
     },
     async displayNameOf(userId) {
       const cached = names.get(userId);
-      if (cached && opts.now().getTime() - cached.at < nameCacheMs) return cached.value;
+      // The constant rather than an option, like the bound below it: the group window is a knob
+      // because a caller turns it, and nothing turns this one.
+      if (cached && opts.now().getTime() - cached.at < DIRECTORY_NAME_CACHE_MS) return cached.value;
       const info = await api.users.info({ user: userId });
       const raw = info.user?.profile?.display_name || info.user?.real_name || info.user?.profile?.real_name || '';
       // `||` rather than `??`: a name that was nothing but whitespace is a workspace that will

@@ -85,9 +85,17 @@ export class MemorySurface implements SurfaceSession {
   readonly requests: SurfaceHttpRequest[] = [];
   /** Every frame this door has emitted, oldest first, capped at `MEMORY_FRAME_RETENTION`. */
   readonly frames: MemoryFrame[] = [];
+  /** Every `typing` call, in order, so a host test can assert what it was told and when. */
+  readonly typingOpened: { conversation: string; replyTo?: MessageRef }[] = [];
+  /** How many disposers have been called. */
+  typingClosed = 0;
   /** How many event streams this door has open. A test asserts it falls back to zero. */
   openStreams = 0;
 
+  /** Set by `breakTyping`: the next `typing` throws this and clears it. */
+  private typingFailure: string | null = null;
+  /** Set by `stallTyping`: which half of the indicator never answers. */
+  private typingStall: 'open' | 'close' | null = null;
   private frameSeq = 0;
   /** The streams parked waiting for something to happen, so `emit` can wake them. */
   private readonly waiting = new Set<() => void>();
@@ -203,15 +211,20 @@ export class MemorySurface implements SurfaceSession {
     this.messageHandler = handler;
   }
 
-  /** Every `typing` call, in order, so a host test can assert what it was told and when. */
-  readonly typingOpened: { conversation: string; replyTo?: MessageRef }[] = [];
-  /** How many disposers have been called. */
-  typingClosed = 0;
-  private typingFailure: string | null = null;
-
   /** Make the next `typing` throw, which is a workspace refusing the signal. */
   breakTyping(message: string): void {
     this.typingFailure = message;
+  }
+
+  /**
+   * Make one half of the indicator hang for ever, which is a workspace that is rate-limiting.
+   *
+   * `'open'` records the call and never answers a disposer; `'close'` answers one that records
+   * the call and never returns. Both are what a client retrying a 429 in-process looks like from
+   * here, and the host must be able to finish a turn through either.
+   */
+  stallTyping(where: 'open' | 'close'): void {
+    this.typingStall = where;
   }
 
   async typing(conversation: string, opts: { replyTo?: MessageRef } = {}): Promise<() => Promise<void>> {
@@ -221,8 +234,10 @@ export class MemorySurface implements SurfaceSession {
       throw new Error(message);
     }
     this.typingOpened.push({ conversation, ...(opts.replyTo === undefined ? {} : { replyTo: opts.replyTo }) });
+    if (this.typingStall === 'open') return new Promise<() => Promise<void>>(() => {});
     return async () => {
       this.typingClosed += 1;
+      if (this.typingStall === 'close') await new Promise<void>(() => {});
     };
   }
 

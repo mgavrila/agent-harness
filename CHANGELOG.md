@@ -15,7 +15,8 @@ by their name, and a sign within a second that the assistant heard them.
 - **An acknowledgement on Slack.** `SurfaceSession.typing` now takes the message being answered and
   answers a disposer; the host calls it before the runtime starts and disposes it on every path out
   of the turn. Slack adds an `eyes` reaction to the triggering message and removes it when the turn
-  ends. **New bot scope: `reactions:write`.** Neither call can fail a turn.
+  ends. **New bot scope: `reactions:write`.** Neither call can fail a turn or hold one: the host
+  starts both and waits for neither, so a rate-limited workspace delays no answer.
 
 ### Fixed
 

@@ -13,11 +13,23 @@ export interface RecordingLog extends Logger {
   readonly warned: string[];
 }
 
+/** A logger that keeps what it was told, for a test that counts lines or reads one back. */
+export function recordingLog(): RecordingLog {
+  const warned: string[] = [];
+  return {
+    warned,
+    info: () => {},
+    warn: (message: string) => {
+      warned.push(message);
+    },
+    error: () => {},
+  };
+}
+
 /** What the fixture's transport lets a test do that the contract does not: seed a thread's root. */
 export interface FakeSlackTransport {
   /** Record that the message `ts` arrived in the thread `threadTs` roots, as a delivery would. */
   noteInbound(channel: string, ts: string, threadTs: string): void;
-  rootOf(channel: string, ts: string): string;
 }
 
 /**
@@ -49,15 +61,7 @@ export function fakeSlackSession(over: Partial<SlackConfig> = {}): {
   // it answers is tested against the real memory in `transport/classify.test.ts`. What is recorded
   // here is the other half: which posts claim a thread, which is the session's decision.
   const noted: { channel: string; threadTs: string }[] = [];
-  const warned: string[] = [];
-  const log: RecordingLog = {
-    info() {},
-    warn: (message: string) => {
-      warned.push(message);
-    },
-    error() {},
-    warned,
-  };
+  const log = recordingLog();
   // The roots a real transport learns from the deliveries it saw. A test seeds one with
   // `noteInbound` and the session reads it back through `rootOf`, which is the seam between them.
   const roots = new Map<string, string>();

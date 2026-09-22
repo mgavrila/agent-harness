@@ -852,7 +852,10 @@ decides what a thread is.
 from adds an `eyes` reaction to the triggering message and removes it when the turn ends, whatever
 the turn ended as. That needs `reactions:write`. A reaction that cannot be removed is left and
 logged once — `a Slack reaction could not be removed` — because a stale reaction is a smaller wrong
-than a turn that failed over an emoji. Neither the add nor the remove can fail a turn.
+than a turn that failed over an emoji. Neither the add nor the remove can fail a turn, and neither
+can hold one: the host starts both and waits for neither, so a workspace that is rate-limiting the
+reaction delays neither the model nor the run row settling. The Slack client retries a 429
+in-process for about half an hour, which is what that guarantee is there for.
 
 **How long the first answer takes is the model's.** A long first prompt — a big persona, several
 skills, a full history window — costs the deployment its time to first token, and minutes are
@@ -1126,14 +1129,20 @@ document at `slack-groups`, or every lookup fails and every caller is refused.
 never declared. A default-level person is named by the workspace rather than by their user id, and
 a workspace that will not say leaves them named by the id, at the level the document gave them. The
 name is read when the principal is first minted and held for the life of the process, which is the
-window the level already has.
+window the level already has. The lookup sits behind that minting cache, so one person costs one
+`users.info` call however many messages they send, and a workspace missing `users:read` costs one
+call and one log line rather than one of each per message.
 
-**A group change takes up to ten minutes to reach a decision, not five.** The surface directory
-caches a workspace's group membership for 300 seconds and `identities/slack-groups` caches the
-resolved level for `sync.everySeconds` (also 300 by default) on top of that, so the two windows
-stack. A minted level that expires mid-conversation falls back to the document's own default for
-that surface until the person's next message re-resolves it — the person is not refused, but may
-briefly act at a lower level than their current group would give them.
+**A group change takes up to ten minutes to reach a decision, not five, and a renamed person can
+be an hour behind that.** The surface directory caches a workspace's group membership for 300
+seconds and `identities/slack-groups` caches the resolved level for `sync.everySeconds` (also 300
+by default) on top of that, so the two windows stack. A minted level that expires mid-conversation
+falls back to the document's own default for that surface until the person's next message
+re-resolves it — the person is not refused, but may briefly act at a lower level than their current
+group would give them. A **display name** is on a longer window of its own: the same directory
+holds up to 500 of them for 3600 seconds, and under `identities/static` a name that is already
+minted is held until the process restarts. Nothing decides an access question on a name, which is
+why it is allowed to be the stalest thing here.
 
 ## Upgrading from Plan 7
 

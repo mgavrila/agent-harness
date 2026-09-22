@@ -408,9 +408,12 @@ export interface SurfaceSession {
    *
    * The host calls this once, before the runtime starts, and calls the disposer exactly once on
    * every path out of the turn: success, a runtime failure, a budget, a cancellation and an
-   * uncaught throw alike. **Neither call may fail a turn**: the host wraps both and logs a throw
-   * from either. An adapter should therefore make the disposer forgiving — a signal that cannot be
-   * taken down is a smaller wrong than a turn that failed over one.
+   * uncaught throw alike. **Neither call may fail a turn, and the host awaits neither**: it starts
+   * them, logs a throw from either, and does not wait, so a surface that is slow or rate-limited
+   * delays nothing. Two things follow for an adapter. The disposer is started once the reply has
+   * been sent but may still be in flight when the turn is over, so it must not assume the process
+   * is still interested in it; and it should be forgiving, because a signal that cannot be taken
+   * down is a smaller wrong than a turn that failed over one.
    */
   typing?(conversation: string, opts?: { replyTo?: MessageRef }): Promise<() => Promise<void>>;
   start(): Promise<void>;

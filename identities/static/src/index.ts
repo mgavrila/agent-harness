@@ -56,33 +56,45 @@ class IdentityWithDefaults implements IdentitySession {
     if (declared) return declared;
     const level = this.defaults[ref.surface];
     if (level === undefined) return null;
-    // What the surface calls this person, when it has a directory and will say. A name is
-    // cosmetic and a level is not, so neither a refusal nor a silence costs them the level the
-    // document already gave them — the ruling `identities/slack-groups` already follows.
-    // `principalFromDefault` falls back to the surface user id, which is what a person was
-    // addressed as before this line existed.
-    const displayName = await (this.directories[ref.surface]?.displayNameOf(ref.userId) ?? Promise.resolve(null))
-      .then((name) => name ?? undefined)
-      .catch((err: unknown) => {
-        this.log.warn(`static identity: no display name for "${ref.userId}": ${describeError(err)}`);
-        return undefined;
-      });
-    const minted = principalFromDefault(ref.surface, ref.userId, level, displayName);
-    if (!minted) return null;
-    const already = this.minted.get(minted.id);
+    // Derived before anything is asked of anybody: the id comes from the surface and the user id
+    // alone, and it is the key both caches below are held under. A name changes what this
+    // principal is *called* and never which principal it is, so the work further down — a request
+    // to the workspace, a warning when it refuses — belongs behind these two checks rather than in
+    // front of them, or it is paid again on every message that person sends.
+    const derived = principalFromDefault(ref.surface, ref.userId, level);
+    if (!derived) return null;
+    const already = this.minted.get(derived.id);
     if (already) return already;
-    if (this.refused.has(minted.id)) return null;
+    if (this.refused.has(derived.id)) return null;
     // A derived id that a declared principal already holds would hand one person another's
     // history, so this caller is refused rather than admitted. It stays a refusal here rather
     // than a load-time error because nothing at load knows which ids will be derived: a check
     // over the declared ids could only guess from their shape, and would refuse a document whose
     // author happened to end an id in eight hex characters. The warning is written once per
     // colliding id, not once per message, so a person who keeps typing does not fill the log.
-    if (await this.declared.get(minted.id)) {
-      this.refused.add(minted.id);
-      this.log.warn(`static identity: derived id "${minted.id}" is already declared; refusing the caller`);
+    if (await this.declared.get(derived.id)) {
+      this.refused.add(derived.id);
+      this.log.warn(`static identity: derived id "${derived.id}" is already declared; refusing the caller`);
       return null;
     }
+    // What the surface calls this person, when it has a directory and will say. A name is
+    // cosmetic and a level is not, so neither a refusal nor a silence costs them the level the
+    // document already gave them — the ruling `identities/slack-groups` already follows. The
+    // fallback is the principal derived above, whose `displayName` is the surface user id, which
+    // is what a person was addressed as before this line existed.
+    const displayName = await (this.directories[ref.surface]?.displayNameOf(ref.userId) ?? Promise.resolve(null))
+      .then((name) => name ?? undefined)
+      .catch((err: unknown) => {
+        this.log.warn(`static identity: no display name for "${ref.userId}": ${describeError(err)}`);
+        return undefined;
+      });
+    // The same derivation carrying the name. `?? derived` cannot be reached — the call above
+    // succeeded on the same surface and user id, and the name is not part of what makes an id —
+    // and is written as a value rather than an assertion.
+    const minted =
+      displayName === undefined
+        ? derived
+        : (principalFromDefault(ref.surface, ref.userId, level, displayName) ?? derived);
     this.minted.set(minted.id, minted);
     this.log.info(`static identity: "${minted.id}" is not declared on ${ref.surface}; acting at level ${level}`);
     return minted;

@@ -1,5 +1,5 @@
-import type { Logger } from '@harness/shared';
 import { describe, expect, it, vi } from 'vitest';
+import { recordingLog } from '../testing.js';
 import { classifyInbound, classifyMessage, createThreadMemory, THREAD_MEMORY_LIMIT } from './classify.js';
 import { FakeSlack } from './fake.js';
 import type { RawMessage } from './types.js';
@@ -7,19 +7,6 @@ import type { RawMessage } from './types.js';
 const BOT = 'UBOT';
 /** This app, as the lookup knows itself: its bot user, and the bot id `auth.test` answers with. */
 const SELF = { userId: BOT, botId: 'B_SELF' };
-
-/** A logger that keeps its warnings, so a test can count them. */
-function recordingLog(): Logger & { warnings: string[] } {
-  const warnings: string[] = [];
-  return {
-    warnings,
-    info: () => {},
-    warn: (message: string) => {
-      warnings.push(message);
-    },
-    error: () => {},
-  };
-}
 
 describe('classifyMessage', () => {
   it('takes a direct message as addressed', () => {
@@ -246,7 +233,7 @@ describe('the thread rule', () => {
     api.failWith = 'ratelimited';
     expect(await classifyInbound(reply(), SELF, threads)).toMatchObject({ mentioned: false });
     expect(await classifyInbound(reply({ ts: '3.3' }), SELF, threads)).toMatchObject({ mentioned: false });
-    expect(log.warnings).toHaveLength(1);
+    expect(log.warned).toHaveLength(1);
     // A failure is not an answer, so nothing was remembered and the next lookup still runs.
     api.failWith = undefined;
     api.replies['C1:1.1'] = [{ bot_id: 'B_SELF' }];
@@ -265,10 +252,10 @@ describe('the thread rule', () => {
       vi.setSystemTime(new Date('2026-09-17T09:00:00Z'));
       expect(await classifyInbound(reply(), SELF, threads)).toMatchObject({ mentioned: false });
       expect(await classifyInbound(reply({ thread_ts: '7.7' }), SELF, threads)).toMatchObject({ mentioned: false });
-      expect(log.warnings).toHaveLength(1);
+      expect(log.warned).toHaveLength(1);
       vi.setSystemTime(new Date('2026-09-17T09:01:00Z'));
       expect(await classifyInbound(reply({ thread_ts: '3.3' }), SELF, threads)).toMatchObject({ mentioned: false });
-      expect(log.warnings).toHaveLength(2);
+      expect(log.warned).toHaveLength(2);
     } finally {
       vi.useRealTimers();
     }
@@ -285,7 +272,7 @@ describe('the thread rule', () => {
     expect(await classifyInbound(reply({ thread_ts: '9.9' }), SELF, threads)).toMatchObject({ mentioned: false });
     api.failWith = 'ratelimited';
     expect(await classifyInbound(reply({ thread_ts: '8.8' }), SELF, threads)).toMatchObject({ mentioned: false });
-    expect(log.warnings).toHaveLength(2);
+    expect(log.warned).toHaveLength(2);
   });
 
   it('remembers the most recent threads only', async () => {

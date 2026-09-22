@@ -104,6 +104,7 @@ export function createSlackSession(transport: SlackTransport, config: SlackConfi
      * one that takes a finished turn with it, and the host would only find out by stopping.
      */
     async typing(conversation, opts = {}) {
+      assertConversation(conversation);
       const message = opts.replyTo;
       if (!message) return async () => {};
       await guarded('reactions.add', () =>

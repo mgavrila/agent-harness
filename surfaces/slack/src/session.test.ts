@@ -451,6 +451,14 @@ describe('acknowledging a message with a reaction', () => {
     expect(api.reactionsRemoved).toEqual([{ channel: 'C0GENERAL', timestamp: '111.1', name: 'eyes' }]);
   });
 
+  it('refuses a conversation that is not a Slack id before it reacts to anything', async () => {
+    const { session, api } = fakeSlackSession();
+    // The same check every other outbound method on this session makes, for the same reason: the
+    // kernel admits any conversation-shaped string and this is where the real format is known.
+    await expect(session.typing!('not a channel', { replyTo: answering })).rejects.toBeInstanceOf(SurfaceError);
+    expect(api.reactionsAdded).toEqual([]);
+  });
+
   it('does nothing at all when there is no message to react to', async () => {
     const { session, api } = fakeSlackSession();
     const stop = await session.typing!('C0GENERAL');

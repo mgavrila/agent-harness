@@ -125,13 +125,19 @@ describe('the static identity plug-in', () => {
 });
 
 describe('a name for somebody the document never declared', () => {
-  const directory = (names: Record<string, string | null>, fail = false): SurfaceDirectory => ({
-    groupsOf: async () => [],
-    displayNameOf: async (userId: string) => {
-      if (fail) throw new Error('missing_scope');
-      return names[userId] ?? null;
-    },
-  });
+  /** A directory that keeps every user id it was asked about, so a case can count the requests. */
+  const directory = (names: Record<string, string | null>, fail = false): SurfaceDirectory & { asked: string[] } => {
+    const asked: string[] = [];
+    return {
+      asked,
+      groupsOf: async () => [],
+      displayNameOf: async (userId: string) => {
+        asked.push(userId);
+        if (fail) throw new Error('missing_scope');
+        return names[userId] ?? null;
+      },
+    };
+  };
 
   it('names a minted principal what the surface calls them', async () => {
     const session = await connect(file({ defaults: { slack: 'member' } }), log, {
@@ -168,5 +174,42 @@ describe('a name for somebody the document never declared', () => {
   it('mints without a directory at all, which is every surface that has none', async () => {
     const session = await connect(file({ defaults: { memory: 'member' } }), log, {});
     expect((await session.resolve({ surface: 'memory', userId: 'U9' }))?.displayName).toBe('U9');
+  });
+
+  it('asks the workspace once per principal, however many messages that person sends', async () => {
+    const slack = directory({ U1: 'Ada Lovelace' });
+    const session = await connect(file({ defaults: { slack: 'member' } }), log, { slack });
+    const first = await session.resolve({ surface: 'slack', userId: 'U1' });
+    expect(await session.resolve({ surface: 'slack', userId: 'U1' })).toEqual(first);
+    // The derived id comes from the surface and the user id alone, so the minted principal can be
+    // found again without a name: the lookup belongs behind that cache, not in front of it.
+    expect(slack.asked).toEqual(['U1']);
+  });
+
+  it('asks a refusing workspace once too, rather than once per message', async () => {
+    const warn = vi.fn();
+    const slack = directory({}, true);
+    const session = await connect(file({ defaults: { slack: 'member' } }), { ...log, warn }, { slack });
+    expect((await session.resolve({ surface: 'slack', userId: 'U1' }))?.displayName).toBe('U1');
+    expect((await session.resolve({ surface: 'slack', userId: 'U1' }))?.displayName).toBe('U1');
+    // A workspace missing `users:read` answers nothing, for every message, for the life of the
+    // process. The minted principal is the cached answer, and one line says so once.
+    expect(slack.asked).toEqual(['U1']);
+    expect(warn).toHaveBeenCalledTimes(1);
+  });
+
+  it('never asks about a caller whose derived id a declared principal already holds', async () => {
+    const memory = directory({ U9: 'Someone' });
+    const collides = file({
+      defaults: { memory: 'member' },
+      principals: [
+        ...PRINCIPALS,
+        { id: 'u-memory-u9-c5f6f2a2', kind: 'user', level: 'admin', displayName: 'Someone else' },
+      ],
+    });
+    const session = await connect(collides, { ...log, warn() {} }, { memory });
+    expect(await session.resolve({ surface: 'memory', userId: 'U9' })).toBeNull();
+    // A caller who is about to be refused is not worth a request to the workspace.
+    expect(memory.asked).toEqual([]);
   });
 });
