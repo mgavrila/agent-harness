@@ -299,4 +299,14 @@ describe('the thread rule', () => {
     expect(await classifyInbound(reply({ thread_ts: 't0' }), SELF, threads)).toMatchObject({ mentioned: false });
     expect(api.repliesCalls).toEqual([{ channel: 'C1', ts: 't0', limit: 50 }]);
   });
+
+  it('answers the root of a thread it saw a message arrive in, and the message itself otherwise', () => {
+    const memory = createThreadMemory(new FakeSlack(), recordingLog());
+    memory.noteInbound('C1', '222.2', '111.1');
+    expect(memory.rootOf('C1', '222.2')).toBe('111.1');
+    // Never seen: the message is its own handle, which is right for a top-level message and is
+    // what the adapter used before this existed.
+    expect(memory.rootOf('C1', '999.9')).toBe('999.9');
+    expect(memory.rootOf('C2', '222.2')).toBe('222.2');
+  });
 });

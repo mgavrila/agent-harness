@@ -78,6 +78,10 @@ export function webClientApi(client: WebClient): SlackApi {
         },
       },
     },
+    reactions: {
+      add: (args) => client.reactions.add(args),
+      remove: (args) => client.reactions.remove(args),
+    },
     users: {
       // Narrowed to the two name fields the directory reads, so nothing else a Slack profile
       // carries — an email, a phone number, a photo URL — travels past this boundary.

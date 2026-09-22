@@ -8,7 +8,7 @@ import {
   type UserLevel,
 } from '@harness/identity-api';
 import { StaticIdentity } from '@harness/identity-api/testing';
-import type { Logger } from '@harness/shared';
+import { describeError, type Logger, type SurfaceDirectory } from '@harness/shared';
 
 /**
  * The declared principals, plus the `defaults` rule for everyone else.
@@ -30,15 +30,23 @@ class IdentityWithDefaults implements IdentitySession {
 
   private readonly declared: StaticIdentity;
   private readonly defaults: Readonly<Record<string, UserLevel>>;
+  /** The directories the loaded surfaces offer, by surface name. A surface with none is absent. */
+  private readonly directories: Readonly<Record<string, SurfaceDirectory>>;
   private readonly log: Logger;
   /** Minted principals, keyed by their own id, so each one is logged and derived once. */
   private readonly minted = new Map<string, Principal>();
   /** Derived ids a declared principal already holds: refused once with a warning, then silently. */
   private readonly refused = new Set<string>();
 
-  constructor(declared: StaticIdentity, defaults: Readonly<Record<string, UserLevel>>, log: Logger) {
+  constructor(
+    declared: StaticIdentity,
+    defaults: Readonly<Record<string, UserLevel>>,
+    directories: Readonly<Record<string, SurfaceDirectory>>,
+    log: Logger,
+  ) {
     this.declared = declared;
     this.defaults = defaults;
+    this.directories = directories;
     this.log = log;
     this.name = declared.name;
   }
@@ -48,7 +56,18 @@ class IdentityWithDefaults implements IdentitySession {
     if (declared) return declared;
     const level = this.defaults[ref.surface];
     if (level === undefined) return null;
-    const minted = principalFromDefault(ref.surface, ref.userId, level);
+    // What the surface calls this person, when it has a directory and will say. A name is
+    // cosmetic and a level is not, so neither a refusal nor a silence costs them the level the
+    // document already gave them — the ruling `identities/slack-groups` already follows.
+    // `principalFromDefault` falls back to the surface user id, which is what a person was
+    // addressed as before this line existed.
+    const displayName = await (this.directories[ref.surface]?.displayNameOf(ref.userId) ?? Promise.resolve(null))
+      .then((name) => name ?? undefined)
+      .catch((err: unknown) => {
+        this.log.warn(`static identity: no display name for "${ref.userId}": ${describeError(err)}`);
+        return undefined;
+      });
+    const minted = principalFromDefault(ref.surface, ref.userId, level, displayName);
     if (!minted) return null;
     const already = this.minted.get(minted.id);
     if (already) return already;
@@ -105,6 +124,8 @@ export const identity: IdentityProvider = defineIdentityProvider({
       `static identity: ${principals.length} principals` +
         (surfaces.length > 0 ? `, and a default level on ${surfaces.join(', ')}` : ''),
     );
-    return Promise.resolve(new IdentityWithDefaults(new StaticIdentity(principals, 'static'), defaults, deps.log));
+    return Promise.resolve(
+      new IdentityWithDefaults(new StaticIdentity(principals, 'static'), defaults, deps.directories, deps.log),
+    );
   },
 });

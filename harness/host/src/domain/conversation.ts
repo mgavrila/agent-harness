@@ -248,6 +248,9 @@ export async function runTurn(host: Host, turn: TurnInput): Promise<TurnResult> 
   let status: RunStatus = 'error';
   let error: string | null = RUNTIME_FAILED;
   let text = '';
+  // Opened inside the `try` below and closed in its `finally`, so it is declared beside the three
+  // above for the same reason: the `finally` has to be able to read it.
+  let stopTyping: (() => Promise<void>) | null = null;
   try {
     // After `host.active.set`, deliberately. `cancelRun` looks the run up in `host.active` and
     // answers false when it is not there, so a watcher told the run id any earlier would be handed
@@ -256,6 +259,20 @@ export async function runTurn(host: Host, turn: TurnInput): Promise<TurnResult> 
     // could still throw here, the log call `emit` falls back on, cannot leave the run row open and
     // `drainActive` waiting out its bound.
     await emit({ type: 'run', runId });
+    // An acknowledgement, where the surface has one: the person learns in under a second that
+    // they were heard, which is the whole of what it is for. Only for a turn that answers the
+    // conversation it came from and only when there is a message to attach it to — a playbook
+    // has nobody waiting and a delivery elsewhere is not an answer to anything.
+    //
+    // Wrapped, and the disposer below is wrapped too: an acknowledgement is a courtesy, and a
+    // turn that failed because a surface would not show one would be the worst possible trade.
+    if (target?.ownThread && turn.replyTo) {
+      try {
+        stopTyping = (await target.session.typing?.(target.conversation, { replyTo: turn.replyTo })) ?? null;
+      } catch (err) {
+        host.log.warn(`run ${runId}: the surface could not show that a reply was coming`, err);
+      }
+    }
     try {
       await appendMessage(host.db, {
         client: host.client,
@@ -448,6 +465,13 @@ export async function runTurn(host: Host, turn: TurnInput): Promise<TurnResult> 
       throw err;
     }
   } finally {
+    if (stopTyping) {
+      try {
+        await stopTyping();
+      } catch (err) {
+        host.log.warn(`run ${runId}: the surface could not stop showing that a reply was coming`, err);
+      }
+    }
     clearTimeout(timer);
     host.active.delete(runId);
     try {

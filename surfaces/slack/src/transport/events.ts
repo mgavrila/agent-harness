@@ -425,6 +425,7 @@ export function eventsTransport(
     events,
     identityState,
     notePostedIn: (channel, threadTs) => threads.notePostedIn(channel, threadTs),
+    rootOf: (channel, ts) => threads.rootOf(channel, ts),
     http: { path: SLACK_MOUNT_PATH, handle },
   };
 }

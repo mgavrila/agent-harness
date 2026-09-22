@@ -24,6 +24,6 @@ export const surface: Surface = defineSurface({
   // Not `async`: building the transport opens nothing, so there is nothing here to await.
   connect: (deps) => {
     const config = slackConfig(deps.secretValues, deps.defaultConversation);
-    return Promise.resolve(createSlackSession(eventsTransport(config, deps.log, deps.storageDir), config));
+    return Promise.resolve(createSlackSession(eventsTransport(config, deps.log, deps.storageDir), config, deps.log));
   },
 });

@@ -42,6 +42,12 @@ export class FakeSlack implements SlackApi {
   userProfiles: Record<string, { real_name?: string; profile?: { display_name?: string } }> = {};
   /** How many times the group list was actually fetched, so a test can prove the cache works. */
   usergroupsListCalls = 0;
+  /** How many times a profile was actually fetched, so a test can prove the name cache works. */
+  userInfoCalls = 0;
+  /** Every reaction added, in order. */
+  reactionsAdded: { channel: string; timestamp: string; name: string }[] = [];
+  /** Every reaction removed, in order. */
+  reactionsRemoved: { channel: string; timestamp: string; name: string }[] = [];
   /** What `auth.test` answers: the ids this app posts under. */
   authTest: SlackAuthTestResult = { user_id: 'U0BOTUSER', bot_id: 'B0BOTID' };
   /** How many times the identity was fetched, so a test can prove it happens once. */
@@ -125,7 +131,21 @@ export class FakeSlack implements SlackApi {
   users = {
     info: async (args: { user: string }): Promise<SlackUserInfoResult> => {
       this.guard();
+      this.userInfoCalls += 1;
       return { user: this.userProfiles[args.user] };
+    },
+  };
+
+  reactions = {
+    add: async (args: { channel: string; timestamp: string; name: string }): Promise<{ ok?: boolean }> => {
+      this.guard();
+      this.reactionsAdded.push(args);
+      return { ok: true };
+    },
+    remove: async (args: { channel: string; timestamp: string; name: string }): Promise<{ ok?: boolean }> => {
+      this.guard();
+      this.reactionsRemoved.push(args);
+      return { ok: true };
     },
   };
 

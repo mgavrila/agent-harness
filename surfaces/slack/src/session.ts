@@ -1,5 +1,5 @@
 import { readFile } from 'node:fs/promises';
-import { SurfaceAcceptedError, SurfaceError } from '@harness/shared';
+import { SurfaceAcceptedError, SurfaceError, type Logger } from '@harness/shared';
 import type {
   ActionEvent,
   Card,
@@ -40,10 +40,46 @@ function assertConversation(conversation: string): void {
   }
 }
 
-export function createSlackSession(transport: SlackTransport, config: SlackConfig): SurfaceSession {
+/**
+ * A direct message's id. Slack's channel ids begin `C` for a channel, `G` for a private group and
+ * `D` for a direct message, which `SLACK_CONVERSATION` above already spells out.
+ */
+const DIRECT_MESSAGE_PREFIX = 'D';
+
+/**
+ * What the assistant marks a message with while it is working on an answer.
+ *
+ * `eyes` rather than an hourglass: it reads as "seen", which is the true claim at the moment it
+ * goes on — the turn has started and nothing has been decided yet.
+ */
+export const ACK_REACTION = 'eyes';
+
+export function createSlackSession(transport: SlackTransport, config: SlackConfig, log: Logger): SurfaceSession {
   const { api, events } = transport;
 
   const ref = (conversation: string, id: string): MessageRef => ({ surface: NAME, conversation, id });
+
+  /**
+   * The thread a reply belongs in, or undefined for one that belongs in no thread.
+   *
+   * Two rules, both of them Slack's rather than the kernel's, which is why they are here and not
+   * in `harness/host/src`:
+   *
+   * **A direct message has no thread.** It is already one person's conversation, and threading
+   * every answer inside it buries the conversation under one-reply threads. The host cannot make
+   * this call: it would have to know what a `D` prefix means, and `kernel-vocabulary.test.ts`
+   * exists to stop it learning.
+   *
+   * **A reply names its thread's root, not the message it answers.** The host hands over the
+   * triggering message, which inside an existing thread is a reply's own timestamp — and Slack
+   * documents that as the wrong handle for `thread_ts`. The transport saw the message arrive and
+   * remembered which thread it was in, so it is the one that can say.
+   */
+  const threadFor = (conversation: string, replyTo: MessageRef | undefined): string | undefined => {
+    if (!replyTo) return undefined;
+    if (conversation.startsWith(DIRECT_MESSAGE_PREFIX)) return undefined;
+    return transport.rootOf(conversation, replyTo.id);
+  };
 
   return {
     name: NAME,
@@ -58,6 +94,32 @@ export function createSlackSession(transport: SlackTransport, config: SlackConfi
     ...(transport.http ? { http: transport.http } : {}),
 
     mention: (userId) => `<@${userId}>`,
+
+    /**
+     * Mark the message being answered, and answer with the way to unmark it.
+     *
+     * Nothing to react to is nothing to do: a reaction goes on a message, and a conversation is
+     * not one. Neither call can fail the turn — the host wraps both — but the disposer is made
+     * forgiving here as well, because a reaction that cannot be taken down is a smaller wrong than
+     * one that takes a finished turn with it, and the host would only find out by stopping.
+     */
+    async typing(conversation, opts = {}) {
+      const message = opts.replyTo;
+      if (!message) return async () => {};
+      await guarded('reactions.add', () =>
+        api.reactions.add({ channel: conversation, timestamp: message.id, name: ACK_REACTION }),
+      );
+      return async () => {
+        try {
+          await api.reactions.remove({ channel: conversation, timestamp: message.id, name: ACK_REACTION });
+        } catch (err) {
+          // One fixed sentence, and the Slack error beside it where a logger shows one. The
+          // reaction stays; a person sees an assistant that is still looking, which is wrong and
+          // harmless, and the alternative is worse.
+          log.warn('a Slack reaction could not be removed', err);
+        }
+      };
+    },
 
     async postCard(conversation, card: Card) {
       assertConversation(conversation);
@@ -87,7 +149,11 @@ export function createSlackSession(transport: SlackTransport, config: SlackConfi
     async postText(conversation, text, opts = {}) {
       assertConversation(conversation);
       const res = await guarded('chat.postMessage', () =>
-        api.chat.postMessage({ channel: conversation, text: toMrkdwn(text), thread_ts: opts.replyTo?.id }),
+        api.chat.postMessage({
+          channel: conversation,
+          text: toMrkdwn(text),
+          thread_ts: threadFor(conversation, opts.replyTo),
+        }),
       );
       // The assistant has now spoken in that thread, so a later reply there is addressed to it
       // with no mention. The id names the message being answered rather than the thread's root;
@@ -121,7 +187,7 @@ export function createSlackSession(transport: SlackTransport, config: SlackConfi
           file: bytes,
           filename: file.filename,
           initial_comment: file.comment,
-          thread_ts: file.replyTo?.id,
+          thread_ts: threadFor(conversation, file.replyTo),
         }),
       );
       return { filename: file.filename };
@@ -189,7 +255,7 @@ export function createSlackSession(transport: SlackTransport, config: SlackConfi
       // the thread becomes a conversation with the assistant, and a stream that ends up posting
       // nothing leaves behind one key that costs nothing.
       if (opts.replyTo) transport.notePostedIn(conversation, opts.replyTo.id);
-      return createEditStream({ api, conversation, threadTs: opts.replyTo?.id });
+      return createEditStream({ api, conversation, threadTs: threadFor(conversation, opts.replyTo) });
     },
 
     start: () => events.start(),

@@ -909,3 +909,51 @@ describe("the runtime's own spend", () => {
     await f.close();
   });
 });
+
+describe('showing that a reply is coming', () => {
+  /** The message a turn is answering, on the fixture surface's own conversation. */
+  const ANSWERING = { surface: 'memory', conversation: 'memory', id: 'm1' };
+
+  it('opens the indicator before the runtime runs and closes it when the turn ends', async () => {
+    const f = await hostFixture(db, { trajectory: [{ say: 'here you are' }] });
+    onTestFinished(() => f.close());
+    await turnOn(f, 'thread', { replyTo: ANSWERING });
+    expect(f.surface.typingOpened).toEqual([{ conversation: 'memory', replyTo: ANSWERING }]);
+    expect(f.surface.typingClosed).toBe(1);
+  });
+
+  it('closes it on a turn that failed, because a turn that failed still stops waiting', async () => {
+    const f = await hostFixture(db, { trajectory: [{ say: 'never recorded' }] });
+    onTestFinished(() => f.close());
+    const spy = vi.spyOn(threadsRepository, 'appendMessage').mockRejectedValue(new Error('simulated insert failure'));
+    try {
+      await expect(turnOn(f, 'thread', { replyTo: ANSWERING })).rejects.toThrow('simulated insert failure');
+    } finally {
+      spy.mockRestore();
+    }
+    expect(f.surface.typingClosed).toBe(1);
+  });
+
+  it('opens nothing for a turn with no message to answer, or one delivered elsewhere', async () => {
+    const f = await hostFixture(db, { trajectory: [{ say: 'nothing to acknowledge' }] });
+    onTestFinished(() => f.close());
+    // A playbook: nobody is waiting in a conversation, so there is nothing to acknowledge.
+    await turnOn(f, 'none', { replyTo: null });
+    // A turn that answers somewhere the question was not asked, and one with no message to
+    // attach an acknowledgement to at all.
+    await turnOn(f, { surface: 'memory', conversation: 'C-ops' }, { replyTo: ANSWERING });
+    await turnOn(f, 'thread', { replyTo: null });
+    expect(f.surface.typingOpened).toEqual([]);
+  });
+
+  it('runs the turn when the indicator throws, and logs it once', async () => {
+    const f = await hostFixture(db, { trajectory: [{ say: 'here you are' }] });
+    onTestFinished(() => f.close());
+    f.surface.breakTyping('the workspace refused');
+    // An acknowledgement is a courtesy. A turn that failed because an emoji could not be added
+    // would be the worst possible trade.
+    const result = await turnOn(f, 'thread', { replyTo: ANSWERING });
+    expect(result.status).toBe('done');
+    expect(f.surface.typingClosed).toBe(0);
+  });
+});

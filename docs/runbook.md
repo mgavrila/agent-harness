@@ -788,7 +788,7 @@ resumed, pooled behind an ingress, or run as one of many in a process.
 
 | App | What the document names | Bot scopes | Other settings |
 |---|---|---|---|
-| The host's Slack app | `surfaces.slack.botToken`, `surfaces.slack.signingSecret` (both `SecretRef`s) and `surfaces.slack.approvalsChannel` | `chat:write`, `app_mentions:read`, `channels:history`, `groups:history`, `im:history`, `im:read`, `im:write`, `mpim:history`, `users:read`, `usergroups:read`, `files:read`, `files:write` | Socket Mode **off**, Interactivity on, both request URLs set |
+| The host's Slack app | `surfaces.slack.botToken`, `surfaces.slack.signingSecret` (both `SecretRef`s) and `surfaces.slack.approvalsChannel` | `chat:write`, `reactions:write`, `app_mentions:read`, `channels:history`, `groups:history`, `im:history`, `im:read`, `im:write`, `mpim:history`, `users:read`, `usergroups:read`, `files:read`, `files:write` | Socket Mode **off**, Interactivity on, both request URLs set |
 
 **Both request URLs are the same URL**, and it carries the tenant:
 
@@ -840,6 +840,26 @@ claims no thread either, so refusing somebody once does not refuse them for ever
 Mentioning the bot is still what starts a new thread or gets an answer at a channel's top level,
 and a direct message needs no mention anywhere; the `channels:history`, `groups:history` and
 `mpim:history` scopes above are what let the bot recognise its own threads again after a restart.
+
+**A reply goes where the question was asked.** A mention at the top of a channel is answered in the
+thread it roots; a mention inside an existing thread is answered on that thread's **root**, which is
+what Slack wants and what the transport remembers from when the message arrived; a direct message is
+answered flat, because a DM is already one person's conversation. A released file follows the same
+rule. None of this is the host's: it hands the adapter the message being answered and the adapter
+decides what a thread is.
+
+**The assistant marks a message while it works on it.** A turn that answers the conversation it came
+from adds an `eyes` reaction to the triggering message and removes it when the turn ends, whatever
+the turn ended as. That needs `reactions:write`. A reaction that cannot be removed is left and
+logged once — `a Slack reaction could not be removed` — because a stale reaction is a smaller wrong
+than a turn that failed over an emoji. Neither the add nor the remove can fail a turn.
+
+**How long the first answer takes is the model's.** A long first prompt — a big persona, several
+skills, a full history window — costs the deployment its time to first token, and minutes are
+normal at twenty thousand tokens. The kernel seeds the same files every turn and the prompt is this
+tenant's own document, so the levers are the document (`persona`, how many skills it declares,
+`routing.routes.chat.model`) and prompt caching at the gateway. The reaction above is why a person
+does not have to wonder in the meantime.
 
 ### Local development with a tunnel
 
@@ -1101,6 +1121,12 @@ else; someone in no group on a surface with no default is refused. The Slack app
 this plug-in reads through, beyond the ones under "Slack over HTTPS": `usergroups:read` (the
 group list and membership) and `users:read` (a display name). Grant both before pointing a
 document at `slack-groups`, or every lookup fails and every caller is refused.
+
+`identities/static` uses the same directory for one thing only: what to call somebody the document
+never declared. A default-level person is named by the workspace rather than by their user id, and
+a workspace that will not say leaves them named by the id, at the level the document gave them. The
+name is read when the principal is first minted and held for the life of the process, which is the
+window the level already has.
 
 **A group change takes up to ten minutes to reach a decision, not five.** The surface directory
 caches a workspace's group membership for 300 seconds and `identities/slack-groups` caches the

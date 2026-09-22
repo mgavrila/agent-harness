@@ -203,6 +203,29 @@ export class MemorySurface implements SurfaceSession {
     this.messageHandler = handler;
   }
 
+  /** Every `typing` call, in order, so a host test can assert what it was told and when. */
+  readonly typingOpened: { conversation: string; replyTo?: MessageRef }[] = [];
+  /** How many disposers have been called. */
+  typingClosed = 0;
+  private typingFailure: string | null = null;
+
+  /** Make the next `typing` throw, which is a workspace refusing the signal. */
+  breakTyping(message: string): void {
+    this.typingFailure = message;
+  }
+
+  async typing(conversation: string, opts: { replyTo?: MessageRef } = {}): Promise<() => Promise<void>> {
+    if (this.typingFailure !== null) {
+      const message = this.typingFailure;
+      this.typingFailure = null;
+      throw new Error(message);
+    }
+    this.typingOpened.push({ conversation, ...(opts.replyTo === undefined ? {} : { replyTo: opts.replyTo }) });
+    return async () => {
+      this.typingClosed += 1;
+    };
+  }
+
   startStream(conversation: string, opts: { replyTo?: MessageRef; recipient?: string } = {}): StreamHandle {
     this.requires(this.capabilities.streaming, 'cannot stream a reply');
     const entry = { conversation, text: '', ended: false, replyTo: opts.replyTo ?? null };
