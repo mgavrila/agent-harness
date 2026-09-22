@@ -1250,10 +1250,11 @@ the sandbox implementation (`@harness/sandbox-api` stays the reserved interface 
 - images are amd64 only; multi-arch is a platform ask;
 - `gh release edit` on a re-run overwrites a hand-edited release body.
 
-## 26. Plan 12a — skills as folders, memory the platform can write, two web repairs (addendum, 2026-09-22)
+## 26. Plan 12a — skills as folders, memory the platform can write, and what two live tests found (addendum, 2026-09-22)
 
 Plan 12 is split into three. **12a is this one**: the skill folder shape, memory write routes on the
-run API, and the two web-surface follow-ups the platform filed after it built against `v0.3.0`. 12b is
+run API, the two web-surface follow-ups the platform filed after it built against `v0.3.0`, and the
+three Slack fixes the user's own live test found on the morning of 2026-09-22 (section 4.16). 12b is
 the MCP plug-in seam with an Activepieces MCP server as its reference client. 12c is the Jev typed
 model seam, `correlation` and the event feed, the `execute` action class, delegation caps and the MCP
 facade. The split exists because 12b and 12c each add a new outbound dependency and a new trust
@@ -1288,6 +1289,9 @@ Rows 28–38 continue the numbering of sections 2 and 15.
 | 36 | What a full scope answers a write route | **`409`, with a fixed sentence carrying the scope and its two caps and naming no entry**, never the tool's own refusal text. | `memory_add`'s refusal to the *model* deliberately carries every current entry with its id, so the model can consolidate in the same turn. Handing that text to an HTTP caller would put memory text in an error body and in whatever log the caller keeps, which invariant 27 forbids. The cap itself is not bypassed: the same check runs, and the difference is only what the caller is told. |
 | 37 | A conversation named after a person | **`u-` is reserved.** `surfaces.web.inbox` may not start with `u-` (a parse-time refusal), and the web door refuses a message, an action or a form whose conversation is `u-<x>` unless the request's `userId` is exactly `<x>` — `400`, a fixed sentence, and **audited once**, the way the bearer refusal is. **The stream is not covered**, because nothing identifies the reader on it (section 30, invariant 29). | The platform names each person's own conversation with an agent `u-<surface user id>`, so `u-` already means "this belongs to one person" in the only client this surface has. Without the door check, a workspace bug that sent the wrong `userId` would put one person's question into another person's conversation, and the tenant's bearer is the same for both. It is audited, unlike the door's other `400`s, because this one is somebody reaching into a conversation that is not theirs, which is a boundary an operator counts. |
 | 38 | A conversation id in a path | **The web surface decodes its own segment** with `decodeURIComponent` before the pattern test; a segment that does not decode is a `400`. The host stays byte-exact: it matches `/tenants/<clientId>/` on the raw path and hands the rest over untouched. | `CONVERSATION_ID_PATTERN` allows `:` and `@`, a correct client percent-encodes both, and the door tests the raw segment — so `team%3Aapprovals` is a `400` today and `team:approvals` is not, which is a difference no client can be written against. The host is left alone because a client id is `[a-z0-9-]` and never needs encoding, and a host that decoded would have to decide what `%2F` means in a tenant prefix. |
+| 39 **(live-test ruling)** | Which thread a reply lands in | **The adapter decides, and the host is unchanged.** `handleMessage` already sets `replyTo` to the triggering message and `postText`, `startStream` and `uploadFile` already send `replyTo.id` as `thread_ts`, so a channel reply is already threaded. What changes is inside `surfaces/slack`: `replyTo.id` is resolved to the **thread root** the transport already remembers, and a **direct message sends no `thread_ts` at all**. | The two real defects are the opposite of the one reported. A DM is threaded today, because `replyTo` is set unconditionally and the adapter uses it blindly, so every answer in a DM opens a thread nobody asked for. And a mention *inside* an existing thread is answered against that message's own `ts` rather than the thread's root, which Slack's own documentation warns against. Both are the adapter's, which is where they belong: the host may not learn what a `D` channel prefix means, and `harness/host/src` naming a vendor is what the vocabulary scan forbids. |
+| 40 **(live-test ruling)** | What an undeclared person is called | **`identities/static` reads the display name off the surface's directory**, exactly as `identities/slack-groups` already does: `deps.directories[surface]?.displayNameOf(userId)` into `principalFromDefault`'s fourth argument. The Slack name cache is split from the group cache — one hour rather than five minutes, because a name changes far less often than a membership — and **bounded**, which it is not today. | The mechanism is all there and one call site does not use it: `SurfaceDirectory.displayNameOf` is implemented over `users.info`, `IdentityDeps.directories` carries it, and `principalFromDefault` already takes a name and falls back to the user id. `identities/static` passes three arguments where there are four, so a default-level person is addressed as `U0C0HQHGY8K` — and `static` is the plug-in the fixture and the demo tenant use. The unbounded name cache is a leak per distinct user for the life of a process. `users:read` is already granted (runbook scopes table). |
+| 41 **(live-test ruling)** | Showing that a reply is coming | **`SurfaceSession.typing` grows a `replyTo` and answers a disposer**: `typing?(conversation, opts?): Promise<() => Promise<void>>`. `runTurn` calls it before the runtime starts and disposes it in its `finally`, on every path out. Slack implements it as an `eyes` reaction added to the triggering message and removed when the turn ends; a failed `reactions.remove` is one fixed log line and the reaction stays. New scope **`reactions:write`**. | `typing?(conversation)` has been declared in `@harness/surface-api` since Plan 7 and **nothing has ever called it** — the silent-fallback class constraint 21 was written against, sitting in the contract. It also cannot address the triggering message, which is the whole of what an acknowledgement has to do. Widening it costs nothing, because there is no caller to break, and it gives the seam the one caller it was declared for. A disposer rather than a second method, so the adapter owns the pairing and the host cannot leak one half of it. |
 
 ## 28. Contracts added in Plan 12a (extends section 17)
 
@@ -1525,6 +1529,85 @@ routing is untouched: `handleSurfaceRequest` still slices `/tenants/<clientId>/`
 `URL.pathname` and tests the client id against `CLIENT_ID_PATTERN`, which contains nothing that needs
 encoding.
 
+### 4.16 What the first live Slack test found
+
+Three fixes, ruled from the user's live test on 2026-09-22 and ordered by what a person in the
+workspace notices first. Each one is smaller than it was reported to be, because most of the
+machinery is already there; what follows is what is actually missing, read out of the code.
+
+**A reply belongs in the thread its question was asked in, and a direct message has no thread.**
+The host is unchanged. `handleMessage` sets the turn's `replyTo` to the triggering message's ref,
+`replyTarget` passes it into `startStream`, and the final post passes it into `postText` — and the
+Slack session already sends `replyTo.id` as `thread_ts` on all three of `postText`, `startStream`
+and `uploadFile`. So the reported symptom, a channel reply arriving flat, is not what the code
+does. What the code does wrong is the other two cases:
+
+| Case | Today | After |
+| ---- | ----- | ----- |
+| A mention at a channel's top level | `thread_ts` is the message's own `ts`, which is the thread root | unchanged |
+| A mention **inside an existing thread** | `thread_ts` is that message's own `ts`, a *reply's* timestamp, which Slack documents as the wrong handle | the thread's root, which the transport already remembers in `ThreadMemory.roots` |
+| A **direct message** | `thread_ts` is the DM's own `ts`, so every answer opens a thread inside the DM | no `thread_ts` at all; a DM stays flat |
+
+`ThreadMemory` gains `rootOf(channel, ts): string`, answering the root it recorded in `noteInbound`
+and falling back to `ts` for a message it does not know — a process that restarted mid-turn, or a
+thread evicted from the bounded store. `SlackTransport` exposes it beside `notePostedIn`. The
+session resolves a `replyTo` through one helper, used by `postText`, `startStream` and `uploadFile`
+alike, which answers `undefined` for a conversation whose id begins `D`. That prefix is Slack's own
+and it stays inside `surfaces/slack`: the host never learns it, which is what keeps
+`kernel-vocabulary.test.ts` green.
+
+**A person the document never declared has a name, and the assistant uses it.** Everything but one
+call site exists: `slackDirectory` implements `displayNameOf` over `users.info`,
+`IdentityDeps.directories` carries the map, `principalFromDefault(surface, userId, level,
+displayName?)` takes a name, and `identities/slack-groups` passes one. `identities/static` does
+not — it calls the same function with three arguments — so a default-level Slack user is minted
+with `displayName` equal to their raw id, and `callerLine` in the runtime prompt then tells the
+model it is speaking with `U0C0HQHGY8K`. Three changes:
+
+1. `identities/static` takes `deps.directories` at `connect` and, when minting, reads
+   `displayNameOf` off the directory for that surface. A directory that refuses or has none costs
+   the caller nothing: the name falls back to the user id, exactly as `slack-groups` already rules,
+   because a name is cosmetic and a level is not.
+2. `slackDirectory` splits its two windows. Group membership keeps `DIRECTORY_CACHE_MS` at five
+   minutes; a display name gets `DIRECTORY_NAME_CACHE_MS` of one hour, because a name changes far
+   less often than a membership and every miss is a `users.info` call.
+3. The name cache becomes **bounded** at `DIRECTORY_NAME_LIMIT = 500` entries, oldest out first. It
+   is unbounded today, which is one entry per distinct user for the life of the process.
+
+Nothing is logged about a profile: the directory records the name against the user id in memory and
+writes neither to the log, and `mention()` stays `<@id>` on Slack, because that is what renders as a
+mention there.
+
+**A person sees that the assistant heard them, within a second.** `SurfaceSession.typing` becomes:
+
+```ts
+/**
+ * Show that a reply is coming, where the surface can, and answer with the way to stop showing it.
+ *
+ * Optional: a surface with no such signal does not implement it. The disposer is called exactly
+ * once, on every path out of the turn, including a failed or cancelled one.
+ */
+typing?(conversation: string, opts?: { replyTo?: MessageRef }): Promise<() => Promise<void>>;
+```
+
+`runTurn` calls it once, before the runtime starts, only when the turn delivers to the thread it
+came from and only when it has a `replyTo`; the disposer is called in the same `finally` that closes
+the kernel. **Neither call can fail a turn**: both are wrapped, and a throw from either is one log
+line. The Slack adapter adds the `eyes` reaction to the triggering message and removes it in the
+disposer; a `reactions.remove` that fails leaves the reaction and writes one fixed sentence, because
+a stale reaction is a smaller wrong than a turn that failed over an emoji. The app needs
+**`reactions:write`**, which is the one new scope in Plan 12a.
+
+**First-turn latency is not a kernel fault and 12a does not change it.** The live test measured four
+minutes to the first answer on a first prompt of about 22,000 tokens, and forty seconds on the
+second. The kernel's contribution is fixed and small: it seeds the same files every turn — each
+skill's folder and one memory snapshot — and the prompt is the tenant's own document, so its size is
+the document's persona, its skills and its history window, none of which 12a changes. The rest is
+the model's time to first token on a long prompt, and it belongs to whoever chooses the deployment
+(`routing.routes.chat.model`, decision 24) and to prompt caching, which is a gateway concern. The
+acknowledgement above is the honest answer to the symptom: the person learns in under a second that
+they were heard. Nothing else here is a kernel change, and section 35 says so.
+
 ## 29. Data model additions (extends section 18)
 
 **One migration in Plan 12a**, by plain `drizzle-kit generate`: 0017 adds one nullable column.
@@ -1542,7 +1625,7 @@ The section 18 write contract gains one line under `client_documents`: `document
 resolved `ClientDocument`, whose `skills` section is now `name → { markdown, resources }`. The columns
 themselves do not change, and neither does rule 1, 2, 3 or 4.
 
-## 30. Security invariants 25–29 (extends section 19)
+## 30. Security invariants 25–31 (extends section 19)
 
 25. **A skill's resource cannot name a file outside its own folder.** No document can express a path
     with a `..` segment, a leading `/`, a backslash or a NUL — `SKILL_RESOURCE_PATH_PATTERN` refuses
@@ -1565,6 +1648,13 @@ themselves do not change, and neither does rule 1, 2, 3 or 4.
     and the audit row repeats nothing of the body. **This invariant does not cover the event stream**,
     which carries no reader identity; the bearer is the bound there, and section 34's question 9 is
     open on it.
+30. **An acknowledgement cannot fail a turn, and cannot outlive one.** `typing` and its disposer are
+    each wrapped, a throw from either is one log line, and the disposer is called on every path out
+    of `runTurn` — success, runtime failure, budget, cancellation and an uncaught throw alike.
+31. **A display name read from a surface's directory is never logged and never leaves the
+    principal.** It reaches `Principal.displayName`, which the runtime renders into the rules block
+    and the host stamps on nothing; a directory failure is logged by category and never with the
+    profile it was asking about.
 
 ## 31. Testing additions (extends section 20)
 
@@ -1604,6 +1694,20 @@ themselves do not change, and neither does rule 1, 2, 3 or 4.
 - **The decoded segment**: `GET web/conversations/team%3Aapprovals/events` and
   `GET web/conversations/a%40b/events` each open a stream, on the same conversation their unencoded
   spellings reach; `GET web/conversations/a%ZZ/events` is a `400`.
+- **The thread a reply lands in**, over `FakeSlack`: a mention at a channel's top level posts with
+  `thread_ts` equal to its own `ts`; a mention inside an existing thread posts with the **root**,
+  not the message's own timestamp; a direct message posts with **no** `thread_ts` at all, streamed
+  and unstreamed alike, and a released file follows the same rule.
+- **A name for somebody the document never declared**: `identities/static` over a fake directory
+  mints a principal whose `displayName` is the name the directory gave, and falls back to the user
+  id when the directory answers null or throws — the level is unaffected either way. The Slack
+  directory answers `users.info` **once for two lookups of one user**, again after its own window
+  but not after the group window, and drops its oldest entry past the bound.
+- **The acknowledgement**, over `FakeSlack` and over a host turn: `reactions.add` is called once
+  with `eyes` on the triggering message before the runtime runs, `reactions.remove` once when the
+  turn ends; a turn that throws still removes it; a `reactions.remove` that fails leaves the
+  reaction and writes one line; a turn with no `replyTo`, and one delivering somewhere other than
+  its own thread, call neither.
 - **Snapshots.** `docs/architecture/tool-surface.json` and `docs/architecture/compose-surface.yaml` are
   byte-identical in every task: no tool is added, removed or re-described — `memory_list`'s output
   keeps its five fields and gains no `updated_at` — and no environment variable and no Compose service
@@ -1613,7 +1717,7 @@ themselves do not change, and neither does rule 1, 2, 3 or 4.
 
 | Plan | Repository | Delivers | Exit criterion |
 | ---- | ---------- | -------- | -------------- |
-| 12a | agent-harness | skills as folders (schema, `!include-skills`, materialiser, runtime seed), `POST`/`PUT`/`DELETE /v1/memory` with migration 0017, the `u-` conversation rules and the decoded web path segment | an open-source skill folder dropped into a tenant's `skills/` directory reaches the model with its templates beside it; the workspace's memory page adds, corrects and deletes an entry of its tenant and of no other, and every change is one audit row; a workspace opening `team%3Aapprovals` and one opening `team:approvals` are on the same stream |
+| 12a | agent-harness | skills as folders (schema, `!include-skills`, materialiser, runtime seed), `POST`/`PUT`/`DELETE /v1/memory` with migration 0017, the `u-` conversation rules and the decoded web path segment, and section 4.16's three Slack fixes | an open-source skill folder dropped into a tenant's `skills/` directory reaches the model with its templates beside it; the workspace's memory page adds, corrects and deletes an entry of its tenant and of no other, and every change is one audit row; a workspace opening `team%3Aapprovals` and one opening `team:approvals` are on the same stream; and in the live Slack workspace a mention in a thread is answered on that thread, a direct message is answered flat, a person the document never declared is addressed by name, and they see the `eyes` reaction within a second of writing |
 
 12a is one pull request and a `v0.4.0` tag, between `v0.3.0` (Plan 11c) and 12b. Nothing in it is a
 seam 12b or 12c depends on, so the three may be reordered; they are in this order because 12a is the
@@ -1690,6 +1794,16 @@ Listed so a reviewer can see each was considered and left out on purpose.
 - **Editing an entry's scope or owner.** `PUT` takes `text` and nothing else. Moving a private note
   into the shared scope is a delete and an add, which is two audit rows and is what actually happened.
 - **The event stream's reader identity.** Open question 9.
+- **Anything about first-turn latency.** Section 4.16's last paragraph: the four minutes measured in
+  the live test are the model's time to first token on a 22,000-token prompt. The kernel seeds the
+  same files every turn and the prompt is the tenant's own document, so there is no kernel change to
+  make. Prompt caching, a smaller persona and a different deployment are the levers, and the first
+  belongs to the gateway.
+- **A typing indicator on any surface but Slack.** `typing` is optional and the web surface does not
+  implement it; a workspace shows its own spinner, because it made the request and is waiting for
+  the stream.
+- **Threading on a surface other than Slack.** `replyTo` is the neutral contract and every adapter
+  already decides what to do with it; only Slack's reading of it changes.
 - **Everything in 12b and 12c**: declared MCP and A2A plug-ins and the bridge, the `write.assign`
   gate, Jev and typed model access, `correlation` on runs, `GET /v1/events` and its webhook sink, the
   `execute` action class, delegation caps.

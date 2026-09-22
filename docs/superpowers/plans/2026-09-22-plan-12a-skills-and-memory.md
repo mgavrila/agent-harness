@@ -2,13 +2,13 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Make a skill a **folder** rather than a string, so an open-source skill arrives with the templates and reference files it tells the model to read; give the platform's memory page the three **write routes** it needs to add, correct and delete a tenant's memory entries, each one audited; and close the two holes the platform found in the web surface — a conversation named after a person is nobody else's, and a percent-encoded conversation id is the same conversation as its unencoded spelling.
+**Goal:** Make a skill a **folder** rather than a string, so an open-source skill arrives with the templates and reference files it tells the model to read; give the platform's memory page the three **write routes** it needs to add, correct and delete a tenant's memory entries, each one audited; close the two holes the platform found in the web surface — a conversation named after a person is nobody else's, and a percent-encoded conversation id is the same conversation as its unencoded spelling; and fix the three things the first live Slack test found — a reply lands in the thread its question was asked in and a direct message stays flat, a person the document never declared is called by their name rather than their user id, and they see within a second that the assistant heard them.
 
-**Architecture:** Five moves. (1) **A skill is a folder.** `ClientDocument.skills` becomes `Record<name, { markdown, resources }>`, bounded by five constants in `@harness/shared` that the schema, the files source, the materialiser and the runtime all read. A string skill is refused at load, naming the skill. (2) **A directory folds into that section.** `@harness/config-files` grows one more include tag, `!include-skills <dir>`, which reads `<dir>/<name>/` beside `client.yaml` — `SKILL.md` into `markdown`, every other regular file into a resource keyed by its relative path — confined to the client's own directory by the two checks `!include` already makes. (3) **The folder reaches the model.** `materialiseSkills` writes every resource under `<storage>/skills/<clientId>/<name>/`, and the deepagents runtime seeds every file under `skill.dir` as `/skills/<name>/<path>`; `RunSkill` and `skill_activated` are untouched, because `dir` was always the contract. (4) **Memory the platform can write.** `POST /v1/memory`, `PUT /v1/memory/<id>` and `DELETE /v1/memory/<id>`, authenticated exactly as the read route, over `addMemory`/`editMemory`/`removeMemory` in `@harness/core-tools` — one implementation of the cap arithmetic and one `WHERE`, with a `MemoryReach` that is the tenant for a route and one principal's visibility for a tool. Migration 0017 adds `memory_entries.updated_at`. (5) **Two web repairs.** `surfaces.web.inbox` may not start with `u-`, the door refuses a `u-<x>` message, action or form from any other `userId` and the host audits that refusal once, and the door `decodeURIComponent`s its own conversation segment before testing it.
+**Architecture:** Five moves. (1) **A skill is a folder.** `ClientDocument.skills` becomes `Record<name, { markdown, resources }>`, bounded by five constants in `@harness/shared` that the schema, the files source, the materialiser and the runtime all read. A string skill is refused at load, naming the skill. (2) **A directory folds into that section.** `@harness/config-files` grows one more include tag, `!include-skills <dir>`, which reads `<dir>/<name>/` beside `client.yaml` — `SKILL.md` into `markdown`, every other regular file into a resource keyed by its relative path — confined to the client's own directory by the two checks `!include` already makes. (3) **The folder reaches the model.** `materialiseSkills` writes every resource under `<storage>/skills/<clientId>/<name>/`, and the deepagents runtime seeds every file under `skill.dir` as `/skills/<name>/<path>`; `RunSkill` and `skill_activated` are untouched, because `dir` was always the contract. (4) **Memory the platform can write.** `POST /v1/memory`, `PUT /v1/memory/<id>` and `DELETE /v1/memory/<id>`, authenticated exactly as the read route, over `addMemory`/`editMemory`/`removeMemory` in `@harness/core-tools` — one implementation of the cap arithmetic and one `WHERE`, with a `MemoryReach` that is the tenant for a route and one principal's visibility for a tool. Migration 0017 adds `memory_entries.updated_at`. (5) **Two web repairs.** `surfaces.web.inbox` may not start with `u-`, the door refuses a `u-<x>` message, action or form from any other `userId` and the host audits that refusal once, and the door `decodeURIComponent`s its own conversation segment before testing it. (6) **Three Slack repairs, almost all of them inside the adapter.** The session resolves a `replyTo` to the thread's **root** and sends no `thread_ts` at all in a direct message; `identities/static` reads a minted principal's display name off the surface's directory, as `identities/slack-groups` already does, and the Slack name cache gets its own hour-long window and a bound; and `SurfaceSession.typing` — declared since Plan 7 and never called — grows a `replyTo`, answers a disposer, is called by `runTurn` before the runtime starts and disposed in its `finally`, and is implemented on Slack as an `eyes` reaction added and removed.
 
 **Tech Stack:** Node `>=22`, pnpm `11.4.0`, TypeScript 7 (`^7.0.2`) in every package with `typescript@6.0.3` at the workspace root only, ESM only, zod v4 as `import * as z from 'zod/v4'`, vitest `^5.0.0`, drizzle-orm with `drizzle-kit generate`. **No new third-party dependency and no new workspace package.** The directory walks are `node:fs/promises`; the decode is `decodeURIComponent`; the byte counting is `Buffer.byteLength`.
 
-**Spec:** `docs/superpowers/specs/2026-09-19-hf1-os-boundary-design.md` — this plan is sections 26–35, the Plan 12a addendum. It implements decisions 28–38; sections 4.13, 4.14 and 4.15; section 29's migration 0017; invariants 25, 26, 27, 28 and 29; section 31's testing additions; and the exit criterion of section 32. It starts from `worktree-plan-12a-skills-and-memory`, branched off `main` at `25ac653`, which is `v0.3.0`. Section 33's constraints 25–33 are answered by named tasks below.
+**Spec:** `docs/superpowers/specs/2026-09-19-hf1-os-boundary-design.md` — this plan is sections 26–35, the Plan 12a addendum. It implements decisions 28–41; sections 4.13, 4.14, 4.15 and 4.16; section 29's migration 0017; invariants 25 through 31; section 31's testing additions; and the exit criterion of section 32. It starts from `worktree-plan-12a-skills-and-memory`, branched off `main` at `25ac653`, which is `v0.3.0`. Section 33's constraints 25–33 are answered by named tasks below.
 
 ## Global Constraints
 
@@ -23,6 +23,7 @@ Every task's requirements implicitly include this section.
 - **Never source `.env`.** The gates script exports what the suite needs and nothing else: `TEST_DATABASE_URL=postgres://harness:harness@localhost:15433/harness_test`, `EVALS_DATABASE_URL=postgres://harness:harness@localhost:15433/harness_evals`, `CONTROL_PLANE_TEST_DATABASE_URL=postgres://harness:harness@localhost:15432/harness_test`, `LITELLM_MASTER_KEY=sk-ci-placeholder`. Those databases exist; do not create or drop them and run no container command against either. To run one suite on its own, put the same variables in front of the command.
 - **One migration in this plan: Task 4's `memory_entries.updated_at`.** Generated by plain `drizzle-kit generate`, never `--custom` and never hand-edited. **No other task touches `harness/db/src/domain/schema.ts` or `harness/db/drizzle/`.** Task 4 runs the generator **twice**, and the second run must print that there is nothing to migrate, which is the check that the committed SQL is what the schema says. The latest migration on `main` is `0016_flowery_living_lightning`, journal index 16, so this plan's is `0017_<whatever drizzle-kit names it>`. `harness/db/src/testing.ts`'s truncation list is **unchanged**: this is a column on a table already on it.
 - **No new environment variable and no environment variable deleted.** `harness/core-tools/src/app/surface.test.ts` scans every non-test source file under the kernel roots for environment reads and fails on a name `.env.example` does not document. Nothing in this plan reads one. `.env.example` is untouched, `harness/compose/docker-compose.yml` is untouched, and `docs/architecture/compose-surface.yaml` is therefore byte-identical in every task.
+- **One new Slack bot scope, `reactions:write`, in Task 8.** It is a setting in an app's own configuration at api.slack.com, not a deployment's file: it goes in the runbook's scopes table and the changelog and nowhere else. `users:read` is **already** granted and already in that table; do not add it a second time.
 - **Both architecture snapshots are byte-identical in every task.** No tool is added, removed or re-described: `memory_list`'s output schema keeps its five fields and gains no `updated_at` (spec decision 35), and nothing else touches a tool description. `git status --porcelain docs/architecture/tool-surface.json docs/architecture/compose-surface.yaml` must print **nothing** at the end of every task; the gates script prints it. No task runs `pnpm surface:record` to "fix" a diff — a diff means something changed that should not have.
 - **No new third-party dependency anywhere, and no new workspace package.** `pnpm install` is not run and `pnpm-lock.yaml` is not edited. Every package this plan touches already declares everything it imports: `@harness/config-api` and `@harness/config-files` already declare `@harness/shared`, `runtimes/deepagents` already declares `@harness/shared` and `@harness/runtime-api`, and `harness/host` already declares `@harness/core-tools`.
 - **The kernel boundary.** Nothing under `catalog/`, `control-plane/`, `apps/` or `deploy/` is imported, edited or created. `catalog/src/testing.ts` builds a document with `skills: {}`, which is valid under the new shape, so the platform's tree needs no edit — and must not get one (spec §33 constraint 26).
@@ -211,6 +212,21 @@ Paths are relative to the repository root.
 
 `CHANGELOG.md`; `docs/runbook.md`; `harness/host/README.md`; `harness/config-api/README.md`; `harness/config-files/README.md`; `ARCHITECTURE.md`; `scripts/src/domain/scaffold.ts` + `scaffold.test.ts`.
 
+### What the live Slack test found (Task 8)
+
+| File | Responsibility |
+|---|---|
+| `harness/surface-api/src/types.ts` | `typing` takes a `replyTo` and answers a disposer |
+| `harness/surface-api/src/testing.ts` | `MemorySurface.typing`, and the three members a host test reads |
+| `harness/host/src/domain/conversation.ts` | `runTurn` opens it before the runtime and disposes it in the `finally` |
+| `surfaces/slack/src/transport/classify.ts` | `ThreadMemory.rootOf` |
+| `surfaces/slack/src/transport/events.ts` + `types.ts` | `SlackTransport.rootOf`; `SlackApi.reactions` |
+| `surfaces/slack/src/transport/web-client.ts` + `fake.ts` | the two real calls, and what a test reads back |
+| `surfaces/slack/src/session.ts` | `threadFor` (the root, and no thread in a DM), `typing` as a reaction |
+| `surfaces/slack/src/directory.ts` | the name window split off the group window, and bounded |
+| `identities/static/src/index.ts` | the directory, and `principalFromDefault`'s fourth argument |
+| `CHANGELOG.md`, `docs/runbook.md` | the three fixes, and `reactions:write` |
+
 ## Task order
 
 Strictly sequential.
@@ -221,7 +237,8 @@ Strictly sequential.
 - **Task 4** (the migration and the domain functions) is independent of 1–3 and runs here so that Task 5 has the functions it calls.
 - **Task 5** (the write routes) after Task 4.
 - **Task 6** (the web repairs) is independent of everything above; it edits `document.ts` again, which is why it runs after Task 1 rather than beside it.
-- **Task 7** (documentation and the scaffolder) last. It is the only task that touches `CHANGELOG.md`.
+- **Task 7** (documentation and the scaffolder) writes the `0.4.0 — unreleased` section, which is why it runs before Task 8 rather than last: Task 8 adds four lines to a section that has to exist first. Those two are the only tasks that touch `CHANGELOG.md`, and Task 8 only ever appends to what Task 7 wrote.
+- **Task 8** (the live Slack test's three fixes) last. It is independent of Tasks 1 to 6 and shares no file with any of them; it comes last because it was ruled after the rest of the plan was written, and because running it against a branch whose gates are already green is the cheapest way to see that it broke nothing.
 
 Every task leaves `docs/architecture/tool-surface.json` and `docs/architecture/compose-surface.yaml` byte-identical, and `git status --porcelain docs/architecture` is the check.
 
@@ -3383,6 +3400,876 @@ git commit -m "docs: describe skill folders and the memory write routes, and sca
 
 ---
 
+
+### Task 8: What the live Slack test found — the right thread, a person's name, and an acknowledgement
+
+**Files:**
+- Modify: `harness/surface-api/src/types.ts` (`typing`'s signature)
+- Modify: `harness/surface-api/src/testing.ts` (`MemorySurface.typing`)
+- Modify: `harness/host/src/domain/conversation.ts` (`runTurn` calls it and disposes it)
+- Modify: `harness/host/src/domain/conversation.test.ts` (four cases)
+- Modify: `surfaces/slack/src/transport/types.ts` (`SlackApi.reactions`, `SlackTransport.rootOf`)
+- Modify: `surfaces/slack/src/transport/web-client.ts` (the two real calls)
+- Modify: `surfaces/slack/src/transport/fake.ts` (`reactions`, and what a test reads back)
+- Modify: `surfaces/slack/src/transport/classify.ts` (`ThreadMemory.rootOf`)
+- Modify: `surfaces/slack/src/transport/classify.test.ts` (one case)
+- Modify: `surfaces/slack/src/transport/events.ts` (expose `rootOf`)
+- Modify: `surfaces/slack/src/session.ts` (`threadFor`, the three call sites, `typing`)
+- Modify: `surfaces/slack/src/session.test.ts` (seven cases)
+- Modify: `surfaces/slack/src/directory.ts` (the split window, the bound)
+- Modify: `surfaces/slack/src/directory.test.ts` (three cases)
+- Modify: `identities/static/src/index.ts` (the directory, the fourth argument)
+- Modify: `identities/static/src/index.test.ts` (three cases)
+- Modify: `CHANGELOG.md` (into the `0.4.0 — unreleased` section Task 7 wrote)
+- Modify: `docs/runbook.md` (the scopes table, the Slack section, directory-backed identity)
+- Delete: nothing.
+
+**Interfaces:**
+- Consumes: nothing from Tasks 1–6. This task is independent of every one of them and touches no file they touch, except `CHANGELOG.md` and `docs/runbook.md`, which Task 7 writes first.
+- Produces:
+  - `SurfaceSession.typing?(conversation: string, opts?: { replyTo?: MessageRef }): Promise<() => Promise<void>>`
+  - `ThreadMemory.rootOf(channel: string, ts: string): string` and `SlackTransport.rootOf(channel, ts): string`
+  - `SlackApi.reactions: { add(args: { channel: string; timestamp: string; name: string }): Promise<{ ok?: boolean }>; remove(args: { channel: string; timestamp: string; name: string }): Promise<{ ok?: boolean }> }`
+  - `DIRECTORY_NAME_CACHE_MS = 3_600_000` and `DIRECTORY_NAME_LIMIT = 500` in `surfaces/slack/src/directory.ts`
+  - `ACK_REACTION = 'eyes'` in `surfaces/slack/src/session.ts`
+
+**What is already true, and must not be re-done.** Read before writing a line of this task:
+
+| Claim | The code | So |
+|---|---|---|
+| A channel reply is already threaded | `handleMessage` sets `replyTo: event.message`; `replyTarget` passes it to `startStream`; `postText` and `startStream` and `uploadFile` all send `replyTo.id` as `thread_ts` | **No host change for threading.** The two defects are a DM being threaded and a reply inside a thread using the child `ts` |
+| A display name can already be fetched | `slackDirectory.displayNameOf` over `users.info`; `IdentityDeps.directories`; `principalFromDefault(surface, userId, level, displayName?)`; `identities/slack-groups` passes one | **The gap is `identities/static`**, which passes three arguments where there are four |
+| `users:read` is already granted | `docs/runbook.md` scopes table and the directory-backed identity section | **Only `reactions:write` is new** |
+| `typing?(conversation)` is declared and called by nobody | `harness/surface-api/src/types.ts:402`; no caller anywhere | Widening it breaks nothing |
+
+- [ ] **Step 1: Write the failing test for the thread rule**
+
+In `surfaces/slack/src/session.test.ts`, add these cases. They use that file's existing fixture — a `FakeSlack`, a fake transport and `createSlackSession` — so build them the way the neighbouring `postText` cases build theirs, and read `api.posts` for what was sent.
+
+```ts
+describe('which thread a reply lands in', () => {
+  const CHANNEL = 'C0GENERAL';
+  const DM = 'D0PRIVATE';
+
+  it('answers a top-level mention in the thread that message roots', async () => {
+    const { session, api, transport } = sessionFixture();
+    // What the transport recorded when the message arrived: a top-level message is its own root.
+    transport.noteInbound(CHANNEL, '111.1', '111.1');
+    await session.postText(CHANNEL, 'here you are', { replyTo: { surface: 'slack', conversation: CHANNEL, id: '111.1' } });
+    expect(api.posts.at(-1)).toMatchObject({ channel: CHANNEL, thread_ts: '111.1' });
+  });
+
+  it('answers a mention inside a thread against that thread’s root, not the message’s own ts', async () => {
+    const { session, api, transport } = sessionFixture();
+    transport.noteInbound(CHANNEL, '222.2', '111.1');
+    await session.postText(CHANNEL, 'still here', { replyTo: { surface: 'slack', conversation: CHANNEL, id: '222.2' } });
+    // Slack documents a reply's own timestamp as the wrong handle for `thread_ts`; the root is
+    // the one the transport already recorded when the message came in.
+    expect(api.posts.at(-1)).toMatchObject({ thread_ts: '111.1' });
+  });
+
+  it('falls back to the message’s own ts for a thread it never saw arrive', async () => {
+    const { session, api } = sessionFixture();
+    // A process that restarted mid-turn, or a thread evicted from the bounded store. Today's
+    // behaviour, kept: it is right for a top-level message and no worse than nothing for a reply.
+    await session.postText(CHANNEL, 'hello', { replyTo: { surface: 'slack', conversation: CHANNEL, id: '333.3' } });
+    expect(api.posts.at(-1)).toMatchObject({ thread_ts: '333.3' });
+  });
+
+  it('keeps a direct message flat, streamed and unstreamed alike', async () => {
+    const { session, api, transport } = sessionFixture();
+    transport.noteInbound(DM, '444.4', '444.4');
+    const replyTo = { surface: 'slack' as const, conversation: DM, id: '444.4' };
+    await session.postText(DM, 'hello', { replyTo });
+    expect(api.posts.at(-1)?.thread_ts).toBeUndefined();
+    const stream = session.startStream(DM, { replyTo });
+    stream.append('hello');
+    await stream.end();
+    // A DM is already one person's conversation. Threading every answer inside it buries the
+    // conversation under one-reply threads, which is what the live test found.
+    expect(api.posts.at(-1)?.thread_ts).toBeUndefined();
+  });
+
+  it('threads a streamed reply in a channel, on the root', async () => {
+    const { session, api, transport } = sessionFixture();
+    transport.noteInbound(CHANNEL, '222.2', '111.1');
+    const stream = session.startStream(CHANNEL, {
+      replyTo: { surface: 'slack', conversation: CHANNEL, id: '222.2' },
+    });
+    stream.append('working');
+    await stream.end();
+    expect(api.posts.at(-1)).toMatchObject({ thread_ts: '111.1' });
+  });
+
+  it('follows the same rule for a released file', async () => {
+    const { session, api, transport } = sessionFixture();
+    transport.noteInbound(CHANNEL, '222.2', '111.1');
+    await session.uploadFile(CHANNEL, {
+      path: fixtureFilePath,
+      filename: 'roster.csv',
+      replyTo: { surface: 'slack', conversation: CHANNEL, id: '222.2' },
+    });
+    expect(api.uploads.at(-1)).toMatchObject({ thread_ts: '111.1' });
+    await session.uploadFile(DM, { path: fixtureFilePath, filename: 'roster.csv', replyTo: { surface: 'slack', conversation: DM, id: '444.4' } });
+    expect(api.uploads.at(-1)?.thread_ts).toBeUndefined();
+  });
+});
+```
+
+`sessionFixture()` stands for whatever this file already uses to build a session over a `FakeSlack` — reuse it and add `noteInbound` to the fake transport it returns if the fake does not already forward one; `fixtureFilePath` is the staged file the existing `uploadFile` case already writes. Do not introduce a second fixture.
+
+- [ ] **Step 2: Run it to verify it fails**
+
+```
+pnpm --filter @harness/surface-slack test -- session.test.ts
+```
+
+Expected: FAIL. The root cases post `thread_ts: '222.2'`; the DM cases post a `thread_ts` where none is wanted.
+
+- [ ] **Step 3: Let the transport say what a message's root was**
+
+In `surfaces/slack/src/transport/classify.ts`, add one method to `ThreadMemory`'s interface and its implementation:
+
+```ts
+  /**
+   * The root of the thread `ts` arrived in, or `ts` itself for a message this process never saw.
+   *
+   * `noteInbound` recorded it when the message was delivered. The fallback is not a guess: for a
+   * top-level message the root *is* its own timestamp, and for a reply this process has forgotten
+   * — a restart mid-turn, or an eviction from the bounded store — it is the handle the adapter
+   * had before this method existed, so nothing gets worse.
+   */
+  rootOf(channel: string, ts: string): string;
+```
+
+```ts
+    rootOf(channel, ts) {
+      return roots.get(`${channel}:${ts}`) ?? ts;
+    },
+```
+
+In `surfaces/slack/src/transport/events.ts`, expose it on the returned transport beside `notePostedIn`:
+
+```ts
+    rootOf: (channel, ts) => threads.rootOf(channel, ts),
+```
+
+and add the same member to `SlackTransport` in `surfaces/slack/src/transport/types.ts`, below `notePostedIn`:
+
+```ts
+  /**
+   * The root of the thread the message `ts` arrived in, or `ts` itself when this process never saw
+   * it arrive. The session asks before it posts, because Slack documents a reply's own timestamp
+   * as the wrong value for `thread_ts` and only the transport saw which thread the message was in.
+   */
+  rootOf(channel: string, ts: string): string;
+```
+
+In `surfaces/slack/src/transport/classify.test.ts`, add one case to the `createThreadMemory` block:
+
+```ts
+  it('answers the root of a thread it saw a message arrive in, and the message itself otherwise', () => {
+    const memory = createThreadMemory(new FakeSlack(), log);
+    memory.noteInbound('C1', '222.2', '111.1');
+    expect(memory.rootOf('C1', '222.2')).toBe('111.1');
+    // Never seen: the message is its own handle, which is right for a top-level message and is
+    // what the adapter used before this existed.
+    expect(memory.rootOf('C1', '999.9')).toBe('999.9');
+    expect(memory.rootOf('C2', '222.2')).toBe('222.2');
+  });
+```
+
+- [ ] **Step 4: Resolve a reply to a thread, once, in the session**
+
+In `surfaces/slack/src/session.ts`, add below `assertConversation`:
+
+```ts
+/**
+ * A direct message's id. Slack's channel ids begin `C` for a channel, `G` for a private group and
+ * `D` for a direct message, which `SLACK_CONVERSATION` above already spells out.
+ */
+const DIRECT_MESSAGE_PREFIX = 'D';
+```
+
+and, inside `createSlackSession` beside `ref`:
+
+```ts
+  /**
+   * The thread a reply belongs in, or undefined for one that belongs in no thread.
+   *
+   * Two rules, both of them Slack's rather than the kernel's, which is why they are here and not
+   * in `harness/host/src`:
+   *
+   * **A direct message has no thread.** It is already one person's conversation, and threading
+   * every answer inside it buries the conversation under one-reply threads. The host cannot make
+   * this call: it would have to know what a `D` prefix means, and `kernel-vocabulary.test.ts`
+   * exists to stop it learning.
+   *
+   * **A reply names its thread's root, not the message it answers.** The host hands over the
+   * triggering message, which inside an existing thread is a reply's own timestamp — and Slack
+   * documents that as the wrong handle for `thread_ts`. The transport saw the message arrive and
+   * remembered which thread it was in, so it is the one that can say.
+   */
+  const threadFor = (conversation: string, replyTo: MessageRef | undefined): string | undefined => {
+    if (!replyTo) return undefined;
+    if (conversation.startsWith(DIRECT_MESSAGE_PREFIX)) return undefined;
+    return transport.rootOf(conversation, replyTo.id);
+  };
+```
+
+Then replace the three `thread_ts` expressions:
+
+- in `postText`: `thread_ts: opts.replyTo?.id` becomes `thread_ts: threadFor(conversation, opts.replyTo)`;
+- in `uploadFile`: `thread_ts: file.replyTo?.id` becomes `thread_ts: threadFor(conversation, file.replyTo)`;
+- in `startStream`: `createEditStream({ api, conversation, threadTs: opts.replyTo?.id })` becomes `createEditStream({ api, conversation, threadTs: threadFor(conversation, opts.replyTo) })`.
+
+`notePostedIn` in both places is left exactly as it is: it already takes the message being answered and resolves the root itself, which is the same store `rootOf` reads.
+
+- [ ] **Step 5: Run the thread cases green**
+
+```
+pnpm --filter @harness/surface-slack test
+```
+
+Expected: PASS, the whole package. The existing `postText` and `startStream` cases that assert a `thread_ts` still pass, because a top-level message's root is its own timestamp.
+
+- [ ] **Step 6: Write the failing test for the name**
+
+In `identities/static/src/index.test.ts`, add these cases:
+
+```ts
+describe('a name for somebody the document never declared', () => {
+  const directory = (names: Record<string, string | null>, fail = false) => ({
+    groupsOf: async () => [],
+    displayNameOf: async (userId: string) => {
+      if (fail) throw new Error('missing_scope');
+      return names[userId] ?? null;
+    },
+  });
+
+  it('names a minted principal what the surface calls them', async () => {
+    const session = await identity.connect(
+      deps({ defaults: { slack: 'member' }, directories: { slack: directory({ U1: 'Ada Lovelace' }) } }),
+    );
+    const principal = await session.resolve({ surface: 'slack', userId: 'U1' });
+    expect(principal).toMatchObject({ level: 'member', displayName: 'Ada Lovelace' });
+    // The id is still derived from the surface user id, so the same person is the same principal
+    // tomorrow and in the next process: a name is cosmetic and an id is not.
+    expect(principal?.surfaces).toEqual({ slack: 'U1' });
+  });
+
+  it('falls back to the surface user id when the directory will not say', async () => {
+    const session = await identity.connect(
+      deps({ defaults: { slack: 'member' }, directories: { slack: directory({ U1: null }) } }),
+    );
+    expect((await session.resolve({ surface: 'slack', userId: 'U1' }))?.displayName).toBe('U1');
+  });
+
+  it('keeps the level when the directory refuses, and says so once', async () => {
+    const log = { info() {}, warn: vi.fn(), error() {} };
+    const session = await identity.connect(
+      deps({ defaults: { slack: 'member' }, directories: { slack: directory({}, true) }, log }),
+    );
+    const principal = await session.resolve({ surface: 'slack', userId: 'U1' });
+    // A workspace that will not say what somebody is called does not cost them the level the
+    // document already gave them — the same ruling `identities/slack-groups` follows.
+    expect(principal).toMatchObject({ level: 'member', displayName: 'U1' });
+    expect(log.warn).toHaveBeenCalledTimes(1);
+  });
+
+  it('mints without a directory at all, which is every surface that has none', async () => {
+    const session = await identity.connect(deps({ defaults: { memory: 'member' }, directories: {} }));
+    expect((await session.resolve({ surface: 'memory', userId: 'U9' }))?.displayName).toBe('U9');
+  });
+});
+```
+
+`deps({ … })` stands for whatever this file already builds an `IdentityDeps` with; extend that helper to take `directories` and `log` if it does not already, defaulting `directories` to `{}`. Import `vi` from vitest if the file does not already.
+
+- [ ] **Step 7: Run it to verify it fails**
+
+```
+pnpm --filter @harness/identity-static test
+```
+
+Expected: FAIL — the first case gets `displayName: 'U1'`, because the plug-in passes three arguments to `principalFromDefault` where there are four.
+
+- [ ] **Step 8: Read the name off the directory**
+
+In `identities/static/src/index.ts`, extend the class and its constructor, and the one call:
+
+```ts
+import type { Logger, SurfaceDirectory } from '@harness/shared';
+```
+
+```ts
+  /** The directories the loaded surfaces offer, by surface name. A surface with none is absent. */
+  private readonly directories: Readonly<Record<string, SurfaceDirectory>>;
+```
+
+```ts
+  constructor(
+    declared: StaticIdentity,
+    defaults: Readonly<Record<string, UserLevel>>,
+    directories: Readonly<Record<string, SurfaceDirectory>>,
+    log: Logger,
+  ) {
+    this.declared = declared;
+    this.defaults = defaults;
+    this.directories = directories;
+    this.log = log;
+    this.name = declared.name;
+  }
+```
+
+and, in `resolve`, between the `level === undefined` guard and `principalFromDefault`:
+
+```ts
+    // What the surface calls this person, when it has a directory and will say. A name is
+    // cosmetic and a level is not, so neither a refusal nor a silence costs them the level the
+    // document already gave them — the ruling `identities/slack-groups` already follows.
+    // `principalFromDefault` falls back to the surface user id, which is what a person was
+    // addressed as before this line existed.
+    const displayName = await (this.directories[ref.surface]?.displayNameOf(ref.userId) ?? Promise.resolve(null))
+      .then((name) => name ?? undefined)
+      .catch((err: unknown) => {
+        this.log.warn(`static identity: no display name for "${ref.userId}": ${describeError(err)}`);
+        return undefined;
+      });
+    const minted = principalFromDefault(ref.surface, ref.userId, level, displayName);
+```
+
+Add `describeError` to the `@harness/shared` import. In `connect`, pass the map through:
+
+```ts
+    return Promise.resolve(
+      new IdentityWithDefaults(new StaticIdentity(principals, 'static'), defaults, deps.directories, deps.log),
+    );
+```
+
+Note what is **not** done here: the name is read on the mint and not on every message, because the minted principal is cached in `this.minted` by its derived id. A person who changes their Slack name is addressed by the old one until this process restarts or `slack-groups` is in use, and that is the same window the level already has.
+
+- [ ] **Step 9: Run it green**
+
+```
+pnpm --filter @harness/identity-static test
+```
+
+Expected: PASS.
+
+- [ ] **Step 10: Write the failing test for the name cache**
+
+In `surfaces/slack/src/directory.test.ts`, add these cases:
+
+```ts
+  it('asks users.info once for two lookups of one person', async () => {
+    const api = new FakeSlack();
+    api.userProfiles = { U1: { real_name: 'Ada Lovelace' } };
+    const directory = slackDirectory(api, { now: () => new Date('2026-09-22T00:00:00Z') });
+    expect(await directory.displayNameOf('U1')).toBe('Ada Lovelace');
+    expect(await directory.displayNameOf('U1')).toBe('Ada Lovelace');
+    expect(api.userInfoCalls).toBe(1);
+  });
+
+  it('holds a name for its own window, which is longer than the group window', async () => {
+    const api = new FakeSlack();
+    api.userProfiles = { U1: { real_name: 'Ada Lovelace' } };
+    let clock = new Date('2026-09-22T00:00:00Z');
+    const directory = slackDirectory(api, { now: () => clock });
+    await directory.displayNameOf('U1');
+    // Past the group window, well inside the name window: a name changes far less often than a
+    // membership, and every miss is a `users.info` call.
+    clock = new Date(clock.getTime() + DIRECTORY_CACHE_MS + 1_000);
+    await directory.displayNameOf('U1');
+    expect(api.userInfoCalls).toBe(1);
+    clock = new Date(clock.getTime() + DIRECTORY_NAME_CACHE_MS);
+    await directory.displayNameOf('U1');
+    expect(api.userInfoCalls).toBe(2);
+  });
+
+  it('drops its oldest name past the bound, rather than growing for the life of the process', async () => {
+    const api = new FakeSlack();
+    const directory = slackDirectory(api, { now: () => new Date('2026-09-22T00:00:00Z') });
+    for (let n = 0; n <= DIRECTORY_NAME_LIMIT; n += 1) {
+      api.userProfiles[`U${n}`] = { real_name: `Person ${n}` };
+      await directory.displayNameOf(`U${n}`);
+    }
+    const asked = api.userInfoCalls;
+    // The newest is still held; the first one asked for has fallen out.
+    await directory.displayNameOf(`U${DIRECTORY_NAME_LIMIT}`);
+    expect(api.userInfoCalls).toBe(asked);
+    await directory.displayNameOf('U0');
+    expect(api.userInfoCalls).toBe(asked + 1);
+  });
+```
+
+and extend that file's import to `import { DIRECTORY_CACHE_MS, DIRECTORY_NAME_CACHE_MS, DIRECTORY_NAME_LIMIT, slackDirectory } from './directory.js';`.
+
+- [ ] **Step 11: Split the window and bound the cache**
+
+In `surfaces/slack/src/directory.ts`, add the two constants below `DIRECTORY_CACHE_MS`:
+
+```ts
+/**
+ * How long one person's display name is reused.
+ *
+ * Twelve times the group window, because the two answer different questions: a membership decides
+ * a level and a workspace that has just moved somebody should be at most one window behind, while
+ * a name is cosmetic and changes once a career. Every miss here is a `users.info` call on the path
+ * that resolves a caller, so a short window is a request per person per turn.
+ */
+export const DIRECTORY_NAME_CACHE_MS = 3_600_000;
+
+/**
+ * How many names are held before the oldest falls out.
+ *
+ * Unbounded, this is one entry per distinct user for the life of the process — small per entry and
+ * with no ceiling, which is the shape of a leak. Five hundred is every person in a large workspace
+ * and a few kilobytes.
+ */
+export const DIRECTORY_NAME_LIMIT = 500;
+```
+
+and change the two places that use the name cache:
+
+```ts
+  const cacheMs = opts.cacheMs ?? DIRECTORY_CACHE_MS;
+  const nameCacheMs = opts.nameCacheMs ?? DIRECTORY_NAME_CACHE_MS;
+```
+
+```ts
+export interface SlackDirectoryOptions {
+  now: () => Date;
+  cacheMs?: number;
+  nameCacheMs?: number;
+}
+```
+
+```ts
+    async displayNameOf(userId) {
+      const cached = names.get(userId);
+      if (cached && opts.now().getTime() - cached.at < nameCacheMs) return cached.value;
+      const info = await api.users.info({ user: userId });
+      const raw = info.user?.profile?.display_name || info.user?.real_name || info.user?.profile?.real_name || '';
+      // `||` rather than `??`: a name that was nothing but whitespace is a workspace that will
+      // not say, which is what null means here.
+      const value = raw.trim() || null;
+      // Re-inserted rather than updated, so the bound below drops the least recently *fetched*
+      // entry: a `Map` keeps insertion order and a plain `set` on an existing key would not move it.
+      names.delete(userId);
+      names.set(userId, { value, at: opts.now().getTime() });
+      if (names.size > DIRECTORY_NAME_LIMIT) {
+        const oldest = names.keys().next();
+        if (!oldest.done) names.delete(oldest.value);
+      }
+      return value;
+    },
+```
+
+Also give `FakeSlack` the counter the cases read. In `surfaces/slack/src/transport/fake.ts`, beside `usergroupsListCalls`:
+
+```ts
+  /** How many times a profile was actually fetched, so a test can prove the name cache works. */
+  userInfoCalls = 0;
+```
+
+and increment it in the `users.info` implementation, after its `guard()`.
+
+- [ ] **Step 12: Run the directory cases green**
+
+```
+pnpm --filter @harness/surface-slack test -- directory.test.ts
+```
+
+Expected: PASS. The existing case `reads the list once per cache window, not once per caller` is unaffected: it passes `cacheMs` explicitly and asserts on the **group** window.
+
+- [ ] **Step 13: Write the failing test for the acknowledgement**
+
+In `harness/host/src/domain/conversation.test.ts`, add these cases. They drive a turn the way the neighbouring cases do, over the fixture's memory surface, which Step 15 teaches to record `typing`:
+
+```ts
+describe('showing that a reply is coming', () => {
+  it('opens the indicator before the runtime runs and closes it when the turn ends', async () => {
+    const f = await fixture();
+    const surface = f.host.surfaces.primary as MemorySurface;
+    await turnOn(f, 'thread', { replyTo: { surface: surface.name, conversation: 'c1', id: 'm1' } });
+    expect(surface.typingOpened).toEqual([{ conversation: 'c1', replyTo: { surface: surface.name, conversation: 'c1', id: 'm1' } }]);
+    expect(surface.typingClosed).toBe(1);
+  });
+
+  it('closes it on a turn that failed, because a turn that failed still stops waiting', async () => {
+    const f = await fixture({ trajectory: 'throws' });
+    const surface = f.host.surfaces.primary as MemorySurface;
+    await expect(turnOn(f, 'thread', { replyTo: { surface: surface.name, conversation: 'c1', id: 'm1' } })).rejects.toThrow();
+    expect(surface.typingClosed).toBe(1);
+  });
+
+  it('opens nothing for a turn with no message to answer, or one delivered elsewhere', async () => {
+    const f = await fixture();
+    const surface = f.host.surfaces.primary as MemorySurface;
+    // A playbook: nobody is waiting in a conversation, so there is nothing to acknowledge.
+    await turnOn(f, 'none', { replyTo: null });
+    // A message with no addressable reference — a surface that cannot address its own messages.
+    await turnOn(f, 'thread', { replyTo: null });
+    expect(surface.typingOpened).toEqual([]);
+  });
+
+  it('runs the turn when the indicator throws, and logs it once', async () => {
+    const f = await fixture();
+    const surface = f.host.surfaces.primary as MemorySurface;
+    surface.breakTyping('the workspace refused');
+    // An acknowledgement is a courtesy. A turn that failed because an emoji could not be added
+    // would be the worst possible trade.
+    const result = await turnOn(f, 'thread', { replyTo: { surface: surface.name, conversation: 'c1', id: 'm1' } });
+    expect(result.status).toBe('done');
+  });
+});
+```
+
+`fixture()` and `turnOn()` stand for the helpers this file already has; `turnOn(f, deliver, over)` already takes an overrides object, so `replyTo` goes in it. Cast to `MemorySurface` the way any neighbouring case that reaches for the fixture surface's own state already does.
+
+- [ ] **Step 14: Run it to verify it fails**
+
+```
+TEST_DATABASE_URL=postgres://harness:harness@localhost:15433/harness_test pnpm --filter @harness/host test -- conversation.test.ts
+```
+
+Expected: FAIL — `typingOpened` does not exist and nothing calls `typing`.
+
+- [ ] **Step 15: Widen the contract and teach the reference surface**
+
+In `harness/surface-api/src/types.ts`, replace the `typing` member of `SurfaceSession`:
+
+```ts
+  /**
+   * Show that a reply is coming, where the surface can, and answer with the way to stop showing it.
+   *
+   * Optional: a surface with no such signal does not implement it, and the host calls nothing.
+   * `replyTo` is the message being answered, because an acknowledgement a person can see is
+   * attached to what they wrote rather than posted beside it — a reaction on Slack, a spinner
+   * wherever a surface has one.
+   *
+   * The host calls this once, before the runtime starts, and calls the disposer exactly once on
+   * every path out of the turn: success, a runtime failure, a budget, a cancellation and an
+   * uncaught throw alike. **Neither call may fail a turn**: the host wraps both and logs a throw
+   * from either. An adapter should therefore make the disposer forgiving — a signal that cannot be
+   * taken down is a smaller wrong than a turn that failed over one.
+   */
+  typing?(conversation: string, opts?: { replyTo?: MessageRef }): Promise<() => Promise<void>>;
+```
+
+In `harness/surface-api/src/testing.ts`, give `MemorySurface` the matching implementation and the three members the host's cases read:
+
+```ts
+  /** Every `typing` call, in order, so a host test can assert what it was told and when. */
+  readonly typingOpened: { conversation: string; replyTo?: MessageRef }[] = [];
+  /** How many disposers have been called. */
+  typingClosed = 0;
+  private typingFailure: string | null = null;
+
+  /** Make the next `typing` throw, which is a workspace refusing the signal. */
+  breakTyping(message: string): void {
+    this.typingFailure = message;
+  }
+
+  async typing(conversation: string, opts: { replyTo?: MessageRef } = {}): Promise<() => Promise<void>> {
+    if (this.typingFailure !== null) {
+      const message = this.typingFailure;
+      this.typingFailure = null;
+      throw new Error(message);
+    }
+    this.typingOpened.push({ conversation, ...(opts.replyTo === undefined ? {} : { replyTo: opts.replyTo }) });
+    return async () => {
+      this.typingClosed += 1;
+    };
+  }
+```
+
+- [ ] **Step 16: Call it from the turn**
+
+In `harness/host/src/domain/conversation.ts`, inside `runTurn`, add the open directly after `await emit({ type: 'run', runId });` and before the inner `try`:
+
+```ts
+    // An acknowledgement, where the surface has one: the person learns in under a second that
+    // they were heard, which is the whole of what it is for. Only for a turn that answers the
+    // conversation it came from and only when there is a message to attach it to — a playbook
+    // has nobody waiting and a delivery elsewhere is not an answer to anything.
+    //
+    // Wrapped, and the disposer below is wrapped too: an acknowledgement is a courtesy, and a
+    // turn that failed because a surface would not show one would be the worst possible trade.
+    let stopTyping: (() => Promise<void>) | null = null;
+    if (target?.ownThread && turn.replyTo) {
+      try {
+        stopTyping = (await target.session.typing?.(target.conversation, { replyTo: turn.replyTo })) ?? null;
+      } catch (err) {
+        host.log.warn(`run ${runId}: the surface could not show that a reply was coming`, err);
+      }
+    }
+```
+
+and the close as the **first** thing in the outer `finally`, before `clearTimeout`:
+
+```ts
+  } finally {
+    if (stopTyping) {
+      try {
+        await stopTyping();
+      } catch (err) {
+        host.log.warn(`run ${runId}: the surface could not stop showing that a reply was coming`, err);
+      }
+    }
+    clearTimeout(timer);
+```
+
+`stopTyping` is declared inside the outer `try` and read in the `finally`, so hoist its `let` to just above `try {` — beside `let status`, `let error` and `let text`, which are there for the same reason.
+
+- [ ] **Step 17: Run the host cases green**
+
+```
+TEST_DATABASE_URL=postgres://harness:harness@localhost:15433/harness_test pnpm --filter @harness/host test -- conversation.test.ts
+```
+
+Expected: PASS.
+
+- [ ] **Step 18: Write the failing test for the reaction**
+
+In `surfaces/slack/src/session.test.ts`, add:
+
+```ts
+describe('acknowledging a message with a reaction', () => {
+  it('adds the reaction to the triggering message and removes it when the turn ends', async () => {
+    const { session, api } = sessionFixture();
+    const stop = await session.typing!('C0GENERAL', {
+      replyTo: { surface: 'slack', conversation: 'C0GENERAL', id: '111.1' },
+    });
+    expect(api.reactionsAdded).toEqual([{ channel: 'C0GENERAL', timestamp: '111.1', name: 'eyes' }]);
+    expect(api.reactionsRemoved).toEqual([]);
+    await stop();
+    expect(api.reactionsRemoved).toEqual([{ channel: 'C0GENERAL', timestamp: '111.1', name: 'eyes' }]);
+  });
+
+  it('does nothing at all when there is no message to react to', async () => {
+    const { session, api } = sessionFixture();
+    const stop = await session.typing!('C0GENERAL');
+    await stop();
+    // A reaction has to go on something. A channel is not a message.
+    expect(api.reactionsAdded).toEqual([]);
+    expect(api.reactionsRemoved).toEqual([]);
+  });
+
+  it('leaves the reaction and says so once when it cannot be removed', async () => {
+    const { session, api, log } = sessionFixture();
+    const stop = await session.typing!('C0GENERAL', {
+      replyTo: { surface: 'slack', conversation: 'C0GENERAL', id: '111.1' },
+    });
+    api.failWith = 'ratelimited';
+    // A stale reaction is a smaller wrong than a turn that failed over an emoji, so the disposer
+    // never throws: the host would log it, but the host would have had to stop the turn to find out.
+    await expect(stop()).resolves.toBeUndefined();
+    expect(log.warned).toContain('a Slack reaction could not be removed');
+  });
+
+  it('answers a disposer even when the reaction could not be added', async () => {
+    const { session, api } = sessionFixture();
+    api.failWith = 'missing_scope';
+    const stop = await session.typing!('C0GENERAL', {
+      replyTo: { surface: 'slack', conversation: 'C0GENERAL', id: '111.1' },
+    });
+    api.failWith = undefined;
+    await stop();
+    // Nothing was added, so nothing is removed: the disposer is not a blind undo.
+    expect(api.reactionsRemoved).toEqual([]);
+  });
+});
+```
+
+`log.warned` stands for whatever this file's fake logger already collects; if it collects nothing, give it an array and push into it, changing no other case.
+
+- [ ] **Step 19: Add the two calls and the session's `typing`**
+
+In `surfaces/slack/src/transport/types.ts`, add to `SlackApi`, below `users`:
+
+```ts
+  reactions: {
+    add(args: { channel: string; timestamp: string; name: string }): Promise<{ ok?: boolean }>;
+    remove(args: { channel: string; timestamp: string; name: string }): Promise<{ ok?: boolean }>;
+  };
+```
+
+In `surfaces/slack/src/transport/web-client.ts`, add the matching slice beside the others:
+
+```ts
+  reactions: {
+    add: (args) => client.reactions.add(args),
+    remove: (args) => client.reactions.remove(args),
+  },
+```
+
+In `surfaces/slack/src/transport/fake.ts`, add the records and the implementation:
+
+```ts
+  /** Every reaction added, in order. */
+  reactionsAdded: { channel: string; timestamp: string; name: string }[] = [];
+  /** Every reaction removed, in order. */
+  reactionsRemoved: { channel: string; timestamp: string; name: string }[] = [];
+```
+
+```ts
+  reactions = {
+    add: async (args: { channel: string; timestamp: string; name: string }): Promise<{ ok?: boolean }> => {
+      this.guard();
+      this.reactionsAdded.push(args);
+      return { ok: true };
+    },
+    remove: async (args: { channel: string; timestamp: string; name: string }): Promise<{ ok?: boolean }> => {
+      this.guard();
+      this.reactionsRemoved.push(args);
+      return { ok: true };
+    },
+  };
+```
+
+In `surfaces/slack/src/session.ts`, add the constant below `DIRECT_MESSAGE_PREFIX`:
+
+```ts
+/**
+ * What the assistant marks a message with while it is working on an answer.
+ *
+ * `eyes` rather than an hourglass: it reads as "seen", which is the true claim at the moment it
+ * goes on — the turn has started and nothing has been decided yet.
+ */
+export const ACK_REACTION = 'eyes';
+```
+
+and the member on the session, beside `mention`:
+
+```ts
+    /**
+     * Mark the message being answered, and answer with the way to unmark it.
+     *
+     * Nothing to react to is nothing to do: a reaction goes on a message, and a conversation is
+     * not one. Neither call can fail the turn — the host wraps both — but the disposer is made
+     * forgiving here as well, because a reaction that cannot be taken down is a smaller wrong than
+     * one that takes a finished turn with it, and the host would only find out by stopping.
+     */
+    async typing(conversation, opts = {}) {
+      const message = opts.replyTo;
+      if (!message) return async () => {};
+      await guarded('reactions.add', () =>
+        api.reactions.add({ channel: conversation, timestamp: message.id, name: ACK_REACTION }),
+      );
+      return async () => {
+        try {
+          await api.reactions.remove({ channel: conversation, timestamp: message.id, name: ACK_REACTION });
+        } catch (err) {
+          // One fixed sentence, and the Slack error beside it where a logger shows one. The
+          // reaction stays; a person sees an assistant that is still looking, which is wrong and
+          // harmless, and the alternative is worse.
+          config.log.warn('a Slack reaction could not be removed', err);
+        }
+      };
+    },
+```
+
+`config.log` stands for however this session already reaches a logger; if `SlackConfig` carries none, take the `Logger` the transport was built with by adding it to `createSlackSession`'s parameters at its one call site in `surfaces/slack/src/index.ts`, which already has one.
+
+Note what the failed-**add** case does: `guarded` throws, the host's own wrapper catches it and logs, and `stopTyping` stays null — so nothing is removed, which is right, because nothing was added.
+
+- [ ] **Step 20: Run the whole Slack package green**
+
+```
+pnpm --filter @harness/surface-slack test
+```
+
+Expected: PASS. `index.test.ts` asserts the session's shape; if it asserts a closed set of members, add `typing` to it.
+
+- [ ] **Step 21: Document the three, and the one new scope**
+
+In `CHANGELOG.md`, inside the `0.4.0 — unreleased` section Task 7 wrote, add to **Added**:
+
+```markdown
+- **An acknowledgement on Slack.** `SurfaceSession.typing` now takes the message being answered and
+  answers a disposer; the host calls it before the runtime starts and disposes it on every path out
+  of the turn. Slack adds an `eyes` reaction to the triggering message and removes it when the turn
+  ends. **New bot scope: `reactions:write`.** Neither call can fail a turn.
+```
+
+and to **Fixed**:
+
+```markdown
+- **A reply in a Slack thread named the wrong message.** A mention inside an existing thread was
+  answered with `thread_ts` set to that message's own timestamp rather than the thread's root,
+  which Slack documents as the wrong handle. The transport already knew the root; the session now
+  asks it.
+- **A direct message on Slack opened a thread for every answer.** A DM is already one person's
+  conversation, so a reply there is now flat. A channel reply is threaded exactly as before.
+- **A person the client document never declared was addressed by their Slack id.**
+  `identities/static` now reads the display name off the surface's directory, as
+  `identities/slack-groups` already did. A directory that refuses or has no name costs the caller
+  nothing: the level stands and the id is the fallback.
+- **The Slack display-name cache was unbounded**, one entry per distinct user for the life of the
+  process. It is bounded at 500 and held for an hour, split from the five-minute group window.
+```
+
+In `docs/runbook.md`, add `reactions:write` to the bot scopes cell of the host's Slack app row in the scopes table (after `chat:write`), and add to the Slack section:
+
+```markdown
+**A reply goes where the question was asked.** A mention at the top of a channel is answered in the
+thread it roots; a mention inside an existing thread is answered on that thread's **root**, which is
+what Slack wants and what the transport remembers from when the message arrived; a direct message is
+answered flat, because a DM is already one person's conversation. A released file follows the same
+rule. None of this is the host's: it hands the adapter the message being answered and the adapter
+decides what a thread is.
+
+**The assistant marks a message while it works on it.** A turn that answers the conversation it came
+from adds an `eyes` reaction to the triggering message and removes it when the turn ends, whatever
+the turn ended as. That needs `reactions:write`. A reaction that cannot be removed is left and
+logged once — `a Slack reaction could not be removed` — because a stale reaction is a smaller wrong
+than a turn that failed over an emoji. Neither the add nor the remove can fail a turn.
+
+**How long the first answer takes is the model's.** A long first prompt — a big persona, several
+skills, a full history window — costs the deployment its time to first token, and minutes are
+normal at twenty thousand tokens. The kernel seeds the same files every turn and the prompt is this
+tenant's own document, so the levers are the document (`persona`, how many skills it declares,
+`routing.routes.chat.model`) and prompt caching at the gateway. The reaction above is why a person
+does not have to wonder in the meantime.
+```
+
+and, in the directory-backed identity section, after the sentence about the two scopes:
+
+```markdown
+`identities/static` uses the same directory for one thing only: what to call somebody the document
+never declared. A default-level person is named by the workspace rather than by their user id, and
+a workspace that will not say leaves them named by the id, at the level the document gave them. The
+name is read when the principal is first minted and held for the life of the process, which is the
+window the level already has.
+```
+
+- [ ] **Step 22: Run the gates**
+
+```
+bash .superpowers/sdd/2026-09-22-plan-12a-skills-and-memory/gates.sh /tmp/gates-task-8.txt
+cat /tmp/gates-task-8.txt
+```
+
+Expected: everything green, both snapshots clean. Three things to look at in particular: `pnpm arch` stays at zero, because nothing has taken on a new import — `identities/static` already imported `@harness/shared`; `harness/core-tools/src/kernel-vocabulary.test.ts` stays green, because `harness/host/src` has learned no Slack word — not `eyes`, not `thread_ts`, not `D` — and everything it says is `typing`, `replyTo` and a disposer; and `harness/core-tools/src/app/surface.test.ts`'s environment scan is unchanged, because nothing here reads a variable.
+
+- [ ] **Step 23: Commit**
+
+```bash
+git add harness/surface-api/src/types.ts harness/surface-api/src/testing.ts \
+  harness/host/src/domain/conversation.ts harness/host/src/domain/conversation.test.ts \
+  surfaces/slack/src/transport/types.ts surfaces/slack/src/transport/web-client.ts \
+  surfaces/slack/src/transport/fake.ts surfaces/slack/src/transport/classify.ts \
+  surfaces/slack/src/transport/classify.test.ts surfaces/slack/src/transport/events.ts \
+  surfaces/slack/src/session.ts surfaces/slack/src/session.test.ts \
+  surfaces/slack/src/directory.ts surfaces/slack/src/directory.test.ts \
+  identities/static/src/index.ts identities/static/src/index.test.ts \
+  CHANGELOG.md docs/runbook.md
+git commit -m "fix(slack): thread a reply on its root, name undeclared people, acknowledge with a reaction"
+```
+
+---
 ## Self-review
 
 Run against the spec addendum, sections 26–35, after the plan was written.
@@ -3408,11 +4295,19 @@ Run against the spec addendum, sections 26–35, after the plan was written.
 | Invariant 27, no memory text in an error, a log or an audit row | 4 (`MemoryFullError`'s fields) and 5 (the `409` and the `args_hash` cases) |
 | Invariant 28, one audit row per write | 5 |
 | Invariant 29, `u-` refused and audited once; the stream excluded | 6, and stated in that task and in the README |
-| Section 31's testing additions | every item maps to a named case in Tasks 1–6 |
+| Decision 39, the thread root and the flat DM | 8 |
+| Decision 40, a name for an undeclared person, and the split, bounded cache | 8 |
+| Decision 41, `typing` as a disposer and the `eyes` reaction | 8 |
+| Section 4.16's three fixes and its latency paragraph | 8, and the runbook paragraph it writes |
+| Invariant 30, an acknowledgement cannot fail a turn or outlive one | 8 |
+| Invariant 31, a display name is never logged | 8 |
+| Section 31's testing additions | every item maps to a named case in Tasks 1–6 and 8 |
 | Section 32's exit criterion | Task 2's fixture round trip, Task 3's seed, Task 5's route suite, Task 6's decode case |
 
 **2. Placeholder scan.** No "TBD", no "add appropriate error handling", no "similar to Task N", no step that describes a code change without showing it. Two first drafts were fixed inline: Task 3's `skill_activated` case named its own body instead of carrying it, and it now carries the whole case plus the `beforeEach` line the case needs; Task 6's decode case reached for `session.postText` with the wrong argument — that method takes a conversation string, not a `MessageRef` — and it is now two cases that assert the status, the content type and the stream shape, and then that a message route and a stream route agree on one conversation. Every symbol a step names was read out of the file it belongs to.
 
 **3. Type consistency.** `SkillShape`/`Skill` are the schema and the type throughout. `MemoryWriter`, `MemoryReach`, `MemoryTarget`, `toolWriter`, `addMemory`, `editMemory`, `removeMemory` and `MemoryFullError` are declared in Task 4's Interfaces block and used with those exact names and signatures in Tasks 4, 5 and 7. `readMemoryEntry(db, { client, id })` is declared in Task 5 and used twice in the same task. `MemoryReadRow` gains `updated_at: string | null` once, in Task 5, and every assertion of its column list in that task lists seven fields. `PERSONAL_CONVERSATION_PREFIX` is declared in Task 6 and used in two packages in that task. `SKILL_MANIFEST_FILE` is declared in Task 1 and used in Tasks 1, 2, 3 and 7. Nothing in a later task names a symbol no earlier task defines.
 
-**4. Gate consistency.** Every task ends with the same gates command and the same snapshot check, and no task re-records a snapshot. One migration, in Task 4 alone. No task adds a dependency, an environment variable, a workspace package or a line under the platform's four directories.
+**4. Gate consistency.** Every task ends with the same gates command and the same snapshot check, and no task re-records a snapshot. One migration, in Task 4 alone. No task adds a dependency, an environment variable, a workspace package or a line under the platform's four directories. Task 8 adds one Slack bot **scope**, which is a setting in an app's own configuration rather than anything in this repository, and it is documented in the runbook and the changelog only.
+
+**5. What Task 8 does not re-do.** Three of the four claims behind it turned out to be already implemented, and the task's own table says so before its first step: the host already sets `replyTo` and the Slack session already sends it as `thread_ts`, so there is no host change for threading; `SurfaceDirectory.displayNameOf`, `IdentityDeps.directories` and `principalFromDefault`'s fourth argument all exist, so the name fix is one call site in `identities/static`; and `users:read` is already granted. Writing those as new work would have produced a task whose tests passed before it was implemented, which is the failure mode a plan is meant to catch rather than cause.
